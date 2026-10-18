@@ -10,7 +10,13 @@ const at = (seq: number, type: string, data: unknown): UiEvent => ({
 const follow = (...events: ReadonlyArray<UiEvent>): Watched =>
   events.reduce(watchedAfter, emptyWatched)
 
-const summary = (id: string, createdAt = 1) => ({ id, cwd: '/work/' + id, createdAt, title: id })
+const summary = (id: string, createdAt = 1, updatedAt = createdAt) => ({
+  id,
+  cwd: '/work/' + id,
+  createdAt,
+  updatedAt,
+  title: id,
+})
 
 const working = follow(
   at(1, 'turn/start', { turn: 1 }),
@@ -48,6 +54,12 @@ describe('the board', () => {
     })
     expect(board.running.map((entry) => entry.summary.id)).toEqual(['a'])
     expect(board.rest.map((entry) => [entry.summary.id, entry.status])).toEqual([['c', 'closed']])
+  })
+
+  test('a session changed later rises above one created later', () => {
+    const board = boardOf([summary('old', 1000, 9000), summary('new', 5000)], new Map())
+    expect(board.rest.map((entry) => entry.summary.id)).toEqual(['old', 'new'])
+    expect(board.rest[0]?.since).toBe(9000)
   })
 
   test('a finished session keeps the first line of its answer, and a replayed event counts once', () => {

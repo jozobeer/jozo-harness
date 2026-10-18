@@ -217,7 +217,7 @@ export function jsonlSessions(options: JsonlSessionsOptions): SessionPersistence
       )
       // The name is read from the head of the same file, under the same budget.
       const title = yield* readTitle(fileOf(id))
-      return { id, cwd: header.cwd, createdAt: header.createdAt, title }
+      return { id, cwd: header.cwd, createdAt: header.createdAt, updatedAt: mtimeMs, title }
     })
 
   const list = (): Effect.Effect<ReadonlyArray<SessionSummary>, SessionError> =>

@@ -111,7 +111,7 @@ const makeHost = (id: string): FakeHost => {
   let effort = ''
   let model = 'stub/model'
   const host: FakeHost = {
-    summary: { id, cwd: '/work', createdAt: 1, title: '' },
+    summary: { id, cwd: '/work', createdAt: 1, updatedAt: 1, title: '' },
     runState: () => {
       states += 1
       return {

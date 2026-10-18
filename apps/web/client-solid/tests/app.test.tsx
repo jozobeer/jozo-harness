@@ -81,8 +81,20 @@ describe('the Solid page', () => {
     const { store, calls } = makeStore(
       {
         sessions: [
-          { id: 'aaaabbbb', cwd: '/one/work', createdAt: Date.now() - 60_000, title: 'first' },
-          { id: 'ccccdddd', cwd: '/two', createdAt: Date.now() - 7_200_000, title: '' },
+          {
+            id: 'aaaabbbb',
+            cwd: '/one/work',
+            createdAt: Date.now() - 60_000,
+            updatedAt: Date.now() - 60_000,
+            title: 'first',
+          },
+          {
+            id: 'ccccdddd',
+            cwd: '/two',
+            createdAt: Date.now() - 7_200_000,
+            updatedAt: Date.now() - 7_200_000,
+            title: '',
+          },
         ],
         sessionId: 'aaaabbbb',
       },
@@ -124,8 +136,20 @@ describe('the Solid page', () => {
     const { store } = makeStore(
       {
         sessions: [
-          { id: 'aaaabbbb', cwd: '/one/work', createdAt: now - 60_000, title: 'first' },
-          { id: 'ccccdddd', cwd: '/two/project-tail', createdAt: now - 60_000, title: '' },
+          {
+            id: 'aaaabbbb',
+            cwd: '/one/work',
+            createdAt: now - 60_000,
+            updatedAt: now - 60_000,
+            title: 'first',
+          },
+          {
+            id: 'ccccdddd',
+            cwd: '/two/project-tail',
+            createdAt: now - 60_000,
+            updatedAt: now - 60_000,
+            title: '',
+          },
         ],
       },
       new Map([['ccccdddd', { conversation: emptyConversation, trace: finished }]]),
@@ -164,7 +188,15 @@ describe('the Solid page', () => {
     ])
     const { store } = makeStore(
       {
-        sessions: [{ id: 'aaaabbbb', cwd: '/one/work', createdAt: now - 60_000, title: 'first' }],
+        sessions: [
+          {
+            id: 'aaaabbbb',
+            cwd: '/one/work',
+            createdAt: now - 60_000,
+            updatedAt: now - 60_000,
+            title: 'first',
+          },
+        ],
       },
       new Map([
         ['aaaabbbb', { conversation: { ...emptyConversation, running: true }, trace: running }],

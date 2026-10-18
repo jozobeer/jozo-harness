@@ -17,15 +17,15 @@ export const sessionRootOf = (rows: ReadonlyArray<PluginRow>): string => {
 
 const when = (time: number): string => new Date(time).toISOString().replace('T', ' ').slice(0, 19)
 
-/** One line per session, newest first: the id it resumes by, when it started, where it ran, its name. */
+/** One line per session, most recently changed first: the id it resumes by, when it last changed, where it ran, its name. */
 export const renderSessionList = (summaries: ReadonlyArray<SessionSummary>): string => {
-  const ordered = [...summaries].sort((left, right) => right.createdAt - left.createdAt)
+  const ordered = [...summaries].sort((left, right) => right.updatedAt - left.updatedAt)
   if (ordered.length === 0) return 'no sessions yet\n'
   return ordered.map(lineOf).join('\n') + '\n'
 }
 
 const lineOf = (summary: SessionSummary): string => {
-  const head = summary.id + '  ' + when(summary.createdAt) + '  ' + summary.cwd
+  const head = summary.id + '  ' + when(summary.updatedAt) + '  ' + summary.cwd
   return summary.title === '' ? head : head + '  ' + summary.title
 }
 

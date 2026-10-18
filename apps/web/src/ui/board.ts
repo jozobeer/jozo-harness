@@ -61,7 +61,7 @@ const closedEntry = (summary: SessionSummary): BoardEntry => ({
   summary,
   status: 'closed',
   waiting: undefined,
-  since: summary.createdAt,
+  since: summary.updatedAt,
   turns: 0,
   calls: 0,
   doing: '',
@@ -91,7 +91,7 @@ export const entryOf = (summary: SessionSummary, watched: Watched | undefined): 
     summary,
     status: statusOf(watched, waiting),
     waiting,
-    since: facts.since ?? summary.createdAt,
+    since: facts.since ?? summary.updatedAt,
     turns: watched.trace.length,
   }
 }

@@ -27,7 +27,9 @@ describe('Sessions', () => {
       'user/message',
     ])
     expect(result.events[1]?.data).toEqual({ text: value, source: 'user' })
-    expect(result.summaries).toEqual([{ id: result.id, cwd: '/work', createdAt: 1234, title: '' }])
+    expect(result.summaries).toEqual([
+      { id: result.id, cwd: '/work', createdAt: 1234, updatedAt: 1234, title: '' },
+    ])
     expect(persistence.stored.size).toBe(1)
   })
 

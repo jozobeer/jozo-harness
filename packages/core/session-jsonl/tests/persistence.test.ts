@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'vitest'
-import { appendFile, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { appendFile, mkdtemp, readFile, rm, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Effect } from 'effect'
@@ -67,10 +67,35 @@ describe('jsonlSessions', () => {
       id: first.id,
       cwd: '/one',
       createdAt: 100,
+      updatedAt: expect.any(Number),
       title: '',
     })
     const summaries = await Effect.runPromise(persistence.list())
     expect(summaries.map((summary) => summary.id).sort()).toEqual([first.id, second.id].sort())
+  })
+
+  test('stat and list carry the moment the log last changed', async () => {
+    const { root, persistence } = isolated()
+    const created = await Effect.runPromise(persistence.create(header()))
+    const file = fileOf(root, created.id)
+    const started = new Date(1_000_000)
+    await utimes(file, started, started)
+    const before = await Effect.runPromise(persistence.stat(created.id))
+
+    await Effect.runPromise(
+      created.sink.append({
+        seq: 2,
+        time: 101,
+        type: 'user/message',
+        data: { text: 'one more turn', source: 'user' },
+      }),
+    )
+    const listed = await Effect.runPromise(persistence.list())
+    const after = listed[0]
+
+    expect(before.updatedAt).toBe(1_000_000)
+    expect(after?.updatedAt ?? 0).toBeGreaterThan(before.updatedAt)
+    expect(after?.createdAt).toBe(100)
   })
 
   test('list is empty before the root exists', async () => {
