@@ -59,6 +59,32 @@ describe('meterOf', () => {
     expect(meter.compacts).toBe(true)
   })
 
+  test('counts cache reads and writes in the request the window held', () => {
+    const events = [
+      headerEvent(),
+      userTurn(2, textOfBytes(40)),
+      event(3, 'assistant/message', {
+        provider: 'p',
+        model: 'm',
+        content: [{ type: 'text' as const, text: 'answer' }],
+        usage: {
+          inputTokens: 100,
+          outputTokens: 20,
+          reasoningTokens: 5,
+          cacheReadTokens: 700,
+          cacheWriteTokens: 50,
+        },
+        stream: [],
+      }),
+    ]
+
+    const meter = meterOf(events, budget)
+
+    // Uncached input, both cache buckets, and output. Reasoning is already in output.
+    expect(meter.estimated).toBe(870)
+    expect(meter.compacts).toBe(true)
+  })
+
   test('counts what the provider reported and only estimates what came after it', () => {
     const events = [
       headerEvent(),
