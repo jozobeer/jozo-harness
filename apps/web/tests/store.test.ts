@@ -4,14 +4,19 @@ import { Cause, Deferred, Effect, Queue, Stream, type Scope } from 'effect'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { WebSocket } from 'ws'
 import {
+  openShell,
   serveWeb,
   WebError,
   type OpenSession,
   type SessionFactory,
   type SettingsPort,
+  type TerminalFactory,
   type WorkspacesPort,
 } from '../src/server/index.ts'
+import { makeStubShell } from './stub-shell.ts'
+import type { TerminalSocket } from '../client-solid/terminal.ts'
 import type { JobDetailView, RunStateView, SessionSummary } from '../src/shared/rpc.ts'
 import { createSessionStore, type BrowseAnswer, type SessionStore } from '../client-solid/store.ts'
 import { draftKey } from '../src/ui/draft.ts'
@@ -311,11 +316,18 @@ const workspacesPort: WorkspacesPort = {
   add: () => Effect.void,
 }
 
+/** A terminal the tests that never open one get: it runs no shell. */
+const idleTerminal: TerminalFactory = () => ({ message: () => undefined, close: () => undefined })
+
 /** Serves one fake host until the test's scope closes. */
 const serve = (
   host: FakeHost,
   /** False serves a server that holds no session yet, as one just started does. */
-  options: { readonly held?: boolean; readonly settings?: FakeSettings } = {},
+  options: {
+    readonly held?: boolean
+    readonly settings?: FakeSettings
+    readonly terminal?: TerminalFactory
+  } = {},
 ): Effect.Effect<Served, never, Scope.Scope> =>
   Effect.gen(function* () {
     const ready = yield* Deferred.make<string>()
@@ -340,6 +352,7 @@ const serve = (
         commands: () => [],
         port: 0,
         staticRoot: root,
+        terminal: options.terminal ?? idleTerminal,
         onReady: (url) => {
           void Effect.runSync(Deferred.succeed(ready, url))
         },
@@ -374,12 +387,21 @@ const saidTexts = (store: SessionStore): ReadonlyArray<string> =>
 const withStore = (
   host: FakeHost,
   body: (store: SessionStore, served: Served) => Effect.Effect<void>,
-  options: { readonly held?: boolean; readonly settings?: FakeSettings } = {},
+  options: {
+    readonly held?: boolean
+    readonly settings?: FakeSettings
+    readonly terminal?: TerminalFactory
+    readonly terminalSocket?: (url: string) => TerminalSocket
+  } = {},
 ): Effect.Effect<void> =>
   Effect.scoped(
     Effect.gen(function* () {
       const served = yield* serve(host, options)
-      const store = createSessionStore({ url: served.wsUrl, search: '' })
+      const store = createSessionStore({
+        url: served.wsUrl,
+        search: '',
+        ...(options.terminalSocket === undefined ? {} : { terminal: options.terminalSocket }),
+      })
       store.start()
       // A server that holds nothing leaves the page with nothing open: the
       // connection is what says the page is ready, not a session.
@@ -972,6 +994,48 @@ describe('the page store', () => {
           expect(browser.stored(draftKey('a'))).toBeUndefined()
           again.stop()
         }),
+      ),
+    )
+  }, 15_000)
+
+  test('the terminal pane carries a line to the shell and its output back', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    const stub = makeStubShell()
+    const terminal: TerminalFactory = (cwd, send) =>
+      openShell(cwd, send, { spawn: () => stub.child, shell: '/bin/sh' })
+    await Effect.runPromise(
+      withStore(
+        host,
+        (store) =>
+          Effect.gen(function* () {
+            store.showPane({ kind: 'terminal' })
+            yield* until(() => store.state().terminal?.status === 'running', 'opened the shell')
+            expect(store.state().pane).toEqual({ kind: 'terminal' })
+
+            stub.out('one line from the shell\n')
+            yield* until(
+              () => store.state().terminal?.text.includes('one line from the shell') === true,
+              'showed the shell output',
+            )
+
+            store.sendTerminal('echo hi')
+            yield* until(() => stub.writes.length === 1, 'sent the line to the shell')
+            expect(stub.writes).toEqual(['echo hi\n'])
+
+            stub.finish(7)
+            yield* until(() => store.state().terminal?.status === 'exited', 'showed the exit')
+            expect(store.state().terminal?.exit).toBe(7)
+
+            // Closing the pane is closing the shell: its process group goes with it.
+            store.showPane(undefined)
+            yield* until(() => stub.kills() === 1, 'stopped the shell')
+            expect(store.state().terminal).toBeUndefined()
+          }),
+        {
+          terminal,
+          terminalSocket: (socketUrl) => new WebSocket(socketUrl) as unknown as TerminalSocket,
+        },
       ),
     )
   }, 15_000)

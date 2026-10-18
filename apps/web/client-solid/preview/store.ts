@@ -172,6 +172,8 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
     submit: () => setState((now) => withDraft(now, '')),
     send: (command) => sendTo(state().sessionId, command),
     sendTo,
+    // The preview runs no shell; a terminal tab opens an empty pane.
+    sendTerminal: () => undefined,
     moveTo: (id) => setState((now) => (id === undefined ? withBlank(now) : open(id, now))),
     chooseTheme: (theme) => setState((now) => withTheme(now, theme)),
     showPane: (pane) => setState((now) => ({ ...now, pane })),

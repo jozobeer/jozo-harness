@@ -10,14 +10,17 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
+  openShell,
   serveWeb,
   WebError,
   type OpenSession,
   type SessionFactory,
   type SettingsPort,
   type SettingsView,
+  type TerminalFactory,
   type WorkspacesPort,
 } from '../src/server/index.ts'
+import { makeStubShell } from './stub-shell.ts'
 import {
   type CommandView,
   type JobDetailView,
@@ -208,6 +211,9 @@ interface Started {
   readonly stop: Deferred.Deferred<void>
 }
 
+/** A terminal the tests that never open one get: it runs no shell. */
+const idleTerminal: TerminalFactory = () => ({ message: () => undefined, close: () => undefined })
+
 const settingsView: SettingsView = {
   model: 'stub/model',
   effort: '',
@@ -271,6 +277,7 @@ const start = (
   web: FakeWeb,
   settings: ReturnType<typeof makeSettings>,
   workspaces: ReturnType<typeof makeWorkspaces> = makeWorkspaces(),
+  terminal: TerminalFactory = idleTerminal,
 ): Effect.Effect<Started, never, Scope.Scope> =>
   Effect.gen(function* () {
     const ready = yield* Deferred.make<string>()
@@ -284,6 +291,7 @@ const start = (
         commands: web.initial.commands,
         port: 0,
         staticRoot,
+        terminal,
         onReady: (url) => {
           void Effect.runSync(Deferred.succeed(ready, url))
         },
@@ -327,6 +335,44 @@ const attemptSocket = (
     })
     socket.once('error', () => resolve({ opened: false, status: 0 }))
   })
+
+/** The terminal socket of one session, at the server that just started. */
+const terminalUrlOf = (started: Started, sessionId: string, token = true): string => {
+  const url = new URL(started.wsUrl)
+  url.pathname = '/terminal'
+  url.searchParams.set('session', sessionId)
+  if (!token) url.searchParams.delete('token')
+  return url.toString()
+}
+
+/** Opens a terminal socket and keeps what it said, for a later read. */
+const openTerminalSocket = (
+  url: string,
+  origin?: string,
+): Promise<{ readonly socket: WebSocket; readonly messages: Array<string> }> =>
+  new Promise((resolve, reject) => {
+    const socket = new WebSocket(url, origin === undefined ? {} : { origin })
+    const messages: Array<string> = []
+    socket.on('message', (data) =>
+      messages.push(Buffer.isBuffer(data) ? data.toString('utf8') : ''),
+    )
+    socket.once('open', () => resolve({ socket, messages }))
+    socket.once('error', reject)
+  })
+
+/** Waits for what a terminal socket reached, or fails saying what never came. */
+const until = (wanted: () => boolean, what: string): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      if (wanted()) return
+      yield* Effect.sleep('10 millis')
+    }
+    return yield* Effect.die(new Error('the terminal never ' + what))
+  })
+
+/** Waits until a terminal socket said one frame containing `text`. */
+const untilSaid = (messages: ReadonlyArray<string>, text: string): Effect.Effect<void> =>
+  until(() => messages.some((message) => message.includes(text)), text)
 
 const tick = (): UiEvent => ({
   kind: 'session',
@@ -932,6 +978,64 @@ describe('the web transport', () => {
     expect(observed.rightToken.opened).toBe(true)
     expect(observed.foreignOrigin).toEqual({ opened: false, status: 403 })
     expect(observed.pageOrigin.opened).toBe(true)
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('the terminal socket runs a shell in the session cwd and carries its i/o', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-root-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a', '/work/here')
+    const settings = makeSettings()
+    const stub = makeStubShell()
+    const cwds: Array<string> = []
+    const terminal: TerminalFactory = (cwd, send) => {
+      cwds.push(cwd)
+      return openShell(cwd, send, { spawn: () => stub.child, shell: '/bin/sh' })
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings, makeWorkspaces(), terminal)
+          const noToken = yield* Effect.promise(() =>
+            attemptSocket(terminalUrlOf(started, 'a', false)),
+          )
+          const foreign = yield* Effect.promise(() =>
+            attemptSocket(terminalUrlOf(started, 'a'), { origin: 'http://evil.example' }),
+          )
+          const unknown = yield* Effect.promise(() =>
+            attemptSocket(terminalUrlOf(started, 'nobody')),
+          )
+          const opened = yield* Effect.promise(() =>
+            openTerminalSocket(terminalUrlOf(started, 'a'), started.origin),
+          )
+          stub.out('hello from the shell\n')
+          yield* untilSaid(opened.messages, 'hello from the shell')
+          opened.socket.send(JSON.stringify({ type: 'input', data: 'pwd\n' }))
+          yield* until(() => stub.writes.length === 1, 'the shell took the line')
+          stub.finish(0)
+          yield* untilSaid(opened.messages, 'exit')
+          opened.socket.close()
+          yield* until(() => stub.kills() === 1, 'the shell was stopped')
+          yield* Deferred.succeed(started.stop, undefined)
+          return {
+            noToken,
+            foreign,
+            unknown,
+            writes: stub.writes,
+            cwds,
+            exited: opened.messages.some((message) => message.includes('exit')),
+          }
+        }),
+      ),
+    )
+
+    expect(observed.noToken).toEqual({ opened: false, status: 401 })
+    expect(observed.foreign).toEqual({ opened: false, status: 403 })
+    expect(observed.unknown).toEqual({ opened: false, status: 404 })
+    expect(observed.cwds).toEqual(['/work/here'])
+    expect(observed.writes).toEqual(['pwd\n'])
+    expect(observed.exited).toBe(true)
     await rm(root, { recursive: true, force: true })
   })
 
