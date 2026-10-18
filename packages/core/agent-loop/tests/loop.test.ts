@@ -28,7 +28,7 @@ import {
   type ToolRegistry,
 } from '@jozo-harness/tools'
 import { Effect, Layer, Schema, Scope, Stream } from 'effect'
-import { AgentLoop, agentLoopLayer, type AgentRequest } from '../src/index.ts'
+import { AgentLoop, agentLoopLayer, installRetry, type AgentRequest } from '../src/index.ts'
 
 type Script = () => Stream.Stream<StreamChunk, LlmFailure>
 
@@ -631,6 +631,54 @@ describe('agent loop', () => {
     expect(eventTypes.filter((type) => type === 'assistant/attempt')).toHaveLength(1)
     expect(eventTypes.filter((type) => type === 'assistant/message')).toHaveLength(1)
     expect(eventTypes.filter((type) => type === 'request/header')).toHaveLength(1)
+    expect(reason(events)).toEqual([{ kind: 'completed' }])
+  })
+
+  test('an installed retry policy retries a rate limit and logs the wait', async () => {
+    const text = crypto.randomUUID()
+    const events = await scenario(
+      [fails(new LlmFailure({ code: 'RATE_LIMIT', message: 'slow down' })), chunks(textTurn(text))],
+      (ctx) =>
+        Effect.gen(function* () {
+          yield* installRetry(ctx.hooks, { maxRetries: 1, initialDelayMs: 0, jitterRatio: 0 })
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+    )
+
+    const retries = events.session
+      .events()
+      .flatMap((event) => (event.type === 'llm/retry' ? [event.data] : []))
+    expect(retries).toEqual([{ attempt: 1, code: 'RATE_LIMIT', delayMs: 0, cause: 'transient' }])
+    expect(reason(events)).toEqual([{ kind: 'completed' }])
+  })
+
+  test('a context overflow compacts once and retries the rebuilt request', async () => {
+    const huge = 'x'.repeat(200_000)
+    const events = await scenario(
+      [
+        fails(new LlmFailure({ code: 'CONTEXT_WINDOW_EXCEEDED', message: 'too long' })),
+        chunks(textTurn('the summary')),
+        chunks(textTurn('done')),
+      ],
+      (ctx) =>
+        Effect.gen(function* () {
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.session.append('user/message', { text: huge, source: 'user' })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+    )
+
+    const retries = events.session
+      .events()
+      .flatMap((event) => (event.type === 'llm/retry' ? [event.data] : []))
+    expect(retries).toEqual([
+      { attempt: 1, code: 'CONTEXT_WINDOW_EXCEEDED', delayMs: 0, cause: 'context-overflow' },
+    ])
     expect(reason(events)).toEqual([{ kind: 'completed' }])
   })
 
