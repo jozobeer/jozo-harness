@@ -30,6 +30,8 @@ export interface TurnEndReasonMap {
   error: { readonly kind: 'error'; readonly failure: LlmFailureData }
   /** The provider stopped at the output cap before the answer settled. */
   'max-tokens': { readonly kind: 'max-tokens' }
+  /** The run died inside the turn; the next run closed it without an answer. */
+  interrupted: { readonly kind: 'interrupted' }
 }
 
 export type TurnEndReason = TurnEndReasonMap[keyof TurnEndReasonMap]

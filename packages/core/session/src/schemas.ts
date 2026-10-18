@@ -20,6 +20,7 @@ const TurnEndReasonSchema: Schema.Schema<TurnEndReason> = Schema.Union([
   }),
   Schema.Struct({ kind: Schema.Literal('error'), failure: LlmFailureSchema }),
   Schema.Struct({ kind: Schema.Literal('max-tokens') }),
+  Schema.Struct({ kind: Schema.Literal('interrupted') }),
 ])
 
 /**
