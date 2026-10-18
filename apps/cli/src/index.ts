@@ -311,10 +311,10 @@ const installTier1 = (
   jobs: JobsShape,
 ) =>
   Effect.gen(function* () {
-    const ask = installAsk(
-      answer === undefined ? holder : { ...holder, ask: (request) => answer(request) },
-      agent.session,
-    )
+    // A run with nobody to answer leaves the seam unserved, so a question fails
+    // at once instead of waiting forever for an answer that cannot come.
+    const ask = installAsk(holder, agent.session)
+    if (answer !== undefined) yield* holder.serve((request) => answer(request))
     const pluginHost = makePluginHost({
       rows,
       known: bundledPlugins.map((plugin) => plugin.name),

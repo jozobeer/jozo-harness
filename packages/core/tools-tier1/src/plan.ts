@@ -1,6 +1,7 @@
 import { Schema, Effect } from 'effect'
 import { PLAN_APPROVAL, type AskShape, type PlanModeShape } from '@jozo-harness/safety'
 import type { ToolDefinition } from '@jozo-harness/tools'
+import { askOrFail } from './ask.ts'
 
 const Parameters = Schema.Struct({
   plan: Schema.String.annotate({
@@ -46,7 +47,7 @@ export const makeExitPlanModeTool = (
   },
   execute: (args, context) =>
     Effect.gen(function* () {
-      const answer = yield* ask.ask({
+      const answer = yield* askOrFail(ask, {
         id: context.callId,
         question: 'Leave plan mode and execute this plan?\n\n' + args.plan,
         options: EXIT_PLAN_OPTIONS,
