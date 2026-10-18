@@ -20,7 +20,7 @@ plugin ごとの config キー、フラグ、環境変数の一覧は `jzh --dum
 | キー | 値 | 効果 |
 |---|---|---|
 | `model` | `provider/model` | 使うルート。`--model` > この値 > 行の `config.model`。ブラウザ UI の席の選択はこの run の中だけのもので、これから開くセッションもその route で始まる（設定ファイルには書かない） |
-| `effort` | provider が読む語 | 推論の強さ。`--effort` > この値 > 行の `config.effort`。未設定なら provider の既定。ブラウザ UI の席から走っているセッションだけ切り替えることもできる（その run が開いている間だけ効く） |
+| `effort` | provider が読む語 | 推論の強さ。`--effort` > この値 > 行の `config.effort`。未設定なら provider の既定。ブラウザ UI の席は、セッションを開く前ならこの run で次に開くセッションの出発点を選び、開いた後ならそのセッションだけを切り替える（どちらも設定ファイルには書かない） |
 | `profile` | profile 名 | 層2で重ねる profile。既定は `headless`。`--profile` > この値 |
 | `search` | `brave` / `deepseek` | `web_search` の provider。未設定は `BRAVE_API_KEY` があるときだけ brave。`deepseek` は `DEEPSEEK_API_KEY` を DeepSeek Search API に送る |
 | `deepseekToolsBaseUrl` | URL | DeepSeek Search / Fetch API の base。既定は `https://api.deepseek.com/v1/tools`。provider は `/search` を足す |

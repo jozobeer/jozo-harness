@@ -159,6 +159,7 @@ describe('the browser state', () => {
     const settings = {
       model: 'stub/model',
       effort: 'low',
+      efforts: ['low', 'high'],
       settingsPath: '/home/.config/jzh/config.yml',
       cwd: '/work/one',
       sessionRoot: '/home/.jzh/sessions',

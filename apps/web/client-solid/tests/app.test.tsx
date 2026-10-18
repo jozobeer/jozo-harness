@@ -39,6 +39,7 @@ type Call =
   | { readonly kind: 'sendTo'; readonly sessionId: string; readonly command: UiCommand }
   | { readonly kind: 'model'; readonly model: string }
   | { readonly kind: 'chooseModel'; readonly model: string }
+  | { readonly kind: 'chooseEffort'; readonly effort: string }
   | { readonly kind: 'askModels' }
   | { readonly kind: 'askCommands' }
   | { readonly kind: 'askFiles'; readonly query: string }
@@ -90,6 +91,7 @@ const makeStore = (
     askFiles: (query) => calls.push({ kind: 'askFiles', query }),
     setModel: (model) => calls.push({ kind: 'model', model }),
     chooseModel: (model) => calls.push({ kind: 'chooseModel', model }),
+    chooseEffort: (effort) => calls.push({ kind: 'chooseEffort', effort }),
     act: (sessionId, action) => calls.push({ kind: 'act', sessionId, action }),
     askWorkspaces: () => calls.push({ kind: 'askWorkspaces' }),
     addWorkspace: (cwd) => calls.push({ kind: 'addWorkspace', cwd }),
@@ -787,14 +789,15 @@ describe('the Solid page', () => {
     expect(choice.value).toBe('low')
 
     fireEvent.change(choice, { target: { value: 'high' } })
-    expect(calls).toContainEqual({ kind: 'command', command: { kind: 'effort', effort: 'high' } })
+    expect(calls).toContainEqual({ kind: 'chooseEffort', effort: 'high' })
 
     fireEvent.change(choice, { target: { value: '' } })
-    expect(calls).toContainEqual({ kind: 'command', command: { kind: 'effort', effort: '' } })
+    expect(calls).toContainEqual({ kind: 'chooseEffort', effort: '' })
   })
 
   test('an effort the endpoint does not name still shows, so the seat never lies', () => {
     const { store } = makeStore({
+      sessionId: 'a',
       run: {
         goal: null,
         schedules: [],
@@ -865,6 +868,7 @@ describe('the Solid page', () => {
       settings: {
         model: 'stub/model',
         effort: '',
+        efforts: ['low', 'high'],
         settingsPath: '/work/settings.yml',
         cwd: '/work',
         sessionRoot: '/work/sessions',
@@ -889,6 +893,34 @@ describe('the Solid page', () => {
     expect(calls).toContainEqual({ kind: 'chooseModel', model: 'stub/other' })
   })
 
+  test('a seat with no session yet offers the effort the next one starts from', () => {
+    const { store, calls } = makeStore({
+      sessionId: '',
+      settings: {
+        model: 'stub/model',
+        effort: 'high',
+        efforts: ['low', 'high'],
+        settingsPath: '/work/settings.yml',
+        cwd: '/work',
+        sessionRoot: '/work/sessions',
+      },
+    })
+
+    const { container } = render(() => <Composer store={store} />)
+
+    // The effort is the one a session opened now would ask, so it shows before the
+    // first line rather than appearing only once a session exists.
+    const choice = container.querySelector('#seat-effort') as HTMLSelectElement
+    expect(choice).not.toBeNull()
+    // The provider choosing is one of the choices, and the endpoint's words are the rest.
+    expect([...choice.options].map((option) => option.value)).toEqual(['', 'low', 'high'])
+    expect(choice.value).toBe('high')
+
+    // The pick is the run's choice, so the session the first line opens starts from it.
+    fireEvent.change(choice, { target: { value: 'low' } })
+    expect(calls).toContainEqual({ kind: 'chooseEffort', effort: 'low' })
+  })
+
   test('a seat whose models were never read asks for them when the list is opened', () => {
     const { store, calls } = makeStore({
       sessionId: 'a',
@@ -910,6 +942,7 @@ describe('the Solid page', () => {
       settings: {
         model: 'stub/model',
         effort: '',
+        efforts: ['low', 'high'],
         settingsPath: '/work/settings.yml',
         cwd: '/work',
         sessionRoot: '/work/sessions',

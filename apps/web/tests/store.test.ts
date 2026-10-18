@@ -266,19 +266,25 @@ const openOf = (host: FakeHost): OpenSession => ({
 interface FakeSettings {
   /** Every route a page chose for the run, with whether it asked to keep it. */
   readonly chosen: Array<{ readonly model: string; readonly remember: boolean }>
+  /** Every effort a page chose for the run. */
+  readonly chosenEffort: Array<string>
   readonly port: SettingsPort
 }
 
 const makeSettings = (): FakeSettings => {
   const chosen: Array<{ readonly model: string; readonly remember: boolean }> = []
+  const chosenEffort: Array<string> = []
   let route = 'stub/model'
+  let effort = ''
   return {
     chosen,
+    chosenEffort,
     port: {
       read: () =>
         Effect.succeed({
           model: route,
-          effort: '',
+          effort,
+          efforts: ['low', 'high'],
           settingsPath: '/work/settings.yml',
           cwd: '/work',
           sessionRoot: '/work/sessions',
@@ -288,6 +294,11 @@ const makeSettings = (): FakeSettings => {
         Effect.sync(() => {
           chosen.push({ model, remember })
           route = model
+        }),
+      setEffort: (next) =>
+        Effect.sync(() => {
+          chosenEffort.push(next)
+          effort = next
         }),
     },
   }
@@ -909,6 +920,52 @@ describe('the page store', () => {
             expect(host.commands).toEqual([])
           }),
         { held: false, settings },
+      ),
+    )
+  }, 15_000)
+
+  test('a pick before any session is open is the effort the next one starts from', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    const settings = makeSettings()
+    await Effect.runPromise(
+      withStore(
+        host,
+        (store) =>
+          Effect.gen(function* () {
+            // Looking at the page opens nothing, so there is no session to address.
+            expect(store.state().sessionId).toBe('')
+            store.chooseEffort('high')
+
+            yield* until(() => settings.chosenEffort.length > 0, 'chose the effort for the run')
+            expect(settings.chosenEffort).toEqual(['high'])
+            // The seat reads back what a session opened now starts from.
+            yield* until(() => store.state().settings?.effort === 'high', 'read the effort back')
+            expect(host.commands).toEqual([])
+          }),
+        { held: false, settings },
+      ),
+    )
+  }, 15_000)
+
+  test('an effort pick while a session is open is that session alone', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    const settings = makeSettings()
+    await Effect.runPromise(
+      withStore(
+        host,
+        (store) =>
+          Effect.gen(function* () {
+            store.chooseEffort('high')
+
+            // The open session switches; the run's choice, which the next session
+            // would start from, stays where it was.
+            yield* until(() => store.state().run?.effort === 'high', 'showed the switched effort')
+            expect(host.commands).toContainEqual({ kind: 'effort', effort: 'high' })
+            expect(settings.chosenEffort).toEqual([])
+          }),
+        { settings },
       ),
     )
   }, 15_000)

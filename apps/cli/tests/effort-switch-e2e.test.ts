@@ -269,4 +269,47 @@ describe('the effort a page switches a session to', () => {
     // Resuming names a session, so that one is what the page opens.
     expect(seen.resumed.initial).toBe(seen.initial)
   }, 30_000)
+
+  test('a pick before any session opens is the effort that session starts from', async () => {
+    const sent: Array<Readonly<Record<string, unknown>>> = []
+    const seen = await withPlace((place) =>
+      Effect.runPromise(
+        served(place, sent, (wsUrl) =>
+          withoutServices(
+            Effect.gen(function* () {
+              const client = yield* RpcClient.make(UiRpcs)
+              const before = yield* client.settings()
+              // The blank seat's pick is the run's choice, so the session the
+              // first line opens starts from it.
+              const switched = yield* client.setEffort({ effort: 'high' })
+              const after = yield* client.settings()
+              const opened = yield* client.open({})
+              const state = yield* client.state({ sessionId: opened.id })
+              yield* client.command({
+                sessionId: opened.id,
+                command: { kind: 'submit', text: 'go' },
+              })
+              yield* Effect.sleep('500 millis')
+              return {
+                before: before.effort,
+                efforts: before.efforts,
+                switched,
+                after: after.effort,
+                opened: state.effort,
+              }
+            }).pipe(clientLayers(wsUrl)),
+          ),
+        ),
+      ),
+    )
+
+    // Before the pick the page already reads the run's effort and the endpoint's words.
+    expect(seen.before).toBe('low')
+    expect(seen.efforts).toEqual(['low', 'high'])
+    expect(seen.switched).toBe(true)
+    // The pick is read back, and the session opened after it starts from it.
+    expect(seen.after).toBe('high')
+    expect(seen.opened).toBe('high')
+    expect(sent[0]).toEqual({ reasoning_effort: 'high' })
+  }, 30_000)
 })

@@ -898,18 +898,21 @@ const messageOf = (error: unknown): string =>
 
 /**
  * What the sessions this run opens from now on start with. A page picks the
- * model for them; the log of a session already open keeps the model it began
- * with, because its route was fixed when its agent was built.
+ * model and the effort for them; a session already open keeps the model route
+ * it began with, because its route was fixed when its agent was built, though
+ * its effort can be switched for that session alone.
  */
 interface RunChoice {
   route: string
+  /** The effort a session this run opens starts from; '' leaves it to the provider. */
+  effort: string
 }
 
 /** What a page reads about the run behind it, which is known before any session is. */
 interface RunFacts {
   readonly rows: ReadonlyArray<PluginRow>
-  /** The effort a session this run opens starts from. */
-  readonly effort: string
+  /** The effort words the provider takes, as a page offers them; empty declares none. */
+  readonly efforts: ReadonlyArray<string>
 }
 
 /** What a page may read and change about this run: the settings file, and the provider's list. */
@@ -920,9 +923,11 @@ const settingsPortOf = (
 ): SettingsPort => ({
   read: () =>
     Effect.succeed({
-      // The model a session opened now would ask, which is the choice a page made.
+      // The model and the effort a session opened now would ask, which are the
+      // choices a page made.
       model: choice.route,
-      effort: facts.effort,
+      effort: choice.effort,
+      efforts: facts.efforts,
       settingsPath: options.settingsPath ?? '',
       cwd: options.cwd,
       sessionRoot: sessionRootOf(facts.rows),
@@ -965,6 +970,12 @@ const settingsPortOf = (
         }),
       ),
     ),
+  // The sessions this run opens from now on start from it; the runs after this one
+  // resolve their own, so nothing is written.
+  setEffort: (effort) =>
+    Effect.sync(() => {
+      choice.effort = effort
+    }),
 })
 
 /** Opens one more session for a UI that outlives its first: the same wiring, a new scope. */
@@ -972,7 +983,6 @@ const sessionFactoryOf = (
   options: CommandOptions,
   rows: ReadonlyArray<PluginRow>,
   choice: RunChoice,
-  effort: string,
   spillBytes: number | undefined,
   layer: Layer.Layer<any, PluginError, never>,
   listSessions: SessionRuntime['listSessions'],
@@ -981,12 +991,13 @@ const sessionFactoryOf = (
     listSessions().pipe(Effect.mapError((error) => new WebError({ message: messageOf(error) }))),
   open: (id, cwd) =>
     Effect.gen(function* () {
-      // The choice is read per open: a page may have picked another model since.
+      // The choices are read per open: a page may have picked another model or
+      // effort since.
       const built = yield* buildSession(
         options,
         rows,
         choice.route,
-        effort,
+        choice.effort,
         spillBytes,
         layer,
         true,
@@ -1028,17 +1039,27 @@ const sessionFactoryOf = (
 /** Where the built browser app sits: this tree's client bundle, beside the CLI. */
 const defaultStaticRoot = fileURLToPath(new URL('../../web/dist/', import.meta.url))
 
+/** What a page reads from the run before any session exists. */
+interface RunReading {
+  /** The store a page's rail lists from: the profile's own session store. */
+  readonly listSessions: SessionRuntime['listSessions']
+  /** The effort words the provider takes, which the blank seat offers. */
+  readonly efforts: ReadonlyArray<string>
+}
+
 /**
- * The store a page's rail lists from, read without opening a session: the
- * profile's own session store, which the layer provides.
+ * Reads the parts of the run that exist before a session does: the profile's
+ * session store and the adapter's effort words, both from the layer the run serves.
  */
-const sessionListerOf = (
+const runReadingOf = (
   layer: Layer.Layer<any, PluginError, never>,
-): Effect.Effect<SessionRuntime['listSessions'], PluginError, Scope.Scope> =>
+): Effect.Effect<RunReading, PluginError, Scope.Scope> =>
   Effect.gen(function* () {
     const context = yield* Layer.build(layer)
     const sessions = Context.get(context, Sessions)
-    return () => sessions.list()
+    // What the provider takes for an effort is the adapter's to say; a page only offers it.
+    const efforts = Context.get(context, Llm).capabilities.reasoningEffort ?? []
+    return { listSessions: () => sessions.list(), efforts }
   })
 
 /** Where a page's registered workspaces live, under the jzh home. */
@@ -1136,7 +1157,7 @@ const serveWebUi = (
       options.stderr('jzh web: the browser app is not built: run pnpm run build:web\n')
       return 1
     }
-    const choice: RunChoice = { route }
+    const choice: RunChoice = { route, effort }
     // The blank page has no session to ask yet, so the run keeps one registry
     // for itself: the very first line typed completes against the built-ins.
     const runCommands = makeCommands()
@@ -1144,15 +1165,16 @@ const serveWebUi = (
     // A page opened before any session exists still lists the skills this run's
     // roots would offer, so the first slash is not blind.
     const defaultCommands = commandViewsOf(runCommands, yield* discoverSkills(skillsOf(options)))
-    // The store the rail lists from lives as long as the server it serves.
+    // The store the rail lists from and the seat's effort words live as long as
+    // the server they serve.
     return yield* Effect.scoped(
       Effect.gen(function* () {
-        const listSessions = yield* sessionListerOf(layer)
+        const reading = yield* runReadingOf(layer)
         return yield* serveWeb({
           ...(initial === undefined ? {} : { initial }),
-          factory: sessionFactoryOf(options, rows, choice, effort, spillBytes, layer, listSessions),
-          settings: settingsPortOf(options, { rows, effort }, choice),
-          workspaces: workspacesPortOf(options, listSessions),
+          factory: sessionFactoryOf(options, rows, choice, spillBytes, layer, reading.listSessions),
+          settings: settingsPortOf(options, { rows, efforts: reading.efforts }, choice),
+          workspaces: workspacesPortOf(options, reading.listSessions),
           commands: () => defaultCommands,
           port: work.port,
           staticRoot,

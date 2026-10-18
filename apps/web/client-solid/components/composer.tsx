@@ -220,13 +220,30 @@ const Takeover = (props: { store: SessionStore }) => {
 /**
  * The effort this session asks the provider for, chosen beside the model it
  * asks. Which words an endpoint takes is the endpoint's to say, so the choices
- * are the ones its adapter declares; the provider choosing is one of them.
+ * are the ones its adapter declares; the provider choosing is one of them. With
+ * nothing open yet it is the effort a session opened now would start from, so
+ * the seat keeps its line before the first message.
  */
 const Effort = (props: { store: SessionStore }) => {
-  /** What the session asks for now; '' leaves the choice to the provider. */
-  const current = (): string => props.store.state().run?.effort ?? ''
+  /**
+   * What the next request asks: the open session's own effort, else the run's
+   * choice for a session opened now. '' leaves the choice to the provider.
+   */
+  const current = (): string => {
+    const now = props.store.state()
+    return now.sessionId === '' ? (now.settings?.effort ?? '') : (now.run?.effort ?? '')
+  }
 
-  const declared = (): ReadonlyArray<string> => props.store.state().run?.efforts ?? []
+  const declared = (): ReadonlyArray<string> => {
+    const now = props.store.state()
+    return now.sessionId === '' ? (now.settings?.efforts ?? []) : (now.run?.efforts ?? [])
+  }
+
+  /** Whether the seat has the facts to show: the blank page's settings, or the open session's run. */
+  const known = (): boolean => {
+    const now = props.store.state()
+    return now.sessionId === '' ? now.settings !== undefined : now.run !== undefined
+  }
 
   /** The effort in effect when the declared words do not name it, so the choice never lies. */
   const extra = (): string | undefined => {
@@ -235,16 +252,14 @@ const Effort = (props: { store: SessionStore }) => {
   }
 
   return (
-    <Show when={props.store.state().run !== undefined}>
+    <Show when={known()}>
       <select
         id="seat-effort"
         class="seat-effort"
-        title="the reasoning effort this session asks the provider for"
-        aria-label="the reasoning effort this session asks the provider for"
+        title="the reasoning effort the next request asks for"
+        aria-label="the reasoning effort the next request asks for"
         value={current()}
-        onChange={(event) =>
-          props.store.send({ kind: 'effort', effort: event.currentTarget.value })
-        }
+        onChange={(event) => props.store.chooseEffort(event.currentTarget.value)}
       >
         <option value="">default</option>
         <For each={declared()}>{(effort) => <option value={effort}>{effort}</option>}</For>

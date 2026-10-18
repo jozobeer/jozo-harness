@@ -227,6 +227,12 @@ export interface SessionStore {
    * Nothing is written down, so the runs after this one keep their own choice.
    */
   readonly chooseModel: (model: string) => void
+  /**
+   * Picks the effort for this session; before one exists, for the session the
+   * first line opens. Nothing is written down, so the runs after this one keep
+   * their own choice.
+   */
+  readonly chooseEffort: (effort: string) => void
   /** Picks the route the settings file keeps for the runs after this one. */
   readonly setModel: (model: string) => void
   /** Renames, pins, archives, or deletes one session through its row menu. */
@@ -367,6 +373,8 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
   )
   const moves = Effect.runSync(Queue.unbounded<Move>())
   const panelAsks = Effect.runSync(Queue.unbounded<PanelAsk>())
+  /** Blank-page effort picks, which have no session to address yet. */
+  const effortAsks = Effect.runSync(Queue.unbounded<string>())
   const workspaceAsks = Effect.runSync(Queue.unbounded<WorkspaceAsk>())
   let following: Fiber.Fiber<void, unknown> | undefined
   const bridge = makeBridge((message) => update((current) => withProblem(current, message)))
@@ -655,70 +663,94 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
         }
       })
 
+    /** Reads the run's choices back, so the seat and the sheet say what a session opened now starts from. */
+    const readRunChoice = () =>
+      Effect.gen(function* () {
+        const settings = yield* client.settings()
+        yield* Effect.sync(() => update((now) => withSettings(now, settings)))
+      })
+
+    /** Runs one ask, saying a refusal in the status strip rather than dropping it. */
+    const reported = <A, E, R>(ask: Effect.Effect<A, E, R>) =>
+      ask.pipe(
+        Effect.catchCause((cause) =>
+          Effect.sync(() => update((now) => withProblem(now, causeText(cause)))),
+        ),
+      )
+
     yield* Effect.forkScoped(
       Stream.runForEach(Stream.fromQueue(panelAsks), (ask) =>
-        Effect.gen(function* () {
-          const asked = ask
-          if (asked.kind === 'models') {
-            const models = yield* client.models()
-            yield* Effect.sync(() => update((now) => withModels(now, models)))
-            return
-          }
-          if (asked.kind === 'commands') {
-            const commands = yield* client.commands({ sessionId: asked.sessionId })
-            // A session switched while the list was on its way keeps its own list:
-            // the answer belongs to the page that asked.
-            yield* Effect.sync(() =>
-              update((now) =>
-                now.sessionId === asked.sessionId ? withCommands(now, commands) : now,
-              ),
-            )
-            return
-          }
-          if (asked.kind === 'files') {
-            const paths = yield* client.files({ sessionId: asked.sessionId, query: asked.query })
-            // The answer says who asked, so a late one never lands as another session's.
-            yield* Effect.sync(() =>
-              update((now) =>
-                withFiles(now, {
-                  sessionId: asked.sessionId,
-                  query: asked.query,
-                  paths,
-                }),
-              ),
-            )
-            return
-          }
-          if (asked.kind === 'sessionAction') {
-            yield* applySessionAction(asked)
-            return
-          }
-          if (asked.kind === 'job') {
-            yield* showJob(asked.id)
-            return
-          }
-          if (asked.kind === 'stopJob') {
-            yield* stopJobAndShow(asked.id)
-            return
-          }
-          if (asked.kind === 'stopSubagent') {
-            yield* client.stopSubagent({ sessionId: state().sessionId, id: asked.id })
-            yield* relist()
-            return
-          }
-          // Only the sheet asks for the settings file to keep the pick; the seat's
-          // pick is the choice of this run alone.
-          yield* client.setModel({
-            model: asked.model,
-            remember: asked.kind === 'setModel',
-          })
-          // Read it back, so the pane shows what the sessions to come start from.
-          const settings = yield* client.settings()
-          yield* Effect.sync(() => update((now) => withSettings(now, settings)))
-        }).pipe(
-          Effect.catchCause((cause) =>
-            Effect.sync(() => update((now) => withProblem(now, causeText(cause)))),
-          ),
+        reported(
+          Effect.gen(function* () {
+            const asked = ask
+            if (asked.kind === 'models') {
+              const models = yield* client.models()
+              yield* Effect.sync(() => update((now) => withModels(now, models)))
+              return
+            }
+            if (asked.kind === 'commands') {
+              const commands = yield* client.commands({ sessionId: asked.sessionId })
+              // A session switched while the list was on its way keeps its own list:
+              // the answer belongs to the page that asked.
+              yield* Effect.sync(() =>
+                update((now) =>
+                  now.sessionId === asked.sessionId ? withCommands(now, commands) : now,
+                ),
+              )
+              return
+            }
+            if (asked.kind === 'files') {
+              const paths = yield* client.files({ sessionId: asked.sessionId, query: asked.query })
+              // The answer says who asked, so a late one never lands as another session's.
+              yield* Effect.sync(() =>
+                update((now) =>
+                  withFiles(now, {
+                    sessionId: asked.sessionId,
+                    query: asked.query,
+                    paths,
+                  }),
+                ),
+              )
+              return
+            }
+            if (asked.kind === 'sessionAction') {
+              yield* applySessionAction(asked)
+              return
+            }
+            if (asked.kind === 'job') {
+              yield* showJob(asked.id)
+              return
+            }
+            if (asked.kind === 'stopJob') {
+              yield* stopJobAndShow(asked.id)
+              return
+            }
+            if (asked.kind === 'stopSubagent') {
+              yield* client.stopSubagent({ sessionId: state().sessionId, id: asked.id })
+              yield* relist()
+              return
+            }
+            // Only the sheet asks for the settings file to keep the pick; the seat's
+            // pick is the choice of this run alone.
+            yield* client.setModel({
+              model: asked.model,
+              remember: asked.kind === 'setModel',
+            })
+            yield* readRunChoice()
+          }),
+        ),
+      ),
+    )
+
+    // A blank page's effort pick has no session to address, so it is its own ask:
+    // the run's choice for the session the first line opens.
+    yield* Effect.forkScoped(
+      Stream.runForEach(Stream.fromQueue(effortAsks), (effort) =>
+        reported(
+          Effect.gen(function* () {
+            yield* client.setEffort({ effort })
+            yield* readRunChoice()
+          }),
         ),
       ),
     )
@@ -888,6 +920,14 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       // the sessions opened from now on start from it as well.
       if (current.sessionId !== '') sendTo(current.sessionId, { kind: 'model', model })
       Queue.offerUnsafe(panelAsks, { kind: 'chooseModel', model })
+    },
+    chooseEffort: (effort) => {
+      const current = state()
+      // An open session switches with the command; the choice is the session's own.
+      // Before one exists the pick is the run's, so the session the first line
+      // opens starts from it.
+      if (current.sessionId !== '') sendTo(current.sessionId, { kind: 'effort', effort })
+      else Queue.offerUnsafe(effortAsks, effort)
     },
     setModel: (model) => Queue.offerUnsafe(panelAsks, { kind: 'setModel', model }),
     act: (sessionId, action) =>

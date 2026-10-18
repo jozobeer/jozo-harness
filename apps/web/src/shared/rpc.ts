@@ -220,6 +220,8 @@ export type RunStateView = typeof RunStateViewSchema.Type
 export const SettingsViewSchema = Schema.Struct({
   model: Schema.String,
   effort: Schema.String,
+  /** The effort words the provider takes, as a page offers them; empty declares none. */
+  efforts: Schema.Array(Schema.String),
   settingsPath: Schema.String,
   cwd: Schema.String,
   sessionRoot: Schema.String,
@@ -308,6 +310,13 @@ export const SetModelRpc = Rpc.make('setModel', {
   error: Schema.String,
 })
 
+/** The effort the sessions this run opens from now on start from. */
+export const SetEffortRpc = Rpc.make('setEffort', {
+  payload: Schema.Struct({ effort: Schema.String }),
+  success: Schema.Boolean,
+  error: Schema.String,
+})
+
 export const UiRpcs = RpcGroup.make(
   SessionsRpc,
   OpenRpc,
@@ -327,6 +336,7 @@ export const UiRpcs = RpcGroup.make(
   SettingsRpc,
   ModelsRpc,
   SetModelRpc,
+  SetEffortRpc,
 )
 
 /**

@@ -1735,7 +1735,6 @@ footer {
   position: relative;
   display: inline-flex;
   max-width: 100%;
-  vertical-align: bottom;
 }
 
 .model-list {
@@ -1855,7 +1854,6 @@ footer {
 /* The effort switch reads as a caption beside the model chip until it is used. */
 .seat-effort {
   max-width: 7rem;
-  margin-left: 2px;
   padding: 2px 4px 2px 8px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -2023,9 +2021,21 @@ footer {
   padding: 6px 8px 8px 10px;
 }
 
+/* One row: the chip and the effort read from the same line, and the caption
+   stays level with the chip as either control's font or height changes. */
 #seat {
+  display: flex;
   flex: 1;
+  gap: 2px;
+  align-items: center;
   min-width: 0;
+}
+
+/* The chip and the select take one control height, so their boxes share a top. */
+#seat .seat-chip,
+#seat .seat-effort {
+  height: 24px;
+  line-height: 18px;
 }
 
 /* An icon alone is one square; a disabled one keeps its room and dims. */

@@ -7,6 +7,7 @@ import {
   withDraft,
   withSession,
   withSessions,
+  withSettings,
   withTheme,
   withWorkspaces,
   type WebState,
@@ -24,6 +25,7 @@ import { fixtureSessions, type FixtureSession } from './fixture.ts'
 const SETTINGS: SettingsView = {
   model: 'ollama-cloud/qwen3-coder:480b',
   effort: '',
+  efforts: ['low', 'high'],
   settingsPath: '/Users/dev/.config/jzh/config.yaml',
   cwd: '/Users/dev/src/jozo-harness',
   sessionRoot: '/Users/dev/.jzh/sessions',
@@ -125,12 +127,14 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
     if (session === undefined) return base
     return { ...replay(withSession(base, session.summary), session.events), run: runNow() }
   }
+  // The blank page's seat reads the run's choice from here, as the real one does.
+  let settings = SETTINGS
   const first: WebState = {
     ...withSessions(
       {
         ...initialState,
         connected: true,
-        settings: SETTINGS,
+        settings,
         models: MODELS,
         workspaces: {
           cwd: SETTINGS.cwd,
@@ -201,6 +205,16 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
     chooseModel: (picked) => {
       model = picked
       setState((now) => ({ ...now, run: runNow() }))
+    },
+    chooseEffort: (picked) => {
+      const current = state()
+      if (current.sessionId !== '') {
+        sendTo(current.sessionId, { kind: 'effort', effort: picked })
+        return
+      }
+      // Nothing is open: the pick is the run's, as the real seat's is.
+      settings = { ...settings, effort: picked }
+      setState((now) => withSettings(now, settings))
     },
     setModel: () => undefined,
     // The made-up rail keeps its own rows, so the menu is alive without a server.

@@ -531,6 +531,14 @@ const opensNothingByItself = async (client: Cdp): Promise<void> => {
   if (seat !== 'stub/model') {
     throw new Error('the seat had no model to start from: ' + String(seat))
   }
+  // The effort is beside it for the same reason: a session started from this page
+  // begins at the run's own effort, and the reader can see which before typing.
+  const effort = await client.evaluate(
+    "(() => { const choice = document.getElementById('seat-effort'); return choice === null ? null : [choice.value, [...choice.options].map((option) => option.value).join(',')].join('|') })()",
+  )
+  if (effort !== '|,low,medium,high,xhigh,max') {
+    throw new Error('the seat had no effort to start from: ' + String(effort))
+  }
 }
 
 /**
@@ -788,9 +796,8 @@ const measuresTheRail = async (client: Cdp): Promise<void> => {
 }
 
 /**
- * The list hangs above the chip, and the chip keeps its line beside the efforts:
- * the two boxes are the same row, so their tops differ by no more than a few
- * pixels of alignment, never by the height of a whole control.
+ * The list hangs above the chip, and the chip keeps its line beside the effort:
+ * the two controls share one row height, so their tops agree.
  */
 const keepsTheSeatInPlace = async (client: Cdp): Promise<void> => {
   const layout = await client.evaluate(
@@ -799,8 +806,10 @@ const keepsTheSeatInPlace = async (client: Cdp): Promise<void> => {
   if (!String(layout).startsWith('true')) {
     throw new Error('the model list did not open above the seat: ' + String(layout))
   }
-  if (Number(String(layout).split(',')[1]) > 8) {
-    throw new Error('the seat moved when the list opened: ' + String(layout))
+  // The two controls share one row height, so their tops must agree, not merely
+  // sit within most of a control's height.
+  if (Math.abs(Number(String(layout).split(',')[1])) > 1) {
+    throw new Error('the effort is not level with the model chip: ' + String(layout))
   }
 }
 

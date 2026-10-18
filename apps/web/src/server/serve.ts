@@ -161,6 +161,11 @@ const handlersOf = (
         Effect.as(true),
         Effect.mapError((error) => error.message),
       ),
+    setEffort: ({ effort }) =>
+      settings.setEffort(effort).pipe(
+        Effect.as(true),
+        Effect.mapError((error) => error.message),
+      ),
   })
 
 /** One frame from the socket, in the two shapes the protocol decodes. */

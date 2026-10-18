@@ -211,6 +211,7 @@ interface Started {
 const settingsView: SettingsView = {
   model: 'stub/model',
   effort: '',
+  efforts: [],
   settingsPath: '/work/settings.yml',
   cwd: '/work',
   sessionRoot: '/work/sessions',
@@ -231,6 +232,7 @@ const makeSettings = (): { readonly port: SettingsPort; readonly wrote: Array<st
               // What the settings file keeps is the write the page asked for.
               if (remember) wrote.push(model)
             }),
+      setEffort: () => Effect.void,
     },
   }
 }
@@ -828,10 +830,12 @@ describe('the web transport', () => {
             const written = yield* client.setModel({ model: 'stub/other', remember: true })
             // The seat's pick is the choice of this run alone, so nothing is written.
             const chosen = yield* client.setModel({ model: 'stub/third', remember: false })
+            // The effort a blank page picks is the run's choice too.
+            const switched = yield* client.setEffort({ effort: 'high' })
             const refused = yield* client
               .setModel({ model: '', remember: true })
               .pipe(Effect.catch((message) => Effect.succeed(message)))
-            return { view, models, written, chosen, refused }
+            return { view, models, written, chosen, switched, refused }
           }).pipe(clientLayers(wsUrl))
           const result = yield* withoutServices(useClient)
           yield* Deferred.succeed(started.stop, undefined)
@@ -844,6 +848,7 @@ describe('the web transport', () => {
     expect(observed.models).toEqual(['stub/model', 'stub/other'])
     expect(observed.written).toBe(true)
     expect(observed.chosen).toBe(true)
+    expect(observed.switched).toBe(true)
     // The route the page asked to keep is the one the file holds.
     expect(settings.wrote).toEqual(['stub/other'])
     expect(observed.refused).toBe('a model route cannot be empty')
@@ -858,6 +863,7 @@ describe('the web transport', () => {
       read: () => Effect.fail(new WebError({ message: 'no settings here' })),
       models: () => Effect.fail(new WebError({ message: 'no models here' })),
       setModel: () => Effect.fail(new WebError({ message: 'no writing here' })),
+      setEffort: () => Effect.fail(new WebError({ message: 'no writing here' })),
     }
 
     const observed = await Effect.runPromise(
