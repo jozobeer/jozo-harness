@@ -7,6 +7,7 @@ import { UiRpcs, withoutServices } from '../src/shared/rpc.ts'
 import {
   applyUiEvent,
   initialState,
+  withBlank,
   withConnection,
   withDraft,
   withModels,
@@ -97,6 +98,9 @@ const sessionToOpen = (current: string, search: string, held: string): string | 
   return held === '' ? undefined : held
 }
 
+/** What a move in the queue asks of the page: read a session, or stand on a blank one. */
+type Move = { readonly kind: 'open'; readonly id: string | undefined } | { readonly kind: 'blank' }
+
 /** What the settings pane asked the server for. */
 type PanelAsk =
   | { readonly kind: 'models' }
@@ -119,6 +123,7 @@ export interface SessionStore {
   readonly send: (command: UiCommand) => void
   /** Sends one command to a session that need not be the one on screen. */
   readonly sendTo: (sessionId: string, command: UiCommand) => void
+  /** Reads a session, or stands on the blank page the first line fills when undefined. */
   readonly moveTo: (id: string | undefined) => void
   readonly chooseTheme: (theme: Theme) => void
   readonly showPane: (pane: Pane | undefined) => void
@@ -230,7 +235,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
   const commands = Effect.runSync(
     Queue.unbounded<{ readonly sessionId: string; readonly command: UiCommand }>(),
   )
-  const moves = Effect.runSync(Queue.unbounded<string | undefined>())
+  const moves = Effect.runSync(Queue.unbounded<Move>())
   const panelAsks = Effect.runSync(Queue.unbounded<PanelAsk>())
   let following: Fiber.Fiber<void, unknown> | undefined
   const bridge = makeBridge((message) => update((current) => withProblem(current, message)))
@@ -365,6 +370,21 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       })
     /* jscpd:ignore-end */
 
+    /**
+     * Stands on the blank page without asking the server for anything. The feed
+     * of the session left behind stops, and its events no longer land; the first
+     * line typed here opens the session that receives it.
+     */
+    const standOnBlank = () =>
+      Effect.gen(function* () {
+        if (following !== undefined) yield* Fiber.interrupt(following)
+        following = undefined
+        yield* Effect.sync(() => {
+          update(withBlank)
+          addressSession(undefined)
+        })
+      })
+
     yield* Effect.sync(() => {
       update((now) => withConnection(now, true))
     })
@@ -407,7 +427,9 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
               ? landed(addressed)
               : Effect.andThen(
                   notTaken(addressed, 'the core did not take the ' + addressed.command.kind),
-                  Effect.sync(() => Queue.offerUnsafe(moves, addressed.sessionId)),
+                  Effect.sync(() =>
+                    Queue.offerUnsafe(moves, { kind: 'open', id: addressed.sessionId }),
+                  ),
                 ),
           ),
           // `ignore` would let a defect kill this fiber, and every later command
@@ -472,13 +494,11 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     // session, or the first message. A page the server holds none for opens
     // none: looking at the UI is not a request for a session.
     const wanted = sessionToOpen(state().sessionId, search, listed.initial)
+    const opening: ReadonlyArray<Move> = wanted === undefined ? [] : [{ kind: 'open', id: wanted }]
     yield* Stream.runForEach(
-      Stream.concat(
-        wanted === undefined ? Stream.empty : Stream.fromIterable([wanted]),
-        Stream.fromQueue(moves),
-      ),
-      (id) =>
-        show(id).pipe(
+      Stream.concat(Stream.fromIterable(opening), Stream.fromQueue(moves)),
+      (move) =>
+        (move.kind === 'blank' ? standOnBlank() : show(move.id)).pipe(
           Effect.catchCause((cause) =>
             unlessInterrupted(
               cause,
@@ -533,7 +553,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
         // The session this line starts is already on its way; keep the line.
         if (owed !== undefined) return
         owed = value
-        Queue.offerUnsafe(moves, undefined)
+        Queue.offerUnsafe(moves, { kind: 'open', id: undefined })
         update((now) => withDraft(now, ''))
         return
       }
@@ -548,7 +568,8 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     },
     send: (command) => sendTo(state().sessionId, command),
     sendTo,
-    moveTo: (id) => Queue.offerUnsafe(moves, id),
+    moveTo: (id) =>
+      Queue.offerUnsafe(moves, id === undefined ? { kind: 'blank' } : { kind: 'open', id }),
     chooseTheme: (theme) => {
       update((now) => withTheme(now, theme))
       showTheme(theme)

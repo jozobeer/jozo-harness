@@ -3,6 +3,7 @@ import type { UiCommand, UiEvent } from '@jozo-harness/ui-protocol'
 import {
   applyUiEvent,
   initialState,
+  withBlank,
   withDraft,
   withSession,
   withSessions,
@@ -124,7 +125,7 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
     submit: () => setState((now) => withDraft(now, '')),
     send: (command) => sendTo(state().sessionId, command),
     sendTo,
-    moveTo: (id) => setState((now) => open(id, now)),
+    moveTo: (id) => setState((now) => (id === undefined ? withBlank(now) : open(id, now))),
     chooseTheme: (theme) => setState((now) => withTheme(now, theme)),
     showPane: (pane) => setState((now) => ({ ...now, pane })),
     openJob: () => undefined,

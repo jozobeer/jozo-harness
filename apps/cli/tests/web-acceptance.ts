@@ -283,16 +283,6 @@ const sessionRows = "document.querySelectorAll('#session-list button.session').l
 const activeName = (): string =>
   "(() => { const row = document.querySelector('#session-list button.session.active'); if (row === null) return ''; const name = row.querySelector('.session-name'); return name === null ? '' : name.textContent })()"
 
-/** Waits until the page reads a session other than the one it had. */
-const waitForOther = async (client: Cdp, previous: string): Promise<string | undefined> => {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    await sleep(250)
-    const id = await client.evaluate(activeSession())
-    if (typeof id === 'string' && id !== '' && id !== previous) return id
-  }
-  return undefined
-}
-
 /** Moves the page back to the session it started with and waits for its history. */
 const switchBack = async (client: Cdp, read: () => Promise<unknown>, id: string): Promise<void> => {
   await client.evaluate(
@@ -353,22 +343,41 @@ const answersTheApproval = async (client: Cdp, read: () => Promise<unknown>): Pr
   return answer
 }
 
-/** Presses New session and checks the page took it over; returns the session it left. */
+/** Clicks New session and waits for the rail to mark no session as read. */
+const pressNewSession = async (client: Cdp): Promise<void> => {
+  await client.evaluate("document.getElementById('new-session').click()")
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    await sleep(250)
+    if ((await client.evaluate(activeSession())) === '') return
+  }
+  throw new Error('the page never moved to a blank session')
+}
+
+/** Checks the rail lists the number of sessions it should. */
+const expectSessionRows = async (client: Cdp, wanted: number, problem: string): Promise<void> => {
+  if ((await client.evaluate(sessionRows)) !== wanted) throw new Error(problem)
+}
+
+/** Presses New session and checks the page moved to a blank one; returns the session it left. */
 const opensANewSession = async (client: Cdp): Promise<string> => {
   const first = await client.evaluate(activeSession())
   if (typeof first !== 'string' || first === '') throw new Error('no session was marked as read')
-  if ((await client.evaluate(sessionRows)) !== 1) {
-    throw new Error('the first session is not the only row the rail lists')
-  }
-  await client.evaluate("document.getElementById('new-session').click()")
-  if ((await waitForOther(client, first)) === undefined) {
-    throw new Error('the page never moved to a new session')
-  }
-  if ((await client.evaluate(sessionRows)) !== 2) {
-    throw new Error('the new session did not join the rail')
-  }
+  await expectSessionRows(client, 1, 'the first session is not the only row the rail lists')
+  const named = await client.evaluate("new URLSearchParams(location.search).get('session')")
+  if (named !== first) throw new Error('the address bar does not name the session on screen')
+
+  // The button opens no session: it moves to the blank page the first line fills.
+  await pressNewSession(client)
+  await expectSessionRows(client, 1, 'the blank page opened a session')
+  // A second press stays on the same blank page.
+  await pressNewSession(client)
+  await expectSessionRows(client, 1, 'a second press opened another session')
   const cleared = await client.evaluate("!document.body.innerText.includes('approved and done')")
   if (cleared !== true) throw new Error('the old conversation stayed on screen')
+  const unnamed = await client.evaluate(
+    "new URLSearchParams(location.search).get('session') === null ? 'unnamed' : 'named'",
+  )
+  if (unnamed !== 'unnamed') throw new Error('the address bar still names a session')
   return first
 }
 

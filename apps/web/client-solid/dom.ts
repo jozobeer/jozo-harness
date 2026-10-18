@@ -6,7 +6,12 @@ import { THEME_KEY, themeAttribute, themeFrom, type Theme } from '../src/ui/them
  * store that drives the page can be read and run where no browser is in scope.
  */
 declare const window: {
-  readonly location: { readonly protocol: string; readonly host: string; readonly search: string }
+  readonly location: {
+    readonly protocol: string
+    readonly host: string
+    readonly pathname: string
+    readonly search: string
+  }
 }
 declare const document: {
   readonly documentElement: { readonly dataset: Record<string, string | undefined> }
@@ -60,7 +65,14 @@ export const keepTheme = (theme: Theme): void => {
   localStorage.setItem(THEME_KEY, theme)
 }
 
-/** Says in the address bar which session the page reads, so a reload returns to it. */
-export const addressSession = (id: string): void => {
-  history.replaceState(null, '', '?session=' + encodeURIComponent(id))
+/**
+ * Says in the address bar which session the page reads, so a reload returns to
+ * it. The blank page names none, and keeps whatever else the address carries.
+ */
+export const addressSession = (id: string | undefined): void => {
+  const params = new URLSearchParams(window.location.search)
+  if (id === undefined) params.delete('session')
+  else params.set('session', id)
+  const query = params.toString()
+  history.replaceState(null, '', query === '' ? window.location.pathname : '?' + query)
 }

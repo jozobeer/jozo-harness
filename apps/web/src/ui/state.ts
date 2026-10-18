@@ -102,6 +102,22 @@ export const withPane = (state: WebState, pane: Pane | undefined): WebState => (
 export const withRun = (state: WebState, run: RunStateView): WebState => ({ ...state, run })
 
 /**
+ * Reads no session: the blank page New session moves to. The conversation and
+ * the run state start over, and the first line typed here opens the session
+ * that receives it.
+ */
+export const withBlank = (state: WebState): WebState => ({
+  ...state,
+  sessionId: '',
+  conversation: emptyConversation,
+  info: emptyInfo,
+  problem: '',
+  run: undefined,
+  turns: [],
+  trace: [],
+})
+
+/**
  * Reads one session: the conversation starts over because another log does, and
  * a session the store did not list (one just created) joins the sidebar.
  */
