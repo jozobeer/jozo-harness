@@ -8,6 +8,7 @@ import {
   type TraceTool,
   type TraceTurn,
 } from '../../src/ui/trace.ts'
+import { Linkify } from './linkify.tsx'
 import { spanOf } from '../edits.ts'
 import { justFinished, pourFrom } from '../pour.ts'
 import type { SessionStore } from '../store.ts'
@@ -85,14 +86,20 @@ const Tool = (props: { tool: TraceTool }) => (
   <details class={'tool-card ' + props.tool.status} open={props.tool.status === 'error'}>
     <summary class="tool-line">
       <span class="tool-name">{props.tool.name}</span>
-      <span class="tool-summary">{summaryBodyOf(props.tool.name, props.tool.summary)}</span>
-      <span class="tool-result">{props.tool.result}</span>
+      <span class="tool-summary">
+        <Linkify text={summaryBodyOf(props.tool.name, props.tool.summary)} stop />
+      </span>
+      <span class="tool-result">
+        <Linkify text={props.tool.result} stop />
+      </span>
       <span class="tool-took">
         {props.tool.endedAt === undefined ? '…' : spanOf(props.tool.endedAt - props.tool.startedAt)}
       </span>
     </summary>
     <Show when={props.tool.output !== ''}>
-      <pre class="tool-output">{plainText(props.tool.output)}</pre>
+      <pre class="tool-output">
+        <Linkify text={plainText(props.tool.output)} />
+      </pre>
     </Show>
     <For each={props.tool.images}>{(image) => <ToolImage image={image} />}</For>
   </details>
@@ -118,15 +125,21 @@ const Skill = (props: { tool: TraceTool }) => (
       <span class="skill-label">skill</span>
       <span class="skill-what">
         <span class="skill-name">{skillNameOf(props.tool.args)}</span>
-        <span class="skill-source">{props.tool.summary}</span>
+        <span class="skill-source">
+          <Linkify text={props.tool.summary} stop />
+        </span>
       </span>
-      <span class="skill-description">{props.tool.result}</span>
+      <span class="skill-description">
+        <Linkify text={props.tool.result} stop />
+      </span>
       <span class="tool-took">
         {props.tool.endedAt === undefined ? '…' : spanOf(props.tool.endedAt - props.tool.startedAt)}
       </span>
     </summary>
     <Show when={props.tool.output !== ''}>
-      <pre class="tool-output">{plainText(props.tool.output)}</pre>
+      <pre class="tool-output">
+        <Linkify text={plainText(props.tool.output)} />
+      </pre>
     </Show>
   </details>
 )
@@ -135,7 +148,9 @@ const Skill = (props: { tool: TraceTool }) => (
 const Step = (props: { step: TraceStep; last: boolean }) => (
   <li class="step">
     <Show when={props.step.reasoning !== ''}>
-      <p class="step-thought">{plainText(props.step.reasoning)}</p>
+      <p class="step-thought">
+        <Linkify text={plainText(props.step.reasoning)} />
+      </p>
     </Show>
     <Show when={props.step.text !== '' && !props.last}>
       <Markdown text={props.step.text} class="step-said" />
@@ -224,7 +239,9 @@ const Turn = (props: { turn: TraceTurn; live: string; now: number; store: Sessio
     <article class={'block turn' + (running() ? ' running' : '')}>
       <Show when={props.turn.prompt !== ''}>
         <div class="block user turn-ask">
-          <div class="body">{plainText(props.turn.prompt)}</div>
+          <div class="body">
+            <Linkify text={plainText(props.turn.prompt)} />
+          </div>
         </div>
       </Show>
       <Show when={props.turn.steps.length > 0 || running()}>

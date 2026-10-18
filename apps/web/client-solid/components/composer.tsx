@@ -9,6 +9,7 @@ import {
   type CommandToken,
 } from '../../src/ui/commands.ts'
 import { renderMarkdown } from '../../src/ui/markdown.ts'
+import { Linkify } from './linkify.tsx'
 import {
   completedReference,
   referenceTokenAt,
@@ -49,7 +50,9 @@ const Queue = (props: { store: SessionStore }) => (
     {(message) => (
       <div class="queued">
         <span class="queued-label">queued</span>
-        <span class="queued-text">{plainText(message)}</span>
+        <span class="queued-text">
+          <Linkify text={plainText(message)} />
+        </span>
       </div>
     )}
   </For>

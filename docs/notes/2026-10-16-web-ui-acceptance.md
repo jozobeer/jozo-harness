@@ -19,8 +19,12 @@ DSH 側の棚卸しは [機能棚卸し](2026-10-16-dsh-web-ui-inventory.md) に
 **会話の描画**
 
 - assistant は markdown。見出し・箇条書き・引用・コードフェンス（言語名つき）・
-  インライン。リンクは http / https / mailto / 相対だけをアンカーにする。
+  インライン。素の http / https URL もアンカーにする（文末の句読点と釣り合わない
+  閉じ括弧は URL の外に残す）。明示リンクは http / https / mailto / 相対だけを
+  アンカーにし、プロトコル相対の `//` は拒否する。
 - tool はカード。1 行の要約と、`<details>` に全文（16,384 字まで）。エラーは開いた状態。
+  要約・結果・出力・reasoning・prompt・inspector でも、http / https の URL は
+  アンカーになる。コードの中と、truncate で末尾が `…` になった URL はリンクにしない。
 - 承認と質問は **composer の上**（takeover）に出る。次に読むべきものは次に打つ場所の隣に
   あるべきだからである。承認は Allow / Deny（y / n でも答える）、質問は選択肢のボタン。
   質問そのものは尋ねた場所にブロックとして残り、markdown で読める。plan の提示もこの経路。

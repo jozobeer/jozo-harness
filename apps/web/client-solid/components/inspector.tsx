@@ -1,5 +1,6 @@
 import { Show, createMemo } from 'solid-js'
 import { plainText } from '@jozo-harness/ui-view'
+import { Linkify } from './linkify.tsx'
 import type { TraceStep, TraceTool, TraceTurn } from '../../src/ui/trace.ts'
 import type { SessionStore } from '../store.ts'
 import { spanOf } from './waterfall.tsx'
@@ -64,13 +65,21 @@ export const Inspector = (props: { store: SessionStore; turn: number; callId: st
           </div>
           <Show when={call().step.reasoning !== ''}>
             <span class="pane-label">reasoning</span>
-            <p class="inspect-thought">{plainText(call().step.reasoning)}</p>
+            <p class="inspect-thought">
+              <Linkify text={plainText(call().step.reasoning)} />
+            </p>
           </Show>
           <span class="pane-label">arguments</span>
-          <pre class="job-output inspect-args">{plainText(prettyOf(call().tool.args))}</pre>
+          <pre class="job-output inspect-args">
+            <Linkify text={plainText(prettyOf(call().tool.args))} />
+          </pre>
           <span class="pane-label">output</span>
           <pre class="job-output">
-            {call().tool.output === '' ? '(no output)' : plainText(call().tool.output)}
+            {call().tool.output === '' ? (
+              '(no output)'
+            ) : (
+              <Linkify text={plainText(call().tool.output)} />
+            )}
           </pre>
         </div>
       )}

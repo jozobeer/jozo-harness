@@ -1171,7 +1171,8 @@ body:has(.context-body[data-open='false'][data-closing='false']) #status {
   color: var(--dim);
 }
 
-.markdown a {
+.markdown a,
+.auto-link {
   color: var(--select);
   text-underline-offset: 2px;
 }
