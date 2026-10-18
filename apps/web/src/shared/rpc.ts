@@ -7,6 +7,8 @@ export const SessionSummarySchema = Schema.Struct({
   id: Schema.String,
   cwd: Schema.String,
   createdAt: Schema.Number,
+  /** When the log last changed, in ms; the row a page lists by recency reads this. */
+  updatedAt: Schema.Number,
   /** The first thing the human typed in that session; '' when the log holds none yet. */
   title: Schema.String,
 })

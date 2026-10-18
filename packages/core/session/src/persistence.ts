@@ -19,6 +19,8 @@ export interface SessionSummary {
   readonly id: SessionId
   readonly cwd: string
   readonly createdAt: number
+  /** When the log was last written, in ms; a fresh session reads as its creation. */
+  readonly updatedAt: number
   /** The first thing the human typed, one short line; '' when the log holds none. */
   readonly title: string
 }

@@ -23,8 +23,8 @@ const session = (type: string, data: unknown): UiEvent => {
 
 const fold = (events: ReadonlyArray<UiEvent>) => events.reduce(applyUiEvent, initialState)
 
-const a = { id: 'a', cwd: '/work/one', createdAt: 1, title: 'count the files' }
-const b = { id: 'b', cwd: '/work/two', createdAt: 2, title: '' }
+const a = { id: 'a', cwd: '/work/one', createdAt: 1, updatedAt: 1, title: 'count the files' }
+const b = { id: 'b', cwd: '/work/two', createdAt: 2, updatedAt: 2, title: '' }
 
 describe('the browser state', () => {
   test('the header learns where the session runs and what answers it', () => {

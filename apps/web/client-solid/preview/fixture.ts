@@ -384,7 +384,11 @@ const titled = (
 ): FixtureSession => {
   const header = events[0]
   const cwd = header === undefined ? '' : String((header.data as { cwd?: string }).cwd ?? '')
-  return { summary: { id, cwd, createdAt: header?.time ?? 0, title }, events: asUi(events) }
+  const updatedAt = events[events.length - 1]?.time ?? header?.time ?? 0
+  return {
+    summary: { id, cwd, createdAt: header?.time ?? 0, updatedAt, title },
+    events: asUi(events),
+  }
 }
 
 /** Every made-up session, newest first, as the rail lists them. */

@@ -1038,12 +1038,16 @@ const runStateOf = (
   }
 }
 
-const summaryOf = (agent: Agent): SessionSummary => ({
-  id: agent.session.id,
-  cwd: agent.session.header.cwd,
-  createdAt: agent.session.header.createdAt,
-  title: titleOf(agent.session.events()),
-})
+const summaryOf = (agent: Agent): SessionSummary => {
+  const events = agent.session.events()
+  return {
+    id: agent.session.id,
+    cwd: agent.session.header.cwd,
+    createdAt: agent.session.header.createdAt,
+    updatedAt: events[events.length - 1]?.time ?? agent.session.header.createdAt,
+    title: titleOf(events),
+  }
+}
 
 /** The scoped body that builds one session: its layer, agent, tools, and UI host. */
 const buildSession = (

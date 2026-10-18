@@ -63,7 +63,7 @@ const makeHost = (id: string): FakeHost => {
       commands.push(command)
     })
   return {
-    summary: { id, cwd: '/work', createdAt: 1, title: '' },
+    summary: { id, cwd: '/work', createdAt: 1, updatedAt: 1, title: '' },
     runState: () => ({
       goal: { objective: 'ship the UI', phase: 'active', rounds: 2, maxRounds: 8 },
       schedules: [{ id: 's-1', when: 'every 60s', prompt: 'check the build', lastFiredAt: 0 }],
@@ -370,7 +370,7 @@ describe('the web transport', () => {
 
     expect(observed.listed).toEqual({
       initial: 'a',
-      items: [{ id: 'a', cwd: '/work', createdAt: 1, title: '' }],
+      items: [{ id: 'a', cwd: '/work', createdAt: 1, updatedAt: 1, title: '' }],
       opened: ['a'],
     })
     expect(observed.again).toBe('a')

@@ -52,15 +52,43 @@ describe('reading the sessions back', () => {
         id: 'older',
         cwd: '/work',
         createdAt: Date.UTC(2026, 0, 2, 3, 4, 5),
+        updatedAt: Date.UTC(2026, 0, 2, 3, 4, 5),
         title: 'count the files',
       },
-      { id: 'newer', cwd: '/home/me', createdAt: Date.UTC(2026, 1, 3, 4, 5, 6), title: '' },
+      {
+        id: 'newer',
+        cwd: '/home/me',
+        createdAt: Date.UTC(2026, 1, 3, 4, 5, 6),
+        updatedAt: Date.UTC(2026, 1, 3, 4, 5, 6),
+        title: '',
+      },
     ])
 
     expect(text.split('\n')[0]).toBe('newer  2026-02-03 04:05:06  /home/me')
     expect(text).toContain('count the files')
     expect(text).toContain('older  2026-01-02 03:04:05  /work')
     expect(renderSessionList([])).toBe('no sessions yet\n')
+  })
+
+  test('the list follows the last change, not the moment it started', () => {
+    const text = renderSessionList([
+      {
+        id: 'used-again',
+        cwd: '/work',
+        createdAt: Date.UTC(2026, 0, 2, 3, 4, 5),
+        updatedAt: Date.UTC(2026, 1, 3, 4, 5, 6),
+        title: 'count the files',
+      },
+      {
+        id: 'made-later',
+        cwd: '/home/me',
+        createdAt: Date.UTC(2026, 1, 2, 3, 4, 5),
+        updatedAt: Date.UTC(2026, 1, 2, 3, 4, 5),
+        title: '',
+      },
+    ])
+
+    expect(text.split('\n')[0]).toBe('used-again  2026-02-03 04:05:06  /work  count the files')
   })
 
   test('a transcript shows the messages the log folds to', () => {
@@ -91,6 +119,7 @@ describe('reading the sessions back', () => {
       id: 's-1',
       cwd: '/work',
       createdAt: 0,
+      updatedAt: 0,
       title: 'count the files',
     })
 

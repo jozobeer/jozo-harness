@@ -138,6 +138,10 @@ const headerOf = (events: ReadonlyArray<SessionEvent>): SessionHeader | undefine
   return first?.type === 'session/header' ? first.data : undefined
 }
 
+/** When the log last changed: the newest event's time, or the moment it was born. */
+const updatedAtOf = (events: ReadonlyArray<SessionEvent>, createdAt: number): number =>
+  events[events.length - 1]?.time ?? createdAt
+
 const printSessions = (
   inputs: CommandInputs,
   io: MainIo,
@@ -177,6 +181,7 @@ const printSessions = (
         id: observed.id,
         cwd: header === undefined ? '' : cwdOf(observed.events, header),
         createdAt: header?.createdAt ?? 0,
+        updatedAt: updatedAtOf(observed.events, header?.createdAt ?? 0),
         title: titleOf(observed.events),
       }) + renderTranscript(observed.events),
     )

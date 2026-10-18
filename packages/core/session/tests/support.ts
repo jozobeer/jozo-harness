@@ -40,6 +40,7 @@ export const makeFakePersistence = (): FakePersistence => {
       append: (sessionEvent) =>
         Effect.sync(() => {
           record.events.push(sessionEvent)
+          record.summary = { ...record.summary, updatedAt: sessionEvent.time }
         }),
       flush: () => Effect.void,
     }
@@ -59,7 +60,13 @@ export const makeFakePersistence = (): FakePersistence => {
         }
         stored.set(id, {
           events: [first],
-          summary: { id, cwd: sessionHeader.cwd, createdAt: sessionHeader.createdAt, title: '' },
+          summary: {
+            id,
+            cwd: sessionHeader.cwd,
+            createdAt: sessionHeader.createdAt,
+            updatedAt: sessionHeader.createdAt,
+            title: '',
+          },
         })
         return opened(id)
       }),
