@@ -288,9 +288,11 @@ const installTier0 = (
   tools: ToolRegistry,
   tier0: Tier0ToolBuilder,
   approval: ApprovalShape | undefined,
+  jobs: JobsShape,
 ) =>
   Effect.gen(function* () {
-    for (const tool of tier0(approval)) yield* tools.register(tool)
+    // The registry lets a timed-out bash call keep running as a job instead of dying.
+    for (const tool of tier0(approval, jobs)) yield* tools.register(tool)
   })
 
 /** Tier 1 tools ask the user; their questions and answers join the log. */
@@ -655,6 +657,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
         tools,
         Context.get(wiring.context, Tier0Tools),
         Context.get(wiring.context, Approval),
+        wiring.jobs,
       )
     }
     if (hasRow(wiring.rows, '@jozo-harness/tools-tier1')) {
