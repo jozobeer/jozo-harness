@@ -50,4 +50,61 @@ describe('the markdown renderer', () => {
   test('a single newline inside a paragraph is a line break', () => {
     expect(renderMarkdown('one\ntwo')).toBe('<p>one<br>two</p>')
   })
+
+  test('a bare URL becomes a link with its query escaped once', () => {
+    const view = renderMarkdown('see https://example.com/a?x=1&y=2 now')
+    expect(view).toBe(
+      '<p>see <a href="https://example.com/a?x=1&amp;y=2" target="_blank" rel="noreferrer noopener">' +
+        'https://example.com/a?x=1&amp;y=2</a> now</p>',
+    )
+  })
+
+  test('sentence punctuation stays outside a bare URL', () => {
+    const view = renderMarkdown('see (https://example.com/docs).')
+    expect(view).toBe(
+      '<p>see (<a href="https://example.com/docs" target="_blank" rel="noreferrer noopener">' +
+        'https://example.com/docs</a>).</p>',
+    )
+  })
+
+  test('a URL keeps a bracket pair it opened itself', () => {
+    const view = renderMarkdown('https://en.wikipedia.org/wiki/Foo_(bar)')
+    expect(view).toBe(
+      '<p><a href="https://en.wikipedia.org/wiki/Foo_(bar)" target="_blank" rel="noreferrer noopener">' +
+        'https://en.wikipedia.org/wiki/Foo_(bar)</a></p>',
+    )
+  })
+
+  test('a URL inside code stays code', () => {
+    expect(renderMarkdown('`https://example.com`')).toBe('<p><code>https://example.com</code></p>')
+    expect(renderMarkdown('```\nhttps://example.com\n```')).toBe(
+      '<pre class="code"><code>https://example.com</code></pre>',
+    )
+  })
+
+  test('a link whose href has a bracket pair keeps the whole href', () => {
+    const view = renderMarkdown('[wiki](https://en.wikipedia.org/wiki/Foo_(bar))')
+    expect(view).toBe(
+      '<p><a href="https://en.wikipedia.org/wiki/Foo_(bar)" target="_blank" rel="noreferrer noopener">' +
+        'wiki</a></p>',
+    )
+  })
+
+  test('a protocol-relative link stays text', () => {
+    const view = renderMarkdown('[x](//evil.example/x)')
+    expect(view).not.toContain('<a ')
+    expect(view).toContain('[x](//evil.example/x)')
+  })
+
+  test('a quote in a link href cannot leave its attribute', () => {
+    const view = renderMarkdown('[x](https://e.x/a"onmouseover="alert(1))')
+    expect(view).not.toContain('"onmouseover="')
+    expect(view).toContain('&quot;onmouseover=&quot;')
+  })
+
+  test('markup after a bare URL stays escaped text', () => {
+    const view = renderMarkdown('see https://e.x/"><img src=x onerror=alert(1)>')
+    expect(view).not.toContain('<img')
+    expect(view).toContain('&lt;img')
+  })
 })

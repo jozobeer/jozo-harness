@@ -387,6 +387,56 @@ describe('the Solid page', () => {
     expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'changes', path: 'a.ts' } })
   })
 
+  test('URLs in the prompt, a tool card and its output are links', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const { store } = makeStore({
+      conversation: {
+        ...emptyConversation,
+        blocks: [{ kind: 'user', text: 'fetch https://example.com/ask' }],
+      },
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'agent/inbox/claimed', {
+          message: { text: 'fetch https://example.com/ask', source: 'user' },
+        }),
+        at(3, 'step/start', { step: 1 }),
+        at(4, 'tool/call', {
+          callId: 'c1',
+          name: 'web_fetch',
+          arguments: '{"url":"https://example.com/page"}',
+          summary: 'fetch https://example.com/page',
+        }),
+        at(5, 'tool/result', {
+          callId: 'c1',
+          isError: false,
+          summary: 'fetched https://example.com/page',
+          content: [{ type: 'text', text: 'see https://example.com/out' }],
+        }),
+        at(6, 'step/end', { step: 1 }),
+        at(7, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      ]),
+    })
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    const hrefs = [...container.querySelectorAll('.tool-card a')].map((link) =>
+      link.getAttribute('href'),
+    )
+    expect(hrefs).toEqual([
+      'https://example.com/page',
+      'https://example.com/page',
+      'https://example.com/out',
+    ])
+    expect(container.querySelector('.turn-ask .body a')?.getAttribute('href')).toBe(
+      'https://example.com/ask',
+    )
+
+    // A link in the folded line opens the page without folding the card open too.
+    const card = container.querySelector('.tool-card') as HTMLDetailsElement
+    fireEvent.click(card.querySelector('.tool-summary a') as Element)
+    expect(card.open).toBe(false)
+  })
+
   test('a running turn keeps one line from its first moment, and fills it as calls come and go', () => {
     const now = Date.now()
     const events = [{ seq: 1, time: now - 2_000, type: 'turn/start', data: { turn: 1 } }]

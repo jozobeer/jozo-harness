@@ -1,4 +1,5 @@
 import { escapeHtml } from './html.ts'
+import { linkPartsOf, type LinkPart } from './linkify.ts'
 
 /** One piece of a document: a fenced block, or the lines that surround it. */
 type Segment =
@@ -10,10 +11,8 @@ const HEADING = /^(#{1,6})\s+(.*)$/
 const RULE = /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/
 const ITEM = /^ {0,3}(?:([-*+])|(\d{1,9})[.)])\s+(.*)$/
 const QUOTE = /^ {0,3}>\s?(.*)$/
-const LINK = /\[([^\]]*)\]\(([^)\s]+)\)/g
 const BOLD = /\*\*([^*]+)\*\*/g
 const ITALIC = /\*([^*]+)\*/g
-const SAFE_HREF = /^(?:https?:|mailto:|\/)/i
 
 /** Where the fence at `index` ends, and the language it names. */
 const fenceAt = (
@@ -52,17 +51,23 @@ const segmentsOf = (lines: ReadonlyArray<string>): ReadonlyArray<Segment> => {
   return segments
 }
 
-const anchor = (label: string, href: string): string =>
-  SAFE_HREF.test(href)
-    ? '<a href="' + href + '" target="_blank" rel="noreferrer noopener">' + label + '</a>'
-    : '[' + label + '](' + href + ')'
+const ANCHOR = /^(?:https?:|mailto:)/i
 
-/** Inline markup of one already-escaped run: links, strong, emphasis. */
+/** A link node; the label and the href are escaped on their own. */
+const anchor = (part: Extract<LinkPart, { kind: 'link' }>): string =>
+  '<a href="' +
+  escapeHtml(part.href) +
+  '"' +
+  (ANCHOR.test(part.href) ? ' target="_blank" rel="noreferrer noopener"' : '') +
+  '>' +
+  escapeHtml(part.label) +
+  '</a>'
+
+/** Inline markup of one raw run: links, strong, emphasis. */
 const inlineOf = (text: string): string =>
-  escapeHtml(text)
-    .replace(LINK, (match, label: string, href: string) =>
-      SAFE_HREF.test(href) ? anchor(label, href) : match,
-    )
+  linkPartsOf(text)
+    .map((part) => (part.kind === 'link' ? anchor(part) : escapeHtml(part.text)))
+    .join('')
     .replace(BOLD, '<strong>$1</strong>')
     .replace(ITALIC, '<em>$1</em>')
 

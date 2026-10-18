@@ -10,6 +10,7 @@ import {
   type JSX,
 } from 'solid-js'
 import { plainText } from '@jozo-harness/ui-view'
+import { Linkify } from './linkify.tsx'
 import type { DirectoryView, SessionAction, SessionSummary } from '../../src/shared/rpc.ts'
 import {
   RECENT_PAGE,
@@ -400,7 +401,9 @@ const WaitingCard = (props: { entry: BoardEntry; store: SessionStore }) => (
           store={props.store}
           detail={waiting().kind === 'approval' ? 'approval' : 'question'}
         />
-        <p class="board-asked">{askedOf(waiting())}</p>
+        <p class="board-asked">
+          <Linkify text={askedOf(waiting())} />
+        </p>
         <Answer entry={props.entry} waiting={waiting()} store={props.store} />
       </div>
     )}
