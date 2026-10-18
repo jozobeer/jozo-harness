@@ -1,6 +1,7 @@
 import {
   AssistantStreamRecordSchema,
   ContentBlockSchema,
+  LLM_FAILURE_CODES,
   LlmFailureSchema,
   LlmUsageSchema,
 } from '@jozo-harness/llm'
@@ -103,6 +104,15 @@ const catalog = new Map<string, Schema.Schema<unknown>>([
     }),
   ],
   [
+    'llm/retry',
+    Schema.Struct({
+      attempt: Schema.Int,
+      code: Schema.Literals(LLM_FAILURE_CODES),
+      delayMs: Schema.Number,
+      cause: Schema.Literals(['transient', 'context-overflow']),
+    }) as Schema.Schema<unknown>,
+  ],
+  [
     'tool/call',
     Schema.Struct({
       callId: Schema.String,
@@ -134,6 +144,7 @@ registerLogOnlySessionEvents([
   'step/end',
   'request/header',
   'assistant/attempt',
+  'llm/retry',
   'tool/call',
 ])
 

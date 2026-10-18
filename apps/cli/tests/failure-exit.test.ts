@@ -4,7 +4,7 @@ import { kernelPlugin, type Plugin } from '@jozo-harness/kernel'
 import { Llm, LlmFailure, type LlmAdapter } from '@jozo-harness/llm'
 import { askPlugin, safetyPlugin } from '@jozo-harness/safety'
 import { sessionPlugin } from '@jozo-harness/session'
-import { sessionJsonlPlugin } from '@jozo-harness/session-jsonl'
+import { jsonlSessions, sessionJsonlPlugin } from '@jozo-harness/session-jsonl'
 import { systemPromptPlugin } from '@jozo-harness/system-prompt'
 import { toolsPlugin } from '@jozo-harness/tools'
 import { Effect, Layer, Schema, Stream } from 'effect'
@@ -33,7 +33,7 @@ const failing: Plugin<{}, Llm, never> = {
     } satisfies LlmAdapter),
 }
 
-const profile = (root: string): string =>
+const profile = (root: string, retry = false): string =>
   [
     'name: test',
     'plugins:',
@@ -61,6 +61,15 @@ const profile = (root: string): string =>
     "    name: '@jozo-harness/agent'",
     '  - id: agent-loop',
     "    name: '@jozo-harness/agent-loop'",
+    ...(retry
+      ? [
+          '    config:',
+          '      retry:',
+          '        maxRetries: 1',
+          '        initialDelayMs: 0',
+          '        jitterRatio: 0',
+        ]
+      : []),
   ].join('\n')
 
 describe('a turn that fails', () => {
@@ -148,6 +157,73 @@ describe('a turn that fails', () => {
     )
 
     expect(code).toBe(0)
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('a rate-limited attempt is retried by the loop row and the turn completes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-retry-'))
+    const err: Array<string> = []
+    let calls = 0
+    const flaky: Plugin<{}, Llm, never> = {
+      ...failing,
+      layer: () =>
+        Layer.succeed(Llm, {
+          name: 'stub',
+          capabilities: {
+            toolChoice: false,
+            reasoningEffort: null,
+            images: 'none',
+            promptCacheControl: false,
+          },
+          stream: () => {
+            calls += 1
+            return calls === 1
+              ? Stream.fail(new LlmFailure({ code: 'RATE_LIMIT', message: 'slow down' }))
+              : Stream.fromIterable([
+                  { type: 'text-delta' as const, index: 0, text: 'fine' },
+                  {
+                    type: 'block-end' as const,
+                    index: 0,
+                    block: { type: 'text' as const, text: 'fine' },
+                  },
+                  { type: 'finish' as const, kind: 'stop' as const },
+                ])
+          },
+        } satisfies LlmAdapter),
+    }
+
+    const code = await Effect.runPromise(
+      runCommand({
+        profiles: [profile(root, true)],
+        plugins: [
+          kernelPlugin,
+          sessionJsonlPlugin,
+          sessionPlugin,
+          toolsPlugin,
+          systemPromptPlugin,
+          safetyPlugin,
+          askPlugin,
+          flaky,
+          agentPlugin,
+          agentLoopPlugin,
+        ] as ReadonlyArray<Plugin<any, any, any>>,
+        cwd: '/tmp',
+        route: 'stub/model',
+        task: 'say something',
+        stdout: () => undefined,
+        stderr: (text) => void err.push(text),
+      }),
+    )
+
+    const store = jsonlSessions({ root })
+    const sessions = await Effect.runPromise(store.list())
+    const opened = await Effect.runPromise(store.open(sessions[0]?.id ?? ''))
+    const retries = opened.events.flatMap((event) =>
+      event.type === 'llm/retry' ? [event.data] : [],
+    )
+
+    expect({ code, stderr: err.join(''), calls }).toEqual({ code: 0, stderr: '', calls: 2 })
+    expect(retries).toEqual([{ attempt: 1, code: 'RATE_LIMIT', delayMs: 0, cause: 'transient' }])
     await rm(root, { recursive: true, force: true })
   })
 })

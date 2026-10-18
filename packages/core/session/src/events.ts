@@ -2,6 +2,7 @@ import type { Emit } from '@jozo-harness/kernel'
 import type {
   AssistantStreamRecord,
   ContentBlock,
+  LlmFailureCode,
   LlmFailureData,
   LlmUsage,
   ToolSchema,
@@ -63,6 +64,19 @@ export interface AssistantAttemptData {
   readonly stream: ReadonlyArray<AssistantStreamRecord>
 }
 
+/** Why a failed attempt was sent again. */
+export type RetryCause = 'transient' | 'context-overflow'
+
+/** One recovery step between two provider attempts: what failed and how long it waited. */
+export interface LlmRetryData {
+  /** The attempt that failed, 1-based. */
+  readonly attempt: number
+  readonly code: LlmFailureCode
+  /** The wait before the next attempt, in milliseconds. */
+  readonly delayMs: number
+  readonly cause: RetryCause
+}
+
 /** Every event the S1 kernel and its packages log. Plugins extend this interface. */
 /** A log that lost its torn tail when it was opened: how much was dropped. */
 export interface SessionRepaired {
@@ -84,6 +98,7 @@ export interface SessionEventMap {
   'user/message': { readonly text: string; readonly source: UserMessageSource }
   'assistant/message': AssistantMessageData
   'assistant/attempt': AssistantAttemptData
+  'llm/retry': LlmRetryData
   'tool/call': {
     readonly callId: string
     readonly name: string

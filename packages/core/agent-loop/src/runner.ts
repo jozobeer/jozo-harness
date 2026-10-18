@@ -48,6 +48,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { groupCalls, type CallBatch } from './batch.ts'
 import type { AgentRequest } from './hooks.ts'
+import { retryConfigSchema } from './retry.ts'
 
 export class AgentLoop extends Context.Service<AgentLoop, AgentRunner>()(
   'jozo-harness/AgentLoop',
@@ -316,17 +317,30 @@ const agentLoopEffect = (
         return checkpointOf(range, summary, envelope)
       })
 
+    /**
+     * Folds the history when the meter says it is past the line, or when a provider
+     * refused the request and the loop needs the surface to shrink before one more
+     * attempt. A forced fold prunes first, so the auxiliary summary call is made on
+     * the smaller history; the answer says whether the estimate actually came down.
+     */
     const recordCompaction = (
       agent: Agent,
       envelope: Omit<AgentRequest, 'messages'>,
-    ): Effect.Effect<void> =>
+      force = false,
+    ): Effect.Effect<boolean> =>
       Effect.gen(function* () {
         const events = agent.session.events()
-        if (!meterOf(events, budget).compacts) return
-        const checkpoint = yield* checkpointFor(envelope, events)
+        const meter = meterOf(events, budget)
+        if (!force && !meter.compacts) return false
+        if (force) {
+          const first = pruneFor(events, compact)
+          if (first !== undefined) yield* append(agent, 'compaction/prune', first)
+        }
+        const checkpoint = yield* checkpointFor(envelope, agent.session.events())
         if (checkpoint !== undefined) yield* append(agent, 'compaction/checkpoint', checkpoint)
         const prune = pruneFor(agent.session.events(), compact)
         if (prune !== undefined) yield* append(agent, 'compaction/prune', prune)
+        return meterOf(agent.session.events(), budget).estimated < meter.estimated
       })
 
     /** The request envelope of this step, before the history is folded into it. */
@@ -354,15 +368,97 @@ const agentLoopEffect = (
       messages: deriveMessages(agent.session.events()),
     })
 
-    /** Sends the settled request until a hook says to stop retrying. */
-    const streamUntilSettled = (agent: Agent, request: AgentRequest): Effect.Effect<StepOutcome> =>
+    /**
+     * The request after a fold that made the surface smaller, and nothing when the
+     * fold left it as large: the loop only resends what can still fit.
+     */
+    const rebuildAfterFold = (
+      agent: Agent,
+      envelope: Omit<AgentRequest, 'messages'>,
+      rebuild: () => Effect.Effect<AgentRequest>,
+      attempt: number,
+      failure: LlmFailure,
+    ): Effect.Effect<AgentRequest | undefined> =>
       Effect.gen(function* () {
+        if (!(yield* recordCompaction(agent, envelope, true))) return undefined
+        yield* append(agent, 'llm/retry', {
+          attempt,
+          code: failure.code,
+          delayMs: 0,
+          cause: 'context-overflow',
+        })
+        return yield* rebuild()
+      })
+
+    /** Whether the hooks ask for one more attempt; a retry waits out its delay and records itself. */
+    const retryAfterFailure = (
+      agent: Agent,
+      failure: LlmFailure,
+      attempt: number,
+    ): Effect.Effect<boolean> =>
+      Effect.gen(function* () {
+        const decision = yield* hooks.waterfall('agent/request-error', agent, failure, attempt)
+        if (decision?.kind !== 'retry') return false
+        const delayMs = decision.delayMs ?? 0
+        if (delayMs > 0) yield* Effect.sleep(delayMs)
+        yield* append(agent, 'llm/retry', {
+          attempt,
+          code: failure.code,
+          delayMs,
+          cause: 'transient',
+        })
+        return true
+      })
+
+    /**
+     * The request to send again after a context overflow, and nothing when this
+     * attempt is not one or the fold left the surface as large.
+     */
+    const resendAfterOverflow = (
+      agent: Agent,
+      envelope: Omit<AgentRequest, 'messages'>,
+      rebuild: () => Effect.Effect<AgentRequest>,
+      attempt: number,
+      failure: LlmFailure,
+      alreadyRecovered: boolean,
+    ): Effect.Effect<AgentRequest | undefined> =>
+      alreadyRecovered || failure.code !== 'CONTEXT_WINDOW_EXCEEDED'
+        ? Effect.succeed(undefined)
+        : rebuildAfterFold(agent, envelope, rebuild, attempt, failure)
+
+    /**
+     * Sends the settled request until a hook says to stop retrying. A context
+     * overflow gets one fold-and-rebuild attempt before the same hooks decide; the
+     * request is only resent when the fold actually made the surface smaller.
+     */
+    const streamUntilSettled = (
+      agent: Agent,
+      request: AgentRequest,
+      envelope: Omit<AgentRequest, 'messages'>,
+      rebuild: () => Effect.Effect<AgentRequest>,
+    ): Effect.Effect<StepOutcome> =>
+      Effect.gen(function* () {
+        let current = request
+        let attempt = 0
+        let overflowRecovered = false
         while (true) {
-          const outcome = yield* streamStep(agent, request)
+          const outcome = yield* streamStep(agent, current)
           if (outcome.ok) return outcome
-          const decision = yield* hooks.waterfall('agent/request-error', outcome.failure)
-          if (decision?.kind !== 'retry') return outcome
-          // A retry resends the settled request; assembly and request/header do not repeat.
+          attempt += 1
+          const rebuilt = yield* resendAfterOverflow(
+            agent,
+            envelope,
+            rebuild,
+            attempt,
+            outcome.failure,
+            overflowRecovered,
+          )
+          if (rebuilt !== undefined) {
+            overflowRecovered = true
+            current = rebuilt
+            continue
+          }
+          if (!(yield* retryAfterFailure(agent, outcome.failure, attempt))) return outcome
         }
       })
 
@@ -382,11 +478,17 @@ const agentLoopEffect = (
           cwdOf(agent.session.events(), agent.session.header),
           opening,
         )
-        yield* recordCompaction(agent, envelopeOf(agent, build))
-        const base = requestOf(agent, build)
-        const request = (yield* hooks.waterfall('agent/request', base)) ?? base
-        yield* recordRequestHeader(agent, request)
-        return yield* streamUntilSettled(agent, request)
+        const envelope = envelopeOf(agent, build)
+        yield* recordCompaction(agent, envelope)
+        const rebuild = (): Effect.Effect<AgentRequest> =>
+          Effect.gen(function* () {
+            const base = requestOf(agent, build)
+            const rebuilt = (yield* hooks.waterfall('agent/request', base)) ?? base
+            yield* recordRequestHeader(agent, rebuilt)
+            return rebuilt
+          })
+        const request = yield* rebuild()
+        return yield* streamUntilSettled(agent, request, envelope, rebuild)
       })
 
     const runOne = (
@@ -615,6 +717,8 @@ export const agentLoopConfigSchema = Schema.Struct({
    * by this much before the headroom is taken off. Unset reserves nothing.
    */
   maxTokens: Schema.optionalKey(Schema.Int),
+  /** Transient provider failures worth another attempt, and how long to wait. */
+  retry: Schema.optionalKey(retryConfigSchema),
 })
 
 export type AgentLoopConfig = Schema.Schema.Type<typeof agentLoopConfigSchema>
