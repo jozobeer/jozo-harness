@@ -87,7 +87,10 @@ import {
   makeGoalTool,
   makeRalphTool,
   DELEGATION_CONTEXT_ORDER,
+  TEAM_IDENTITY_CONTEXT_ORDER,
   delegationLine,
+  teamIdentityLine,
+  teamIdentityOf,
   makeScheduleTool,
   makeWorkflowTool,
   makePluginTool,
@@ -705,6 +708,33 @@ const installDelegationContext = (
       )
   })
 
+/**
+ * Registers the teammate's identity in the runtime snapshot. The entry reads the
+ * rosters of the live agents, so a teammate and the lead that spawned it see the
+ * same record while the work runs.
+ */
+const installTeamIdentityContext = (
+  wiring: ProfileWiring,
+): Effect.Effect<void, ToolError, Scope.Scope> =>
+  Effect.gen(function* () {
+    if (wiring.options.subagents !== true) return
+    const agents = Context.get(wiring.context, Agents)
+    yield* Context.get(wiring.context, SystemPrompt)
+      .context({
+        name: 'team:identity',
+        order: TEAM_IDENTITY_CONTEXT_ORDER,
+        text: (subject: RuntimeContextSubject) =>
+          Effect.sync(() => {
+            if (subject.agentId === undefined) return undefined
+            const identity = teamIdentityOf(agents, subject.agentId)
+            return identity === undefined ? undefined : teamIdentityLine(identity)
+          }),
+      })
+      .pipe(
+        Effect.mapError((error) => new ToolError({ code: 'execution', message: error.message })),
+      )
+  })
+
 /** Tiers and guards come from the profile's rows. */
 /**
  * Installs what the profile's rows ask for and reports the composition the session
@@ -747,6 +777,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
       // An agent at the delegation limit reads it in the next runtime snapshot;
       // the tool stays visible and refuses the call, as dsh does.
       yield* installDelegationContext(wiring)
+      yield* installTeamIdentityContext(wiring)
     }
     // A failed provider attempt is retried for the codes the loop row lists; the
     // loop only decides what to do when a listener answers, so this is the wiring

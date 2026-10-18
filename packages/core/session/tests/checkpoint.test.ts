@@ -93,6 +93,28 @@ describe('summarizableMessages', () => {
 
     expect(range.map((entry) => entry.seq)).toEqual([3, 4])
   })
+
+  test('keeps the newest runtime snapshot out of the summary', () => {
+    const events = [
+      headerEvent(),
+      event(2, 'system/message', { text: 'the frame' }),
+      event(3, 'user/message', {
+        text: 'Current runtime context:\n- team: you are teammate "builder"',
+        source: 'runtime-context' as const,
+      }),
+      event(4, 'assistant/message', {
+        provider: 'p',
+        model: 'm',
+        content: [{ type: 'text' as const, text: 'working' }],
+        stream: [],
+      }),
+      event(5, 'user/message', { text: 'the newest request', source: 'user' as const }),
+    ]
+
+    // The snapshot is outside the retention, but it still says who is asking: a
+    // summary must not fold it away.
+    expect(summarizableMessages(events, options).map((entry) => entry.seq)).toEqual([4])
+  })
 })
 
 describe('messagesWithPrune', () => {
@@ -104,6 +126,26 @@ describe('messagesWithPrune', () => {
 
     expect(JSON.stringify(messages)).not.toContain(text)
     expect(JSON.stringify(messages)).toContain('[earlier output of')
+  })
+
+  test('leaves the newest runtime snapshot at full length', () => {
+    const events = [
+      headerEvent(),
+      event(2, 'system/message', { text: 'the frame' }),
+      event(3, 'user/message', {
+        text: 'Current runtime context:\n- team: ' + 'x'.repeat(200),
+        source: 'runtime-context' as const,
+      }),
+      event(4, 'assistant/message', {
+        provider: 'p',
+        model: 'm',
+        content: [{ type: 'text' as const, text: 'working' }],
+        stream: [],
+      }),
+      event(5, 'user/message', { text: 'the newest request', source: 'user' as const }),
+    ]
+
+    expect(pruneFor(events, options)?.shadowedSeqs ?? []).not.toContain(3)
   })
 })
 
