@@ -47,6 +47,23 @@ const createNow = () => {
 const titleOf = (entry: BoardEntry): string =>
   entry.summary.title === '' ? entry.summary.id.slice(0, 8) : entry.summary.title
 
+/** What the row menu can say about a copy: nothing yet, or how it went. */
+type Copied = 'idle' | 'copied' | 'failed'
+
+/** Hands the whole id to the page's clipboard; an insecure page has none to give. */
+const copyId = async (id: string): Promise<Copied> => {
+  try {
+    await navigator.clipboard.writeText(id)
+    return 'copied'
+  } catch {
+    return 'failed'
+  }
+}
+
+/** The menu item's label, which reports the try once the reader has made one. */
+const copyLabel = (copied: Copied): string =>
+  copied === 'copied' ? 'Copied' : copied === 'failed' ? 'Copy failed' : 'Copy session ID'
+
 /** The sessions whose title or folder says what was typed, ignoring case. */
 const matching = (
   sessions: ReadonlyArray<SessionSummary>,
@@ -128,16 +145,19 @@ const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) 
   const [renaming, setRenaming] = createSignal(false)
   const [confirming, setConfirming] = createSignal(false)
   const [draft, setDraft] = createSignal('')
+  const [copied, setCopied] = createSignal<Copied>('idle')
 
   const close = (): void => {
     setMenu(false)
     setRenaming(false)
     setConfirming(false)
+    setCopied('idle')
   }
   const open = (): void => {
     setConfirming(false)
     setRenaming(false)
     setMenu(true)
+    setCopied('idle')
   }
   const act = (action: SessionAction): void => {
     props.store.act(id(), action)
@@ -153,6 +173,10 @@ const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) 
     const title = draft().trim()
     if (title !== '') act({ kind: 'rename', title })
     else close()
+  }
+  const copySessionId = (): void => {
+    // The menu stays open so the label can report whether the copy landed.
+    void copyId(id()).then((state) => setCopied(state))
   }
 
   onMount(() => {
@@ -260,6 +284,12 @@ const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) 
           >
             {archived() ? 'Unarchive' : 'Archive'}
           </button>
+          <button class="session-menu-item" type="button" onClick={copySessionId}>
+            {copyLabel(copied())}
+          </button>
+          <Show when={copied() === 'failed'}>
+            <span class="session-id-fallback">{id()}</span>
+          </Show>
           <button
             class="session-menu-item danger"
             type="button"
