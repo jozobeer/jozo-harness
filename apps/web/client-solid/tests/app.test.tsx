@@ -110,6 +110,74 @@ describe('the Solid page', () => {
     expect(calls).toContainEqual({ kind: 'moveTo', id: 'aaaabbbb' })
   })
 
+  test('the rail draws a session in one line, with the time at the right', () => {
+    const now = Date.now()
+    const finished = traceOf([
+      { seq: 1, time: now - 180_000, type: 'turn/start', data: { turn: 1 } },
+      {
+        seq: 2,
+        time: now - 60_000,
+        type: 'turn/end',
+        data: { turn: 1, reason: { kind: 'completed' } },
+      },
+    ])
+    const { store } = makeStore(
+      {
+        sessions: [
+          { id: 'aaaabbbb', cwd: '/one/work', createdAt: now - 60_000, title: 'first' },
+          { id: 'ccccdddd', cwd: '/two/project-tail', createdAt: now - 60_000, title: '' },
+        ],
+      },
+      new Map([['ccccdddd', { conversation: emptyConversation, trace: finished }]]),
+    )
+
+    const { container } = render(() => <Board store={store} />)
+
+    const rows = [...container.querySelectorAll('#session-list button.session')]
+    expect(rows).toHaveLength(2)
+    for (const row of rows) {
+      // The cwd moved to the hover text, so the row is the mark, the name, and the time.
+      expect(row.getAttribute('title')).not.toBeNull()
+      expect(row.querySelector('.session-where')).toBeNull()
+      expect(row.children).toHaveLength(3)
+      expect(row.lastElementChild?.classList.contains('session-detail')).toBe(true)
+    }
+    expect(rows[0]?.getAttribute('title')).toBe('work')
+    expect(rows[0]?.querySelector('.session-detail')?.textContent).toBe('1m')
+    // The mark's colour says done; the word is gone from the row.
+    expect(rows[0]?.textContent).not.toContain('done')
+    expect(rows[1]?.getAttribute('title')).toBe('project-tail')
+    expect(rows[1]?.querySelector('.session-detail')?.textContent).toBe('1m')
+  })
+
+  test('the rail keeps the elapsed time and calls at the right of a running row', () => {
+    const now = Date.now()
+    const running = traceOf([
+      { seq: 1, time: now - 5_000, type: 'turn/start', data: { turn: 1 } },
+      { seq: 2, time: now - 5_000, type: 'step/start', data: { step: 1 } },
+      {
+        seq: 3,
+        time: now - 1_000,
+        type: 'tool/call',
+        data: { callId: 'c1', name: 'bash', arguments: '{}', summary: 'pnpm test' },
+      },
+    ])
+    const { store } = makeStore(
+      {
+        sessions: [{ id: 'aaaabbbb', cwd: '/one/work', createdAt: now - 60_000, title: 'first' }],
+      },
+      new Map([
+        ['aaaabbbb', { conversation: { ...emptyConversation, running: true }, trace: running }],
+      ]),
+    )
+
+    const { container } = render(() => <Board store={store} />)
+
+    const row = container.querySelector('button.session')
+    expect(row?.querySelector('.session-detail')?.textContent).toMatch(/^\d+s · 1 calls$/)
+    expect(container.querySelector('.board-doing')?.textContent).toBe('bash pnpm test')
+  })
+
   test('a turn shows the ask, folds its work into one line, and ends in the answer', () => {
     const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
     const { store, calls } = makeStore({

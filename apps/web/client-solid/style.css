@@ -457,7 +457,7 @@
 
   #session-list .session {
     grid-template-columns: 12px minmax(0, 1fr) auto;
-    gap: 2px 8px;
+    gap: 0 8px;
     align-items: center;
   }
 
@@ -485,19 +485,9 @@
     grid-column: 2;
   }
 
-  #session-list .session-where {
+  .session-detail {
     grid-column: 3;
     grid-row: 1;
-    display: block;
-    max-width: 8rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    color: var(--dim);
-    font-size: var(--text-xs);
-  }
-
-  .session-detail {
-    grid-column: 2 / -1;
     overflow: hidden;
     color: var(--dim);
     font-size: var(--text-xs);
