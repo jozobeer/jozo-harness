@@ -14,6 +14,31 @@ const StartParameters = Schema.Struct({
 const IdParameters = Schema.Struct({
   id: Schema.String.annotate({ description: 'The job id a start returned.' }),
 })
+const ReadParameters = Schema.Struct({
+  id: Schema.String.annotate({ description: 'The job id a start returned.' }),
+  wait: Schema.optionalKey(
+    Schema.Boolean.annotate({
+      description:
+        'Whether to wait for output the job has not produced yet. Defaults to true; false returns what is buffered now.',
+    }),
+  ),
+  timeoutMs: Schema.optionalKey(
+    Schema.Int.annotate({
+      description: 'The most milliseconds to wait. Defaults to 30000 and is capped at 600000.',
+    }),
+  ),
+})
+
+/** How long job_output waits for output unless the caller says otherwise. */
+export const JOB_OUTPUT_DEFAULT_WAIT_MS = 30_000
+/** The most job_output waits, however the caller asks. */
+export const JOB_OUTPUT_MAX_WAIT_MS = 600_000
+
+/** The wait a read asks the registry for, given how the caller wants to read. */
+export const jobOutputWaitMs = (args: { wait?: boolean; timeoutMs?: number }): number =>
+  args.wait === false
+    ? 0
+    : Math.min(args.timeoutMs ?? JOB_OUTPUT_DEFAULT_WAIT_MS, JOB_OUTPUT_MAX_WAIT_MS)
 
 /** Starts a command in the background, so long work can overlap with the turn. */
 export const makeJobStartTool = (
@@ -35,25 +60,44 @@ export const makeJobStartTool = (
       .pipe(Effect.map((job) => ({ id: job.id, command: job.command }))),
 })
 
-/** Reads what a background job has produced so far. */
+/** Reads what a background job has produced since the previous read, waiting for more if asked. */
 export const makeJobOutputTool = (
   jobs: JobsShape,
-): ToolDefinition<{ id: string }, { id: string; running: boolean; output: string }> => ({
+): ToolDefinition<
+  { id: string; wait?: boolean; timeoutMs?: number },
+  { id: string; running: boolean; output: string; truncated: boolean }
+> => ({
   name: 'job_output',
   presentCall: (args) => ({ summary: 'job_output ' + args.id }),
   description:
-    'Reads the output a background job has produced so far. Poll it to follow long work; job_kill stops one that no longer matters.',
-  parameters: IdParameters,
+    'Reads the output a background job has produced since the last read of it. Waits for a running job to produce more, up to timeoutMs, instead of polling; job_kill stops one that no longer matters.',
+  parameters: ReadParameters,
   output: {
-    schema: Schema.Struct({ id: Schema.String, running: Schema.Boolean, output: Schema.String }),
+    schema: Schema.Struct({
+      id: Schema.String,
+      running: Schema.Boolean,
+      output: Schema.String,
+      truncated: Schema.Boolean,
+    }),
     render: (_args, value) => [
-      { type: 'text', text: value.output + (value.running ? '\n[running]' : '\n[finished]') },
+      {
+        type: 'text',
+        text:
+          (value.output === '' ? '(no new output)' : value.output) +
+          (value.truncated ? '\n[earlier output dropped before it could be read]' : '') +
+          (value.running ? '\n[running]' : '\n[finished]'),
+      },
     ],
   },
   execute: (args) =>
-    jobs
-      .read(args.id)
-      .pipe(Effect.map((job) => ({ id: job.id, running: job.running, output: job.output }))),
+    jobs.read(args.id, { waitMs: jobOutputWaitMs(args) }).pipe(
+      Effect.map((job) => ({
+        id: job.id,
+        running: job.running,
+        output: job.output,
+        truncated: job.truncated,
+      })),
+    ),
 })
 
 /** Stops a background job. */
