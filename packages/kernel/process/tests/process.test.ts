@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest'
+import { existsSync } from 'node:fs'
 import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,6 +7,16 @@ import { spawn } from '../src/index.ts'
 
 const collected = async (stream: ReadableStream<Uint8Array>): Promise<string> =>
   await new Response(stream).text()
+
+/** Waits for a child to create a marker file, or reports that it never did. */
+const waitForFile = async (path: string, timeoutMs = 5_000): Promise<boolean> => {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (existsSync(path)) return true
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  return existsSync(path)
+}
 
 describe('spawn', () => {
   test('runs a command, reads its output, and reports the exit code', async () => {
@@ -53,4 +64,21 @@ describe('spawn', () => {
     child.kill()
     expect(await child.exited).not.toBe(0)
   })
+
+  test('kill ends the descendants the command started', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'jozo-harness-process-'))
+    const ready = join(directory, 'grandchild-ready')
+    const stopped = join(directory, 'grandchild-stopped')
+    try {
+      const grandchild = `bash -c 'trap "touch ${stopped}" TERM; touch ${ready}; sleep 30'`
+      const child = spawn(['bash', '-lc', `${grandchild} & wait`])
+      // The marker proves the descendant installed its signal handler before the kill.
+      expect(await waitForFile(ready)).toBe(true)
+      child.kill()
+      expect(await child.exited).not.toBe(0)
+      expect(await waitForFile(stopped)).toBe(true)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  }, 15_000)
 })
