@@ -1486,6 +1486,86 @@ footer {
   white-space: nowrap;
 }
 
+/* The goal above the composer: what the session works toward, and the words that move it. */
+.goal-bar {
+  display: flex;
+  gap: var(--s2);
+  align-items: center;
+  max-width: var(--prose-w);
+  margin: 0 auto 6px;
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-size: var(--text-sm);
+}
+
+.goal-line {
+  display: flex;
+  flex: 1;
+  gap: var(--s2);
+  align-items: baseline;
+  min-width: 0;
+}
+
+.goal-phase {
+  flex: none;
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.goal-phase::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentcolor;
+}
+
+.goal-phase.active {
+  color: var(--tool);
+}
+
+.goal-phase.paused {
+  color: var(--warn);
+}
+
+.goal-phase.blocked {
+  color: var(--error);
+}
+
+.goal-phase.complete {
+  color: var(--select);
+}
+
+.goal-objective {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.goal-rounds {
+  flex: none;
+  margin-left: auto;
+  color: var(--dim);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.goal-actions {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+.goal-actions button {
+  padding: 4px 8px;
+  font-size: var(--text-xs);
+}
+
 /* One box: the draft on top, and under it the model it goes to and the two actions. */
 #composer {
   position: relative;

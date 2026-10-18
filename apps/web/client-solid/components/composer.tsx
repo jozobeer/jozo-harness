@@ -30,6 +30,72 @@ const Queue = (props: { store: SessionStore }) => (
   </For>
 )
 
+/**
+ * The goal the session works toward, above the composer. Every button is only the
+ * command the human would type, so the rules of a goal stay in one place.
+ */
+const GoalBar = (props: { store: SessionStore; onEdit: (objective: string) => void }) => {
+  const goal = () => props.store.state().run?.goal
+  const run = (text: string): void => props.store.send({ kind: 'submit', text })
+  return (
+    <Show when={goal()}>
+      {(current) => (
+        <section id="goal-bar" class="goal-bar" aria-label="the goal this session works toward">
+          <div class="goal-line">
+            <span class={'goal-phase ' + current().phase}>{current().phase}</span>
+            <span class="goal-objective">{current().objective}</span>
+            <span class="goal-rounds">
+              {String(current().rounds) + '/' + String(current().maxRounds)}
+            </span>
+          </div>
+          <div class="goal-actions">
+            <Switch>
+              <Match when={current().phase === 'active'}>
+                <Button
+                  type="button"
+                  data-goal-action="pause"
+                  title="stop the next round from starting"
+                  onClick={() => run('/goal pause')}
+                >
+                  Pause
+                </Button>
+              </Match>
+              <Match when={current().phase === 'paused'}>
+                <Button
+                  type="button"
+                  data-goal-action="resume"
+                  title="let the next round start again"
+                  onClick={() => run('/goal resume')}
+                >
+                  Resume
+                </Button>
+              </Match>
+            </Switch>
+            <Button
+              type="button"
+              data-goal-action="edit"
+              title="change the objective in the composer"
+              onClick={() => props.onEdit(current().objective)}
+            >
+              Edit
+            </Button>
+            <Show when={current().phase !== 'complete'}>
+              <Button
+                type="button"
+                data-goal-action="done"
+                title="mark the objective achieved"
+                onClick={() => run('/goal done')}
+              >
+                Done
+              </Button>
+            </Show>
+          </div>
+        </section>
+      )}
+    </Show>
+  )
+}
+
 /** The two ways the page answers for the human: an approval, or a question. */
 const Takeover = (props: { store: SessionStore }) => {
   const conversation = () => props.store.state().conversation
@@ -329,6 +395,18 @@ export const Composer = (props: { store: SessionStore }) => {
     if (textarea !== undefined) grow(textarea)
   }
 
+  /** Puts the edit command in the composer, so the objective is changed where it reads. */
+  const editGoal = (objective: string): void => {
+    const text = '/goal edit ' + objective
+    props.store.setDraft(text)
+    const node = textarea
+    if (node === undefined) return
+    node.value = text
+    grow(node)
+    node.focus()
+    node.setSelectionRange(text.length, text.length)
+  }
+
   const candidates = (): ReadonlyArray<CommandView> => {
     const found = token()
     return found === undefined ? [] : commandCandidates(props.store.state().commands ?? [], found)
@@ -392,6 +470,7 @@ export const Composer = (props: { store: SessionStore }) => {
 
   return (
     <footer data-takeover={takeover() ? 'true' : 'false'}>
+      <GoalBar store={props.store} onEdit={editGoal} />
       <div id="queue">
         <Queue store={props.store} />
       </div>
