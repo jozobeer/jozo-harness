@@ -306,11 +306,11 @@ describe('the Solid page', () => {
     field.remove()
   })
 
-  test('the rail keeps the elapsed time and calls at the right of a running row', () => {
+  test('the rail keeps a running session in Recent, with no running section or second line', () => {
     const now = Date.now()
     const running = traceOf([
       { seq: 1, time: now - 5_000, type: 'turn/start', data: { turn: 1 } },
-      { seq: 2, time: now - 5_000, type: 'step/start', data: { step: 1 } },
+      { seq: 2, time: now - 4_000, type: 'step/start', data: { step: 1 } },
       {
         seq: 3,
         time: now - 1_000,
@@ -337,9 +337,15 @@ describe('the Solid page', () => {
 
     const { container } = render(() => <Board store={store} />)
 
-    const row = container.querySelector('button.session')
-    expect(row?.querySelector('.session-detail')?.textContent).toMatch(/^\d+s · 1 calls$/)
-    expect(container.querySelector('.board-doing')?.textContent).toBe('bash pnpm test')
+    expect(container.querySelectorAll('.board-title')).toHaveLength(1)
+    expect(container.querySelector('.board-title')?.textContent).toContain('Recent')
+    expect(container.querySelector('.board-running')).toBeNull()
+    expect(container.querySelector('.board-doing')).toBeNull()
+    const row = container.querySelector('.recent-group .session-row')
+    expect(row).not.toBeNull()
+    expect(row?.querySelector('button.session')?.classList.contains('running')).toBe(true)
+    // The row keeps the when, not a call count that moves every second.
+    expect(row?.querySelector('.session-detail')?.textContent).toBe('now')
   })
 
   test('a turn shows the ask, folds its work into one line, and ends in the answer', () => {
@@ -379,6 +385,67 @@ describe('the Solid page', () => {
 
     fireEvent.click(container.querySelector('button.change') as Element)
     expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'changes', path: 'a.ts' } })
+  })
+
+  test('a running turn keeps one line from its first moment, and fills it as calls come and go', () => {
+    const now = Date.now()
+    const events = [{ seq: 1, time: now - 2_000, type: 'turn/start', data: { turn: 1 } }]
+    const { store, setState } = makeStore({
+      conversation: {
+        ...emptyConversation,
+        blocks: [{ kind: 'user', text: 'hello' }],
+        running: true,
+      },
+      trace: traceOf(events),
+    })
+
+    const { container } = render(() => <Conversation store={store} />)
+    const line = container.querySelector('.process-line')
+    const doing = container.querySelector('.process-now')
+    expect(line?.querySelector('.process-state')?.textContent).toBe('Working')
+    // A turn that has not called a tool yet still says what it is doing.
+    expect(doing?.textContent).toBe('thinking')
+
+    // The first call fills the line that is already there instead of adding one.
+    setState((current) => ({
+      ...current,
+      trace: traceOf([
+        ...events,
+        { seq: 2, time: now - 1_000, type: 'step/start', data: { step: 1 } },
+        {
+          seq: 3,
+          time: now - 500,
+          type: 'tool/call',
+          data: { callId: 'c1', name: 'bash', arguments: '{}', summary: 'pnpm test' },
+        },
+      ]),
+    }))
+    expect(container.querySelector('.process-line')).toBe(line)
+    expect(container.querySelector('.process-now')).toBe(doing)
+    expect(doing?.textContent).toBe('bash pnpm test')
+
+    // Between two calls the line keeps its place and says the turn is thinking.
+    setState((current) => ({
+      ...current,
+      trace: traceOf([
+        ...events,
+        { seq: 2, time: now - 1_000, type: 'step/start', data: { step: 1 } },
+        {
+          seq: 3,
+          time: now - 500,
+          type: 'tool/call',
+          data: { callId: 'c1', name: 'bash', arguments: '{}', summary: 'pnpm test' },
+        },
+        {
+          seq: 4,
+          time: now - 400,
+          type: 'tool/result',
+          data: { callId: 'c1', isError: false, summary: 'ok', content: [] },
+        },
+      ]),
+    }))
+    expect(container.querySelector('.process-now')).toBe(doing)
+    expect(doing?.textContent).toBe('thinking')
   })
 
   test('a skill load is a card naming what it loaded, from where, and folds the body', () => {
@@ -1493,6 +1560,30 @@ describe('the rail', () => {
 
     expect(container.querySelector('.where')?.textContent).toBe('/work/project')
     expect(container.querySelector('.branch')).toBeNull()
+  })
+
+  test('the status bar says working while a session runs, without counting runners', () => {
+    const now = Date.now()
+    const running = traceOf([{ seq: 1, time: now, type: 'turn/start', data: { turn: 1 } }])
+    const { store } = makeStore(
+      {
+        connected: true,
+        conversation: { ...emptyConversation, running: true },
+        sessions: [
+          { id: 'aaaabbbb', cwd: '/one/work', createdAt: now, updatedAt: now, title: 'first' },
+        ],
+      },
+      new Map([
+        ['aaaabbbb', { conversation: { ...emptyConversation, running: true }, trace: running }],
+      ]),
+    )
+
+    const { container } = render(() => (
+      <Status store={store} drawer={false} onDrawer={() => undefined} />
+    ))
+
+    expect(container.querySelector('.hint')?.textContent).toBe('working…')
+    expect(container.querySelector('.fleet')).toBeNull()
   })
 
   test('the status bar keeps the room the pane strip measured', () => {

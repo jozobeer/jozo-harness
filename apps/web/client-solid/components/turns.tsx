@@ -166,6 +166,13 @@ const ProcessLine = (props: { turn: TraceTurn; now: number }) => {
   const running = () => props.turn.endedAt === undefined
   const finished = justFinished(running)
   const current = () => tools().findLast((tool) => tool.status === 'running')
+  // The line stays put for the whole turn; between calls the model is thinking.
+  const doing = (): string => {
+    const tool = current()
+    return tool === undefined
+      ? 'thinking'
+      : tool.name + ' ' + summaryBodyOf(tool.name, tool.summary)
+  }
   return (
     <summary
       class={'process-line' + (running() ? ' pour rising' : '')}
@@ -182,12 +189,8 @@ const ProcessLine = (props: { turn: TraceTurn; now: number }) => {
       <Show when={failed() > 0}>
         <span class="process-failed">{plural(failed(), 'failure')}</span>
       </Show>
-      <Show when={current()}>
-        {(tool) => (
-          <span class="process-now">
-            {tool().name + ' ' + summaryBodyOf(tool().name, tool().summary)}
-          </span>
-        )}
+      <Show when={running()}>
+        <span class="process-now">{doing()}</span>
       </Show>
     </summary>
   )
@@ -224,7 +227,7 @@ const Turn = (props: { turn: TraceTurn; live: string; now: number; store: Sessio
           <div class="body">{plainText(props.turn.prompt)}</div>
         </div>
       </Show>
-      <Show when={props.turn.steps.length > 0}>
+      <Show when={props.turn.steps.length > 0 || running()}>
         <details class="process">
           <ProcessLine turn={props.turn} now={props.now} />
           <ol class="steps">

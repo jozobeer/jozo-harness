@@ -1040,17 +1040,6 @@
     color: var(--beer-dim);
   }
 
-  .board-doing {
-    margin: 0;
-    padding: 0 10px 0 30px;
-    overflow: hidden;
-    color: var(--accent);
-    font-family: var(--mono);
-    font-size: var(--text-xs);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
   #status .fleet {
     flex: none;
     color: var(--dim);
