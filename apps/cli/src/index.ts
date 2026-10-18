@@ -59,6 +59,7 @@ import {
 } from '@jozo-harness/tools-tier1'
 import { runConfig } from './config-command.ts'
 import { runContextOf } from './run-state.ts'
+import { jobDetailOf, jobsOf, stopJobOf } from './jobs.ts'
 import { stopSubagentOf, subagentsOf } from './subagents.ts'
 import { sessionRootOf } from './session-list.ts'
 import { credentialSource, type SettingsSurface } from './settings.ts'
@@ -121,7 +122,6 @@ import {
   pageIsThere,
   serveWeb,
   type CommandView,
-  type JobDetailView,
   type OpenSession,
   type RunStateView,
   type SessionFactory,
@@ -1117,22 +1117,6 @@ const commandViewsOf = (
   ]
 }
 
-/** What one background command has kept as output. */
-const jobDetailOf = (jobs: JobsShape, id: string): Effect.Effect<JobDetailView, WebError> =>
-  jobs.read(id).pipe(
-    Effect.map((job) => ({
-      id: job.id,
-      command: job.command,
-      running: job.running,
-      output: job.output,
-    })),
-    Effect.mapError((error) => new WebError({ message: messageOf(error) })),
-  )
-
-/** Stops one background command; a job that already ended is not an error. */
-const stopJobOf = (jobs: JobsShape, id: string): Effect.Effect<void, WebError> =>
-  jobs.kill(id).pipe(Effect.mapError((error) => new WebError({ message: messageOf(error) })))
-
 /** What the session can say about itself right now: its goal, its schedules, its background work. */
 const runStateOf = (
   agent: Agent,
@@ -1158,11 +1142,7 @@ const runStateOf = (
     queued: projectInbox(events)
       .nextTurn.filter((message) => message.source === 'user')
       .map((message) => message.text),
-    jobs: jobs.list().map((job) => ({
-      id: job.id,
-      command: job.command,
-      running: job.running,
-    })),
+    jobs: jobsOf(jobs),
     subagents: subagentsOf(children),
     goal:
       goal === undefined

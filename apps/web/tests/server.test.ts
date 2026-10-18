@@ -79,7 +79,15 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
     runState: () => ({
       goal: { objective: 'ship the UI', phase: 'active', rounds: 2, maxRounds: 8 },
       schedules: [{ id: 's-1', when: 'every 60s', prompt: 'check the build', lastFiredAt: 0 }],
-      jobs: [{ id: 'j-1', command: 'sleep 5', running: true }],
+      jobs: [
+        {
+          id: 'j-1',
+          command: 'sleep 5',
+          running: true,
+          startedAt: 1_700_000_000_000,
+          tail: 'still going',
+        },
+      ],
       subagents: [{ id: 'child-1', status: 'running', startedAt: 1_700_000_000_000 }],
       todos: [],
       todoCounts: { pending: 0, inProgress: 0, completed: 0 },
@@ -691,7 +699,15 @@ describe('the web transport', () => {
     expect(observed.running.goal?.objective).toBe('ship the UI')
     expect(observed.running.goal?.rounds).toBe(2)
     expect(observed.running.schedules[0]?.when).toBe('every 60s')
-    expect(observed.running.jobs).toEqual([{ id: 'j-1', command: 'sleep 5', running: true }])
+    expect(observed.running.jobs).toEqual([
+      {
+        id: 'j-1',
+        command: 'sleep 5',
+        running: true,
+        startedAt: 1_700_000_000_000,
+        tail: 'still going',
+      },
+    ])
     expect(observed.running.subagents).toEqual([
       { id: 'child-1', status: 'running', startedAt: 1_700_000_000_000 },
     ])

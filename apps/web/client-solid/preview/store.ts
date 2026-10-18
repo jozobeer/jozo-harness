@@ -46,7 +46,15 @@ const RUN: RunStateView = {
   schedules: [
     { id: 's1', when: 'every 30m', prompt: 'pnpm run check を回して報告', lastFiredAt: 0 },
   ],
-  jobs: [{ id: 'j1a2b3c4d5', command: 'pnpm vitest --watch apps/web', running: true }],
+  jobs: [
+    {
+      id: 'j1a2b3c4d5',
+      command: 'pnpm vitest --watch apps/web',
+      running: true,
+      startedAt: Date.now() - 18_000,
+      tail: '✓ 42 tests passed',
+    },
+  ],
   subagents: [{ id: 'child-9f2a1c3d', status: 'running', startedAt: Date.now() - 42_000 }],
   todos: [
     { content: '失敗する再現テストを書く', status: 'completed' },

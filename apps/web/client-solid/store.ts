@@ -7,6 +7,8 @@ import {
   UiRpcs,
   withoutServices,
   type DirectoryView,
+  type JobDetailView,
+  type RunStateView,
   type SessionAction,
 } from '../src/shared/rpc.ts'
 import {
@@ -96,8 +98,40 @@ const keepsRunning = <A>(
  */
 const KEEP_ALIVE = { pingInterval: '20 seconds', pingTimeout: '1 minute' } as const
 
-/** How often a running turn reads the run state again: jobs and children come and go inside one. */
+/** How often a running turn or job reads the run state again: work comes and goes inside one. */
 const RUN_BEAT = '1 second'
+
+/** True while a job the page knows still runs, so the pane keeps up with it after its turn ends. */
+const jobRuns = (run: RunStateView | undefined): boolean =>
+  run?.jobs.some((job) => job.running) === true
+
+/** The pane when it is one job's, narrowed to it; undefined otherwise. */
+const jobPaneOf = (pane: Pane | undefined): Extract<Pane, { kind: 'job' }> | undefined =>
+  pane?.kind === 'job' ? pane : undefined
+
+/** True when the beat has work to read: a turn, a job, or the output of an open running job. */
+const workRunning = (
+  current: WebState,
+  openJob: Extract<Pane, { kind: 'job' }> | undefined,
+): boolean =>
+  current.conversation.running || jobRuns(current.run) || openJob?.detail?.running === true
+
+/** The run state lands only on the session it was read for, not one the reader moved to. */
+const runIfSame = (now: WebState, sessionId: string, run: RunStateView): WebState =>
+  now.sessionId === sessionId ? withRun(now, run) : now
+
+/** A job's output lands only on its own pane in the session it was read for. */
+const detailIfOpen = (
+  now: WebState,
+  sessionId: string,
+  id: string,
+  detail: JobDetailView,
+): WebState => {
+  const pane = jobPaneOf(now.pane)
+  return now.sessionId === sessionId && pane?.id === id
+    ? withPane(now, { kind: 'job', id, detail })
+    : now
+}
 
 /** What one session's log told the page to read again. */
 const needsRefresh = (type: string): boolean =>
@@ -411,23 +445,28 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
 
     /**
      * A turn is not the only thing that changes the Run pane: a job or a child
-     * agent starts and finishes inside one, and waiting for the turn boundary
-     * would keep it off the page until the whole turn ended. While a turn runs,
-     * the run state is read on a slow beat; outside one, a boundary event is
-     * enough.
+     * agent starts and finishes inside one, and a job can outlive the turn that
+     * started it. While a turn or a job runs, the run state is read on a slow
+     * beat; an open job's output is read with it, so its pane keeps growing.
      */
     yield* Effect.forkScoped(
       Effect.gen(function* () {
         yield* Effect.sleep(RUN_BEAT)
         const current = state()
-        if (current.sessionId === '' || !current.conversation.running) return
-        yield* client.state({ sessionId: current.sessionId }).pipe(
-          Effect.tap((run) =>
-            Effect.sync(() =>
-              update((now) => (now.sessionId === current.sessionId ? withRun(now, run) : now)),
-            ),
-          ),
+        if (current.sessionId === '') return
+        const sessionId = current.sessionId
+        const openJob = jobPaneOf(current.pane)
+        if (!workRunning(current, openJob)) return
+        yield* client.state({ sessionId }).pipe(
+          Effect.tap((run) => Effect.sync(() => update((now) => runIfSame(now, sessionId, run)))),
           // A failed beat is the next one's problem; the page still has its last view.
+          Effect.catchCause(() => Effect.void),
+        )
+        if (openJob?.detail?.running !== true) return
+        yield* client.jobDetail({ sessionId, id: openJob.id }).pipe(
+          Effect.tap((detail) =>
+            Effect.sync(() => update((now) => detailIfOpen(now, sessionId, openJob.id, detail))),
+          ),
           Effect.catchCause(() => Effect.void),
         )
       }).pipe(Effect.forever),
@@ -589,6 +628,18 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
         yield* Effect.sync(() => update((now) => withPane(now, { kind: 'job', id, detail })))
       })
 
+    /**
+     * Stops one job and reads the store again. A stop from the list leaves the
+     * pane shut; one from the job's own pane reads that job again.
+     */
+    const stopJobAndShow = (id: string) =>
+      Effect.gen(function* () {
+        yield* client.stopJob({ sessionId: state().sessionId, id })
+        yield* relist()
+        const pane = state().pane
+        if (pane?.kind === 'job' && pane.id === id) yield* showJob(id)
+      })
+
     /** Renames, pins, archives, or deletes one session, and leaves a deleted one behind. */
     const applySessionAction = (asked: {
       readonly sessionId: string
@@ -647,9 +698,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
             return
           }
           if (asked.kind === 'stopJob') {
-            yield* client.stopJob({ sessionId: state().sessionId, id: asked.id })
-            yield* relist()
-            yield* showJob(asked.id)
+            yield* stopJobAndShow(asked.id)
             return
           }
           if (asked.kind === 'stopSubagent') {

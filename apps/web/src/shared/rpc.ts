@@ -163,6 +163,10 @@ export const JobViewSchema = Schema.Struct({
   id: Schema.String,
   command: Schema.String,
   running: Schema.Boolean,
+  /** When the job began, in ms; the page reads the elapsed time from it. */
+  startedAt: Schema.Number,
+  /** The end of the newest line the job produced, for a row that stays one row. */
+  tail: Schema.String,
 })
 
 /** One child agent the session started, as the core holds it now. */
