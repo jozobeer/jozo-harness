@@ -273,6 +273,36 @@ describe('agent loop', () => {
     expect(stored[injected]?.type === 'user/message' ? stored[injected].data.text : '').toBe(note)
   })
 
+  test('a steer queued as the turn closes is delivered and whenIdle settles', async () => {
+    const note = crypto.randomUUID()
+    let steered = false
+    const events = await scenario([chunks(textTurn('first')), chunks(textTurn('second'))], (ctx) =>
+      Effect.gen(function* () {
+        // The closing edge of a turn: the step loop already found no input, so
+        // only the wake this steer offers can open the turn it is claimed by.
+        yield* ctx.hooks.on('agent/turn-stopping', (agent) =>
+          Effect.gen(function* () {
+            if (steered) return
+            steered = true
+            yield* agent.steer({ text: note, source: 'inject' }).pipe(Effect.orDie)
+          }),
+        )
+        const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+        yield* agent.followup({ text: 'go', source: 'user' })
+        yield* agent.whenIdle
+        return agent
+      }),
+    )
+
+    const stored = events.session.events()
+    const delivered = stored.flatMap((event) =>
+      event.type === 'user/message' && event.data.source === 'inject' ? [event.data.text] : [],
+    )
+    expect(types(events).filter((type) => type === 'turn/start')).toHaveLength(2)
+    expect(delivered).toEqual([note])
+    expect(events.inbox.pending).toBe(false)
+  })
+
   test('a pre-step listener opens the turn with its messages', async () => {
     const note = crypto.randomUUID()
     const events = await scenario([chunks(textTurn('done'))], (ctx) =>
