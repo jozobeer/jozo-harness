@@ -10,7 +10,7 @@ import {
   type JSX,
 } from 'solid-js'
 import { plainText } from '@jozo-harness/ui-view'
-import type { SessionSummary } from '../../src/shared/rpc.ts'
+import type { SessionAction, SessionSummary } from '../../src/shared/rpc.ts'
 import { boardOf, type BoardEntry, type Waiting } from '../../src/ui/board.ts'
 import { basenameOf, whenOf } from '../lib.ts'
 import type { SessionStore } from '../store.ts'
@@ -102,25 +102,189 @@ const Search = (props: { query: string; onQuery: (query: string) => void }) => {
   )
 }
 
-/** The row that opens a session; every session shows exactly one. */
-const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) => (
-  <button
-    class={
-      'session ' +
-      props.entry.status +
-      (props.entry.summary.id === props.store.state().sessionId ? ' active' : '')
+/**
+ * The row that opens a session; every session shows exactly one. Hovering or
+ * right-clicking offers the menu that renames, pins, archives, or deletes it;
+ * a double-click puts the name itself in reach.
+ */
+const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) => {
+  const id = () => props.entry.summary.id
+  const pinned = () => props.entry.summary.pinned === true
+  const archived = () => props.entry.summary.archived === true
+  let row: HTMLDivElement | undefined
+  const [menu, setMenu] = createSignal(false)
+  const [renaming, setRenaming] = createSignal(false)
+  const [confirming, setConfirming] = createSignal(false)
+  const [draft, setDraft] = createSignal('')
+
+  const close = (): void => {
+    setMenu(false)
+    setRenaming(false)
+    setConfirming(false)
+  }
+  const open = (): void => {
+    setConfirming(false)
+    setRenaming(false)
+    setMenu(true)
+  }
+  const act = (action: SessionAction): void => {
+    props.store.act(id(), action)
+    close()
+  }
+  const askRename = (): void => {
+    setDraft(titleOf(props.entry))
+    setMenu(false)
+    setConfirming(false)
+    setRenaming(true)
+  }
+  const commitRename = (): void => {
+    const title = draft().trim()
+    if (title !== '') act({ kind: 'rename', title })
+    else close()
+  }
+
+  onMount(() => {
+    // A menu that stays open when the reader looks elsewhere covers the rail.
+    const onPointer = (event: PointerEvent): void => {
+      if (row === undefined || !(event.target instanceof Node)) return
+      if (!row.contains(event.target)) close()
     }
-    type="button"
-    // The folder a row belongs to is on hover until the workspaces group the rail.
-    title={basenameOf(props.entry.summary.cwd)}
-    data-session-id={props.entry.summary.id}
-    onClick={() => props.store.moveTo(props.entry.summary.id)}
-  >
-    <span class="session-mark" />
-    <span class="session-name">{titleOf(props.entry)}</span>
-    <span class="session-detail">{props.detail}</span>
-  </button>
-)
+    document.addEventListener('pointerdown', onPointer)
+    onCleanup(() => document.removeEventListener('pointerdown', onPointer))
+  })
+
+  return (
+    <div
+      class="session-row"
+      ref={(node) => {
+        row = node
+      }}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        open()
+      }}
+    >
+      <Show
+        when={!renaming()}
+        fallback={
+          <input
+            class="session-rename"
+            aria-label="Session name"
+            value={draft()}
+            ref={(node) => {
+              queueMicrotask(() => {
+                node.focus()
+                node.select()
+              })
+            }}
+            onInput={(event) => setDraft(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                commitRename()
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                close()
+              }
+            }}
+            onBlur={() => {
+              if (renaming()) commitRename()
+            }}
+          />
+        }
+      >
+        <button
+          class={
+            'session ' +
+            props.entry.status +
+            (pinned() ? ' pinned' : '') +
+            (archived() ? ' archived' : '') +
+            (id() === props.store.state().sessionId ? ' active' : '')
+          }
+          type="button"
+          // The folder a row belongs to is on hover until the workspaces group the rail.
+          title={basenameOf(props.entry.summary.cwd)}
+          data-session-id={id()}
+          onClick={() => props.store.moveTo(id())}
+          onDblClick={(event) => {
+            event.preventDefault()
+            askRename()
+          }}
+        >
+          <span class="session-mark" />
+          <span class="session-name">{titleOf(props.entry)}</span>
+          <span class="session-detail">{props.detail}</span>
+        </button>
+      </Show>
+      <button
+        class="session-menu"
+        type="button"
+        aria-label="Session actions"
+        aria-expanded={menu()}
+        onClick={() => {
+          if (menu()) close()
+          else open()
+        }}
+      >
+        ⋯
+      </button>
+      <Show when={menu()}>
+        <div class="session-menu-panel" role="menu">
+          <button class="session-menu-item" type="button" onClick={askRename}>
+            Rename
+          </button>
+          <button
+            class="session-menu-item"
+            type="button"
+            onClick={() => act({ kind: 'pin', pinned: !pinned() })}
+          >
+            {pinned() ? 'Unpin' : 'Pin'}
+          </button>
+          <button
+            class="session-menu-item"
+            type="button"
+            onClick={() => act({ kind: 'archive', archived: !archived() })}
+          >
+            {archived() ? 'Unarchive' : 'Archive'}
+          </button>
+          <button
+            class="session-menu-item danger"
+            type="button"
+            onClick={() => {
+              setMenu(false)
+              setConfirming(true)
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      </Show>
+      <Show when={confirming()}>
+        <div
+          class="session-menu-panel session-confirm"
+          role="alertdialog"
+          aria-label="Delete session"
+        >
+          <p class="session-confirm-asked">Delete this session?</p>
+          <p class="session-confirm-hint">Its log is removed. This cannot be undone.</p>
+          <div class="session-confirm-actions">
+            <button
+              class="session-delete-confirm"
+              type="button"
+              onClick={() => act({ kind: 'delete' })}
+            >
+              Delete permanently
+            </button>
+            <button class="session-delete-cancel" type="button" onClick={close}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Show>
+    </div>
+  )
+}
 
 /** The way to answer, right on the board; the session on screen is answered below. */
 const Answer = (props: { entry: BoardEntry; waiting: Waiting; store: SessionStore }) => {
@@ -230,9 +394,14 @@ const restDetail = (entry: BoardEntry, now: number): string => whenOf(entry.sinc
  */
 export const Board = (props: { store: SessionStore }) => {
   const [query, setQuery] = createSignal('')
-  const board = createMemo(() =>
-    boardOf(matching(props.store.state().sessions, query()), props.store.watched()),
+  const [showArchived, setShowArchived] = createSignal(false)
+  const archivedCount = createMemo(
+    () => props.store.state().sessions.filter((session) => session.archived === true).length,
   )
+  const visible = createMemo(() =>
+    props.store.state().sessions.filter((session) => showArchived() || session.archived !== true),
+  )
+  const board = createMemo(() => boardOf(matching(visible(), query()), props.store.watched()))
   const noMatch = (): boolean =>
     query().trim() !== '' &&
     board().waiting.length + board().running.length + board().rest.length === 0
@@ -249,6 +418,17 @@ export const Board = (props: { store: SessionStore }) => {
         + New session
       </Button>
       <Search query={query()} onQuery={setQuery} />
+      <Show when={archivedCount() > 0}>
+        <button
+          id="show-archived"
+          class="show-archived"
+          type="button"
+          aria-pressed={showArchived()}
+          onClick={() => setShowArchived(!showArchived())}
+        >
+          {showArchived() ? 'Hide archived' : 'Show archived (' + String(archivedCount()) + ')'}
+        </button>
+      </Show>
       <nav id="session-list" aria-label="Sessions">
         <Section title="Waiting on you" count={board().waiting.length}>
           <For each={board().waiting}>

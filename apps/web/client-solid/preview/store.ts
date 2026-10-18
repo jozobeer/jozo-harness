@@ -10,7 +10,12 @@ import {
   withTheme,
   type WebState,
 } from '../../src/ui/state.ts'
-import type { RunStateView, SettingsView } from '../../src/shared/rpc.ts'
+import type {
+  RunStateView,
+  SessionAction,
+  SessionSummary,
+  SettingsView,
+} from '../../src/shared/rpc.ts'
 import type { SessionStore } from '../store.ts'
 import { emptyWatched, watchedAfter, type Watched } from '../../src/ui/board.ts'
 import { fixtureSessions, type FixtureSession } from './fixture.ts'
@@ -73,6 +78,20 @@ const answered = (session: FixtureSession, command: UiCommand): ReadonlyArray<Ui
   }
   if (command.kind === 'answer') return [event('interaction/ask/answered', command)]
   return []
+}
+
+/** What a menu action changes in the made-up summary; delete is handled apart. */
+const changed = (summary: SessionSummary, action: SessionAction): SessionSummary => {
+  switch (action.kind) {
+    case 'rename':
+      return { ...summary, title: action.title }
+    case 'pin':
+      return { ...summary, pinned: action.pinned }
+    case 'archive':
+      return { ...summary, archived: action.archived }
+    default:
+      return summary
+  }
 }
 
 /**
@@ -138,5 +157,23 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
       setState((now) => ({ ...now, run: runNow() }))
     },
     setModel: () => undefined,
+    // The made-up rail keeps its own rows, so the menu is alive without a server.
+    act: (id, action) => {
+      const index = sessions.findIndex((item) => item.summary.id === id)
+      const session = sessions[index]
+      if (session === undefined) return
+      if (action.kind === 'delete') {
+        sessions.splice(index, 1)
+        setState((now) => (now.sessionId === id ? withBlank(now) : now))
+      } else {
+        sessions[index] = { ...session, summary: changed(session.summary, action) }
+      }
+      setState((now) =>
+        withSessions(
+          now,
+          sessions.map((item) => item.summary),
+        ),
+      )
+    },
   }
 }

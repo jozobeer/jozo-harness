@@ -11,10 +11,24 @@ export const SessionSummarySchema = Schema.Struct({
   updatedAt: Schema.Number,
   /** The first thing the human typed in that session; '' when the log holds none yet. */
   title: Schema.String,
+  /** Whether the reader put the session at the top of its group; absent reads as no. */
+  pinned: Schema.optionalKey(Schema.Boolean),
+  /** Whether the reader put the session away; absent reads as no. */
+  archived: Schema.optionalKey(Schema.Boolean),
 })
 
 /** The wire shape of one session summary; the store's own summary carries these fields. */
 export type SessionSummary = typeof SessionSummarySchema.Type
+
+/** What the reader may do to one session from its row menu. */
+export const SessionActionSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('rename'), title: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('pin'), pinned: Schema.Boolean }),
+  Schema.Struct({ kind: Schema.Literal('archive'), archived: Schema.Boolean }),
+  Schema.Struct({ kind: Schema.Literal('delete') }),
+])
+
+export type SessionAction = typeof SessionActionSchema.Type
 
 /** What a page needs before it opens anything: the list, and where to start. */
 export const SessionsRpc = Rpc.make('sessions', {
@@ -31,6 +45,13 @@ export const SessionsRpc = Rpc.make('sessions', {
 export const OpenRpc = Rpc.make('open', {
   payload: Schema.Struct({ sessionId: Schema.optionalKey(Schema.String) }),
   success: SessionSummarySchema,
+  error: Schema.String,
+})
+
+/** Renames, pins, archives, or deletes one session. The row menu's whole vocabulary. */
+export const SessionActionRpc = Rpc.make('sessionAction', {
+  payload: Schema.Struct({ sessionId: Schema.String, action: SessionActionSchema }),
+  success: Schema.Boolean,
   error: Schema.String,
 })
 
@@ -173,6 +194,7 @@ export const SetModelRpc = Rpc.make('setModel', {
 export const UiRpcs = RpcGroup.make(
   SessionsRpc,
   OpenRpc,
+  SessionActionRpc,
   UiCommandRpc,
   UiEventsRpc,
   StateRpc,
