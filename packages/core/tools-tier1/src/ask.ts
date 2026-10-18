@@ -1,6 +1,6 @@
-import { Schema, Effect } from 'effect'
-import type { AskShape } from '@jozo-harness/safety'
-import type { ToolDefinition } from '@jozo-harness/tools'
+import { Effect, Schema } from 'effect'
+import type { AskRequested, AskShape } from '@jozo-harness/safety'
+import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
 
 const Parameters = Schema.Struct({
   question: Schema.String.annotate({
@@ -21,6 +21,12 @@ export interface AskValue {
   readonly answer: string
 }
 
+/** Asks one question; a question nobody can answer fails the call rather than hanging it. */
+export const askOrFail = (ask: AskShape, request: AskRequested): Effect.Effect<string, ToolError> =>
+  ask
+    .ask(request)
+    .pipe(Effect.mapError((error) => new ToolError({ code: 'execution', message: error.message })))
+
 /**
  * Asks the user one question and waits for the answer. The question id is the
  * call id, so the request and the answer line up in the log.
@@ -36,7 +42,7 @@ export const askUserToolFor = (ask: AskShape): ToolDefinition<AskArgs, AskValue>
   },
   execute: (args, context) =>
     Effect.gen(function* () {
-      const answer = yield* ask.ask({
+      const answer = yield* askOrFail(ask, {
         id: context.callId,
         question: args.question,
         options: args.options ?? [],
