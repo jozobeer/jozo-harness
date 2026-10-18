@@ -18,8 +18,11 @@ export interface OpenSession {
 /** What the app that owns the profiles gives the server: the store's list, and one more session. */
 export interface SessionFactory {
   readonly list: () => Effect.Effect<ReadonlyArray<SessionSummary>, WebError>
-  /** Opens the named session, or creates one when the id is absent. */
-  readonly open: (id: string | undefined) => Effect.Effect<OpenSession, WebError, Scope.Scope>
+  /** Opens the named session, or creates one in `cwd` when the id is absent. */
+  readonly open: (
+    id: string | undefined,
+    cwd: string | undefined,
+  ) => Effect.Effect<OpenSession, WebError, Scope.Scope>
 }
 
 /** The sessions one server serves: the one it started with, plus any the page asks for later. */
@@ -27,7 +30,10 @@ export interface SessionRegistry {
   /** The session a page opens when it names none; '' while the server holds none. */
   readonly initial: string
   readonly list: () => Effect.Effect<ReadonlyArray<SessionSummary>, WebError>
-  readonly open: (id: string | undefined) => Effect.Effect<OpenSession, WebError>
+  readonly open: (
+    id: string | undefined,
+    cwd: string | undefined,
+  ) => Effect.Effect<OpenSession, WebError>
   /** The host of a session already open; undefined when the page names one nobody opened. */
   readonly hostOf: (id: string) => UiHost | undefined
   /** What an open session says about itself; undefined when nobody opened it. */
@@ -54,7 +60,10 @@ export const makeSessionRegistry = (input: {
     // The scope this registry lives in: every session it opens is closed with it.
     const own = yield* Scope.Scope
 
-    const openInOwnScope = (id: string | undefined): Effect.Effect<OpenSession, WebError> =>
+    const openInOwnScope = (
+      id: string | undefined,
+      cwd: string | undefined,
+    ): Effect.Effect<OpenSession, WebError> =>
       Effect.gen(function* () {
         const known = id === undefined ? undefined : opened.get(id)
         if (known !== undefined) return known
@@ -62,7 +71,7 @@ export const makeSessionRegistry = (input: {
         const scope = yield* Scope.make()
         yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
         const session = yield* input.factory
-          .open(id)
+          .open(id, cwd)
           .pipe(Effect.provideService(Scope.Scope, scope))
         opened.set(session.summary.id, session)
         return session

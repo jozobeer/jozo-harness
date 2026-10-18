@@ -10,7 +10,7 @@ import { toolsPlugin } from '@jozo-harness/tools'
 import { Deferred, Effect, Layer, Schema, Stream } from 'effect'
 import { RpcClient, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawn } from '@jozo-harness/process'
@@ -281,4 +281,110 @@ describe('the browser UI through the command', () => {
     await rm(root, { recursive: true, force: true })
     await rm(workspace, { recursive: true, force: true })
   }, 20_000)
+
+  test('a page opens a session in the workspace it names, and the prompt reads there', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-cwd-'))
+    const serverWorkspace = await mkdtemp(join(tmpdir(), 'jozo-harness-web-server-ws-'))
+    const otherWorkspace = await mkdtemp(join(tmpdir(), 'jozo-harness-web-other-ws-'))
+    const home = await mkdtemp(join(tmpdir(), 'jozo-harness-web-home-'))
+    await writeFile(join(otherWorkspace, 'AGENTS.md'), 'the other workspace speaks\n')
+    const ready = Effect.runSync(Deferred.make<string>())
+    const stop = Effect.runSync(Deferred.make<void>())
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* Effect.forkScoped(
+            runCommand({
+              profiles: [profile(root)],
+              plugins,
+              cwd: serverWorkspace,
+              jzhHome: home,
+              route: 'stub/model',
+              web: { port: 0, staticRoot },
+              stdout: () => undefined,
+              stderr: (text) => {
+                const match = /http:\/\/127\.0\.0\.1:\d+\//.exec(text)
+                if (match !== null) void Effect.runSync(Deferred.succeed(ready, match[0]))
+              },
+              interrupt: Deferred.await(stop),
+            }),
+          )
+          const url = (yield* Deferred.await(ready)).replace(/\/$/, '')
+          const wsUrl = 'ws://' + url.replace(/^http:\/\//, '') + '/ui'
+
+          const used = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const made = yield* client.open({ cwd: otherWorkspace })
+            const offered = yield* client.workspaces()
+            // A resume keeps the workspace the session header recorded.
+            const resumed = yield* client.open({ sessionId: made.id, cwd: serverWorkspace })
+            const added = yield* client.addWorkspace({ cwd: otherWorkspace })
+            const fileRefused = yield* client
+              .addWorkspace({ cwd: join(otherWorkspace, 'AGENTS.md') })
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
+            const relativeRefused = yield* client
+              .addWorkspace({ cwd: 'relative/path' })
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
+            const seen = yield* Deferred.make<string>()
+            yield* Effect.forkScoped(
+              client.events({ sessionId: made.id }).pipe(
+                Stream.runForEach((event) =>
+                  Effect.gen(function* () {
+                    if (event.kind !== 'session' || event.event.type !== 'assistant/message') return
+                    yield* Deferred.succeed(seen, textOf(event.event.data as AssistantMessageData))
+                  }),
+                ),
+              ),
+            )
+            const accepted = yield* client.command({
+              sessionId: made.id,
+              command: { kind: 'submit', text: 'ping' },
+            })
+            const answer = yield* Deferred.await(seen)
+            return { made, offered, resumed, added, fileRefused, relativeRefused, accepted, answer }
+          })
+
+          const result = yield* withoutServices(used).pipe(
+            Effect.provide(RpcClient.layerProtocolSocket()),
+            Effect.provide(Socket.layerWebSocket(wsUrl)),
+            Effect.provide(Socket.layerWebSocketConstructorGlobal),
+            Effect.provide(RpcSerialization.layerJson),
+          )
+          yield* Deferred.succeed(stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    const store = jsonlSessions({ root })
+    const listed = await Effect.runPromise(store.list())
+    const opened = await Effect.runPromise(store.open(listed[0]?.id ?? ''))
+    const header = opened.events[0]
+    const registry = await readFile(join(home, 'web', 'workspaces.json'), 'utf8')
+
+    expect(observed.made.cwd).toBe(otherWorkspace)
+    expect(observed.resumed.cwd).toBe(otherWorkspace)
+    expect(observed.offered.cwd).toBe(serverWorkspace)
+    expect(observed.offered.items.map((item) => item.cwd)).toContain(otherWorkspace)
+    expect(observed.added).toBe(true)
+    expect(observed.fileRefused).toBe('a workspace must be a directory')
+    expect(observed.relativeRefused).toBe('a workspace path must be absolute')
+    expect(observed.accepted).toBe(true)
+    expect(observed.answer).toContain('hello from jozo-harness')
+    // The session header keeps the workspace the page named...
+    expect(header?.type === 'session/header' ? header.data.cwd : '').toBe(otherWorkspace)
+    // ...and the prompt was assembled from that workspace's instructions.
+    expect(
+      opened.events
+        .flatMap((event) => (event.type === 'system/message' ? [event.data.text] : []))
+        .join('\n'),
+    ).toContain('the other workspace speaks')
+    expect(JSON.parse(registry)).toContain(otherWorkspace)
+
+    await rm(root, { recursive: true, force: true })
+    await rm(serverWorkspace, { recursive: true, force: true })
+    await rm(otherWorkspace, { recursive: true, force: true })
+    await rm(home, { recursive: true, force: true })
+  }, 30_000)
 })

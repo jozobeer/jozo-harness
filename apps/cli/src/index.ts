@@ -107,7 +107,8 @@ import {
   type AskShape,
   type PlanModeShape,
 } from '@jozo-harness/safety'
-import { dirname, join, relative } from 'node:path'
+import { isAbsolute, dirname, join, relative } from 'node:path'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { runTui, type TuiIo } from '@jozo-harness/tui'
 import { fileURLToPath } from 'node:url'
 import { makeUiHost, type UiHost } from '@jozo-harness/ui-host'
@@ -120,6 +121,7 @@ import {
   type RunStateView,
   type SessionFactory,
   type SettingsPort,
+  type WorkspacesPort,
 } from '@jozo-harness/web'
 import { Llm } from '@jozo-harness/llm'
 import { Cause, Context, Effect, Layer, Scope, Stream } from 'effect'
@@ -448,6 +450,7 @@ const createAgent = (
   spillBytes: number | undefined,
   effort: string,
   resume: SessionId | undefined,
+  cwd: string,
 ) =>
   Effect.gen(function* () {
     const agentOptions: AgentOptions = {
@@ -458,9 +461,11 @@ const createAgent = (
       // Spilled text belongs in the jzh home, under the session that owns it.
       ...(options.jzhHome === undefined ? {} : { spillDir: join(options.jzhHome, 'spill') }),
     }
+    // A resumed session opens with the workspace its header recorded; `cwd` only
+    // decides where a session that does not exist yet is created.
     return resume === undefined
-      ? yield* agents.create({ cwd: options.cwd, options: agentOptions })
-      : yield* agents.create({ cwd: options.cwd, resume, options: agentOptions })
+      ? yield* agents.create({ cwd, options: agentOptions })
+      : yield* agents.create({ cwd, resume, options: agentOptions })
   })
 
 const serveLines = (
@@ -819,7 +824,7 @@ const sessionFactoryOf = (
 ): SessionFactory => ({
   list: () =>
     listSessions().pipe(Effect.mapError((error) => new WebError({ message: messageOf(error) }))),
-  open: (id) =>
+  open: (id, cwd) =>
     Effect.gen(function* () {
       // The choice is read per open: a page may have picked another model since.
       const built = yield* buildSession(
@@ -831,6 +836,8 @@ const sessionFactoryOf = (
         layer,
         true,
         id,
+        // A page that named no workspace gets the one this run was started in.
+        cwd ?? options.cwd,
       )
       if (built.kind === 'refused') {
         return yield* Effect.fail(new WebError({ message: built.message }))
@@ -871,6 +878,73 @@ const sessionListerOf = (
     return () => sessions.list()
   })
 
+/** Where a page's registered workspaces live, under the jzh home. */
+const workspaceFileOf = (home: string): string => join(home, 'web', 'workspaces.json')
+
+/** The folders a reader registered: a missing or malformed file holds none of them. */
+const registeredWorkspacesOf = async (home: string): Promise<ReadonlyArray<string>> => {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(workspaceFileOf(home), 'utf8'))
+    return Array.isArray(parsed)
+      ? parsed.filter((each): each is string => typeof each === 'string')
+      : []
+  } catch {
+    return []
+  }
+}
+
+/** Registers one absolute, existing directory; a page cannot name a file or a guess. */
+const addWorkspaceOf =
+  (home: string | undefined) =>
+  (cwd: string): Effect.Effect<void, WebError> => {
+    if (home === undefined) {
+      return Effect.fail(new WebError({ message: 'this run has no home to keep workspaces in' }))
+    }
+    return Effect.tryPromise({
+      try: async () => {
+        if (!isAbsolute(cwd)) throw new Error('a workspace path must be absolute')
+        if (!(await stat(cwd)).isDirectory()) throw new Error('a workspace must be a directory')
+        const known = await registeredWorkspacesOf(home)
+        if (known.includes(cwd)) return
+        const path = workspaceFileOf(home)
+        await mkdir(dirname(path), { recursive: true })
+        await writeFile(path, JSON.stringify([...known, cwd], null, 2) + '\n')
+      },
+      catch: (cause) => new WebError({ message: messageOf(cause) }),
+    })
+  }
+
+/**
+ * The folders a page may start a session in: the ones sessions already used,
+ * newest first, then the registered ones, with the run's own directory always
+ * offered so a page never starts with an empty choice.
+ */
+const workspacesPortOf = (
+  options: CommandOptions,
+  listSessions: SessionRuntime['listSessions'],
+): WorkspacesPort => ({
+  list: () =>
+    Effect.gen(function* () {
+      const sessions = yield* listSessions()
+      const home = options.jzhHome
+      const registered =
+        home === undefined ? [] : yield* Effect.promise(() => registeredWorkspacesOf(home))
+      const lastUsed = new Map<string, number>()
+      for (const session of sessions) {
+        lastUsed.set(session.cwd, Math.max(lastUsed.get(session.cwd) ?? 0, session.updatedAt))
+      }
+      for (const cwd of registered) {
+        if (!lastUsed.has(cwd)) lastUsed.set(cwd, 0)
+      }
+      if (!lastUsed.has(options.cwd)) lastUsed.set(options.cwd, 0)
+      const items = [...lastUsed]
+        .map(([cwd, lastUsedAt]) => ({ cwd, lastUsedAt }))
+        .sort((a, b) => b.lastUsedAt - a.lastUsedAt || a.cwd.localeCompare(b.cwd))
+      return { cwd: options.cwd, items }
+    }).pipe(Effect.mapError((error) => new WebError({ message: messageOf(error) }))),
+  add: addWorkspaceOf(options.jzhHome),
+})
+
 /**
  * Starts the browser UI; it runs until interrupted. A plain run opens no
  * session: looking at the page is not a request for one, so the first is built
@@ -903,6 +977,7 @@ const serveWebUi = (
           ...(initial === undefined ? {} : { initial }),
           factory: sessionFactoryOf(options, rows, choice, effort, spillBytes, layer, listSessions),
           settings: settingsPortOf(options, { rows, effort }, choice),
+          workspaces: workspacesPortOf(options, listSessions),
           port: work.port,
           staticRoot,
           onReady: (url) => {
@@ -1059,19 +1134,14 @@ const buildSession = (
   layer: Layer.Layer<any, PluginError, never>,
   wantsUi: boolean,
   resume: SessionId | undefined,
+  /** Where a new session starts; a resumed one keeps the workspace its header has. */
+  cwd: string,
 ) =>
   Effect.gen(function* () {
     const context = yield* Layer.build(Layer.mergeAll(layer, approvalServiceLayer, askServiceLayer))
     const hooks = Context.get(context, Hooks)
     // A UI owns the screen; only the non-interactive paths stream text out.
     if (!wantsUi) yield* installOutput(hooks, options)
-
-    // Workspace instructions join the prompt before the first turn.
-    const agents = yield* registerAgentsMd(
-      Context.get(context, SystemPrompt),
-      options.cwd,
-      agentsOptionsOf(options),
-    )
 
     if (hasRow(rows, '@jozo-harness/mcp')) {
       yield* installMcpServers(Context.get(context, Tools), Context.get(context, McpServers))
@@ -1084,6 +1154,17 @@ const buildSession = (
       spillBytes,
       effort,
       resume,
+      cwd,
+    )
+    // The workspace belongs to the session, not to the run that serves it: tools,
+    // instructions, and skill roots all read the cwd the session header recorded.
+    const sessionOptions: CommandOptions = { ...options, cwd: agent.session.header.cwd }
+
+    // Workspace instructions join the prompt before the first turn.
+    const agents = yield* registerAgentsMd(
+      Context.get(context, SystemPrompt),
+      sessionOptions.cwd,
+      agentsOptionsOf(options),
     )
     // What the provider takes for an effort is the adapter's to say; a page only offers it.
     const efforts = Context.get(context, Llm).capabilities.reasoningEffort ?? []
@@ -1106,12 +1187,12 @@ const buildSession = (
     yield* installNestedAgentsMd({
       hooks,
       agent,
-      root: options.cwd,
+      root: sessionOptions.cwd,
       loaded: loadedAgentsOf(agents),
     })
 
     // A catalog this agent has not read yet opens its turn, before the input it claimed.
-    const skills = skillsOf(options)
+    const skills = skillsOf(sessionOptions)
     yield* hooks.on('agent/pre-step', (input, next) =>
       Effect.gen(function* () {
         const decision = yield* next()
@@ -1127,7 +1208,7 @@ const buildSession = (
 
     const composition = yield* installFromProfile({
       rows,
-      options,
+      options: sessionOptions,
       route,
       agent,
       hooks,
@@ -1176,7 +1257,17 @@ const serveWebWork = (
     const resumed =
       options.resume === undefined
         ? undefined
-        : yield* buildSession(options, rows, route, effort, spillBytes, layer, true, options.resume)
+        : yield* buildSession(
+            options,
+            rows,
+            route,
+            effort,
+            spillBytes,
+            layer,
+            true,
+            options.resume,
+            options.cwd,
+          )
     if (resumed !== undefined && resumed.kind === 'refused') {
       options.stderr('jzh: ' + resumed.message + '\n')
       return 1
@@ -1216,6 +1307,7 @@ const runSession = (
       layer,
       ownsTheScreen(work),
       options.resume,
+      options.cwd,
     )
     if (built.kind === 'refused') {
       options.stderr('jzh: ' + built.message + '\n')

@@ -10,6 +10,7 @@ import {
   type OpenSession,
   type SessionFactory,
   type SettingsPort,
+  type WorkspacesPort,
 } from '../src/server/index.ts'
 import type { JobDetailView, RunStateView, SessionSummary } from '../src/shared/rpc.ts'
 import { createSessionStore, type SessionStore } from '../client-solid/store.ts'
@@ -246,6 +247,12 @@ interface Served {
   readonly opens: () => number
 }
 
+/** The folders a page may start in; these tests never open a new workspace. */
+const workspacesPort: WorkspacesPort = {
+  list: () => Effect.succeed({ cwd: '/work', items: [{ cwd: '/work', lastUsedAt: 0 }] }),
+  add: () => Effect.void,
+}
+
 /** Serves one fake host until the test's scope closes. */
 const serve = (
   host: FakeHost,
@@ -271,6 +278,7 @@ const serve = (
         ...(options.held === false ? {} : { initial: openOf(host) }),
         factory,
         settings: (options.settings ?? makeSettings()).port,
+        workspaces: workspacesPort,
         port: 0,
         staticRoot: root,
         onReady: (url) => {
