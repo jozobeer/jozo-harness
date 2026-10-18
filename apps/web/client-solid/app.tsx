@@ -14,7 +14,9 @@ import {
   RAIL_MIN,
   clampRailWidth,
   railCollapsedFrom,
+  railStateOf,
   railWidthFrom,
+  watchWidth,
 } from './rail.ts'
 import { createSessionStore, type SessionStore } from './store.ts'
 
@@ -29,6 +31,26 @@ const inField = (target: EventTarget | null): boolean =>
   target instanceof HTMLElement &&
   target.closest('input, textarea, select, [contenteditable="true"]') !== null
 
+/** The width where the rail hands its place to a drawer. */
+const NARROW_QUERY = '(max-width: 720px)'
+
+const narrowQueryOf = (): MediaQueryList | undefined =>
+  typeof window.matchMedia === 'function' ? window.matchMedia(NARROW_QUERY) : undefined
+
+/** The rail's control says what pressing it does in the rail the page draws. */
+const foldLabel = (state: 'open' | 'collapsed'): string =>
+  state === 'open' ? 'Hide sessions' : 'Show sessions'
+
+const foldTitle = (state: 'open' | 'collapsed'): string =>
+  (state === 'open' ? 'Hide' : 'Show') + ' sessions (Mod+B)'
+
+/** The room the folded pane's strip keeps in the status bar. */
+const stripRoom = (width: number): string | undefined =>
+  width === 0 ? undefined : '--context-strip-w: ' + String(width) + 'px'
+
+/** The drawer attribute, present only while the drawer is open. */
+const drawerAttr = (open: boolean): string | undefined => (open ? '' : undefined)
+
 /** The page: the strip, the board of sessions, the answers or the trace, and the pane. */
 export const App = (props: { store?: SessionStore; lens?: Lens }) => {
   const store = props.store ?? createSessionStore()
@@ -37,6 +59,15 @@ export const App = (props: { store?: SessionStore; lens?: Lens }) => {
   const [folded, setFolded] = createSignal(
     railCollapsedFrom(localStorage.getItem(RAIL_COLLAPSED_KEY)),
   )
+  /** Below 720px the rail is a drawer: one state decides whether it is seen. */
+  const query = narrowQueryOf()
+  const [narrow, setNarrow] = createSignal(query?.matches === true)
+  const [drawer, setDrawer] = createSignal(false)
+  /** The width of the folded pane's strip, so the status bar keeps clear of it. */
+  const [stripWidth, setStripWidth] = createSignal(0)
+  let context: HTMLElement | undefined
+  const railState = (): 'open' | 'collapsed' => railStateOf(narrow(), folded(), drawer())
+  const railOpen = (): boolean => railState() === 'open'
   const choose = (next: Lens): void => {
     setLens(next)
     localStorage.setItem(LENS_KEY, next)
@@ -48,6 +79,11 @@ export const App = (props: { store?: SessionStore; lens?: Lens }) => {
   const fold = (next: boolean): void => {
     setFolded(next)
     localStorage.setItem(RAIL_COLLAPSED_KEY, String(next))
+  }
+  /** The fold button and Mod+B work whichever rail the page draws. */
+  const toggleRail = (): void => {
+    if (narrow()) setDrawer(!drawer())
+    else fold(!folded())
   }
   /** A drag starts at the boundary and follows the pointer until it lets go. */
   const drag = (event: PointerEvent): void => {
@@ -79,35 +115,50 @@ export const App = (props: { store?: SessionStore; lens?: Lens }) => {
     const onKey = (event: KeyboardEvent): void => {
       if (!foldCombo(event) || inField(event.target)) return
       event.preventDefault()
-      fold(!folded())
+      toggleRail()
     }
     document.addEventListener('keydown', onKey)
+    const onNarrow = (event: MediaQueryListEvent): void => {
+      setNarrow(event.matches)
+    }
+    query?.addEventListener('change', onNarrow)
+    // The strip sizes itself from its tabs, so its room in the status bar is measured.
+    const stopWidth = watchWidth(context, setStripWidth)
     onCleanup(() => {
       document.removeEventListener('keydown', onKey)
+      query?.removeEventListener('change', onNarrow)
+      stopWidth?.()
       store.stop()
     })
   })
   // Both readings stay mounted, so switching back finds the place and the open steps it left.
   return (
     <>
-      <header id="status" aria-live="polite">
+      <header id="status" aria-live="polite" style={stripRoom(stripWidth())}>
         <button
           id="rail-fold"
           class="rail-fold"
           type="button"
           aria-controls="sidebar"
-          aria-expanded={!folded()}
-          aria-label={folded() ? 'Show sessions' : 'Hide sessions'}
-          title={(folded() ? 'Show' : 'Hide') + ' sessions (Mod+B)'}
-          onClick={() => fold(!folded())}
+          aria-expanded={railOpen()}
+          aria-label={foldLabel(railState())}
+          title={foldTitle(railState())}
+          onClick={toggleRail}
         >
           {folded() ? '»' : '«'}
         </button>
-        <Status store={store} />
+        <Status
+          store={store}
+          drawer={drawer()}
+          onDrawer={() => {
+            setDrawer(!drawer())
+          }}
+        />
       </header>
       <div
         id="shell"
-        data-rail={folded() ? 'collapsed' : 'open'}
+        data-rail={railState()}
+        data-drawer={drawerAttr(drawer())}
         style={'--rail-w: ' + String(railWidth()) + 'px'}
       >
         <aside id="sidebar">
@@ -133,7 +184,13 @@ export const App = (props: { store?: SessionStore; lens?: Lens }) => {
           <Waterfall store={store} />
           <Composer store={store} />
         </div>
-        <aside id="context" aria-label="Context">
+        <aside
+          id="context"
+          aria-label="Context"
+          ref={(element) => {
+            context = element
+          }}
+        >
           <ContextPane store={store} />
         </aside>
       </div>

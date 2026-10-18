@@ -798,8 +798,9 @@ body {
     grid-template-columns: var(--rail-w) minmax(0, 1fr);
   }
 
+  /* The sheet hangs over the page's columns, but never over the status bar. */
   #context {
-    position: fixed;
+    position: absolute;
     top: 0;
     right: 0;
     bottom: 0;
@@ -811,7 +812,7 @@ body {
 
 /* A pane with nothing to show keeps only its tabs, up in the strip's right end. */
 body:has(.context-body[data-open='false'][data-closing='false']) #status {
-  padding-right: 200px;
+  padding-right: calc(var(--context-strip-w, 222px) + var(--s4));
 }
 
 #context:has(.context-body[data-open='false'][data-closing='false']) {
@@ -835,6 +836,14 @@ body:has(.context-body[data-open='false'][data-closing='false']) #status {
 }
 
 #context:has(.context-body[data-open='false'][data-closing='false']) .pane-close {
+  display: none;
+}
+
+/*
+ * A closed pane keeps only its tabs: an empty body would still take its padding
+ * as height, and the transparent sheet would hang over the page and take clicks.
+ */
+#context:has(.context-body[data-open='false'][data-closing='false']) .context-body {
   display: none;
 }
 

@@ -1208,14 +1208,10 @@
       text-overflow: ellipsis;
     }
 
-    /* The tabs that hang in the strip are wider than the room the strip keeps for them. */
-    body:has(.context-body[data-open='false'][data-closing='false']) #status {
-      padding-right: 236px;
-    }
-
+    /* The rail is a sheet over the page, and the page begins under the status bar. */
     #sidebar {
-      position: fixed;
-      top: 39px;
+      position: absolute;
+      top: 0;
       bottom: 0;
       left: 0;
       z-index: 40;
@@ -1231,7 +1227,7 @@
       grid-column: 1;
     }
 
-    body[data-drawer] #sidebar {
+    #shell[data-drawer] #sidebar {
       transform: none;
       visibility: visible;
     }

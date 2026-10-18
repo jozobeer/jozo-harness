@@ -16,7 +16,13 @@ import { lensFrom, type Lens } from '../lens.ts'
 import type { SessionStore } from '../store.ts'
 import type { SessionAction } from '../../src/shared/rpc.ts'
 import { traceOf } from '../../src/ui/trace.ts'
-import { RAIL_COLLAPSED_KEY, RAIL_KEY, railCollapsedFrom, railWidthFrom } from '../rail.ts'
+import {
+  RAIL_COLLAPSED_KEY,
+  RAIL_KEY,
+  railCollapsedFrom,
+  railStateOf,
+  railWidthFrom,
+} from '../rail.ts'
 import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY } from '../recent.ts'
 
 /** One call a component made, in the order it made them. */
@@ -1003,6 +1009,71 @@ describe('the rail', () => {
     ]).toEqual([280, 300, 264, 420, 280])
     expect(railCollapsedFrom('true')).toBe(true)
     expect([railCollapsedFrom(null), railCollapsedFrom('false')]).toEqual([false, false])
+  })
+
+  test('the narrow page lets the drawer decide the rail, not the stored fold', () => {
+    localStorage.setItem(RAIL_COLLAPSED_KEY, 'true')
+    const listeners: Array<(event: { matches: boolean }) => void> = []
+    vi.stubGlobal(
+      'matchMedia',
+      (media: string): MediaQueryList =>
+        ({
+          matches: media === '(max-width: 720px)',
+          media,
+          addEventListener: (_: string, listener: (event: { matches: boolean }) => void) =>
+            listeners.push(listener),
+          removeEventListener: () => undefined,
+        }) as unknown as MediaQueryList,
+    )
+    try {
+      const { store } = makeStore()
+      const { container } = render(() => <App store={store} />)
+      const shell = container.querySelector('#shell') as HTMLElement
+      const toggle = container.querySelector('#drawer-toggle') as HTMLButtonElement
+      expect(shell.getAttribute('data-rail')).toBe('collapsed')
+
+      fireEvent.click(toggle)
+      expect(shell.getAttribute('data-rail')).toBe('open')
+      expect(shell.hasAttribute('data-drawer')).toBe(true)
+      expect(toggle.getAttribute('aria-expanded')).toBe('true')
+
+      fireEvent.click(toggle)
+      expect(shell.getAttribute('data-rail')).toBe('collapsed')
+      expect(shell.hasAttribute('data-drawer')).toBe(false)
+
+      // A wide window hands the rail back to the fold kept from an earlier visit.
+      listeners[0]?.({ matches: false })
+      expect(shell.getAttribute('data-rail')).toBe('collapsed')
+      expect(railStateOf(false, false, true)).toBe('open')
+      expect(railStateOf(false, true, true)).toBe('collapsed')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  test('the status bar keeps the room the pane strip measured', () => {
+    let measure: ((width: number) => void) | undefined
+    class FakeResizeObserver {
+      constructor(
+        callback: (
+          entries: ReadonlyArray<{ readonly contentRect: { readonly width: number } }>,
+        ) => void,
+      ) {
+        measure = (width) => callback([{ contentRect: { width } }])
+      }
+      observe(): void {}
+      disconnect(): void {}
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+    try {
+      const { store } = makeStore()
+      const { container } = render(() => <App store={store} />)
+      const header = container.querySelector('#status') as HTMLElement
+      measure?.(221.4)
+      expect(header.style.getPropertyValue('--context-strip-w')).toBe('222px')
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   test('the rail opens at the width and fold kept from an earlier visit', () => {

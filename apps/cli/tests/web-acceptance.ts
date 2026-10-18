@@ -625,6 +625,113 @@ const measuresTheFoldedShell = async (client: Cdp): Promise<void> => {
   }
 }
 
+/** Where an element sits, rounded: left, top, right, bottom. */
+const boxOf = async (client: Cdp, selector: string): Promise<ReadonlyArray<number>> => {
+  const box = await client.evaluate(
+    "(() => { const one = document.querySelector('" +
+      selector +
+      "').getBoundingClientRect(); return [one.left, one.top, one.right, one.bottom] })()",
+  )
+  return String(box)
+    .split(',')
+    .map((one) => Math.round(Number(one)))
+}
+
+/** The browser at one width, given the moment the page needs to lay out again. */
+const resizeTo = async (client: Cdp, width: number): Promise<void> => {
+  await client.send('Emulation.setDeviceMetricsOverride', {
+    width,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false,
+  })
+  await sleep(250)
+}
+
+const closesThePane =
+  "(() => { const one = document.getElementById('panel-close'); if (one !== null) one.click(); return true })()"
+
+const railState = "document.getElementById('shell').getAttribute('data-rail')"
+
+/** The folded pane hangs its tabs at the strip's right end, clear of the bar. */
+const measuresTheClosedStrip = async (client: Cdp): Promise<void> => {
+  for (const width of [1440, 1000]) {
+    await resizeTo(client, width)
+    const [stripLeft] = await boxOf(client, '#context')
+    const [, , statusRight] = await boxOf(client, '#status .hint')
+    if (stripLeft === undefined || statusRight === undefined || stripLeft < statusRight) {
+      throw new Error(
+        'the pane tabs landed on the status bar at ' +
+          width +
+          ': ' +
+          String(stripLeft) +
+          ' < ' +
+          String(statusRight),
+      )
+    }
+  }
+}
+
+/** The open pane is a sheet over the columns, but never over the bar. */
+const measuresTheOpenPane = async (client: Cdp): Promise<void> => {
+  for (const width of [1000, 700]) {
+    await resizeTo(client, width)
+    const [, paneTop] = await boxOf(client, '#context')
+    const [, , , barBottom] = await boxOf(client, '#status')
+    if (paneTop === undefined || barBottom === undefined || paneTop < barBottom) {
+      throw new Error(
+        'the open pane covered the status bar at ' +
+          width +
+          ': ' +
+          String(paneTop) +
+          ' < ' +
+          String(barBottom),
+      )
+    }
+  }
+}
+
+/** Below 720 the drawer is the rail, so its own state decides what the shell says. */
+const measuresTheDrawer = async (client: Cdp): Promise<void> => {
+  await client.evaluate("document.getElementById('drawer-toggle').click()")
+  await sleep(50)
+  const opened = await client.evaluate(railState)
+  const [, drawerTop] = await boxOf(client, '#sidebar')
+  const [, , , barBottom] = await boxOf(client, '#status')
+  if (opened !== 'open') throw new Error('the open drawer left the rail state at ' + String(opened))
+  if (drawerTop === undefined || barBottom === undefined || drawerTop < barBottom) {
+    throw new Error(
+      'the drawer started above the status bar: ' + String(drawerTop) + ' < ' + String(barBottom),
+    )
+  }
+  await client.evaluate("document.getElementById('drawer-toggle').click()")
+  await sleep(50)
+  const closed = await client.evaluate(railState)
+  if (closed !== 'collapsed') {
+    throw new Error('the closed drawer left the rail state at ' + String(closed))
+  }
+}
+
+/**
+ * The bar and the page keep their rows at every width. The folded pane's tabs
+ * hang at the strip's right end, and the open pane is a sheet over the columns:
+ * neither may land on the status bar, and the drawer starts below it.
+ */
+const keepsTheNarrowPageInRows = async (client: Cdp): Promise<void> => {
+  await resizeTo(client, 1440)
+  await client.evaluate(closesThePane)
+  await sleep(250)
+  await measuresTheClosedStrip(client)
+  await client.evaluate("document.getElementById('settings').click()")
+  await sleep(250)
+  await measuresTheOpenPane(client)
+  await client.evaluate(closesThePane)
+  await sleep(250)
+  await measuresTheDrawer(client)
+  await resizeTo(client, 1440)
+  await sleep(50)
+}
+
 /** The text inside one element, or '' when the page does not have it. */
 const textIn = (client: Cdp, selector: string): Promise<unknown> =>
   client.evaluate("document.querySelector('" + selector + "')?.textContent ?? ''")
@@ -762,6 +869,7 @@ const driveBrowser = async (url: string, profileDir: string): Promise<BrowserOut
     await switchesTheEffort(client, read)
     await asksForTheModels(client, read)
     await measuresTheFoldedShell(client)
+    await keepsTheNarrowPageInRows(client)
     await measuresTheRail(client)
     await saveScreenshot(client)
     return { passed: true, answer }

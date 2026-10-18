@@ -4,7 +4,7 @@ import { hintOf } from '../lib.ts'
 import type { SessionStore } from '../store.ts'
 
 /** The strip along the top: the connection, where the session runs, what happens next. */
-export const Status = (props: { store: SessionStore }) => {
+export const Status = (props: { store: SessionStore; drawer: boolean; onDrawer: () => void }) => {
   const state = () => props.store.state()
   /** An approval or a question waits on the reader: the one thing the strip should shout. */
   const waiting = (): boolean =>
@@ -21,7 +21,8 @@ export const Status = (props: { store: SessionStore }) => {
         type="button"
         aria-label="sessions"
         aria-controls="sidebar"
-        onClick={() => document.body.toggleAttribute('data-drawer')}
+        aria-expanded={props.drawer}
+        onClick={props.onDrawer}
       >
         ☰
       </button>
