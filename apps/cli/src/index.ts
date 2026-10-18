@@ -80,6 +80,7 @@ import {
   makeWorkingDirectoryTool,
   makeExitPlanModeTool,
   makeGoalTool,
+  makeRalphTool,
   makeScheduleTool,
   makeWorkflowTool,
   makePluginTool,
@@ -413,6 +414,7 @@ const tier1ToolList = (
         ),
     }),
   )
+  list.push(makeRalphTool({ agents, route }))
   if (options.subagents === true) {
     list.push(
       makeSubagentTool({

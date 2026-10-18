@@ -203,6 +203,8 @@ jzh --patch sessions.yml "…"
 
 ## チームで分担させる
 
+`ralph` は `--subagents` を要さず、tier1 行がある run で既定でモデルに渡る。objective と前 round の handoff だけを受け取る fresh な子を round ごとに起こすので、親の会話を長期記憶にしない反復に向く。通常の長い仕事は同じ session を続ける `goal` を使う。
+
 `--subagents` を付けると、`subagent` / `workflow` / 子を操る 4 つ（`list_agents` / `send_message` / `interrupt_agent` / `wait_agent`）と `team` がモデルに渡る。モデルは `team` ツールで名前つきの子（teammate）と共有の板（board）を持てる。teammate は `subagent` と同じ子 agent で、仕事を渡すのは既存の `send_message`、待つのは `wait_agent` である。
 
 ```
