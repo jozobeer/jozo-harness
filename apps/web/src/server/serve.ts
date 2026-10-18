@@ -1,11 +1,12 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import type { Duplex } from 'node:stream'
-import { WebSocketServer, type RawData, type WebSocket } from 'ws'
+import { WebSocket, WebSocketServer, type RawData } from 'ws'
 import { Effect, Layer, Stream } from 'effect'
 import { RpcSerialization, RpcServer } from 'effect/rpc'
 import { sendCommand } from '@jozo-harness/ui-protocol'
 import { UiRpcs, type CommandView } from '../shared/rpc.ts'
+import { TERMINAL_PATH, terminalSessionOf, type TerminalFrame } from '../shared/terminal.ts'
 import { hostAllowed, originAllowed, tokenFromUrl, tokenMatches } from './auth.ts'
 import { makeWebProtocol, type Connection } from './protocol.ts'
 import { applyMeta, readMeta, sessionActionOf, withMeta } from './session-meta.ts'
@@ -17,6 +18,7 @@ import {
 } from './sessions.ts'
 import { searchWorkspaceFiles } from './files.ts'
 import { branchOf } from './git-branch.ts'
+import type { TerminalFactory, TerminalSession } from './terminal.ts'
 import type { SettingsPort } from './settings.ts'
 import { staticResponse } from './static.ts'
 import type { WorkspacesPort } from './workspaces.ts'
@@ -41,6 +43,8 @@ export interface ServeWebOptions {
   readonly onReady: (url: string) => void
   /** Completes to stop the server, as SIGINT does. */
   readonly interrupt?: Effect.Effect<void>
+  /** Starts the shell the terminal pane talks to, in the session's own directory. */
+  readonly terminal: TerminalFactory
 }
 
 const handlersOf = (
@@ -163,6 +167,10 @@ const handlersOf = (
       ),
   })
 
+/** The text of one frame, which the terminal protocol is written in. */
+const textOf = (data: Uint8Array | string): string =>
+  typeof data === 'string' ? data : new TextDecoder().decode(data)
+
 /** One frame from the socket, in the two shapes the protocol decodes. */
 const payloadOf = (data: RawData): Uint8Array | string => {
   if (typeof data === 'string') return data
@@ -209,10 +217,12 @@ const respondTo = async (
 /** Refuses a websocket handshake with a status the client can read. */
 const refuseUpgrade = (socket: Duplex, status: number, message: string): void => {
   const body = message + '\n'
+  const reason = status === 401 ? 'Unauthorized' : status === 404 ? 'Not Found' : 'Forbidden'
   socket.end(
     'HTTP/1.1 ' +
       String(status) +
-      (status === 401 ? ' Unauthorized' : ' Forbidden') +
+      ' ' +
+      reason +
       '\r\nconnection: close\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: ' +
       String(Buffer.byteLength(body)) +
       '\r\n\r\n' +
@@ -221,9 +231,10 @@ const refuseUpgrade = (socket: Duplex, status: number, message: string): void =>
 }
 
 /**
- * Serves the sessions of one profile: the browser app, the RPC socket, and
- * nothing else. Binds to loopback, and the socket asks for the token the ready
- * URL carries; a foreign Host or Origin is refused before the handshake.
+ * Serves the sessions of one profile: the browser app, the RPC socket, and the
+ * terminal socket the right pane opens. Binds to loopback, and both sockets ask
+ * for the token the ready URL carries; a foreign Host or Origin is refused
+ * before the handshake, and only a session the server holds may start a shell.
  */
 export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
   Effect.scoped(
@@ -233,7 +244,9 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
         factory: options.factory,
       })
       const { protocol, attach } = yield* makeWebProtocol
+      const startTerminal = options.terminal
       const connections = new Map<WebSocket, Connection>()
+      const terminals = new Map<WebSocket, TerminalSession>()
       // One token per run: it rides in the ready URL and the socket repeats it.
       const token = randomBytes(32).toString('hex')
       // The chosen port is known only once the listener is up; requests arrive after.
@@ -245,36 +258,88 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
         })
       })
       const sockets = new WebSocketServer({ noServer: true })
+
+      /** Why this handshake is refused; undefined when the gate lets it through. */
+      const refusalOf = (
+        request: IncomingMessage,
+      ): { readonly status: number; readonly message: string } | undefined => {
+        if (!hostAllowed(request.headers.host, boundPort)) {
+          return { status: 403, message: 'forbidden host' }
+        }
+        if (!originAllowed(request.headers.origin, boundPort)) {
+          return { status: 403, message: 'forbidden origin' }
+        }
+        return tokenMatches(tokenFromUrl(request.url ?? ''), token)
+          ? undefined
+          : { status: 401, message: 'a token is required' }
+      }
+
+      /** Wires one accepted socket as the page's RPC connection. */
+      const attachUi = (client: WebSocket): void => {
+        const connection = attach((text) => client.send(text))
+        connections.set(client, connection)
+        client.on('message', (data) => connection.message(payloadOf(data)))
+        client.on('close', () => {
+          connection.close()
+          connections.delete(client)
+        })
+      }
+
+      /** Wires one accepted socket as one shell's stdin, stdout, and stderr. */
+      const attachTerminal = (client: WebSocket, cwd: string): void => {
+        const terminal = startTerminal(cwd, (frame: TerminalFrame) => {
+          if (client.readyState !== WebSocket.OPEN) return
+          client.send(JSON.stringify(frame))
+          // The shell is gone once its code is said; the page may keep the text.
+          if (frame.type === 'exit') client.close()
+        })
+        terminals.set(client, terminal)
+        client.on('message', (data) => terminal.message(textOf(payloadOf(data))))
+        client.on('close', () => {
+          terminal.close()
+          terminals.delete(client)
+        })
+      }
+
+      /** The open session a terminal handshake names; undefined when it names none open. */
+      const terminalSessionFor = (request: IncomingMessage): OpenSession | undefined => {
+        const sessionId = terminalSessionOf(request.url ?? '')
+        return sessionId === undefined ? undefined : registry.sessionOf(sessionId)
+      }
+
+      /** Answers one terminal handshake: the pane may name only a session already open. */
+      const acceptTerminal = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
+        const session = terminalSessionFor(request)
+        if (session === undefined) {
+          refuseUpgrade(socket, 404, 'the session is not open')
+          return
+        }
+        sockets.handleUpgrade(request, socket, head, (client) =>
+          attachTerminal(client, session.summary.cwd),
+        )
+      }
+
       server.on('upgrade', (request, socket, head) => {
-        if (pathOf(request) !== UI_PATH) {
+        const path = pathOf(request)
+        if (path !== UI_PATH && path !== TERMINAL_PATH) {
           socket.destroy()
           return
         }
-        if (!hostAllowed(request.headers.host, boundPort)) {
-          refuseUpgrade(socket, 403, 'forbidden host')
+        const refusal = refusalOf(request)
+        if (refusal !== undefined) {
+          refuseUpgrade(socket, refusal.status, refusal.message)
           return
         }
-        if (!originAllowed(request.headers.origin, boundPort)) {
-          refuseUpgrade(socket, 403, 'forbidden origin')
+        if (path === TERMINAL_PATH) {
+          acceptTerminal(request, socket, head)
           return
         }
-        if (!tokenMatches(tokenFromUrl(request.url ?? ''), token)) {
-          refuseUpgrade(socket, 401, 'a token is required')
-          return
-        }
-        sockets.handleUpgrade(request, socket, head, (client) => {
-          const connection = attach((text) => client.send(text))
-          connections.set(client, connection)
-          client.on('message', (data) => connection.message(payloadOf(data)))
-          client.on('close', () => {
-            connection.close()
-            connections.delete(client)
-          })
-        })
+        sockets.handleUpgrade(request, socket, head, (client) => attachUi(client))
       })
 
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
+          for (const terminal of terminals.values()) terminal.close()
           for (const client of sockets.clients) client.terminate()
           sockets.close()
           // A keep-alive connection would hold the listener open past the scope.

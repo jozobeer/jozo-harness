@@ -49,6 +49,7 @@ type Call =
   | { readonly kind: 'stopSubagent'; readonly id: string }
   | { readonly kind: 'openJob'; readonly id: string }
   | { readonly kind: 'stopJob'; readonly id: string }
+  | { readonly kind: 'terminal'; readonly line: string }
 
 /** What the Add workspace dialog heard about one folder. */
 type BrowseAnswer =
@@ -85,6 +86,7 @@ const makeStore = (
     openJob: (id) => calls.push({ kind: 'openJob', id }),
     stopJob: (id) => calls.push({ kind: 'stopJob', id }),
     stopSubagent: (id) => calls.push({ kind: 'stopSubagent', id }),
+    sendTerminal: (line) => calls.push({ kind: 'terminal', line }),
     askModels: () => calls.push({ kind: 'askModels' }),
     askCommands: () => calls.push({ kind: 'askCommands' }),
     askFiles: (query) => calls.push({ kind: 'askFiles', query }),
@@ -963,6 +965,39 @@ describe('the Solid page', () => {
     )
     fireEvent.click(turns as Element)
     expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'trajectory' } })
+
+    const terminal = [...container.querySelectorAll('button.tab')].find(
+      (tab) => tab.textContent === 'terminal',
+    )
+    fireEvent.click(terminal as Element)
+    expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'terminal' } })
+  })
+
+  test('the terminal pane shows the shell text and sends its line', () => {
+    const { store, calls } = makeStore({
+      sessionId: 'a',
+      info: { cwd: '/work', model: '', turns: 0 },
+      pane: { kind: 'terminal' },
+      terminal: {
+        sessionId: 'a',
+        text: '$ one line\n',
+        status: 'running',
+        exit: undefined,
+        problem: '',
+      },
+    })
+
+    const { container } = render(() => <ContextPane store={store} />)
+
+    expect(container.querySelector('.terminal-output')?.textContent).toBe('$ one line\n')
+    expect(container.querySelector('.terminal-cwd')?.textContent).toBe('/work')
+    expect(container.querySelector('.terminal-state')?.textContent).toBe('running')
+
+    const input = container.querySelector('.terminal-line input') as HTMLInputElement
+    fireEvent.input(input, { target: { value: 'echo hi' } })
+    fireEvent.submit(container.querySelector('.terminal-line') as Element)
+    expect(calls).toContainEqual({ kind: 'terminal', line: 'echo hi' })
+    expect(input.value).toBe('')
   })
 
   test('the run pane lists running subagents, moves to one, and stops it', () => {
