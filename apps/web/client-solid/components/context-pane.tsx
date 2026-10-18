@@ -1,9 +1,10 @@
 import { For, Match, Show, Switch, createEffect, createSignal, onCleanup } from 'solid-js'
+import type { ConversationBlock } from '@jozo-harness/ui-view'
 import type { RunStateView, SettingsView } from '../../src/shared/rpc.ts'
 import type { Pane } from '../../src/ui/state.ts'
 import { THEMES, type Theme } from '../../src/ui/theme.ts'
 import type { TurnView } from '../../src/ui/trajectory.ts'
-import { childSessionsOf } from '../lib.ts'
+import { childSessionsOf, elapsedOf } from '../lib.ts'
 import type { SessionStore } from '../store.ts'
 import { Review } from './review.tsx'
 import { Inspector } from './inspector.tsx'
@@ -73,6 +74,68 @@ const PromptSections = (props: { sections: RunStateView['promptSections'] }) => 
   </>
 )
 
+/** The links a session's finished subagents left in its conversation. */
+const ChildLinks = (props: { store: SessionStore; blocks: ReadonlyArray<ConversationBlock> }) => {
+  const ids = () => childSessionsOf(props.blocks)
+  return (
+    <Show when={ids().length > 0}>
+      <ul class="run-children">
+        <For each={ids()}>
+          {(id) => (
+            <li>
+              <button
+                class="run-child"
+                type="button"
+                data-session-id={id}
+                onClick={() => props.store.moveTo(id)}
+              >
+                {'subagent · ' + id.slice(0, 8)}
+              </button>
+            </li>
+          )}
+        </For>
+      </ul>
+    </Show>
+  )
+}
+
+/** The children the core holds now, with what each does and how long it has run. */
+const LiveSubagents = (props: { store: SessionStore; subagents: RunStateView['subagents'] }) => (
+  <ul class="run-children">
+    <For each={props.subagents}>
+      {(child) => {
+        const working = () => child.status === 'running' || child.status === 'cancelling'
+        return (
+          <li class={'run-child-row ' + child.status} data-subagent-id={child.id}>
+            <button
+              class="run-child"
+              type="button"
+              data-session-id={child.id}
+              onClick={() => props.store.moveTo(child.id)}
+            >
+              <span class="run-child-state">{child.status}</span>
+              <span class="run-child-id">{child.id.slice(0, 8)}</span>
+              <Show when={working()}>
+                <span class="run-child-elapsed">{elapsedOf(child.startedAt, Date.now())}</span>
+              </Show>
+            </button>
+            <Show when={working()}>
+              <button
+                class="run-child-stop"
+                type="button"
+                data-stop-subagent={child.id}
+                onClick={() => props.store.stopSubagent(child.id)}
+              >
+                stop
+              </button>
+            </Show>
+          </li>
+        )
+      }}
+    </For>
+  </ul>
+)
+
 const Run = (props: { store: SessionStore }) => {
   const run = () => props.store.state().run
   return (
@@ -116,23 +179,13 @@ const Run = (props: { store: SessionStore }) => {
                 </For>
               </ul>
             </Show>
-            <Show when={childSessionsOf(props.store.state().conversation.blocks).length > 0}>
-              <ul class="run-children">
-                <For each={childSessionsOf(props.store.state().conversation.blocks)}>
-                  {(id) => (
-                    <li>
-                      <button
-                        class="run-child"
-                        type="button"
-                        data-session-id={id}
-                        onClick={() => props.store.moveTo(id)}
-                      >
-                        {'subagent · ' + id.slice(0, 8)}
-                      </button>
-                    </li>
-                  )}
-                </For>
-              </ul>
+            <Show
+              when={state().subagents.length > 0}
+              fallback={
+                <ChildLinks store={props.store} blocks={props.store.state().conversation.blocks} />
+              }
+            >
+              <LiveSubagents store={props.store} subagents={state().subagents} />
             </Show>
           </>
         )}

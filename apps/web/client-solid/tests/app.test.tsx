@@ -7,6 +7,7 @@ import { initialState, withDraft, withTheme, type Pane, type WebState } from '..
 import { App } from '../app.tsx'
 import { Composer } from '../components/composer.tsx'
 import { ContextPane } from '../components/context-pane.tsx'
+import { elapsedOf } from '../lib.ts'
 import { Conversation } from '../components/conversation.tsx'
 import { Board } from '../components/board.tsx'
 import { Status } from '../components/status.tsx'
@@ -44,6 +45,7 @@ type Call =
   | { readonly kind: 'askWorkspaces' }
   | { readonly kind: 'addWorkspace'; readonly cwd: string }
   | { readonly kind: 'browseDirectories'; readonly path: string }
+  | { readonly kind: 'stopSubagent'; readonly id: string }
 
 /** What the Add workspace dialog heard about one folder. */
 type BrowseAnswer =
@@ -79,6 +81,7 @@ const makeStore = (
     showPane: (pane) => calls.push({ kind: 'pane', pane }),
     openJob: () => undefined,
     stopJob: () => undefined,
+    stopSubagent: (id) => calls.push({ kind: 'stopSubagent', id }),
     askModels: () => calls.push({ kind: 'askModels' }),
     askCommands: () => calls.push({ kind: 'askCommands' }),
     askFiles: (query) => calls.push({ kind: 'askFiles', query }),
@@ -486,6 +489,7 @@ describe('the Solid page', () => {
       goal: { objective: 'ship it', phase, rounds: 2, maxRounds: 8 },
       schedules: [],
       jobs: [],
+      subagents: [],
       todos: [],
       todoCounts: { pending: 0, inProgress: 0, completed: 0 },
       skills: [],
@@ -525,6 +529,7 @@ describe('the Solid page', () => {
       goal: { objective: 'ship it', phase: 'paused' as const, rounds: 2, maxRounds: 8 },
       schedules: [],
       jobs: [],
+      subagents: [],
       todos: [],
       todoCounts: { pending: 0, inProgress: 0, completed: 0 },
       skills: [],
@@ -689,6 +694,7 @@ describe('the Solid page', () => {
         goal: null,
         schedules: [],
         jobs: [],
+        subagents: [],
         todos: [],
         todoCounts: { pending: 0, inProgress: 0, completed: 0 },
         skills: [],
@@ -723,6 +729,7 @@ describe('the Solid page', () => {
         goal: null,
         schedules: [],
         jobs: [],
+        subagents: [],
         todos: [],
         todoCounts: { pending: 0, inProgress: 0, completed: 0 },
         skills: [],
@@ -749,6 +756,7 @@ describe('the Solid page', () => {
         goal: null,
         schedules: [],
         jobs: [],
+        subagents: [],
         todos: [],
         todoCounts: { pending: 0, inProgress: 0, completed: 0 },
         skills: [],
@@ -855,6 +863,7 @@ describe('the Solid page', () => {
         goal: { objective: 'ship the port', phase: 'active', rounds: 1, maxRounds: 8 },
         schedules: [],
         jobs: [],
+        subagents: [],
         todos: [
           { content: 'write the test', status: 'completed' },
           { content: 'fix the code', status: 'in_progress' },
@@ -886,6 +895,97 @@ describe('the Solid page', () => {
     )
     fireEvent.click(turns as Element)
     expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'trajectory' } })
+  })
+
+  test('the run pane lists running subagents, moves to one, and stops it', () => {
+    const { store, calls } = makeStore({
+      pane: { kind: 'run' },
+      run: {
+        goal: null,
+        schedules: [],
+        jobs: [],
+        subagents: [
+          { id: 'child-12345678', status: 'running', startedAt: Date.now() - 3_000 },
+          { id: 'child-9abcdef0', status: 'idle', startedAt: Date.now() - 90_000 },
+        ],
+        todos: [],
+        todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+        skills: [],
+        promptSections: [],
+        queued: [],
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+      },
+    })
+
+    const { container } = render(() => <ContextPane store={store} />)
+
+    const running = container.querySelector('[data-subagent-id="child-12345678"]') as Element
+    const idle = container.querySelector('[data-subagent-id="child-9abcdef0"]') as Element
+    expect(container.querySelectorAll('.run-child-row')).toHaveLength(2)
+    expect(running.querySelector('.run-child-state')?.textContent).toBe('running')
+    expect(running.querySelector('.run-child-id')?.textContent).toBe('child-12')
+    expect(idle.querySelector('.run-child-state')?.textContent).toBe('idle')
+    // Only a child that still works offers a stop; an idle one has nothing to stop.
+    expect(running.querySelector('.run-child-stop')).not.toBeNull()
+    expect(idle.querySelector('.run-child-stop')).toBeNull()
+
+    fireEvent.click(running.querySelector('.run-child') as Element)
+    expect(calls).toContainEqual({ kind: 'moveTo', id: 'child-12345678', cwd: undefined })
+
+    fireEvent.click(running.querySelector('.run-child-stop') as Element)
+    expect(calls).toContainEqual({ kind: 'stopSubagent', id: 'child-12345678' })
+  })
+
+  test('a session with no live child keeps the links its finished subagents left', () => {
+    const { store, calls } = makeStore({
+      pane: { kind: 'run' },
+      conversation: {
+        ...emptyConversation,
+        blocks: [
+          {
+            kind: 'tool',
+            callId: 'c1',
+            name: 'subagent',
+            summary: 'subagent',
+            status: 'done',
+            output: 'the child said so\n\n[child session: child-old]',
+            result: 'the child said so',
+          },
+        ],
+      },
+      run: {
+        goal: null,
+        schedules: [],
+        jobs: [],
+        subagents: [],
+        todos: [],
+        todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+        skills: [],
+        promptSections: [],
+        queued: [],
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+      },
+    })
+
+    const { container } = render(() => <ContextPane store={store} />)
+
+    expect(container.querySelectorAll('.run-child-row')).toHaveLength(0)
+    const link = container.querySelector('.run-child') as Element
+    expect(link.textContent).toBe('subagent · child-ol')
+    fireEvent.click(link)
+    expect(calls).toContainEqual({ kind: 'moveTo', id: 'child-old', cwd: undefined })
+  })
+
+  test('elapsed time reads in seconds, minutes, and hours', () => {
+    const now = 1_000_000_000
+    expect(elapsedOf(now - 3_000, now)).toBe('3s')
+    expect(elapsedOf(now - 90_000, now)).toBe('1m')
+    expect(elapsedOf(now - 3_600_000, now)).toBe('1h')
+    expect(elapsedOf(now + 3_000, now)).toBe('0s')
   })
 
   test('the trace draws each call on its turn, and a call opens in the inspector', () => {

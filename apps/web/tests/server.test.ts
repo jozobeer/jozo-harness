@@ -37,6 +37,9 @@ interface FakeHost {
   readonly runState: () => RunStateView
   readonly jobOutput: (id: string) => Effect.Effect<JobDetailView, WebError>
   readonly stopJob: (id: string) => Effect.Effect<void, WebError>
+  readonly stopSubagent: (id: string) => Effect.Effect<void, WebError>
+  /** The children a page stopped, in the order it asked. */
+  readonly stopped: Array<string>
   readonly commands: Array<UiCommand>
   /** Broadcasts one event to every tab, like the real host does. */
   readonly publish: (event: UiEvent) => void
@@ -44,6 +47,7 @@ interface FakeHost {
 
 const makeHost = (id: string, cwd = '/work'): FakeHost => {
   const commands: Array<UiCommand> = []
+  const stopped: Array<string> = []
   const subscribers = new Set<Queue.Queue<UiEvent>>()
   const publish = (event: UiEvent): void => {
     for (const queue of subscribers.values().toArray()) Queue.offerUnsafe(queue, event)
@@ -76,6 +80,7 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
       goal: { objective: 'ship the UI', phase: 'active', rounds: 2, maxRounds: 8 },
       schedules: [{ id: 's-1', when: 'every 60s', prompt: 'check the build', lastFiredAt: 0 }],
       jobs: [{ id: 'j-1', command: 'sleep 5', running: true }],
+      subagents: [{ id: 'child-1', status: 'running', startedAt: 1_700_000_000_000 }],
       todos: [],
       todoCounts: { pending: 0, inProgress: 0, completed: 0 },
       skills: [],
@@ -91,6 +96,13 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
         : Effect.fail(new WebError({ message: 'no such job' })),
     stopJob: (jobId) =>
       jobId === 'j-1' ? Effect.void : Effect.fail(new WebError({ message: 'no such job' })),
+    stopSubagent: (childId) =>
+      childId === 'child-1'
+        ? Effect.sync(() => {
+            stopped.push(childId)
+          })
+        : Effect.fail(new WebError({ message: 'the subagent is not running' })),
+    stopped,
     commands,
     publish,
     host: {
@@ -126,6 +138,7 @@ const makeWeb = (initialId: string, cwd = '/work'): FakeWeb => {
       runState: first.runState,
       jobOutput: first.jobOutput,
       stopJob: first.stopJob,
+      stopSubagent: first.stopSubagent,
     },
     factory: {
       list: () => Effect.succeed([...hosts.values()].map((fake) => fake.summary)),
@@ -141,6 +154,7 @@ const makeWeb = (initialId: string, cwd = '/work'): FakeWeb => {
               runState: known.runState,
               jobOutput: known.jobOutput,
               stopJob: known.stopJob,
+              stopSubagent: known.stopSubagent,
             }
           }
           const fresh = makeHost(made, cwd)
@@ -152,6 +166,7 @@ const makeWeb = (initialId: string, cwd = '/work'): FakeWeb => {
             runState: fresh.runState,
             jobOutput: fresh.jobOutput,
             stopJob: fresh.stopJob,
+            stopSubagent: fresh.stopSubagent,
           }
         }),
     },
@@ -657,10 +672,14 @@ describe('the web transport', () => {
               .pipe(Effect.catch((message) => Effect.succeed(message)))
             const detail = yield* client.jobDetail({ sessionId: 'a', id: 'j-1' })
             const stopped = yield* client.stopJob({ sessionId: 'a', id: 'j-1' })
+            const childStopped = yield* client.stopSubagent({ sessionId: 'a', id: 'child-1' })
+            const unknownChild = yield* client
+              .stopSubagent({ sessionId: 'a', id: 'child-9' })
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
             const unknownJob = yield* client
               .jobDetail({ sessionId: 'a', id: 'j-9' })
               .pipe(Effect.catch((message) => Effect.succeed(message)))
-            return { running, refused, detail, stopped, unknownJob }
+            return { running, refused, detail, stopped, childStopped, unknownChild, unknownJob }
           }).pipe(clientLayers(wsUrl))
           const result = yield* withoutServices(useClient)
           yield* Deferred.succeed(started.stop, undefined)
@@ -673,6 +692,9 @@ describe('the web transport', () => {
     expect(observed.running.goal?.rounds).toBe(2)
     expect(observed.running.schedules[0]?.when).toBe('every 60s')
     expect(observed.running.jobs).toEqual([{ id: 'j-1', command: 'sleep 5', running: true }])
+    expect(observed.running.subagents).toEqual([
+      { id: 'child-1', status: 'running', startedAt: 1_700_000_000_000 },
+    ])
     expect(observed.running.queued).toEqual(['one more thing'])
     expect(observed.detail).toEqual({
       id: 'j-1',
@@ -681,6 +703,8 @@ describe('the web transport', () => {
       output: 'still going',
     })
     expect(observed.stopped).toBe(true)
+    expect(observed.childStopped).toBe(true)
+    expect(observed.unknownChild).toBe('the subagent is not running')
     expect(observed.unknownJob).toBe('no such job')
     expect(observed.refused).toBe('the session is not open')
     await rm(root, { recursive: true, force: true })

@@ -654,6 +654,53 @@ body {
   color: var(--text);
 }
 
+.run-child-row {
+  display: flex;
+  gap: var(--s1);
+  align-items: stretch;
+}
+
+.run-child-row .run-child {
+  display: flex;
+  flex: 1;
+  gap: var(--s2);
+  align-items: baseline;
+  min-width: 0;
+}
+
+.run-child-row.running .run-child-state,
+.run-child-row.cancelling .run-child-state {
+  color: var(--tool);
+}
+
+.run-child-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-child-elapsed {
+  margin-left: auto;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.run-child-stop {
+  flex: none;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--dim);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.run-child-stop:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .rail-button {
   margin-top: 6px;
   padding: 5px 8px;

@@ -12,6 +12,15 @@ export const whenOf = (at: number, now: number): string => {
   return new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+/** How long something has been running, short enough for the Run pane. */
+export const elapsedOf = (at: number, now: number): string => {
+  const seconds = Math.max(0, Math.floor((now - at) / 1000))
+  if (seconds < 60) return String(seconds) + 's'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return String(minutes) + 'm'
+  return String(Math.floor(minutes / 60)) + 'h'
+}
+
 export const basenameOf = (path: string): string => {
   const parts = path.split('/')
   return parts[parts.length - 1] ?? path

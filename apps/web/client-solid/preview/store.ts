@@ -47,6 +47,7 @@ const RUN: RunStateView = {
     { id: 's1', when: 'every 30m', prompt: 'pnpm run check を回して報告', lastFiredAt: 0 },
   ],
   jobs: [{ id: 'j1a2b3c4d5', command: 'pnpm vitest --watch apps/web', running: true }],
+  subagents: [{ id: 'child-9f2a1c3d', status: 'running', startedAt: Date.now() - 42_000 }],
   todos: [
     { content: '失敗する再現テストを書く', status: 'completed' },
     { content: 'runStateOf に射影を足す', status: 'in_progress' },
@@ -162,6 +163,7 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
     showPane: (pane) => setState((now) => ({ ...now, pane })),
     openJob: () => undefined,
     stopJob: () => undefined,
+    stopSubagent: () => undefined,
     askModels: () => undefined,
     askCommands: () => undefined,
     askFiles: () => undefined,
