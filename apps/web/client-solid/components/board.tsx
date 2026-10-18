@@ -24,9 +24,11 @@ import {
   type Waiting,
 } from '../../src/ui/board.ts'
 import { basenameOf, whenOf } from '../lib.ts'
+import { pourFrom } from '../pour.ts'
 import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY, keepPaths, pathsFrom } from '../recent.ts'
 import type { BrowseAnswer, SessionStore } from '../store.ts'
 import { Button } from './ui/button.tsx'
+import { Fizz } from './ui/fizz.tsx'
 
 /** A span the way the board says it: 38s, 6m, 2h. */
 const elapsedOf = (ms: number): string => {
@@ -340,7 +342,7 @@ const Answer = (props: { entry: BoardEntry; waiting: Waiting; store: SessionStor
         {(request) => (
           <div class="board-actions">
             <Button
-              variant="primary"
+              variant="foam"
               type="button"
               onClick={() =>
                 props.store.sendTo(id(), {
@@ -353,6 +355,7 @@ const Answer = (props: { entry: BoardEntry; waiting: Waiting; store: SessionStor
               Allow
             </Button>
             <Button
+              variant="rim"
               type="button"
               onClick={() =>
                 props.store.sendTo(id(), {
@@ -373,6 +376,7 @@ const Answer = (props: { entry: BoardEntry; waiting: Waiting; store: SessionStor
             <For each={request().options}>
               {(option) => (
                 <Button
+                  variant="scoop"
                   type="button"
                   onClick={() =>
                     props.store.sendTo(id(), { kind: 'answer', id: request().id, answer: option })
@@ -399,6 +403,7 @@ const WaitingCard = (props: { entry: BoardEntry; store: SessionStore }) => (
   <Show when={props.entry.waiting}>
     {(waiting) => (
       <div class="board-card">
+        <Fizz />
         <Row
           entry={props.entry}
           store={props.store}
@@ -741,7 +746,10 @@ export const Board = (props: { store: SessionStore }) => {
             {(id) => {
               const entry = () => atKey(rows(), id)
               return (
-                <div class="board-running">
+                <div
+                  class="board-running pour rising"
+                  style={{ '--pour-from': pourFrom(entry().since, Date.now()) }}
+                >
                   <Row entry={entry()} store={props.store} detail={runningDetail(entry(), now())} />
                   <Show when={entry().doing !== ''}>
                     <p class="board-doing">{entry().doing}</p>

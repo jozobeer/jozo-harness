@@ -5,6 +5,7 @@ import type { Pane } from '../../src/ui/state.ts'
 import { THEMES, type Theme } from '../../src/ui/theme.ts'
 import type { TurnView } from '../../src/ui/trajectory.ts'
 import { childSessionsOf, elapsedOf } from '../lib.ts'
+import { levelOf } from '../pour.ts'
 import type { SessionStore } from '../store.ts'
 import { Review } from './review.tsx'
 import { Inspector } from './inspector.tsx'
@@ -13,7 +14,7 @@ import { Button } from './ui/button.tsx'
 const Goal = (props: { goal: RunStateView['goal'] }) => (
   <Show when={props.goal} fallback={<div class="run-empty">no goal</div>}>
     {(goal) => (
-      <div class="run-goal">
+      <div class="run-goal pour" style={{ '--level': levelOf(goal().rounds, goal().maxRounds) }}>
         <span class="run-objective">{goal().objective}</span>
         <span class={'run-phase ' + goal().phase}>{goal().phase}</span>
         <span class="run-rounds">{String(goal().rounds) + '/' + String(goal().maxRounds)}</span>
@@ -28,6 +29,10 @@ const todoMarks: Readonly<Record<string, string>> = {
   completed: '[x]',
 }
 
+/** A todo's class: the one in progress pours, with no end it knows of. */
+const todoClass = (status: string): string =>
+  'run-todo ' + status + (status === 'in_progress' ? ' pour rising' : '')
+
 const Todos = (props: { todos: RunStateView['todos']; counts: RunStateView['todoCounts'] }) => (
   <Show when={props.todos.length > 0}>
     <div class="run-section">
@@ -39,7 +44,7 @@ const Todos = (props: { todos: RunStateView['todos']; counts: RunStateView['todo
     <ul class="run-todos">
       <For each={props.todos}>
         {(todo) => (
-          <li class={'run-todo ' + todo.status}>
+          <li class={todoClass(todo.status)}>
             <span class="run-todo-mark">{todoMarks[todo.status] ?? '[ ]'}</span>
             <span class="run-todo-content">{todo.content}</span>
           </li>

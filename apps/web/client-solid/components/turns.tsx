@@ -3,6 +3,7 @@ import { plainText, summaryBodyOf } from '@jozo-harness/ui-view'
 import { renderMarkdown } from '../../src/ui/markdown.ts'
 import { toolsOf, type TraceStep, type TraceTool, type TraceTurn } from '../../src/ui/trace.ts'
 import { spanOf } from '../edits.ts'
+import { justFinished, pourFrom } from '../pour.ts'
 import type { SessionStore } from '../store.ts'
 
 /**
@@ -108,15 +109,25 @@ const Step = (props: { step: TraceStep; last: boolean }) => (
 const plural = (count: number, word: string): string =>
   String(count) + ' ' + word + (count === 1 ? '' : 's')
 
+/** The dot's class: a ring while the turn runs, then how it ended, green a moment if it ended well. */
+const dotClass = (running: boolean, outcome: string, finished: boolean): string =>
+  'process-dot ' +
+  (running ? 'running' : outcome) +
+  (finished && outcome === 'completed' ? ' finished' : '')
+
 /** The process folded to one line: how long, how much, and what went wrong. */
 const ProcessLine = (props: { turn: TraceTurn; now: number }) => {
   const tools = () => toolsOf(props.turn)
   const failed = () => tools().filter((tool) => tool.status === 'error').length
   const running = () => props.turn.endedAt === undefined
+  const finished = justFinished(running)
   const current = () => tools().findLast((tool) => tool.status === 'running')
   return (
-    <summary class="process-line">
-      <span class={'process-dot ' + (running() ? 'running' : props.turn.outcome)} />
+    <summary
+      class={'process-line' + (running() ? ' pour rising' : '')}
+      style={{ '--pour-from': pourFrom(props.turn.startedAt, Date.now()) }}
+    >
+      <span class={dotClass(running(), props.turn.outcome, finished())} />
       <span class="process-state">{running() ? 'Working' : 'Worked'}</span>
       <span class="process-took">
         {spanOf((props.turn.endedAt ?? props.now) - props.turn.startedAt)}

@@ -434,7 +434,7 @@ const choosesATheme = async (client: Cdp, read: () => Promise<unknown>): Promise
   if ((await client.evaluate(themeAttributeOf)) !== 'light') {
     throw new Error('the light choice never reached the document')
   }
-  if ((await client.evaluate(backgroundOf)) !== 'rgb(255, 255, 255)') {
+  if ((await client.evaluate(backgroundOf)) !== 'rgb(244, 246, 248)') {
     throw new Error('the light palette never applied')
   }
   await client.evaluate(themeButton('system'))
