@@ -22,6 +22,7 @@ describe('the notes the dump prints', () => {
     expect(text).toContain(FLAG_NAMES.join(' '))
     expect(text).toContain('XDG_CONFIG_HOME')
     expect(text).toContain('BRAVE_API_KEY')
+    expect(text).toContain('DEEPSEEK_API_KEY')
     expect(text).toContain('  - planMode ')
   })
 

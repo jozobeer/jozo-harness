@@ -17,6 +17,13 @@ export const PROVIDERS: ReadonlyArray<ProviderSecret> = [
     hint: 'https://ollama.com/settings/keys',
   },
   {
+    name: 'deepseek',
+    route: 'deepseek',
+    env: 'DEEPSEEK_API_KEY',
+    baseUrl: 'https://api.deepseek.com/v1',
+    hint: 'https://platform.deepseek.com/api_keys',
+  },
+  {
     name: 'openai',
     route: 'openai',
     env: 'OPENAI_API_KEY',

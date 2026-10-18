@@ -109,7 +109,9 @@ describe('jzh config', () => {
       const code = await runConfig(['set', 'nope', 'x'], sink.io, env)
 
       expect(code).toBe(2)
-      expect(sink.errs.join('')).toContain('model, effort, profile, skills, plugins')
+      expect(sink.errs.join('')).toContain(
+        'model, effort, profile, search, deepseekToolsBaseUrl, skills, plugins',
+      )
     })
   })
 

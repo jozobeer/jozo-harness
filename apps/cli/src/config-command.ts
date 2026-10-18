@@ -26,7 +26,13 @@ const USAGE =
   'jzh config init                  write a starting file with every key commented out\n'
 
 /** The keys a person writes as one value; the list keys have their own commands. */
-const SCALAR_KEYS: ReadonlyArray<string> = ['model', 'effort', 'profile']
+const SCALAR_KEYS: ReadonlyArray<string> = [
+  'model',
+  'effort',
+  'profile',
+  'search',
+  'deepseekToolsBaseUrl',
+]
 const LIST_KEYS: ReadonlyArray<string> = ['skills']
 const KNOWN_KEYS: ReadonlyArray<string> = SETTINGS_KEYS.map((note) => note.name)
 
@@ -77,15 +83,31 @@ const indented = (text: string): string =>
 const settingsOf = async (paths: ConfigPaths) =>
   await Effect.runPromise(Effect.result(loadConfigFile(paths.config)))
 
+const modelProblem = (value: string): string | undefined => {
+  const parts = value.split('/')
+  const shaped = parts.length === 2 && parts.every((part) => part !== '' && !/\s/.test(part))
+  return shaped ? undefined : 'model takes provider/model (jzh models lists them)'
+}
+
+const searchProblem = (value: string): string | undefined =>
+  value === 'brave' || value === 'deepseek' ? undefined : 'search takes brave or deepseek'
+
+const baseUrlProblem = (value: string): string | undefined =>
+  /^https?:\/\//.test(value) ? undefined : 'deepseekToolsBaseUrl takes an http(s) URL'
+
+/** The scalar keys whose value the settings file can check without asking a provider. */
+const SCALAR_PROBLEMS: Readonly<Record<string, (value: string) => string | undefined>> = {
+  model: modelProblem,
+  // Which words an endpoint takes is the endpoint's to say, so the file takes any of them.
+  effort: () => undefined,
+  search: searchProblem,
+  deepseekToolsBaseUrl: baseUrlProblem,
+}
+
 /** Why the value does not fit the key; undefined when it does. */
 const refusal = async (key: string, value: string): Promise<string | undefined> => {
-  if (key === 'model') {
-    const parts = value.split('/')
-    const shaped = parts.length === 2 && parts.every((part) => part !== '' && !/\s/.test(part))
-    return shaped ? undefined : 'model takes provider/model (jzh models lists them)'
-  }
-  // Which words an endpoint takes is the endpoint's to say, so the file takes any of them.
-  if (key === 'effort') return undefined
+  const known = SCALAR_PROBLEMS[key]
+  if (known !== undefined) return known(value)
   return await loadBundledProfileNamed(value).then(
     () => undefined,
     () => 'no bundled profile named ' + value + ' (base, headless, repl)',

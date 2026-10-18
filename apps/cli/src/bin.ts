@@ -128,7 +128,7 @@ const loadInputs = (parsed: ParsedArgs, io: MainIo): Effect.Effect<CommandInputs
       effort,
       documents: [base, named],
       patches,
-      search: searchFromEnv(process.env),
+      search: searchFromEnv(process.env, settings),
     }
   })
 
