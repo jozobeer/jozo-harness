@@ -46,12 +46,19 @@ import {
   presetChange,
   presetProblem,
   presetResumable,
+  statsViewOf,
   type CommandsShape,
   type Preset,
   type SessionError,
+  type TokenBudget,
 } from '@jozo-harness/session'
 import { Tier0Tools, type Tier0ToolBuilder, type WorktreeHost } from '@jozo-harness/tools-tier0'
-import { installRetry, type RetryConfig } from '@jozo-harness/agent-loop'
+import {
+  agentLoopConfigSchema,
+  installRetry,
+  tokenBudgetOf,
+  type RetryConfig,
+} from '@jozo-harness/agent-loop'
 import { installBuiltinCommands } from './commands.ts'
 import { listModels, modelEndpointOf } from './models.ts'
 import {
@@ -143,7 +150,7 @@ import {
   type WorkspacesPort,
 } from '@jozo-harness/web'
 import { Llm } from '@jozo-harness/llm'
-import { Cause, Context, Effect, Exit, Layer, Scope, Stream } from 'effect'
+import { Cause, Context, Effect, Exit, Layer, Schema, Scope, Stream } from 'effect'
 import {
   EFFORT_KEY,
   MODEL_KEY,
@@ -1025,6 +1032,7 @@ const sessionFactoryOf = (
             built.runtime.jobs,
             built.runtime.efforts,
             built.runtime.agents.childrenOf(agent.id),
+            built.runtime.budget,
           ),
         jobOutput: (jobId: string) => jobDetailOf(built.runtime.jobs, jobId),
         stopJob: (jobId: string) => stopJobOf(built.runtime.jobs, jobId),
@@ -1191,13 +1199,13 @@ const serveWebUi = (
 
 /** One built session as the page sees it; undefined when it was built without a UI. */
 const openSessionOf = (runtime: SessionRuntime): OpenSession | undefined => {
-  const { agent, ui, jobs, efforts, agents } = runtime
+  const { agent, ui, jobs, efforts, agents, budget } = runtime
   if (ui === undefined) return undefined
   return {
     summary: summaryOf(agent),
     host: ui,
     commands: () => commandViewsOf(runtime.commands, runtime.skillCatalog()),
-    runState: () => runStateOf(agent, jobs, efforts, agents.childrenOf(agent.id)),
+    runState: () => runStateOf(agent, jobs, efforts, agents.childrenOf(agent.id), budget),
     jobOutput: (jobId: string) => jobDetailOf(jobs, jobId),
     stopJob: (jobId: string) => stopJobOf(jobs, jobId),
     stopSubagent: (childId: string) => stopSubagentOf(agents, agent.id, childId),
@@ -1250,6 +1258,8 @@ interface SessionRuntime {
   /** The skills the catalog lists now, as the composer offers them beside commands. */
   readonly skillCatalog: () => ReadonlyArray<SkillSummary>
   readonly spillBytes: number | undefined
+  /** The budget the loop compacts with, so a page reads the same line it fires on. */
+  readonly budget: TokenBudget
   readonly layer: Layer.Layer<any, PluginError, never>
 }
 
@@ -1300,6 +1310,8 @@ const runStateOf = (
   efforts: ReadonlyArray<string>,
   /** The child agents this session started, as the registry holds them now. */
   children: ReadonlyArray<Agent>,
+  /** The line the loop compacts on; the page reports the same estimate. */
+  budget: TokenBudget,
 ): RunStateView => {
   const events = agent.session.events()
   const goal = currentGoal(events)
@@ -1310,6 +1322,7 @@ const runStateOf = (
     model: agent.options.route,
     effort: agent.options.reasoningEffort ?? '',
     efforts,
+    stats: statsViewOf(events, budget),
     todos: context.todos,
     todoCounts: context.todoCounts,
     skills: context.skills,
@@ -1386,10 +1399,15 @@ const buildSession = (
     )
     // What the provider takes for an effort is the adapter's to say; a page only offers it.
     const efforts = Context.get(context, Llm).capabilities.reasoningEffort ?? []
+    // The loop measured the request against this budget; reading the same values
+    // here lets /status and the page report the line compaction would fire on.
+    const loopRow = rows.find((row) => row.name === '@jozo-harness/agent-loop')
+    const loopConfig = Schema.decodeUnknownSync(agentLoopConfigSchema)(loopRow?.config ?? {})
+    const budget = tokenBudgetOf(loopConfig, Context.get(context, Llm).capabilities)
     // What a human can type at this session is not the model's business; both the
     // REPL and a UI run it through the same registry and the log keeps the record.
     const commands = makeCommands()
-    yield* installBuiltinCommands(commands)
+    yield* installBuiltinCommands(commands, { budget })
     // The catalog is read once for the page's completion list and again by the tool
     // and the host, who read the roots themselves so a changed file is never stale.
     const skills = skillsOf(sessionOptions)
@@ -1465,6 +1483,7 @@ const buildSession = (
         efforts,
         skillCatalog: () => skillCatalog,
         spillBytes,
+        budget,
         layer,
       },
     } satisfies BuiltSession

@@ -1612,6 +1612,50 @@ describe('the rail', () => {
     expect(container.querySelector('.branch')).toBeNull()
   })
 
+  test('the status bar reads the token stats the run carried', () => {
+    const stats = {
+      tokensPerSecond: '12',
+      tokens: '1.0k in · 200 out',
+      cache: '45%',
+      context: '12% (usage)',
+    }
+    const { store } = makeStore({
+      run: {
+        goal: null,
+        schedules: [],
+        jobs: [],
+        subagents: [],
+        todos: [],
+        todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+        skills: [],
+        promptSections: [],
+        queued: [],
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+        stats,
+      },
+    })
+
+    const { container } = render(() => (
+      <Status store={store} drawer={false} onDrawer={() => undefined} />
+    ))
+
+    const shown = container.querySelector('.stats')
+    const text = '12 tok/s · 1.0k in · 200 out · cache 45% · ctx 12% (usage)'
+    expect(shown?.textContent).toBe(text)
+    expect(shown?.getAttribute('title')).toBe(text)
+  })
+
+  test('the status bar leaves the stats out until the run has them', () => {
+    const { store } = makeStore()
+    const { container } = render(() => (
+      <Status store={store} drawer={false} onDrawer={() => undefined} />
+    ))
+
+    expect(container.querySelector('.stats')).toBeNull()
+  })
+
   test('the status bar says working while a session runs, without counting runners', () => {
     const now = Date.now()
     const running = traceOf([{ seq: 1, time: now, type: 'turn/start', data: { turn: 1 } }])

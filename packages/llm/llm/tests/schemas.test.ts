@@ -5,6 +5,7 @@ import {
   ContentBlockSchema,
   LlmFailure,
   LlmFailureSchema,
+  LlmUsageSchema,
   StreamChunkSchema,
   encodeLlmFailure,
   type AssistantStreamRecord,
@@ -71,6 +72,20 @@ describe('schema round trips', () => {
     expect(await decode(Schema.Array(AssistantStreamRecordSchema), throughJson(encoded))).toEqual(
       records,
     )
+  })
+
+  test('usage keeps the cache buckets the provider reported', async () => {
+    const usage = {
+      inputTokens: 3,
+      outputTokens: 5,
+      reasoningTokens: 2,
+      cacheReadTokens: 7,
+      cacheWriteTokens: 1,
+    }
+
+    const encoded = await run(Schema.encodeEffect(LlmUsageSchema)(usage))
+
+    expect(await decode(LlmUsageSchema, throughJson(encoded))).toEqual(usage)
   })
 
   test('a failure is stored in its data shape', async () => {

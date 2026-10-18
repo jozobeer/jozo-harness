@@ -34,6 +34,8 @@ export const LlmUsageSchema: Schema.Schema<LlmUsage> = Schema.Struct({
   inputTokens: Schema.Int,
   outputTokens: Schema.Int,
   reasoningTokens: Schema.optionalKey(Schema.Int),
+  cacheReadTokens: Schema.optionalKey(Schema.Int),
+  cacheWriteTokens: Schema.optionalKey(Schema.Int),
 })
 
 const FinishKindSchema: Schema.Schema<FinishKind> = Schema.Literals([

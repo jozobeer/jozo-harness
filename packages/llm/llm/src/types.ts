@@ -22,11 +22,22 @@ export type ContentBlock =
 
 export type ContentBlockType = ContentBlock['type']
 
-/** Token accounting reported by the provider for one request. */
+/**
+ * Token accounting reported by the provider for one request.
+ *
+ * The buckets are disjoint: `inputTokens` is the uncached prompt, cache reads and
+ * writes sit beside it rather than inside it, and `reasoningTokens` is part of
+ * `outputTokens`. A provider that reports no cache buckets leaves both absent, so
+ * a consumer can tell "no cache" from "did not say".
+ */
 export interface LlmUsage {
   readonly inputTokens: number
   readonly outputTokens: number
   readonly reasoningTokens?: number
+  /** Prompt tokens the provider served from its cache. */
+  readonly cacheReadTokens?: number
+  /** Prompt tokens the provider wrote into its cache. */
+  readonly cacheWriteTokens?: number
 }
 
 /** How a model response ended. `error` carries no content of its own. */

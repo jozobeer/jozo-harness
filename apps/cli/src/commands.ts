@@ -4,10 +4,13 @@ import {
   cwdOf,
   DEFAULT_COMPACT_MAX_BYTES,
   pruneFor,
+  statsLineTextOf,
+  statsViewOf,
   type CommandsShape,
   type CompactOptions,
   type Session,
   type SessionHeader,
+  type TokenBudget,
 } from '@jozo-harness/session'
 import {
   currentGoal,
@@ -59,8 +62,12 @@ const scheduleLines = (session: Session): ReadonlyArray<string> => {
   ]
 }
 
-/** What /status answers: everything a session can say about itself from its log. */
-export const statusText = (session: Session): string => {
+/**
+ * What /status answers: everything a session can say about itself from its log.
+ * Without the loop's budget the context stays unknown, and so does anything the
+ * log never counted: a missing number reads as an em dash, not as zero.
+ */
+export const statusText = (session: Session, budget?: TokenBudget): string => {
   const events = session.events()
   const header: SessionHeader = session.header
   return [
@@ -68,6 +75,7 @@ export const statusText = (session: Session): string => {
     'model: ' + modelOf(session),
     'cwd: ' + cwdOf(events, header),
     'turns: ' + String(events.filter((event) => event.type === 'turn/start').length),
+    'stats: ' + statsLineTextOf(statsViewOf(events, budget)),
     goalLine(session),
     ...scheduleLines(session),
   ].join('\n')
@@ -121,8 +129,17 @@ const goalLogOf = (session: Session): GoalLog => ({
   append: (state) => session.append('goal/updated', state).pipe(Effect.orDie),
 })
 
+/** What a command registry needs from the session it answers for. */
+export interface BuiltinCommandOptions {
+  /** The budget the loop compacts with; absent leaves the context stat unknown. */
+  readonly budget?: TokenBudget
+}
+
 /** The commands every jozo-harness session answers. */
-export const installBuiltinCommands = (commands: CommandsShape): Effect.Effect<void> =>
+export const installBuiltinCommands = (
+  commands: CommandsShape,
+  options: BuiltinCommandOptions = {},
+): Effect.Effect<void> =>
   Effect.gen(function* () {
     yield* commands.register({
       name: 'help',
@@ -131,8 +148,9 @@ export const installBuiltinCommands = (commands: CommandsShape): Effect.Effect<v
     })
     yield* commands.register({
       name: 'status',
-      summary: 'where this session stands: model, cwd, turns, goal, schedules',
-      run: (_input, context) => Effect.succeed({ ok: true, text: statusText(context.session) }),
+      summary: 'where this session stands: model, cwd, turns, token stats, goal, schedules',
+      run: (_input, context) =>
+        Effect.succeed({ ok: true, text: statusText(context.session, options.budget) }),
     })
     yield* commands.register({
       name: 'model',

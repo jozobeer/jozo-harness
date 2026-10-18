@@ -13,6 +13,7 @@ import {
   encodeLlmFailure,
   type ContentBlock,
   type FinishKind,
+  type LlmCapabilities,
   type RequestMessage,
   type StreamChunk,
   type TimedStreamChunk,
@@ -191,6 +192,22 @@ const openBoundary = (
 const recordedTurnEnd = (session: Session, turn: number): boolean =>
   session.events().some((event) => event.type === 'turn/end' && event.data.turn === turn)
 
+/**
+ * The budget the loop measures requests against: the profile's word where it has
+ * one, the adapter's where it knows, and the loop's default where neither does.
+ */
+export const tokenBudgetOf = (
+  config: AgentLoopConfig,
+  capabilities: LlmCapabilities,
+): TokenBudget => ({
+  contextWindow:
+    config.contextWindow ?? capabilities.contextWindow ?? DEFAULT_CONTEXT_WINDOW_TOKENS,
+  thresholdRatio: config.thresholdRatio ?? DEFAULT_COMPACT_THRESHOLD_RATIO,
+  headroomTokens: config.headroomTokens ?? DEFAULT_COMPACT_HEADROOM_TOKENS,
+  reserveTokens: config.maxTokens ?? 0,
+  imageTokens: capabilities.imageTokens ?? IMAGE_REFERENCE_TOKENS,
+})
+
 const agentLoopEffect = (
   config: AgentLoopConfig = {},
 ): Effect.Effect<AgentRunner, never, Hooks | Tools | SystemPrompt | Llm> =>
@@ -199,14 +216,7 @@ const agentLoopEffect = (
     const tools = yield* Tools
     const promptService = yield* SystemPrompt
     const llm = yield* Llm
-    const budget: TokenBudget = {
-      contextWindow:
-        config.contextWindow ?? llm.capabilities.contextWindow ?? DEFAULT_CONTEXT_WINDOW_TOKENS,
-      thresholdRatio: config.thresholdRatio ?? DEFAULT_COMPACT_THRESHOLD_RATIO,
-      headroomTokens: config.headroomTokens ?? DEFAULT_COMPACT_HEADROOM_TOKENS,
-      reserveTokens: config.maxTokens ?? 0,
-      imageTokens: llm.capabilities.imageTokens ?? IMAGE_REFERENCE_TOKENS,
-    }
+    const budget = tokenBudgetOf(config, llm.capabilities)
     const compact: CompactOptions = {
       retainTokens:
         config.retainTokens ?? Math.floor(messageBudgetOf(budget) * DEFAULT_COMPACT_RETAIN_RATIO),

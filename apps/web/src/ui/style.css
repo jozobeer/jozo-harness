@@ -214,6 +214,18 @@ body {
   white-space: nowrap;
 }
 
+/* Token and context numbers stay one line; a long log is clipped, never wrapped. */
+#status .stats {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 #status .hint {
   flex: none;
   margin-left: auto;
