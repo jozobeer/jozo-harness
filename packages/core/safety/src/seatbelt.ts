@@ -1,7 +1,5 @@
 import { realpathSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { Effect } from 'effect'
-import type { SandboxShape } from './sandbox.ts'
+import { wrapForProvider, type SandboxShape } from './sandbox.ts'
 import type { SandboxMode } from './policy.ts'
 
 /** One SBPL profile's roots, without the mode that decides them. */
@@ -74,26 +72,21 @@ export function seatbeltSandbox(options: SeatbeltOptions): SandboxShape {
   return {
     name: 'seatbelt',
     confines: true,
+    enforcement: 'full',
     mode: options.mode,
-    wrap: (command) => {
-      const mode = command.mode ?? options.mode
-      if (mode === 'danger-full-access') {
-        return Effect.succeed({
-          argv: command.argv,
-          cwd: command.cwd,
-          mode,
-          denialSignatures: [],
-        })
-      }
-      const implicit = mode === 'workspace-write' ? [command.cwd, tmpdir()] : []
-      const writableRoots = [...new Set([...options.writableRoots, ...implicit])]
-      const profile = seatbeltProfile({ ...options, writableRoots })
-      return Effect.succeed({
-        argv: ['sandbox-exec', '-p', profile, '--', ...command.argv],
-        cwd: command.cwd,
-        mode,
-        denialSignatures: DENIAL_SIGNATURES,
-      })
-    },
+    wrap: (command) =>
+      wrapForProvider(
+        command,
+        options.mode,
+        options.writableRoots,
+        DENIAL_SIGNATURES,
+        (_mode, writableRoots) => [
+          'sandbox-exec',
+          '-p',
+          seatbeltProfile({ ...options, writableRoots }),
+          '--',
+          ...command.argv,
+        ],
+      ),
   }
 }

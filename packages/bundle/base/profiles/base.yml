@@ -16,8 +16,8 @@ plugins:
     name: '@jozo-harness/safety'
     config:
       preset: workspace-write
-      # Commands run contained by default; sandbox: none runs them as they are.
-      sandbox: seatbelt
+      # Commands run contained by default; auto picks seatbelt on macOS and bwrap on Linux.
+      sandbox: auto
   - id: tier0
     name: '@jozo-harness/tools-tier0'
   - id: ask
