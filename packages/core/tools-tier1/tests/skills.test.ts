@@ -1,9 +1,15 @@
 import { Effect } from 'effect'
 import { describe, expect, test } from 'vitest'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { discoverSkills, parseSkillDocument, renderSkillCatalog, skillRoots } from '../src/index.ts'
+import {
+  discoverSkills,
+  loadSkill,
+  parseSkillDocument,
+  renderSkillCatalog,
+  skillRoots,
+} from '../src/index.ts'
 /** Writes a file, making the directories above it, because the file may not be there yet. */
 const writeFileDeep = async (path: string, text: string | Uint8Array): Promise<void> => {
   await mkdir(dirname(path), { recursive: true })
@@ -67,6 +73,35 @@ describe('discoverSkills', () => {
     expect(skills[0]?.description).toBe('demo does things')
     await rm(first, { recursive: true, force: true })
     await rm(second, { recursive: true, force: true })
+  })
+
+  test('a symlinked skill directory is listed and loads through the link', async () => {
+    const shared = await mkdtemp(join(tmpdir(), 'jozo-harness-skills-'))
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-skills-'))
+    await writeSkill(shared, 'demo', 'from the shared directory')
+    await symlink(join(shared, 'demo'), join(root, 'demo'), 'dir')
+
+    const skills = await Effect.runPromise(discoverSkills([root]))
+    const loaded = await Effect.runPromise(loadSkill([root], 'demo'))
+
+    expect(skills.map((skill) => skill.name)).toEqual(['demo'])
+    expect(skills[0]?.path).toBe(join(root, 'demo', 'SKILL.md'))
+    expect(loaded?.body).toBe('from the shared directory')
+    await rm(root, { recursive: true, force: true })
+    await rm(shared, { recursive: true, force: true })
+  })
+
+  test('a broken or non-directory symlink is ignored', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-skills-'))
+    await writeSkill(root, 'demo')
+    await symlink(join(root, 'missing-target'), join(root, 'broken'), 'dir')
+    await writeFileDeep(join(root, 'plain-file'), 'not a directory')
+    await symlink(join(root, 'plain-file'), join(root, 'linked-file'), 'file')
+
+    const skills = await Effect.runPromise(discoverSkills([root]))
+
+    expect(skills.map((skill) => skill.name)).toEqual(['demo'])
+    await rm(root, { recursive: true, force: true })
   })
 
   test('a SKILL.md that fails validation is ignored', async () => {

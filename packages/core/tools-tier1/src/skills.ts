@@ -1,4 +1,4 @@
-import { readdir } from 'node:fs/promises'
+import { readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Effect } from 'effect'
 import { readIfPresent } from './read-text.ts'
@@ -71,7 +71,21 @@ export function parseSkillDocument(text: string): SkillDocument | undefined {
 const directoriesOf = (root: string): Effect.Effect<ReadonlyArray<string>> =>
   Effect.promise(() =>
     readdir(root, { withFileTypes: true }).then(
-      (entries) => entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name),
+      async (entries) => {
+        const names: Array<string> = []
+        for (const entry of entries) {
+          if (entry.isDirectory()) {
+            names.push(entry.name)
+            continue
+          }
+          if (!entry.isSymbolicLink()) continue
+          // Follow a link one level so a shared skills directory can be linked in.
+          // A broken link or a link to a file is no skill directory, like a missing one.
+          const target = await stat(join(root, entry.name)).catch(() => undefined)
+          if (target?.isDirectory() === true) names.push(entry.name)
+        }
+        return names
+      },
       // A missing or unreadable root holds no skills; it is not a failure.
       () => [],
     ),
