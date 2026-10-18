@@ -122,6 +122,32 @@ export function discoverSkills(
   })
 }
 
+/** One skill's document and where it was read from. */
+export interface LoadedSkill extends SkillDocument {
+  /** Absolute path of the SKILL.md this document came from. */
+  readonly path: string
+}
+
+/**
+ * Reads one skill by name from the first root that holds it, or undefined when no
+ * root lists it or the file no longer parses. The roots are searched again here, so
+ * a caller that named a skill and the catalogue it read cannot drift apart.
+ */
+export function loadSkill(
+  roots: ReadonlyArray<string>,
+  name: string,
+): Effect.Effect<LoadedSkill | undefined> {
+  return Effect.gen(function* () {
+    const listed = yield* discoverSkills(roots)
+    const match = listed.find((skill) => skill.name === name)
+    if (match === undefined) return undefined
+    const text = yield* readIfPresent(match.path)
+    const document = text === undefined ? undefined : parseSkillDocument(text)
+    // A document that stopped parsing between listing and reading is no skill now.
+    return document === undefined ? undefined : { ...document, path: match.path }
+  })
+}
+
 /** One catalog description: single line, trimmed, bounded. */
 export const catalogDescription = (description: string): string =>
   description.replace(/\s+/g, ' ').trim().slice(0, DESCRIPTION_MAX)
