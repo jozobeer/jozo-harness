@@ -7,6 +7,7 @@
     "build": "vp -C client-solid build"
   },
   "dependencies": {
+    "@jozo-harness/tools-tier0": "workspace:*",
     "@jozo-harness/ui-protocol": "workspace:*",
     "@jozo-harness/ui-view": "workspace:*",
     "@kobalte/core": "0.13.14",

@@ -5,6 +5,7 @@ import {
   initialState,
   withConnection,
   withDraft,
+  withFiles,
   withModels,
   withPane,
   withProblem,
@@ -95,6 +96,15 @@ describe('the browser state', () => {
     expect(moved.sessionId).toBe('b')
     expect(moved.conversation.blocks).toHaveLength(0)
     expect(moved.sessions.map((item) => item.id)).toEqual(['a', 'b'])
+  })
+
+  test('the file answer belongs to its session and is dropped on a move', () => {
+    const matches = { sessionId: 'a', query: 'comp', paths: ['apps/web/composer.tsx'] }
+    const shown = withFiles(withSession(initialState, a), matches)
+    expect(shown.files).toEqual(matches)
+    // Reopening the session already on screen keeps its answer; another starts over.
+    expect(withSession(shown, a).files).toEqual(matches)
+    expect(withSession(shown, b).files).toBeUndefined()
   })
 
   test('the theme a reader picks is what the page keeps', () => {

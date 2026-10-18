@@ -1,5 +1,5 @@
 import { fireEvent, render } from '@solidjs/testing-library'
-import { beforeEach, describe, expect, test } from 'vitest'
+import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { createSignal } from 'solid-js'
 import type { UiCommand } from '@jozo-harness/ui-protocol'
 import { emptyConversation } from '@jozo-harness/ui-view'
@@ -31,6 +31,7 @@ type Call =
   | { readonly kind: 'chooseModel'; readonly model: string }
   | { readonly kind: 'askModels' }
   | { readonly kind: 'askCommands' }
+  | { readonly kind: 'askFiles'; readonly query: string }
   | { readonly kind: 'act'; readonly sessionId: string; readonly action: SessionAction }
 
 /** A store the components can be rendered against: signals in, calls out. */
@@ -62,6 +63,7 @@ const makeStore = (
     stopJob: () => undefined,
     askModels: () => calls.push({ kind: 'askModels' }),
     askCommands: () => calls.push({ kind: 'askCommands' }),
+    askFiles: (query) => calls.push({ kind: 'askFiles', query }),
     setModel: (model) => calls.push({ kind: 'model', model }),
     chooseModel: (model) => calls.push({ kind: 'chooseModel', model }),
     act: (sessionId, action) => calls.push({ kind: 'act', sessionId, action }),
@@ -470,6 +472,64 @@ describe('the Solid page', () => {
     // The word is complete now, so the next Enter sends it.
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(calls).toContainEqual({ kind: 'submit' })
+  })
+
+  test('an @ word offers the files of the session, and Enter inserts the picked path', () => {
+    const { store, calls } = makeStore({
+      sessionId: 'a',
+      files: {
+        sessionId: 'a',
+        query: 'comp',
+        paths: ['apps/web/client-solid/components/composer.tsx', 'packages/ui/src/composer.ts'],
+      },
+    })
+
+    const { container } = render(() => <Composer store={store} />)
+
+    const input = container.querySelector('#input') as HTMLTextAreaElement
+    fireEvent.input(input, { target: { value: 'read @comp' } })
+
+    const options = [...container.querySelectorAll('#reference-list button')]
+    expect(options.map((option) => option.getAttribute('data-reference'))).toEqual([
+      'apps/web/client-solid/components/composer.tsx',
+      'packages/ui/src/composer.ts',
+    ])
+    expect(container.querySelector('#command-list')).toBeNull()
+
+    // Enter accepts the reference; it does not send the half-typed line.
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(calls).toContainEqual({
+      kind: 'draft',
+      text: 'read @apps/web/client-solid/components/composer.tsx ',
+    })
+    expect(calls).not.toContainEqual({ kind: 'submit' })
+    expect(container.querySelector('#reference-list')).toBeNull()
+
+    // The word is complete now, so the next Enter sends it.
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(calls).toContainEqual({ kind: 'submit' })
+  })
+
+  test('the @ word waits before it asks for files, and an empty word asks for none', () => {
+    vi.useFakeTimers()
+    try {
+      const { store, calls } = makeStore({ sessionId: 'a' })
+      const { container } = render(() => <Composer store={store} />)
+      const input = container.querySelector('#input') as HTMLTextAreaElement
+
+      fireEvent.input(input, { target: { value: '@comp' } })
+      expect(calls).not.toContainEqual({ kind: 'askFiles', query: 'comp' })
+      vi.advanceTimersByTime(149)
+      expect(calls).not.toContainEqual({ kind: 'askFiles', query: 'comp' })
+      vi.advanceTimersByTime(1)
+      expect(calls).toContainEqual({ kind: 'askFiles', query: 'comp' })
+
+      fireEvent.input(input, { target: { value: '@' } })
+      vi.advanceTimersByTime(150)
+      expect(calls).not.toContainEqual({ kind: 'askFiles', query: '' })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   test('a slash before the list is read asks for it, and a non-command line stays quiet', () => {

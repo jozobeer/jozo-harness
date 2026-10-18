@@ -51,6 +51,8 @@ export interface WebState {
   readonly models: ReadonlyArray<string> | undefined
   /** What this session can be told, once the composer asked; undefined while nobody has. */
   readonly commands: ReadonlyArray<CommandView> | undefined
+  /** The workspace paths the last reference word named; undefined until one asked. */
+  readonly files: FileMatches | undefined
   /** Which surface the right pane shows; undefined leaves the tab strip alone and the body empty. */
   readonly pane: Pane | undefined
   /** Every turn this session ran, oldest first, as the log recorded it. */
@@ -59,6 +61,13 @@ export interface WebState {
   readonly run: RunStateView | undefined
   /** Every turn this session ran, folded one event at a time down to its steps and calls. */
   readonly trace: ReadonlyArray<TraceTurn>
+}
+
+/** One answer to a reference query: the paths, and the session and word that asked. */
+export interface FileMatches {
+  readonly sessionId: string
+  readonly query: string
+  readonly paths: ReadonlyArray<string>
 }
 
 export const initialState: WebState = {
@@ -74,6 +83,7 @@ export const initialState: WebState = {
   settings: undefined,
   models: undefined,
   commands: undefined,
+  files: undefined,
   pane: { kind: 'run' },
   turns: [],
   run: undefined,
@@ -117,6 +127,12 @@ export const withCommands = (state: WebState, commands: ReadonlyArray<CommandVie
   commands,
 })
 
+/** The paths one reference word named; a late answer is tagged, so the page can tell whose it is. */
+export const withFiles = (state: WebState, files: FileMatches): WebState => ({
+  ...state,
+  files,
+})
+
 export const withPane = (state: WebState, pane: Pane | undefined): WebState => ({
   ...state,
   pane,
@@ -136,8 +152,9 @@ export const withBlank = (state: WebState): WebState => ({
   info: emptyInfo,
   problem: '',
   run: undefined,
-  // The list belonged to the session left behind; the next one reads its own on demand.
+  // The lists belonged to the session left behind; the next one reads its own on demand.
   commands: undefined,
+  files: undefined,
   turns: [],
   trace: [],
 })
@@ -160,6 +177,7 @@ export const withSession = (state: WebState, summary: SessionSummary): WebState 
     problem: state.sessionId === summary.id ? state.problem : '',
     run: undefined,
     commands: state.sessionId === summary.id ? state.commands : undefined,
+    files: state.sessionId === summary.id ? state.files : undefined,
     turns: [],
     trace: [],
   }

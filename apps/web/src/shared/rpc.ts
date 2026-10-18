@@ -217,6 +217,17 @@ export const CommandsRpc = Rpc.make('commands', {
   error: Schema.String,
 })
 
+/**
+ * The workspace paths one reference word names in one session, best first. The
+ * empty id asks the run itself, so the blank page completes before any session
+ * exists; the walk keeps .gitignore and never reads the tree in the page.
+ */
+export const FilesRpc = Rpc.make('files', {
+  payload: Schema.Struct({ sessionId: Schema.String, query: Schema.String }),
+  success: Schema.Array(Schema.String),
+  error: Schema.String,
+})
+
 /** The goal and the schedules of one session, as of now. */
 export const StateRpc = Rpc.make('state', {
   payload: Schema.Struct({ sessionId: Schema.String }),
@@ -254,6 +265,7 @@ export const UiRpcs = RpcGroup.make(
   UiCommandRpc,
   UiEventsRpc,
   CommandsRpc,
+  FilesRpc,
   StateRpc,
   JobDetailRpc,
   JobStopRpc,

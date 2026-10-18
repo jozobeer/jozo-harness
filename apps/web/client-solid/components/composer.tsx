@@ -9,8 +9,17 @@ import {
   type CommandToken,
 } from '../../src/ui/commands.ts'
 import { renderMarkdown } from '../../src/ui/markdown.ts'
+import {
+  completedReference,
+  referenceTokenAt,
+  referencesFor,
+  type ReferenceToken,
+} from '../../src/ui/references.ts'
 import type { SessionStore } from '../store.ts'
 import { Button } from './ui/button.tsx'
+
+/** How long the composer waits after the last key before it asks for files. */
+const REFERENCE_ASK_DELAY = 150
 
 /** The composer grows with its draft, up to the height of a page. */
 const grow = (node: HTMLTextAreaElement): void => {
@@ -369,12 +378,58 @@ const Completion = (props: {
   )
 }
 
+/** The files one @word names, above the input. */
+const Reference = (props: {
+  paths: ReadonlyArray<string>
+  answered: boolean
+  selected: number
+  onSelect: (index: number) => void
+  onAccept: (path: string) => void
+}) => (
+  <div
+    id="reference-list"
+    class="command-list"
+    role="listbox"
+    aria-label="the files this word names"
+  >
+    <Show when={props.answered} fallback={<div class="card-hint">reading the files…</div>}>
+      <Show when={props.paths.length > 0} fallback={<div class="card-hint">no file matches</div>}>
+        <For each={props.paths}>
+          {(path, index) => (
+            <button
+              type="button"
+              role="option"
+              class="command-option"
+              data-reference={path}
+              aria-selected={index() === props.selected}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseEnter={() => props.onSelect(index())}
+              onClick={() => props.onAccept(path)}
+            >
+              <span class="command-name">{'@' + path}</span>
+            </button>
+          )}
+        </For>
+      </Show>
+    </Show>
+  </div>
+)
+
 /** The input, and what sits above it: waiting input and the thing to answer. */
 export const Composer = (props: { store: SessionStore }) => {
   let textarea: HTMLTextAreaElement | undefined
   /** The slash word the popup belongs to; undefined closes it. */
   const [token, setToken] = createSignal<CommandToken | undefined>()
+  /** The @word the file popup belongs to; undefined closes it. */
+  const [reference, setReference] = createSignal<ReferenceToken | undefined>()
   const [selected, setSelected] = createSignal(0)
+  /** The one timer that waits for the typing to stop before files are read. */
+  let asking: ReturnType<typeof setTimeout> | undefined
+  const stopAsking = (): void => {
+    if (asking !== undefined) clearTimeout(asking)
+    asking = undefined
+  }
+  onCleanup(stopAsking)
 
   onMount(() => {
     // y and n answer a pending approval, as long as the composer does not have the keys.
@@ -412,16 +467,70 @@ export const Composer = (props: { store: SessionStore }) => {
     return found === undefined ? [] : commandCandidates(props.store.state().commands ?? [], found)
   }
 
+  /** The files the open @word names, once the session has answered that word. */
+  const referencePaths = (): ReadonlyArray<string> => {
+    const found = reference()
+    return found === undefined
+      ? []
+      : referencesFor(props.store.state().files, props.store.state().sessionId, found)
+  }
+
+  /** Whether the open @word has an answer yet; while it has none the popup says it is reading. */
+  const referenceAnswered = (): boolean => {
+    const found = reference()
+    const known = props.store.state().files
+    return (
+      found !== undefined &&
+      known !== undefined &&
+      known.sessionId === props.store.state().sessionId &&
+      known.query === found.query
+    )
+  }
+
+  /** Waits for the typing to stop, then reads the files the word names. */
+  const askFiles = (found: ReferenceToken): void => {
+    stopAsking()
+    if (found.query === '') return
+    const known = props.store.state().files
+    if (
+      known !== undefined &&
+      known.sessionId === props.store.state().sessionId &&
+      known.query === found.query
+    ) {
+      return
+    }
+    asking = setTimeout(() => {
+      asking = undefined
+      props.store.askFiles(found.query)
+    }, REFERENCE_ASK_DELAY)
+  }
+
   /**
-   * Reads the word under the caret again. The list belongs to the session on
-   * screen, so it is read the first time a slash is typed and dropped when the
-   * page moves to another session.
+   * Reads the word under the caret again. A command is the first word of a
+   * line; an @word may sit anywhere. The command list belongs to the session on
+   * screen, so it is read the first time a slash is typed.
    */
   const refresh = (node: HTMLTextAreaElement): void => {
-    const found = commandTokenAt(node.value, node.selectionStart ?? 0)
-    setToken(found)
+    const caret = node.selectionStart ?? 0
+    const command = commandTokenAt(node.value, caret)
     setSelected(0)
-    if (found !== undefined && props.store.state().commands === undefined) props.store.askCommands()
+    if (command !== undefined) {
+      stopAsking()
+      setReference(undefined)
+      setToken(command)
+      if (props.store.state().commands === undefined) props.store.askCommands()
+      return
+    }
+    setToken(undefined)
+    const found = referenceTokenAt(node.value, caret)
+    // A bare @ names nothing yet, so it opens no popup and walks no tree.
+    if (found === undefined || found.query === '') {
+      stopAsking()
+      setReference(undefined)
+      return
+    }
+    setReference(found)
+    askFiles(found)
   }
 
   const accept = (name: string): void => {
@@ -437,12 +546,31 @@ export const Composer = (props: { store: SessionStore }) => {
     node.setSelectionRange(next.caret, next.caret)
   }
 
+  /** Inserts @path where the @word was, as text the model reads. */
+  const acceptReference = (path: string): void => {
+    const node = textarea
+    const found = reference()
+    if (node === undefined || found === undefined) return
+    const next = completedReference(node.value, found, path)
+    props.store.setDraft(next.text)
+    node.value = next.text
+    grow(node)
+    stopAsking()
+    setReference(undefined)
+    node.focus()
+    node.setSelectionRange(next.caret, next.caret)
+  }
+
+  /** How many rows the open popup offers; the two popups never open together. */
+  const completionLength = (): number =>
+    token() !== undefined ? candidates().length : referencePaths().length
+
   /** Moves the selection one row, when the key is an arrow. */
   const moveSelection = (event: KeyboardEvent): boolean => {
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return false
     event.preventDefault()
     const step = event.key === 'ArrowDown' ? 1 : -1
-    setSelected(movedCommandIndex(selected(), step, candidates().length))
+    setSelected(movedCommandIndex(selected(), step, completionLength()))
     return true
   }
 
@@ -450,17 +578,29 @@ export const Composer = (props: { store: SessionStore }) => {
   const dismissCompletion = (event: KeyboardEvent): boolean => {
     if (event.key !== 'Escape') return false
     event.preventDefault()
+    stopAsking()
     setToken(undefined)
+    setReference(undefined)
     return true
+  }
+
+  /** Puts the selected command or path into the line; no candidate means nothing to put. */
+  const acceptChosen = (): void => {
+    if (token() !== undefined) {
+      const chosen = candidates()[selected()]
+      if (chosen !== undefined) accept(chosen.name)
+      return
+    }
+    const path = referencePaths()[selected()]
+    if (path !== undefined) acceptReference(path)
   }
 
   /** Accepts the selected candidate on Tab or Enter; the line is not sent yet. */
   const acceptCompletion = (event: KeyboardEvent): boolean => {
-    const enter = event.key === 'Enter' && !event.shiftKey
-    if (event.key !== 'Tab' && !enter) return false
+    const accepting = event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)
+    if (!accepting || (token() === undefined && reference() === undefined)) return false
     event.preventDefault()
-    const chosen = candidates()[selected()]
-    if (chosen !== undefined) accept(chosen.name)
+    acceptChosen()
     return true
   }
 
@@ -495,6 +635,17 @@ export const Composer = (props: { store: SessionStore }) => {
             />
           )}
         </Show>
+        <Show when={reference()}>
+          {(_found) => (
+            <Reference
+              paths={referencePaths()}
+              answered={referenceAnswered()}
+              selected={selected()}
+              onSelect={setSelected}
+              onAccept={acceptReference}
+            />
+          )}
+        </Show>
         <textarea
           id="input"
           rows="1"
@@ -509,13 +660,17 @@ export const Composer = (props: { store: SessionStore }) => {
             refresh(event.currentTarget)
           }}
           onClick={(event) => refresh(event.currentTarget)}
-          onBlur={() => setToken(undefined)}
+          onBlur={() => {
+            stopAsking()
+            setToken(undefined)
+            setReference(undefined)
+          }}
           onKeyDown={(event) => {
             // An IME owns the keys while it composes: Enter confirms the conversion,
             // it does not accept a candidate or send the line.
             if (event.isComposing) return
             if (
-              token() !== undefined &&
+              (token() !== undefined || reference() !== undefined) &&
               (moveSelection(event) || dismissCompletion(event) || acceptCompletion(event))
             ) {
               return
