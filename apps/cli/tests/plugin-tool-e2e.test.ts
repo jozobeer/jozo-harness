@@ -149,23 +149,36 @@ describe('the plugin rows through the command', () => {
   test('an approved row lands in the settings for the next start', async () => {
     const observed = await run(
       [
-        toolTurn('plugin', { action: 'add', id: 'mcp', name: '@jozo-harness/mcp' }),
+        toolTurn('plugin', { action: 'add', id: 'tier1', name: '@jozo-harness/tools-tier1' }),
         toolTurn('plugin', { action: 'list' }),
       ],
       'approve',
     )
 
     expect(observed.code).toBe(0)
-    expect(observed.settings).toContain('id: mcp')
-    expect(observed.settings).toContain('@jozo-harness/mcp')
+    expect(observed.settings).toContain('id: tier1')
+    expect(observed.settings).toContain('@jozo-harness/tools-tier1')
     // The answer says when it takes effect, and this run's rows are unchanged.
     expect(observed.results).toContain('starts again')
     expect(observed.results).toContain('kernel @jozo-harness/kernel')
   })
 
-  test('a row the human keeps changes nothing', async () => {
+  test('a row the next start could not load is refused, and nothing is written', async () => {
     const observed = await run(
       [toolTurn('plugin', { action: 'add', id: 'mcp', name: '@jozo-harness/mcp' })],
+      'approve',
+    )
+
+    expect(observed.code).toBe(0)
+    // The next start would fail on that row: it is refused before the write, and
+    // the model reads what the row still needs.
+    expect(observed.settings).toBe('')
+    expect(observed.results).toContain('command')
+  })
+
+  test('a row the human keeps changes nothing', async () => {
+    const observed = await run(
+      [toolTurn('plugin', { action: 'add', id: 'tier1', name: '@jozo-harness/tools-tier1' })],
       'keep the rows as they are',
     )
 
