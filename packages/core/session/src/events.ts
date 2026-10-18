@@ -27,6 +27,8 @@ export interface TurnEndReasonMap {
   completed: { readonly kind: 'completed' }
   cancelled: { readonly kind: 'cancelled'; readonly cause: TurnCancelCause }
   error: { readonly kind: 'error'; readonly failure: LlmFailureData }
+  /** The provider stopped at the output cap before the answer settled. */
+  'max-tokens': { readonly kind: 'max-tokens' }
 }
 
 export type TurnEndReason = TurnEndReasonMap[keyof TurnEndReasonMap]

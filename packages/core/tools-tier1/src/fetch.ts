@@ -1,5 +1,6 @@
 import { Schema, Effect } from 'effect'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
+import { NETWORK_TOOL_TIMEOUT_MS } from './timeouts.ts'
 
 const Parameters = Schema.Struct({
   url: Schema.String.annotate({ description: 'The http(s) URL to fetch.' }),
@@ -27,6 +28,7 @@ export const webFetchTool: ToolDefinition<WebFetchArgs, WebFetchValue> = {
   parameters: Parameters,
   // Fetching is read-only; two fetches may run at the same time.
   isConcurrencySafe: () => true,
+  timeoutMs: NETWORK_TOOL_TIMEOUT_MS,
   output: {
     schema: Schema.Struct({
       url: Schema.String,

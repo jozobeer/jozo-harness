@@ -14,6 +14,10 @@ export const UiCommandSchema = Schema.Union([
   }),
   Schema.Struct({ kind: Schema.Literal('answer'), id: Schema.String, answer: Schema.String }),
   Schema.Struct({ kind: Schema.Literal('cancel') }),
+  // '' is the UI's way of leaving the choice to the provider.
+  Schema.Struct({ kind: Schema.Literal('effort'), effort: Schema.String }),
+  // What this session runs on from its next request: `provider/model`.
+  Schema.Struct({ kind: Schema.Literal('model'), model: Schema.String }),
 ])
 
 export type UiCommand = typeof UiCommandSchema.Type
@@ -76,6 +80,17 @@ export interface UiHost {
   readonly answer: (id: string, answer: string) => Effect.Effect<void, SessionError>
   /** Cancels the running turn; a no-op while idle. */
   readonly cancel: () => Effect.Effect<void>
+  /**
+   * Switches the reasoning effort this session asks the provider for. It lands
+   * on the request after the switch; '' leaves the choice to the provider.
+   */
+  readonly setEffort: (effort: string) => Effect.Effect<void>
+  /**
+   * Switches the route this session asks, as `provider/model`. It lands on the
+   * request after the switch, and the session keeps it until it is switched
+   * again.
+   */
+  readonly setModel: (model: string) => Effect.Effect<void>
   /** The approval answerer handed to `installApproval`. */
   readonly answerApproval: (request: ApprovalRequested) => Effect.Effect<boolean>
   /** The answerer handed to `installAsk`. */
@@ -96,5 +111,9 @@ export const sendCommand = (
       return host.answer(command.id, command.answer)
     case 'cancel':
       return host.cancel()
+    case 'effort':
+      return host.setEffort(command.effort)
+    case 'model':
+      return host.setModel(command.model)
   }
 }

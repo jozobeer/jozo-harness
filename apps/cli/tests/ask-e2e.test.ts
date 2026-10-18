@@ -141,4 +141,38 @@ describe('ask_user through the command', () => {
     expect(JSON.stringify(result)).toContain('blue')
     await rm(root, { recursive: true, force: true })
   })
+
+  test('a question with nobody to answer fails, not hangs', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-ask-'))
+    const code = await Effect.runPromise(
+      runCommand({
+        profiles: [profile(root)],
+        plugins: [
+          kernelPlugin,
+          sessionJsonlPlugin,
+          sessionPlugin,
+          toolsPlugin,
+          systemPromptPlugin,
+          safetyPlugin,
+          askPlugin,
+          tier1Plugin,
+          stubLlm,
+          agentPlugin,
+          agentLoopPlugin,
+        ] as ReadonlyArray<Plugin<any, any, any>>,
+        cwd: '/tmp',
+        route: 'stub/model',
+        task: 'ask me',
+        stdout: () => undefined,
+        stderr: () => undefined,
+      }),
+    )
+    expect(code).toBe(0)
+
+    const sessions = await Effect.runPromise(jsonlSessions({ root }).list())
+    const opened = await Effect.runPromise(jsonlSessions({ root }).open(sessions[0]?.id ?? ''))
+    const result = opened.events.find((event) => event.type === 'tool/result')
+    expect(JSON.stringify(result)).toContain('nobody is listening')
+    await rm(root, { recursive: true, force: true })
+  })
 })

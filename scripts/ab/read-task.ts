@@ -45,6 +45,13 @@ export const readReport: AbTask = {
     'one line per file, in file order, each line being exactly that ending line. Read the ' +
     'files; do not guess their contents.',
   files: files(),
+  regime: {
+    difference:
+      'toolCalls and turns separate a harness that reads all sixteen files from one that skips ' +
+      'some, reReads above zero means it went back over a file it had already read, and ' +
+      'compactions above zero means the run crossed the line the pair was built to stay under.',
+    flat: 'A tie means both read the same volume and neither compacted, so this task alone cannot separate them; only the pair with long-prompt then shows what a crossing costs.',
+  },
   timeoutMs: 1_200_000,
   done: async (workspace) => {
     const report = await readFile(workspace + '/report.md', 'utf8').catch(() => '')

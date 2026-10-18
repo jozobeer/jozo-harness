@@ -33,6 +33,7 @@ interface Created {
   readonly task: string
   readonly route: string | undefined
   readonly seed: ReadonlyArray<SessionEvent> | undefined
+  readonly parent: string | undefined
 }
 
 const fakeAgents = (seen: Array<Created>, text: string): AgentsShape =>
@@ -41,12 +42,14 @@ const fakeAgents = (seen: Array<Created>, text: string): AgentsShape =>
       cwd: string
       options?: { readonly route?: string }
       seed?: ReadonlyArray<SessionEvent>
+      parent?: string
     }) => {
       seen.push({
         cwd: options.cwd,
         task: '',
         route: options.options?.route,
         seed: options.seed,
+        parent: options.parent,
       })
       const agent = {
         id: 'child-1',
@@ -99,7 +102,9 @@ describe('subagent tool', () => {
     expect(result?.isError).toBe(false)
     expect(result?.value).toEqual({ sessionId: 'child-1', text: 'child says hi' })
     expect(JSON.stringify(result?.content)).toContain('[child session: child-1]')
-    expect(seen).toEqual([{ cwd: '/work', task: 'look around', route: 'stub/model', seed: [] }])
+    expect(seen).toEqual([
+      { cwd: '/work', task: 'look around', route: 'stub/model', seed: [], parent: 's1' },
+    ])
   })
 
   test('takes the cwd it is given', async () => {
@@ -178,7 +183,7 @@ describe('subagent tool', () => {
       ),
     )
 
-    expect(seen).toEqual([{ cwd: '/work', task: '', route: 'stub/model', seed: [] }])
+    expect(seen).toEqual([{ cwd: '/work', task: '', route: 'stub/model', seed: [], parent: 's1' }])
     expect(result?.value).toEqual({ sessionId: 'child-1', text: '' })
     expect(JSON.stringify(result?.content)).toContain('send_message')
   })

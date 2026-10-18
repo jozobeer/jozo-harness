@@ -58,6 +58,11 @@ describe('web_fetch tool', () => {
     await server.stop()
   })
 
+  test('declares a timeout so a server that never answers cannot hold the call', () => {
+    expect(webFetchTool.timeoutMs).toBeGreaterThan(0)
+    expect(webFetchTool.timeoutMs).toBeLessThanOrEqual(60_000)
+  })
+
   test('refuses a non-http url before calling out', async () => {
     const result = await Effect.runPromise(call(webFetchTool, { url: 'file:///etc/passwd' }))
 

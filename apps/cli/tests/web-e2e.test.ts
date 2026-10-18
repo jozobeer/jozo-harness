@@ -10,7 +10,7 @@ import { toolsPlugin } from '@jozo-harness/tools'
 import { Deferred, Effect, Layer, Schema, Stream } from 'effect'
 import { RpcClient, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawn } from '@jozo-harness/process'
@@ -22,6 +22,9 @@ const textTurn = (text: string): ReadonlyArray<StreamChunk> => [
   { type: 'block-end', index: 0, block: { type: 'text', text } },
   { type: 'finish', kind: 'stop' },
 ]
+
+/** Every request the stub was sent, by the route it named. */
+const calls: Array<{ readonly provider: string; readonly model: string }> = []
 
 const stubLlm: Plugin<{}, Llm, never> = {
   name: 'stub-llm',
@@ -37,7 +40,10 @@ const stubLlm: Plugin<{}, Llm, never> = {
         images: 'none',
         promptCacheControl: false,
       },
-      stream: () => Stream.fromIterable(textTurn('hello from jozo-harness')),
+      stream: (request) => {
+        calls.push({ provider: request.provider, model: request.model })
+        return Stream.fromIterable(textTurn('hello from jozo-harness'))
+      },
     } satisfies LlmAdapter),
 }
 
@@ -104,6 +110,90 @@ describe('the browser UI through the command', () => {
     await rm(staticRoot, { recursive: true, force: true })
   })
 
+  test('a model a page picks is what the session it opens next starts from', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-model-'))
+    const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-web-model-ws-'))
+    // The settings file the pick is written to, so the real home stays out of it.
+    const configHome = await mkdtemp(join(tmpdir(), 'jozo-harness-web-model-config-'))
+    const ready = Effect.runSync(Deferred.make<string>())
+    const stop = Effect.runSync(Deferred.make<void>())
+    const previous = process.env.XDG_CONFIG_HOME
+    process.env.XDG_CONFIG_HOME = configHome
+    const before = calls.length
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* Effect.forkScoped(
+            runCommand({
+              profiles: [profile(root)],
+              plugins,
+              cwd: workspace,
+              route: 'stub/model',
+              web: { port: 0, staticRoot },
+              stdout: () => undefined,
+              stderr: (text) => {
+                const match = /http:\/\/127\.0\.0\.1:\d+\//.exec(text)
+                if (match !== null) void Effect.runSync(Deferred.succeed(ready, match[0]))
+              },
+              interrupt: Deferred.await(stop),
+            }),
+          )
+          const url = (yield* Deferred.await(ready)).replace(/\/$/, '')
+          const wsUrl = 'ws://' + url.replace(/^http:\/\//, '') + '/ui'
+
+          const used = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const held = yield* client.settings()
+            // The session that is already open keeps the model it was built with.
+            const opened = yield* client.open({})
+            const written = yield* client.setModel({ model: 'stub/other', remember: true })
+            const chosen = yield* client.settings()
+            yield* client.command({
+              sessionId: opened.id,
+              command: { kind: 'submit', text: 'ping' },
+            })
+            yield* Effect.sleep('500 millis')
+            // The session opened after the pick is the one that asks for it.
+            const next = yield* client.open({})
+            yield* client.command({ sessionId: next.id, command: { kind: 'submit', text: 'ping' } })
+            yield* Effect.sleep('500 millis')
+            return { held: held.model, written, chosen: chosen.model }
+          })
+
+          const result = yield* withoutServices(used).pipe(
+            Effect.provide(RpcClient.layerProtocolSocket()),
+            Effect.provide(Socket.layerWebSocket(wsUrl)),
+            Effect.provide(Socket.layerWebSocketConstructorGlobal),
+            Effect.provide(RpcSerialization.layerJson),
+          )
+          yield* Deferred.succeed(stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    const settings = await readFile(join(configHome, 'jzh', 'config.yaml'), 'utf8')
+    if (previous === undefined) delete process.env.XDG_CONFIG_HOME
+    else process.env.XDG_CONFIG_HOME = previous
+    await rm(root, { recursive: true, force: true })
+    await rm(workspace, { recursive: true, force: true })
+    await rm(configHome, { recursive: true, force: true })
+
+    // The page reads what a session opened now would ask, and picks for the next one.
+    expect(observed.held).toBe('stub/model')
+    expect(observed.written).toBe(true)
+    expect(observed.chosen).toBe('stub/other')
+    // Written, so a later run reads it there...
+    expect(settings).toContain('model: stub/other')
+    // ...the session that was already open kept the model it began with...
+    // ...and the one the page opened afterwards asked the provider for the pick.
+    expect(calls.slice(before)).toEqual([
+      { provider: 'stub', model: 'model' },
+      { provider: 'stub', model: 'other' },
+    ])
+  }, 30_000)
+
   test('a browser client drives a real turn and the static app is served', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-'))
     const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-web-ws-'))
@@ -134,9 +224,11 @@ describe('the browser UI through the command', () => {
           const used = Effect.gen(function* () {
             const client = yield* RpcClient.make(UiRpcs)
             const seen = yield* Deferred.make<string>()
-            const { initial } = yield* client.sessions()
+            // A server that just started holds no session: the page asks for one.
+            const listed = yield* client.sessions()
+            const opened = yield* client.open({})
             yield* Effect.forkScoped(
-              client.events({ sessionId: initial }).pipe(
+              client.events({ sessionId: opened.id }).pipe(
                 Stream.runForEach((event) =>
                   Effect.gen(function* () {
                     if (event.kind !== 'session' || event.event.type !== 'assistant/message') return
@@ -146,13 +238,19 @@ describe('the browser UI through the command', () => {
               ),
             )
             const accepted = yield* client.command({
-              sessionId: initial,
+              sessionId: opened.id,
               command: { kind: 'submit', text: 'ping' },
             })
             const answer = yield* Deferred.await(seen)
             const page = yield* Effect.promise(() => fetch(url + '/'))
             const home = yield* Effect.promise(() => page.text())
-            return { accepted, answer, status: page.status, home }
+            return {
+              held: listed.initial,
+              accepted,
+              answer,
+              status: page.status,
+              home,
+            }
           })
 
           const result = yield* withoutServices(used).pipe(
@@ -170,6 +268,7 @@ describe('the browser UI through the command', () => {
     const sessions = await Effect.runPromise(jsonlSessions({ root }).list())
     const opened = await Effect.runPromise(jsonlSessions({ root }).open(sessions[0]?.id ?? ''))
 
+    expect(observed.held).toBe('')
     expect(observed.accepted).toBe(true)
     expect(observed.answer).toContain('hello from jozo-harness')
     expect(observed.status).toBe(200)

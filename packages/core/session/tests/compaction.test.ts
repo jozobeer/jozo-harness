@@ -89,6 +89,20 @@ describe('pruneFor', () => {
     expect(pruneFor(events, options)).toBeUndefined()
   })
 
+  test('an older system prompt folds as history while the newest stays the frame', () => {
+    const events = [
+      headerEvent(),
+      event(2, 'system/message', { text: longText(500) }),
+      event(3, 'system/message', { text: longText(500) }),
+      event(4, 'user/message', { text: 'go', source: 'user' as const }),
+    ]
+
+    const prune = pruneFor(events, options)
+
+    // The prompt the model was given first is history now; the newest is the frame.
+    expect(prune?.shadowedSeqs).toEqual([2])
+  })
+
   test('drops reasoning from an old message and records that too', () => {
     const events = [
       headerEvent(),

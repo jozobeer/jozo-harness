@@ -328,7 +328,9 @@ describe('compaction through the command', () => {
   test('a request that reserves output compacts against the shorter line', async () => {
     const plain = await mkdtemp(join(tmpdir(), 'jozo-harness-compact-'))
     const reserved = await mkdtemp(join(tmpdir(), 'jozo-harness-compact-'))
-    const tasks = ['the first thing the model was told', 'second']
+    // The frame is recorded once, so the message itself carries the pressure on the
+    // second request: over the reserved line, under the unreserved one.
+    const tasks = ['the first thing the model was told '.repeat(20), 'second']
     // The window is 1,000 tokens: without a reservation the line is 800, and with 900
     // reserved for the answer it is 100.
     const budget = 'contextWindow: 1000\nthresholdRatio: 0.8\nheadroomTokens: 0'
@@ -453,9 +455,11 @@ describe('compaction through the command', () => {
         } satisfies LlmAdapter),
     })
 
+    // The second request carries enough input of its own to cross the line: the
+    // system frame is recorded once and no longer pads every turn.
     const { sent, opened } = await runTasks(
       root,
-      [first, 'second'],
+      [first, 'the second thing the model was told '.repeat(4)],
       'retainTokens: 1\nmaxBytes: 10\ncontextWindow: 120\nheadroomTokens: 0',
       summaryLlm,
     )

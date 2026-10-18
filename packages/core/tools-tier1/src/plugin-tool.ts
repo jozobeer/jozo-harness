@@ -1,6 +1,7 @@
 import { Schema, Effect } from 'effect'
 import { APPROVAL_ANSWER, type AskShape } from '@jozo-harness/safety'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
+import { askOrFail } from './ask.ts'
 
 /** One row of the composition, as a human reads it. */
 export interface PluginRowSummary {
@@ -170,7 +171,7 @@ export const makePluginTool = (host: PluginHost): ToolDefinition<PluginArgs, Plu
       if (args.action === 'list') return listed(host)
       const change = changeFor(args, host)
       if (change instanceof ToolError) return yield* Effect.fail(change)
-      const answer = yield* host.ask.ask({
+      const answer = yield* askOrFail(host.ask, {
         id: context.callId,
         question: questionFor(change),
         options: OPTIONS,

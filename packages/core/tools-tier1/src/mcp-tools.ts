@@ -2,6 +2,7 @@ import { Effect, Schema } from 'effect'
 import type { ContentBlock } from '@jozo-harness/llm'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
 import { TOOLS_CALL, TOOLS_LIST } from './mcp-codec.ts'
+import { NETWORK_TOOL_TIMEOUT_MS } from './timeouts.ts'
 import type { McpClientShape } from './mcp.ts'
 
 interface ToolListing {
@@ -47,6 +48,8 @@ export const mcpTools = (
         name: prefix + name,
         description: tool.description ?? 'An MCP tool',
         parameters: Schema.Unknown,
+        // A stuck server answers no JSON-RPC response, so the call needs a bound.
+        timeoutMs: NETWORK_TOOL_TIMEOUT_MS,
         output: {
           schema: Schema.Unknown,
           render: (_args, value) => textBlocks(value),

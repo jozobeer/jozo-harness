@@ -29,6 +29,11 @@ describe('decodeSessionEvent', () => {
     expect(await decode(throughJson(sessionEvent))).toEqual(sessionEvent)
   })
 
+  test('round-trips a turn ended by the token cap', async () => {
+    const sessionEvent = event(2, 'turn/end', { turn: 1, reason: { kind: 'max-tokens' } })
+    expect(await decode(throughJson(sessionEvent))).toEqual(sessionEvent)
+  })
+
   test('round-trips a header', async () => {
     expect(await decode(throughJson(headerEvent()))).toEqual(headerEvent())
   })

@@ -31,24 +31,36 @@ export interface AgentDriver {
   setStatus(status: AgentStatus): Effect.Effect<void>
   /** Cause of the latest `cancel`, read by the turn finalizer when it records `turn/end`. */
   readonly cancelCause: AgentCancelCause | undefined
-  /** Completes once per `followup`. A runner takes from it before starting a turn. */
+  /** Completes once per queued input. A runner takes from it before starting a turn. */
   readonly wake: Queue.Queue<void>
 }
 
 export interface Agent {
   readonly id: SessionId
   readonly session: Session
+  /** What the loop reads as it works: the options as they are now, not as they were created. */
   readonly options: AgentOptions
   readonly inbox: Inbox
   readonly status: AgentStatus
   /** Agent-scoped registrations live until the agent is disposed. */
   readonly scope: Scope.Scope
   readonly driver: AgentDriver
+  /**
+   * Switches the reasoning effort the loop asks the provider for. It lands on
+   * the request after the switch; '' leaves the choice to the provider.
+   */
+  setEffort(effort: string): Effect.Effect<void>
+  /**
+   * Switches the route the loop asks, as `provider/model`. It lands on the
+   * request after the switch, and the session keeps it until it is switched
+   * again.
+   */
+  setRoute(route: string): Effect.Effect<void>
   /** Queues input for a new turn and wakes the runner. */
   followup(message: UserMessage): Effect.Effect<void, SessionError>
-  /** Queues input for the next step boundary without waking an idle agent. */
+  /** Queues input for the next step boundary and wakes the runner, so an idle agent starts a turn with it. */
   steer(message: UserMessage): Effect.Effect<void, SessionError>
-  /** Queues input for the next request without waking an idle agent. */
+  /** Queues input for the next request and wakes the runner, so an idle agent starts a turn with it. */
   inject(message: UserMessage): Effect.Effect<void, SessionError>
   cancel(cause: AgentCancelCause): Effect.Effect<void>
   readonly whenIdle: Effect.Effect<void>
@@ -66,6 +78,8 @@ export interface CreateAgentOptions {
   readonly options: AgentOptions
   /** Resumes an existing session instead of creating one. */
   readonly resume?: SessionId
+  /** The agent that started this one. Its cancel and dispose reach this child too. */
+  readonly parent?: SessionId
 }
 
 export type AgentError = SessionError | AgentInitError
@@ -74,6 +88,8 @@ export interface AgentsShape {
   create(options: CreateAgentOptions): Effect.Effect<Agent, AgentError>
   get(id: SessionId): Agent | undefined
   list(): ReadonlyArray<Agent>
+  /** The agents this one started, and only those. */
+  childrenOf(id: SessionId): ReadonlyArray<Agent>
   dispose(id: SessionId): Effect.Effect<void>
   disposeAll(): Effect.Effect<void>
 }

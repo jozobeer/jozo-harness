@@ -119,7 +119,15 @@ describe('the browser state', () => {
       cwd: '/work/one',
       sessionRoot: '/home/.jzh/sessions',
     }
-    const run = { goal: null, schedules: [], jobs: [], queued: ['hold this'] }
+    const run = {
+      goal: null,
+      schedules: [],
+      jobs: [],
+      queued: ['hold this'],
+      model: 'stub/model',
+      effort: '',
+      efforts: [],
+    }
     const connected = withConnection(initialState, true)
     const drafted = withDraft(connected, 'half typed')
     const shown = withSettings(drafted, settings)

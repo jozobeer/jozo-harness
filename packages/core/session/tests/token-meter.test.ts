@@ -140,6 +140,42 @@ describe('meterOf', () => {
     )
   })
 
+  const imageResult = (seq: number, data: string) =>
+    event(seq, 'tool/result', {
+      callId: 'c1',
+      isError: false,
+      content: [{ type: 'image' as const, mediaType: 'image/png', data }],
+    })
+
+  test('prices an image block as a reference, not by the length of its base64', () => {
+    const budget128k: TokenBudget = {
+      contextWindow: 128_000,
+      thresholdRatio: 0.8,
+      headroomTokens: 2_000,
+    }
+    const events = [headerEvent(), imageResult(2, 'A'.repeat(500_000))]
+
+    const meter = meterOf(events, budget128k)
+
+    // 500 KB of base64 used to read as ~125,000 tokens and cross the 102,400 line alone.
+    expect(meter.estimated).toBe(1_000)
+    expect(meter.compacts).toBe(false)
+  })
+
+  test('prices an image at what the routed adapter declares for one', () => {
+    const events = [headerEvent(), imageResult(2, 'A'.repeat(500_000))]
+
+    const meter = meterOf(events, {
+      contextWindow: 1000,
+      thresholdRatio: 0.8,
+      headroomTokens: 0,
+      imageTokens: 4321,
+    })
+
+    expect(meter.estimated).toBe(4321)
+    expect(meter.compacts).toBe(true)
+  })
+
   test('a context window too small for the headroom still leaves a threshold', () => {
     const events = [headerEvent(), userTurn(2, 'go')]
 

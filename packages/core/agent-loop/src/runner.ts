@@ -12,6 +12,7 @@ import {
   compactAssistantStream,
   encodeLlmFailure,
   type ContentBlock,
+  type FinishKind,
   type RequestMessage,
   type StreamChunk,
   type TimedStreamChunk,
@@ -23,8 +24,10 @@ import {
   checkpointOf,
   cwdOf,
   deriveMessages,
+  IMAGE_REFERENCE_TOKENS,
   lastRequestHeader,
   lastRuntimeContext,
+  lastSystemPrompt,
   messageBudgetOf,
   messagesWithPrune,
   meterOf,
@@ -54,7 +57,12 @@ export class AgentLoop extends Context.Service<AgentLoop, AgentRunner>()(
 type ToolCall = Extract<ContentBlock, { type: 'tool-call' }>
 
 type StepOutcome =
-  | { readonly ok: true; readonly content: ReadonlyArray<ContentBlock> }
+  | {
+      readonly ok: true
+      readonly content: ReadonlyArray<ContentBlock>
+      /** Why the provider stopped; `length` means the output cap cut the answer. */
+      readonly finish: FinishKind | undefined
+    }
   | { readonly ok: false; readonly failure: LlmFailure }
 
 /** The prompt as the system-prompt service hands it to one step. */
@@ -131,6 +139,7 @@ const agentLoopEffect = (
       thresholdRatio: config.thresholdRatio ?? DEFAULT_COMPACT_THRESHOLD_RATIO,
       headroomTokens: config.headroomTokens ?? DEFAULT_COMPACT_HEADROOM_TOKENS,
       reserveTokens: config.maxTokens ?? 0,
+      imageTokens: llm.capabilities.imageTokens ?? IMAGE_REFERENCE_TOKENS,
     }
     const compact: CompactOptions = {
       retainTokens:
@@ -196,7 +205,7 @@ const agentLoopEffect = (
                   ...(assembled.usage === undefined ? {} : { usage: assembled.usage }),
                   stream: compactAssistantStream(stream),
                 })
-                return { ok: true as const, content: assembled.content }
+                return { ok: true as const, content: assembled.content, finish: assembled.finish }
               }),
           }),
         )
@@ -215,9 +224,11 @@ const agentLoopEffect = (
       })
 
     /**
-     * Appends the settled system prompt and the input that started the step; the
-     * runtime snapshot follows the prompt and precedes the input, and is recorded
-     * on every step so a mid-turn change reaches the next request.
+     * Appends the settled system prompt when it changed and the input that started
+     * the step; the runtime snapshot follows the prompt and precedes the input, and
+     * is recorded on every step so a mid-turn change reaches the next request. The
+     * log's newest frame is the comparison, so a resumed session holding duplicates
+     * stops growing rather than adding another copy.
      */
     const recordInput = (
       agent: Agent,
@@ -227,7 +238,9 @@ const agentLoopEffect = (
       opening: boolean,
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
-        if (opening) yield* append(agent, 'system/message', { text: build.system })
+        if (opening && build.system !== lastSystemPrompt(agent.session.events())) {
+          yield* append(agent, 'system/message', { text: build.system })
+        }
         yield* recordRuntimeContext(agent, cwd)
         for (const message of input) {
           yield* append(agent, 'user/message', { text: message.text, source: message.source })
@@ -462,11 +475,9 @@ const agentLoopEffect = (
       agent: Agent,
       pending: ReadonlyMap<string, ToolCall>,
     ): Effect.Effect<void> =>
-      Effect.forEach(
-        [...pending.values()],
-        (call) => didNotFinish(agent, call.id, call.name),
-        { discard: true },
-      )
+      Effect.forEach([...pending.values()], (call) => didNotFinish(agent, call.id, call.name), {
+        discard: true,
+      })
 
     /**
      * The log a run resumes from can hold a call with no result: a process killed
@@ -520,6 +531,13 @@ const agentLoopEffect = (
             return false
           }
           const calls = outcome.content.filter(isToolCall)
+          // A cut-off answer is not a completed one: no tool call is run from it,
+          // and the turn closes with the reason the cap gives it.
+          if (outcome.finish === 'length') {
+            yield* append(agent, 'step/end', { step })
+            yield* append(agent, 'turn/end', { turn, reason: { kind: 'max-tokens' } })
+            return false
+          }
           if (calls.length === 0) {
             yield* append(agent, 'step/end', { step })
             if (agent.inbox.nextStep.length === 0) return true

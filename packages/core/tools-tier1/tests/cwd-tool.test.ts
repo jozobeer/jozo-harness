@@ -45,6 +45,33 @@ describe('working_directory tool', () => {
     expect(result?.value).toEqual({ cwd: join('/', 'work', 'sub', 'dir') })
   })
 
+  test('returns to the workspace root with "."', async () => {
+    const moved: Array<string> = []
+    const tool = makeWorkingDirectoryTool({
+      root: '/work',
+      change: (cwd) => Effect.sync(() => void moved.push(cwd)),
+    })
+
+    const result = await Effect.runPromise(call(tool, { path: '.' }, '/work/sub'))
+
+    expect(result?.isError).toBe(false)
+    expect(moved).toEqual([join('/', 'work')])
+    expect(result?.value).toEqual({ cwd: join('/', 'work') })
+  })
+
+  test('returns to the workspace root with its absolute path', async () => {
+    const moved: Array<string> = []
+    const tool = makeWorkingDirectoryTool({
+      root: '/work',
+      change: (cwd) => Effect.sync(() => void moved.push(cwd)),
+    })
+
+    const result = await Effect.runPromise(call(tool, { path: join('/', 'work') }, '/work/sub'))
+
+    expect(result?.isError).toBe(false)
+    expect(moved).toEqual([join('/', 'work')])
+  })
+
   test('refuses a move outside the workspace', async () => {
     const moved: Array<string> = []
     const tool = makeWorkingDirectoryTool({

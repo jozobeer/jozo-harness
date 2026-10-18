@@ -36,6 +36,44 @@ describe('job tools', () => {
     expect(observed.killed?.isError).toBe(false)
   })
 
+  test('one waited read returns only what the job produced since the last read', async () => {
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const jobs = yield* makeJobs()
+          const context = yield* Layer.build(Layer.provideMerge(toolsLayer, HooksLive))
+          const tools = Context.get(context, Tools)
+          for (const tool of jobTools(jobs)) yield* tools.register(tool)
+
+          const call = (name: string, args: unknown) =>
+            tools.call({
+              callId: 'c-' + name,
+              tool: name,
+              arguments: JSON.stringify(args),
+              context: { sessionId: 's1', cwd: '/tmp', callId: 'c-' + name },
+            })
+
+          yield* call('job_start', { command: 'echo first && sleep 0.4 && echo second' })
+          yield* Effect.sleep('200 millis')
+          const first = yield* call('job_output', { id: 'job-1', wait: false })
+          const waited = yield* call('job_output', { id: 'job-1', wait: true, timeoutMs: 5_000 })
+          return {
+            first: JSON.stringify(first?.value),
+            waited: JSON.stringify(waited?.value),
+            content: JSON.stringify(waited?.content),
+          }
+        }),
+      ),
+    )
+
+    expect(observed.first).toContain('"running":true')
+    expect(observed.first).toContain('first')
+    expect(observed.waited).toContain('second')
+    expect(observed.waited).toContain('"truncated":false')
+    expect(observed.waited).not.toContain('first')
+    expect(observed.content).toContain('second')
+  })
+
   test('lists what is running and what has stopped', async () => {
     const observed = await Effect.runPromise(
       Effect.scoped(

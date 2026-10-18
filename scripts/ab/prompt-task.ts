@@ -23,6 +23,13 @@ export const longPrompt: AbTask = {
     filler() +
     '\n\nThe text above is filler. Create a file done.md whose single line reads exactly: status: ok',
   files: {},
+  regime: {
+    difference:
+      'compactions is the reading here: zero means the first request never crossed the line, one ' +
+      'or more means the harness compacted before answering, and turns then shows how much of ' +
+      'the filler it carried before done.md was written.',
+    flat: 'A tie in compactions with done.md on disk means both crossed the same line and kept the instruction, so the task cannot say which of the two lost less on the way through.',
+  },
   timeoutMs: 600_000,
   done: async (workspace) => {
     const text = await readFile(workspace + '/done.md', 'utf8').catch(() => '')

@@ -28,7 +28,7 @@ import {
   type ToolRegistry,
 } from '@jozo-harness/tools'
 import { Effect, Layer, Schema, Scope, Stream } from 'effect'
-import { AgentLoop, agentLoopLayer } from '../src/index.ts'
+import { AgentLoop, agentLoopLayer, type AgentRequest } from '../src/index.ts'
 
 type Script = () => Stream.Stream<StreamChunk, LlmFailure>
 
@@ -177,6 +177,41 @@ describe('agent loop', () => {
     expect(assistant).toEqual([[{ type: 'text', text }]])
   })
 
+  test('a step cut off by the token cap ends the turn as max-tokens', async () => {
+    const text = 'half an ans'
+    let stopping = 0
+    const events = await scenario(
+      [
+        chunks([
+          { type: 'text-delta', index: 0, text },
+          { type: 'block-end', index: 0, block: { type: 'text', text } },
+          { type: 'finish', kind: 'length' },
+        ]),
+      ],
+      (ctx) =>
+        Effect.gen(function* () {
+          yield* ctx.hooks.on('agent/turn-stopping', () =>
+            Effect.sync(() => {
+              stopping += 1
+            }),
+          )
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+    )
+
+    // The answer is still history, but the turn says why it stopped.
+    const assistant = events.session
+      .events()
+      .flatMap((event) => (event.type === 'assistant/message' ? [event.data.content] : []))
+    expect(assistant).toEqual([[{ type: 'text', text }]])
+    expect(reason(events)).toEqual([{ kind: 'max-tokens' }])
+    // A truncated turn is not one that may queue another goal round.
+    expect(stopping).toBe(0)
+  })
+
   test('executes a tool call and runs a second step with its result', async () => {
     const echo: ToolDefinition<{ readonly text: string }, { readonly text: string }> = {
       name: 'echo',
@@ -273,6 +308,36 @@ describe('agent loop', () => {
     expect(stored[injected]?.type === 'user/message' ? stored[injected].data.text : '').toBe(note)
   })
 
+  test('a steer queued as the turn closes is delivered and whenIdle settles', async () => {
+    const note = crypto.randomUUID()
+    let steered = false
+    const events = await scenario([chunks(textTurn('first')), chunks(textTurn('second'))], (ctx) =>
+      Effect.gen(function* () {
+        // The closing edge of a turn: the step loop already found no input, so
+        // only the wake this steer offers can open the turn it is claimed by.
+        yield* ctx.hooks.on('agent/turn-stopping', (agent) =>
+          Effect.gen(function* () {
+            if (steered) return
+            steered = true
+            yield* agent.steer({ text: note, source: 'inject' }).pipe(Effect.orDie)
+          }),
+        )
+        const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+        yield* agent.followup({ text: 'go', source: 'user' })
+        yield* agent.whenIdle
+        return agent
+      }),
+    )
+
+    const stored = events.session.events()
+    const delivered = stored.flatMap((event) =>
+      event.type === 'user/message' && event.data.source === 'inject' ? [event.data.text] : [],
+    )
+    expect(types(events).filter((type) => type === 'turn/start')).toHaveLength(2)
+    expect(delivered).toEqual([note])
+    expect(events.inbox.pending).toBe(false)
+  })
+
   test('a pre-step listener opens the turn with its messages', async () => {
     const note = crypto.randomUUID()
     const events = await scenario([chunks(textTurn('done'))], (ctx) =>
@@ -358,6 +423,94 @@ describe('agent loop', () => {
     expect(header?.params).toEqual({ reasoning_effort: 'high' })
   })
 
+  test('an effort a session was switched to reaches the request after the switch', async () => {
+    const events = await scenario([chunks(textTurn('one')), chunks(textTurn('two'))], (ctx) =>
+      Effect.gen(function* () {
+        const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+        yield* agent.followup({ text: 'first', source: 'user' })
+        yield* agent.whenIdle
+        yield* agent.setEffort('high')
+        yield* agent.followup({ text: 'second', source: 'user' })
+        yield* agent.whenIdle
+        return agent
+      }),
+    )
+
+    const params = events.session
+      .events()
+      .flatMap((event) => (event.type === 'request/header' ? [event.data.params] : []))
+
+    // The first request named no effort; the one after the switch asks for it.
+    expect(params).toEqual([{}, { reasoning_effort: 'high' }])
+  })
+
+  test('a route a session was switched to reaches the request after the switch', async () => {
+    const events = await scenario([chunks(textTurn('one')), chunks(textTurn('two'))], (ctx) =>
+      Effect.gen(function* () {
+        const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+        yield* agent.followup({ text: 'first', source: 'user' })
+        yield* agent.whenIdle
+        yield* agent.setRoute('other/model')
+        yield* agent.followup({ text: 'second', source: 'user' })
+        yield* agent.whenIdle
+        return agent
+      }),
+    )
+
+    const headers = events.session
+      .events()
+      .flatMap((event) => (event.type === 'request/header' ? [event.data] : []))
+
+    // The switch is a change of route, so the log opens a second series rather
+    // than reusing the header the session started with.
+    expect(headers.map((data) => [data.provider, data.model, data.reason])).toEqual([
+      ['fake', 'model', 'opened'],
+      ['other', 'model', 'changed'],
+    ])
+  })
+
+  test('an effort switched while a turn runs reaches that turn', async () => {
+    const events = await scenario(
+      [
+        chunks([
+          {
+            type: 'block-end',
+            index: 0,
+            block: { type: 'tool-call', id: 'c1', name: 'switch-effort', arguments: '{}' },
+          },
+          { type: 'finish', kind: 'tool-calls' },
+        ]),
+        chunks(textTurn('done')),
+      ],
+      (ctx) =>
+        Effect.gen(function* () {
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          // Anything the human does while the turn runs, standing in for the command.
+          const pick: ToolDefinition<{}, { readonly ok: boolean }> = {
+            name: 'switch-effort',
+            description: 'switches the effort from inside a turn',
+            parameters: Schema.Struct({}),
+            output: {
+              schema: Schema.Struct({ ok: Schema.Boolean }),
+              render: () => [{ type: 'text', text: 'switched' }],
+            },
+            execute: () => agent.setEffort('high').pipe(Effect.as({ ok: true })),
+          }
+          yield* ctx.tools.register(pick)
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+    )
+
+    const params = events.session
+      .events()
+      .flatMap((event) => (event.type === 'request/header' ? [event.data.params] : []))
+
+    // One turn, two requests: the one that called the tool, and the one after it.
+    expect(params).toEqual([{}, { reasoning_effort: 'high' }])
+  })
+
   test('a turn that changes nothing reuses the header it opened', async () => {
     const events = await scenario([chunks(textTurn('one')), chunks(textTurn('two'))], (ctx) =>
       Effect.gen(function* () {
@@ -373,6 +526,89 @@ describe('agent loop', () => {
     const kinds = types(events)
     expect(kinds.filter((type) => type === 'request/header')).toHaveLength(1)
     expect(kinds.filter((type) => type === 'turn/start')).toHaveLength(2)
+  })
+
+  test('records the system prompt once across turns that keep it the same', async () => {
+    const events = await scenario(
+      [chunks(textTurn('one')), chunks(textTurn('two')), chunks(textTurn('three'))],
+      (ctx) =>
+        Effect.gen(function* () {
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          for (const text of ['first', 'second', 'third']) {
+            yield* agent.followup({ text, source: 'user' })
+            yield* agent.whenIdle
+          }
+          return agent
+        }),
+    )
+
+    const prompts = events.session
+      .events()
+      .flatMap((event) => (event.type === 'system/message' ? [event.data.text] : []))
+
+    expect(types(events).filter((type) => type === 'turn/start')).toHaveLength(3)
+    expect(prompts).toHaveLength(1)
+  })
+
+  test('records a changed system prompt and sends both frames', async () => {
+    let frame = 'first frame'
+    const requests: Array<AgentRequest> = []
+    const events = await scenario([chunks(textTurn('one')), chunks(textTurn('two'))], (ctx) =>
+      Effect.gen(function* () {
+        yield* ctx.prompt
+          .section({ name: 'test-frame', order: 1, text: () => frame })
+          .pipe(Effect.orDie)
+        yield* ctx.hooks.on('agent/request', (request, next) =>
+          Effect.map(next(), (adjusted) => {
+            requests.push(adjusted ?? request)
+            return adjusted
+          }),
+        )
+        const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+        yield* agent.followup({ text: 'first', source: 'user' })
+        yield* agent.whenIdle
+        frame = 'second frame'
+        yield* agent.followup({ text: 'second', source: 'user' })
+        yield* agent.whenIdle
+        return agent
+      }),
+    )
+
+    const prompts = events.session
+      .events()
+      .flatMap((event) => (event.type === 'system/message' ? [event.data.text] : []))
+    const sent = (requests[1]?.messages ?? [])
+      .filter((message) => message.role === 'system')
+      .flatMap((message) =>
+        message.content.flatMap((block) => (block.type === 'text' ? [block.text] : [])),
+      )
+
+    expect(prompts).toEqual(['first frame', 'second frame'])
+    // The changed frame reaches the request without dropping the one it replaces.
+    expect(sent).toEqual(['first frame', 'second frame'])
+  })
+
+  test('a resumed log with duplicate prompts does not append the frame again', async () => {
+    const events = await scenario([chunks(textTurn('done'))], (ctx) =>
+      Effect.gen(function* () {
+        yield* ctx.prompt
+          .section({ name: 'test-frame', order: 1, text: 'the frame' })
+          .pipe(Effect.orDie)
+        const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+        // A session recorded by a run that appended the same prompt every turn.
+        yield* agent.session.append('system/message', { text: 'the frame' })
+        yield* agent.session.append('system/message', { text: 'the frame' })
+        yield* agent.followup({ text: 'go', source: 'user' })
+        yield* agent.whenIdle
+        return agent
+      }),
+    )
+
+    const prompts = events.session
+      .events()
+      .flatMap((event) => (event.type === 'system/message' ? [event.data.text] : []))
+
+    expect(prompts).toEqual(['the frame', 'the frame'])
   })
 
   test('retries a failed attempt without repeating the request header', async () => {

@@ -139,31 +139,28 @@ describe('Agents', () => {
     expect(events.status).toBe('idle')
   })
 
-  test('steer waits for a wake and is claimed with the next turn', async () => {
+  test('steer wakes the runner and its input opens a turn', async () => {
     const steered = crypto.randomUUID()
-    const turn = crypto.randomUUID()
     const seen = await withAgents(turnRunner(), () =>
       Effect.gen(function* () {
         const agents = yield* Agents
         const agent = yield* agents.create({ cwd: '/work', options: { route: 'r' } })
         yield* agent.steer(message(steered))
-        yield* Effect.yieldNow
-        const beforeWake = agent.session
-          .events()
-          .filter((event) => event.type === 'turn/start').length
-        yield* agent.followup(message(turn))
-        yield* agent.whenIdle
+        // Only the steer is queued: if it did not wake the runner, the wait times out.
+        yield* agent.whenIdle.pipe(Effect.timeout('1 second'), Effect.orDie)
         return {
-          beforeWake,
+          turns: agent.session.events().filter((event) => event.type === 'turn/start').length,
           users: agent.session
             .events()
             .flatMap((event) => (event.type === 'user/message' ? [event.data.text] : [])),
+          status: agent.status,
         }
       }),
     )
 
-    expect(seen.beforeWake).toBe(0)
-    expect(seen.users).toEqual([steered, turn])
+    expect(seen.turns).toBe(1)
+    expect(seen.users).toEqual([steered])
+    expect(seen.status).toBe('idle')
   })
 
   test('cancel interrupts a running turn and returns the agent to idle', async () => {
@@ -255,5 +252,150 @@ describe('Agents', () => {
     expect(result.outcome.ok ? undefined : result.outcome.error).toBeInstanceOf(AgentInitError)
     expect(result.listed).toBe(0)
     expect(order).toEqual([])
+  })
+
+  test('the effort of a session can be switched, and switched off again', async () => {
+    const seen = await withAgents(turnRunner(), () =>
+      Effect.gen(function* () {
+        const agents = yield* Agents
+        const agent = yield* agents.create({
+          cwd: '/work',
+          options: { route: 'r', reasoningEffort: 'low' },
+        })
+        const started = agent.options.reasoningEffort
+        yield* agent.setEffort('high')
+        const switched = agent.options.reasoningEffort
+        yield* agent.setEffort('')
+        return {
+          started,
+          switched,
+          cleared: agent.options.reasoningEffort,
+          // The switch changes the effort and leaves the rest of the options as they were.
+          route: agent.options.route,
+        }
+      }),
+    )
+
+    expect(seen.started).toBe('low')
+    expect(seen.switched).toBe('high')
+    expect(seen.cleared).toBeUndefined()
+    expect(seen.route).toBe('r')
+  })
+
+  test('the route of a session can be switched on its own', async () => {
+    const seen = await withAgents(turnRunner(), () =>
+      Effect.gen(function* () {
+        const agents = yield* Agents
+        const agent = yield* agents.create({
+          cwd: '/work',
+          options: { route: 'stub/model', reasoningEffort: 'low' },
+        })
+        const started = agent.options.route
+        yield* agent.setRoute('stub/other')
+        return {
+          started,
+          switched: agent.options.route,
+          // The switch changes the route and leaves the rest of the options as they were.
+          effort: agent.options.reasoningEffort,
+        }
+      }),
+    )
+
+    expect(seen.started).toBe('stub/model')
+    expect(seen.switched).toBe('stub/other')
+    expect(seen.effort).toBe('low')
+  })
+
+  test('childrenOf answers only the agents this one started', async () => {
+    const seen = await withAgents(turnRunner(), () =>
+      Effect.gen(function* () {
+        const agents = yield* Agents
+        const left = yield* agents.create({ cwd: '/work', options: { route: 'r' } })
+        const right = yield* agents.create({ cwd: '/work', options: { route: 'r' } })
+        const leftChild = yield* agents.create({
+          cwd: '/work',
+          options: { route: 'r' },
+          parent: left.id,
+        })
+        return {
+          left: agents.childrenOf(left.id).map((agent) => agent.id),
+          right: agents.childrenOf(right.id).map((agent) => agent.id),
+          child: leftChild.id,
+          all: agents.list().length,
+        }
+      }),
+    )
+
+    expect(seen.left).toEqual([seen.child])
+    expect(seen.right).toEqual([])
+    expect(seen.all).toBe(3)
+  })
+
+  test('cancelling a parent cancels the child it started', async () => {
+    const interrupted: Array<string> = []
+    const blocking: AgentRunner = {
+      run: (agent) =>
+        Effect.gen(function* () {
+          while (true) {
+            yield* Queue.take(agent.driver.wake)
+            if (!agent.inbox.pending) continue
+            yield* agent.driver.setStatus('running')
+            yield* agent.inbox.claim(true)
+            yield* Effect.never.pipe(Effect.ensuring(Effect.sync(() => interrupted.push(agent.id))))
+          }
+        }).pipe(Effect.catchCause(() => Effect.void)),
+    }
+
+    const seen = await withAgents(blocking, () =>
+      Effect.gen(function* () {
+        const agents = yield* Agents
+        const parent = yield* agents.create({ cwd: '/work', options: { route: 'r' } })
+        const child = yield* agents.create({
+          cwd: '/work',
+          options: { route: 'r' },
+          parent: parent.id,
+        })
+        yield* parent.followup(message('go'))
+        yield* child.followup(message('go'))
+        while (parent.status !== 'running' || child.status !== 'running') yield* Effect.yieldNow
+        yield* parent.cancel('user')
+        yield* child.whenIdle
+        return {
+          child: child.id,
+          interrupted: [...interrupted],
+          parentStatus: parent.status,
+          childStatus: child.status,
+        }
+      }),
+    )
+
+    // The parent's own turn is interrupted too; the child must be among them.
+    expect(seen.interrupted).toContain(seen.child)
+    expect(seen.parentStatus).toBe('idle')
+    expect(seen.childStatus).toBe('idle')
+  })
+
+  test('disposing a parent disposes the child it started', async () => {
+    const seen = await withAgents(turnRunner(), () =>
+      Effect.gen(function* () {
+        const agents = yield* Agents
+        const parent = yield* agents.create({ cwd: '/work', options: { route: 'r' } })
+        const child = yield* agents.create({
+          cwd: '/work',
+          options: { route: 'r' },
+          parent: parent.id,
+        })
+        yield* agents.dispose(parent.id)
+        return {
+          child: agents.get(child.id),
+          status: child.status,
+          listed: agents.list().map((agent) => agent.id),
+        }
+      }),
+    )
+
+    expect(seen.child).toBeUndefined()
+    expect(seen.status).toBe('disposed')
+    expect(seen.listed).toEqual([])
   })
 })

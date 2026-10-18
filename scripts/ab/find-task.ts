@@ -71,6 +71,13 @@ export const findDisagreement: AbTask = {
     'and the two counts, lowest first. Read the claims; they repeat by design, so their ' +
     'numbers are the only way to tell.',
   files: files(),
+  regime: {
+    difference:
+      'toolCalls and turns show how much of the forty files each harness read before answering, ' +
+      'compactions above zero means it compacted while holding the claims, and failedEdits above ' +
+      'zero means a retry while writing answer.md.',
+    flat: 'A tie means both read the same volume and found the one faulty crate, which says the fault is findable either way and nothing about which harness reads better under a window.',
+  },
   timeoutMs: 1_200_000,
   done: async (workspace) => {
     const answer = await readFile(workspace + '/answer.md', 'utf8').catch(() => '')

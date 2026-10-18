@@ -19,6 +19,13 @@ export interface TokenBudget {
    * so they are gone before the headroom is. Unset reserves nothing.
    */
   readonly reserveTokens?: number
+  /**
+   * What one image block costs the routed model. Provider visual pricing does not
+   * scale with the base64 the log carries, so an image is a reference of this size;
+   * the adapter declares it when it knows the route. Unset prices one image as
+   * {@link IMAGE_REFERENCE_TOKENS}.
+   */
+  readonly imageTokens?: number
 }
 
 /** What is left of the window for messages once the answer's room is reserved. */
@@ -57,26 +64,39 @@ const ENCODER = new TextEncoder()
 
 const bytesOf = (text: string): number => ENCODER.encode(text).length
 
-const blockBytes = (block: ContentBlock): number => {
+/**
+ * What one image block costs when the routed model declares nothing. An image's
+ * tokens are the provider's to price and do not scale with the base64 the log
+ * carries: a fixed reference keeps one screenshot from reading as a whole window,
+ * while staying above the structural price of the reference alone.
+ */
+export const IMAGE_REFERENCE_TOKENS = 1_000
+
+const blockBytes = (block: ContentBlock, imageTokens: number): number => {
   if (block.type === 'text' || block.type === 'reasoning') return bytesOf(block.text)
-  if (block.type === 'image') return block.data.length
+  if (block.type === 'image') return imageTokens * BYTES_PER_TOKEN
   return bytesOf(block.name + block.arguments)
 }
 
 /** What one message adds to a request, as the request carries it after the fold. */
-const messageBytes = (message: RequestMessage): number =>
-  message.content.reduce((sum, block) => sum + blockBytes(block), 0)
+const messageBytes = (message: RequestMessage, imageTokens: number): number =>
+  message.content.reduce((sum, block) => sum + blockBytes(block, imageTokens), 0)
 
 /**
  * What one message is estimated to carry. The meter's own rule, so a whole request
  * and the tail a compaction retains are counted the same way.
  */
-export const messageTokens = (message: RequestMessage): number =>
-  Math.ceil(messageBytes(message) / BYTES_PER_TOKEN)
+export const messageTokens = (
+  message: RequestMessage,
+  imageTokens: number = IMAGE_REFERENCE_TOKENS,
+): number => Math.ceil(messageBytes(message, imageTokens) / BYTES_PER_TOKEN)
 
 /** The bytes the fold would send for a log, with every recorded compaction applied. */
-const foldedBytes = (events: ReadonlyArray<SessionEvent>): number =>
-  deriveMessagesWithSeqs(events).reduce((sum, entry) => sum + messageBytes(entry.message), 0)
+const foldedBytes = (events: ReadonlyArray<SessionEvent>, imageTokens: number): number =>
+  deriveMessagesWithSeqs(events).reduce(
+    (sum, entry) => sum + messageBytes(entry.message, imageTokens),
+    0,
+  )
 
 /**
  * The bytes the tool schemas cost, as the newest recorded request carried them. Every
@@ -88,8 +108,8 @@ const toolsBytes = (events: ReadonlyArray<SessionEvent>): number => {
 }
 
 /** What one request carries: its messages and the tools it may call. */
-const surfaceBytes = (events: ReadonlyArray<SessionEvent>): number =>
-  toolsBytes(events) + foldedBytes(events)
+const surfaceBytes = (events: ReadonlyArray<SessionEvent>, imageTokens: number): number =>
+  toolsBytes(events) + foldedBytes(events, imageTokens)
 
 /**
  * The newest provider count in the log, as the tokens that one request carried.
@@ -116,10 +136,13 @@ const newestUsage = (
  */
 export const meterOf = (events: ReadonlyArray<SessionEvent>, budget: TokenBudget): TokenMeter => {
   const anchor = newestUsage(events)
-  const counted = anchor === undefined ? 0 : surfaceBytes(events.slice(0, anchor.index + 1))
+  const imageTokens = budget.imageTokens ?? IMAGE_REFERENCE_TOKENS
+  const counted =
+    anchor === undefined ? 0 : surfaceBytes(events.slice(0, anchor.index + 1), imageTokens)
   const estimated = Math.max(
     0,
-    (anchor?.tokens ?? 0) + Math.ceil((surfaceBytes(events) - counted) / BYTES_PER_TOKEN),
+    (anchor?.tokens ?? 0) +
+      Math.ceil((surfaceBytes(events, imageTokens) - counted) / BYTES_PER_TOKEN),
   )
   const threshold = thresholdOf(budget)
   return {

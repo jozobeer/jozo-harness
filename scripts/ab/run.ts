@@ -19,9 +19,9 @@ import { readFileSync } from 'node:fs'
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { zstdDecompressSync } from 'node:zlib'
 import { dshMetrics, jozoHarnessMetrics, type AbEvent, type AbMetrics } from './metrics.ts'
 import { tableOf, type Cell } from './table.ts'
+import { zstdText } from './zstd.ts'
 import { TASKS, type AbTask } from './tasks.ts'
 
 const ROUTE = process.env.JZH_AB_ROUTE ?? 'ollama-cloud/deepseek-v4.1-flash'
@@ -108,9 +108,8 @@ const jsonl = (text: string): ReadonlyArray<AbEvent> =>
     }
   })
 
-/** The dsh log is zstd-compressed; node:zlib decodes it without a helper process. */
-const zstdJsonl = (path: string): ReadonlyArray<AbEvent> =>
-  jsonl(new TextDecoder().decode(zstdDecompressSync(readFileSync(path))))
+/** The dsh log is zstd, one frame per append; zstdText reads every frame. */
+const zstdJsonl = (path: string): ReadonlyArray<AbEvent> => jsonl(zstdText(readFileSync(path)))
 
 /** A log that cannot be counted spoils its own run, not the runs still to come. */
 const countedOf = (count: () => AbMetrics): AbMetrics | Error => {

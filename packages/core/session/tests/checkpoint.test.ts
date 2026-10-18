@@ -65,6 +65,19 @@ describe('summarizableMessages', () => {
     expect(range.map((entry) => entry.seq)).toEqual([3, 4, 5])
   })
 
+  test('summarizes an older system prompt while the newest stays the frame', () => {
+    const events = [
+      headerEvent(),
+      event(2, 'system/message', { text: 'the old frame' }),
+      event(3, 'system/message', { text: 'the new frame' }),
+      event(4, 'user/message', { text: 'the newest request', source: 'user' as const }),
+    ]
+
+    const range = summarizableMessages(events, options)
+
+    expect(range.map((entry) => entry.seq)).toEqual([2])
+  })
+
   test('leaves nothing when the whole history is retained', () => {
     const { events } = history()
 

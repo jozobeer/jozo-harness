@@ -55,6 +55,12 @@ describe('web_search tool', () => {
     expect(text?.type === 'text' ? text.text : '').toContain('https://example.com/jozo-harness')
   })
 
+  test('declares a timeout so a provider that never answers cannot hold the call', () => {
+    const tool = makeWebSearchTool({ search: () => Effect.never })
+    expect(tool.timeoutMs).toBeGreaterThan(0)
+    expect(tool.timeoutMs).toBeLessThanOrEqual(60_000)
+  })
+
   test('an empty query is refused before calling the provider', async () => {
     let called = 0
     const result = await Effect.runPromise(

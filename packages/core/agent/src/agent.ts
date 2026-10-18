@@ -17,7 +17,26 @@ export interface MakeAgentOptions {
   readonly options: AgentOptions
   readonly scope: Scope.Scope
   readonly handle: AgentHandle
+  /**
+   * Stops the agents this one started. Read when cancel runs, so children
+   * started after this shell was built are reached too.
+   */
+  readonly cancelDescendants: Effect.Effect<void>
 }
+
+/**
+ * The options as they are with this effort. `''` drops the field, so the
+ * provider chooses; an effort that is already absent keeps the same object.
+ */
+const withEffort = (options: AgentOptions, effort: string): AgentOptions => {
+  const { reasoningEffort: before, ...rest } = options
+  if (effort !== '') return { ...rest, reasoningEffort: effort }
+  return before === undefined ? options : rest
+}
+
+/** The options as they are with this route; the route already asked keeps the same object. */
+const withRoute = (options: AgentOptions, route: string): AgentOptions =>
+  options.route === route ? options : { ...options, route }
 
 /**
  * Builds the agent shell: durable inbox, status, cancellation, and the
@@ -70,6 +89,11 @@ export function makeAgent(input: MakeAgentOptions): Effect.Effect<Agent> {
       }),
     )
 
+    /**
+     * Queued input always wakes the runner: a steer or inject that lands as a turn
+     * closes has no step left to be claimed at, and nothing else would open the
+     * turn it waits for. A wake the running turn already answered costs one loop.
+     */
     const queue = (
       target: 'next-turn' | 'next-step',
       message: UserMessage,
@@ -77,30 +101,47 @@ export function makeAgent(input: MakeAgentOptions): Effect.Effect<Agent> {
       Effect.gen(function* () {
         yield* inbox.queue(target, message)
         yield* notify()
+        yield* Queue.offer(wake, void 0)
       })
+
+    // A human may switch the effort or the model while the session runs, so the
+    // options are read through this rather than handed out once: the runner takes
+    // them per request, and the switch lands on the request after it.
+    let current = input.options
 
     return {
       id: input.id,
       session: input.session,
-      options: input.options,
+      get options() {
+        return current
+      },
       inbox,
       scope: input.scope,
       driver,
       get status() {
         return status
       },
-      followup: (message) =>
-        Effect.gen(function* () {
-          yield* queue('next-turn', message)
-          yield* Queue.offer(wake, void 0)
+      setEffort: (next) =>
+        Effect.sync(() => {
+          current = withEffort(current, next)
         }),
+      setRoute: (next) =>
+        Effect.sync(() => {
+          current = withRoute(current, next)
+        }),
+      followup: (message) => queue('next-turn', message),
       steer: (message) => queue('next-step', message),
       inject: (message) => queue('next-step', message),
       cancel: (cause) =>
         Effect.gen(function* () {
           if (status === 'disposed') return
           cancelCause = cause
-          if (input.handle.fiber === undefined) return
+          // A parent may be idle while the children it started still work.
+          yield* input.cancelDescendants
+          if (input.handle.fiber === undefined) {
+            cancelCause = undefined
+            return
+          }
           yield* setStatus('cancelling')
           // The interrupt waits for the turn's finalizer, which records this cause.
           yield* Fiber.interrupt(input.handle.fiber)
