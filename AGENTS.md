@@ -20,7 +20,7 @@ vp test <path>          # 触ったパッケージのテストだけ先に回す
 
 - doc gate: README と `docs/` の相対リンクと `jzh:<path>` 参照は、実在するパスを指さなければならない。ファイルを動かしたら参照も直す。
 - 重複検出: `packages` / `apps` / `scripts` の本番コードで 70 トークン以上の繰り返しは失敗する（テストは対象外）。
-- e2e は macOS の seatbelt を前提にするものがある。Linux で落ちるテストは、それだけを理由に skip や削除をしない。落ちた理由を報告する。
+- e2e は platform の既定 sandbox（macOS は seatbelt、Linux は bwrap）を実際に走らせる。Linux では bubblewrap と AppArmor の設定（`docs/how-to.md`）が要る。片方の platform でだけ落ちるテストは、それだけを理由に skip や削除をしない。落ちた理由を報告する。
 
 ## ワークスペース
 
