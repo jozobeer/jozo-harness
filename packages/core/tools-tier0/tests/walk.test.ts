@@ -16,7 +16,7 @@ const write = async (dir: string, path: string, body = 'x\n'): Promise<void> => 
 }
 
 describe('walkFiles', () => {
-  test('never walks node_modules or .git, at any depth', async () => {
+  test('never walks node_modules or .git, but does walk other dot-entries', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-walk-'))
     await write(dir, 'src/a.ts')
     await write(dir, 'node_modules/pkg/index.js')
@@ -26,7 +26,7 @@ describe('walkFiles', () => {
 
     const found = await Effect.runPromise(walkFiles({ cwd: dir, limit: 100 }))
 
-    expect(found).toEqual(['src/a.ts'])
+    expect(found).toEqual(['.hidden/file.txt', 'src/a.ts'])
     await rm(dir, { recursive: true, force: true })
   })
 
@@ -40,7 +40,7 @@ describe('walkFiles', () => {
 
     const found = await Effect.runPromise(walkFiles({ cwd: dir, limit: 100 }))
 
-    expect(found).toEqual(['keep.log', 'src/a.ts'])
+    expect(found).toEqual(['.gitignore', 'keep.log', 'src/a.ts'])
     await rm(dir, { recursive: true, force: true })
   })
 
@@ -54,7 +54,19 @@ describe('walkFiles', () => {
 
     const found = await Effect.runPromise(walkFiles({ cwd: dir, limit: 100 }))
 
-    expect(found).toEqual(['elsewhere/generated/b.ts', 'src/kept.ts'])
+    expect(found).toEqual(['.ignore', 'elsewhere/generated/b.ts', 'src/kept.ts'])
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('a start directory walks only its subtree', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-walk-'))
+    await write(dir, 'src/a.ts')
+    await write(dir, 'src/sub/b.ts')
+    await write(dir, 'other/c.ts')
+
+    const found = await Effect.runPromise(walkFiles({ cwd: dir, limit: 100, start: 'src' }))
+
+    expect(found).toEqual(['src/a.ts', 'src/sub/b.ts'])
     await rm(dir, { recursive: true, force: true })
   })
 

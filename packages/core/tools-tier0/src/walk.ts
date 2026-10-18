@@ -105,6 +105,11 @@ export interface WalkRequest {
   readonly limit: number
   /** When given, only files whose workspace-relative path matches are collected. */
   readonly pattern?: string
+  /**
+   * The workspace-relative directory to start at; the collected paths stay
+   * workspace-relative. Omitted, the walk starts at the workspace root.
+   */
+  readonly start?: string
   /** `path` (default) sorts by name; `modified` sorts by modification time, oldest first. */
   readonly order?: WalkOrder
 }
@@ -152,12 +157,16 @@ const takeEntry = (
     if (entry.isFile() && acceptsFile(walk, relative)) walk.found.push(relative)
   })
 
-/** Hidden entries are skipped, as a search tool conventionally does. */
+/**
+ * Every entry is considered, dot-entries included: a search that silently hides
+ * `.github` or `.agents` makes the model conclude a file does not exist. Only
+ * the directories in IGNORED_DIRECTORIES stay out.
+ */
 const collectFrom = (walk: Walk, directory: string, prefix: string): Effect.Effect<void> =>
   Effect.gen(function* () {
     for (const entry of yield* readEntries(directory)) {
       if (walk.found.length >= walk.limit) return
-      if (!entry.name.startsWith('.')) yield* takeEntry(walk, directory, prefix, entry)
+      yield* takeEntry(walk, directory, prefix, entry)
     }
   })
 
@@ -192,9 +201,10 @@ const inOrder = (
       )
 
 /**
- * Every file under `cwd` that survives the ignore files, in the requested order.
- * A path that is a directory the rules exclude is never walked, so its contents
- * cost nothing; hidden entries are skipped; the walk stops at `limit`.
+ * Every file under `cwd` (or under `start` when given) that survives the
+ * ignore files, in the requested order. A path that is a directory the rules
+ * exclude is never walked, so its contents cost nothing; dot-entries other than
+ * the ignored directories are walked; the walk stops at `limit`.
  */
 export const walkFiles = (request: WalkRequest): Effect.Effect<ReadonlyArray<string>> =>
   Effect.gen(function* () {
@@ -204,6 +214,7 @@ export const walkFiles = (request: WalkRequest): Effect.Effect<ReadonlyArray<str
       ignored: makeIgnoredPaths(yield* readIgnoreRules(request.cwd)),
       found: [],
     }
-    yield* collectFrom(walk, request.cwd, '')
+    const start = request.start ?? ''
+    yield* collectFrom(walk, start === '' ? request.cwd : join(request.cwd, start), start)
     return yield* inOrder(request.cwd, walk.found, request.order ?? 'path')
   })
