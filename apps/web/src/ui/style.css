@@ -1653,18 +1653,19 @@ footer {
   font-size: var(--text-xs);
 }
 
+/* The chip is the model's name, so a route too long for the row wraps instead
+   of ending in an ellipsis that hides which model the session asks. */
 .seat-chip {
   max-width: 100%;
   padding: 2px 8px;
-  overflow: hidden;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: none;
   color: var(--dim);
   font-family: var(--mono);
   font-size: var(--text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
   cursor: pointer;
 }
 
@@ -1734,6 +1735,7 @@ footer {
 .seat-model {
   position: relative;
   display: inline-flex;
+  min-width: 0;
   max-width: 100%;
 }
 
@@ -2031,8 +2033,12 @@ footer {
   min-width: 0;
 }
 
-/* The chip and the select take one control height, so their boxes share a top. */
-#seat .seat-chip,
+/* The chip grows when the route wraps; the select keeps one control height. */
+#seat .seat-chip {
+  min-height: 24px;
+  line-height: 18px;
+}
+
 #seat .seat-effort {
   height: 24px;
   line-height: 18px;

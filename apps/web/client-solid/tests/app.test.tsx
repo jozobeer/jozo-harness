@@ -28,6 +28,9 @@ import {
   railWidthFrom,
 } from '../rail.ts'
 import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY } from '../recent.ts'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /** One call a component made, in the order it made them. */
 type Call =
@@ -756,6 +759,21 @@ describe('the Solid page', () => {
 
     fireEvent.input(input, { target: { value: 'hello /he' } })
     expect(container.querySelector('#command-list')).toBeNull()
+  })
+
+  test('the model chip wraps the whole route instead of hiding it behind an ellipsis', () => {
+    const sheet = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../src/ui/style.css'),
+      'utf8',
+    )
+    const start = sheet.indexOf('.seat-chip {')
+    expect(start).toBeGreaterThan(-1)
+    const rule = sheet.slice(start, sheet.indexOf('}', start))
+    // The route is the model's name, so a narrow composer grows the chip instead
+    // of trading the tail of the name for an ellipsis.
+    expect(rule).not.toContain('text-overflow')
+    expect(rule).not.toContain('white-space: nowrap')
+    expect(rule).toMatch(/overflow-wrap:\s*anywhere/)
   })
 
   test('the seat offers the effort words the endpoint takes, beside the model chip', () => {
