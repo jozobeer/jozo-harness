@@ -481,8 +481,14 @@ const serveLines = (
       line.trim() === ''
         ? Effect.void
         : Effect.gen(function* () {
-            // A command is answered here and now; the model never sees it.
-            const outcome = yield* commands.run(line, agent.session)
+            // A command is answered here and now; the model never sees it. The
+            // switches a chip would move are handed to the command that names them.
+            const outcome = yield* commands.run(line, agent.session, {
+              route: () => agent.options.route,
+              effort: () => agent.options.reasoningEffort ?? '',
+              setModel: (model) => agent.setRoute(model),
+              setEffort: (effort) => agent.setEffort(effort),
+            })
             if (outcome !== undefined) {
               options.stdout(outcome.text + '\n')
               return

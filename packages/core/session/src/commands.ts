@@ -55,6 +55,18 @@ export class CommandError extends Data.TaggedError('CommandError')<{
   readonly message: string
 }> {}
 
+/**
+ * The switches only the UI that owns the running agent can reach: a command is
+ * handed them for the run, so the route and effort a chip would change are the
+ * same ones `/model` and `/effort` change.
+ */
+export interface CommandControl {
+  readonly route: () => string
+  readonly effort: () => string
+  readonly setModel: (model: string) => Effect.Effect<void>
+  readonly setEffort: (effort: string) => Effect.Effect<void>
+}
+
 /** What one command is told when it runs. */
 export interface CommandContext {
   readonly session: Session
@@ -62,6 +74,8 @@ export interface CommandContext {
   readonly commandId: string
   /** How the session names itself, for commands that report it. */
   readonly sessionId: string
+  /** The agent's switches, when the caller that runs the line has one. */
+  readonly control?: CommandControl
 }
 
 /** What one command answers. A refusal is an answer too, and reaches the human. */
@@ -97,6 +111,7 @@ export interface CommandsShape {
   readonly run: (
     line: string,
     session: Session,
+    control?: CommandControl,
   ) => Effect.Effect<CommandOutcome | undefined, SessionError>
 }
 
@@ -160,7 +175,7 @@ export const makeCommands = (): CommandsShape => {
       }),
     list: () => [...byName.values()],
     parse: parseCommand,
-    run: (line, session) =>
+    run: (line, session, control) =>
       Effect.gen(function* () {
         const invocation = parseCommand(line)
         if (invocation === undefined) return undefined
@@ -171,7 +186,12 @@ export const makeCommands = (): CommandsShape => {
           input: invocation.input,
         })
         const command = byName.get(invocation.name)
-        const context: CommandContext = { session, commandId, sessionId: session.id }
+        const context: CommandContext = {
+          session,
+          commandId,
+          sessionId: session.id,
+          ...(control === undefined ? {} : { control }),
+        }
         const outcome = yield* command === undefined
           ? Effect.succeed(unknownCommand(invocation.name, [...byName.values()]))
           : command
