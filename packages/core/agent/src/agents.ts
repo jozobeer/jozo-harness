@@ -5,6 +5,7 @@ import { Sessions } from '@jozo-harness/session'
 import { makeAgent, type AgentHandle } from './agent.ts'
 import './hooks.ts'
 import {
+  AgentInitError,
   type Agent,
   type AgentError,
   type AgentRunner,
@@ -18,6 +19,7 @@ interface Registered {
   readonly agent: Agent
   readonly scope: Scope.Closeable
   readonly handle: AgentHandle
+  readonly parent: SessionId | undefined
 }
 
 /** Builds the agent registry over the sessions and the supplied turn runner. */
@@ -29,10 +31,15 @@ export function agentsService(
     const hooks = yield* Hooks
     const registered = new Map<SessionId, Registered>()
 
+    const childrenOf = (id: SessionId): ReadonlyArray<Agent> =>
+      [...registered.values()].filter((entry) => entry.parent === id).map((entry) => entry.agent)
+
     const dispose = (id: SessionId): Effect.Effect<void> =>
       Effect.gen(function* () {
         const entry = registered.get(id)
         if (entry === undefined) return
+        // Children first: the parent owns everything they run on.
+        for (const child of childrenOf(id)) yield* dispose(child.id)
         registered.delete(id)
         entry.handle.fiber = undefined
         yield* entry.agent.driver.setStatus('disposed')
@@ -42,6 +49,14 @@ export function agentsService(
     return {
       create: (options: CreateAgentOptions): Effect.Effect<Agent, AgentError> =>
         Effect.gen(function* () {
+          if (options.parent !== undefined && !registered.has(options.parent)) {
+            return yield* Effect.fail(
+              new AgentInitError({
+                code: 'init',
+                message: 'unknown parent agent: ' + options.parent,
+              }),
+            )
+          }
           const session =
             options.resume === undefined
               ? yield* sessions.create({
@@ -57,6 +72,11 @@ export function agentsService(
             options: options.options,
             scope,
             handle,
+            cancelDescendants: Effect.suspend(() =>
+              Effect.forEach(childrenOf(session.id), (child) => child.cancel('parent-cancelled'), {
+                discard: true,
+              }),
+            ),
           })
 
           yield* Effect.matchEffect(hooks.serial('agent/created', agent), {
@@ -75,13 +95,15 @@ export function agentsService(
             )
           })
           yield* handle.start
-          registered.set(agent.id, { agent, scope, handle })
+          registered.set(agent.id, { agent, scope, handle, parent: options.parent })
           return agent
         }),
 
       get: (id) => registered.get(id)?.agent,
 
       list: () => [...registered.values()].map((entry) => entry.agent),
+
+      childrenOf,
 
       dispose,
 

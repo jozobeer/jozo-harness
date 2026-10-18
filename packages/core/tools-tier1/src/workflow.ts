@@ -66,6 +66,7 @@ const runTask = (
   host: WorkflowHost,
   task: WorkflowTask,
   cwd: string,
+  parent: string,
 ): Effect.Effect<WorkflowItem> =>
   Effect.gen(function* () {
     // Both ways a child can fail to start are this item's failure, not the run's.
@@ -74,6 +75,7 @@ const runTask = (
         cwd: task.cwd ?? cwd,
         options: { route: host.route },
         seed: forkSeed(host.parentEvents()),
+        parent,
       })
       .pipe(Effect.orElseSucceed(() => undefined))
     if (child === undefined) return failed(task.id, 'cannot start a child agent')
@@ -149,8 +151,10 @@ export const makeWorkflowTool = (
       }
       const concurrency = Math.max(args.concurrency ?? WORKFLOW_CONCURRENCY, 1)
       // Each item decides its own fate; one failing child never fails the call.
-      return yield* Effect.forEach(args.tasks, (task) => runTask(host, task, context.cwd), {
-        concurrency,
-      })
+      return yield* Effect.forEach(
+        args.tasks,
+        (task) => runTask(host, task, context.cwd, context.sessionId),
+        { concurrency },
+      )
     }),
 })

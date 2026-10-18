@@ -78,6 +78,8 @@ export interface CreateAgentOptions {
   readonly options: AgentOptions
   /** Resumes an existing session instead of creating one. */
   readonly resume?: SessionId
+  /** The agent that started this one. Its cancel and dispose reach this child too. */
+  readonly parent?: SessionId
 }
 
 export type AgentError = SessionError | AgentInitError
@@ -86,6 +88,8 @@ export interface AgentsShape {
   create(options: CreateAgentOptions): Effect.Effect<Agent, AgentError>
   get(id: SessionId): Agent | undefined
   list(): ReadonlyArray<Agent>
+  /** The agents this one started, and only those. */
+  childrenOf(id: SessionId): ReadonlyArray<Agent>
   dispose(id: SessionId): Effect.Effect<void>
   disposeAll(): Effect.Effect<void>
 }
