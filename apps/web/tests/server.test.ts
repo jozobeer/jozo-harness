@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'vitest'
 import { execFileSync } from 'node:child_process'
+import { request } from 'node:http'
 import type { UiCommand, UiEvent, UiHost } from '@jozo-harness/ui-protocol'
+import { WebSocket } from 'ws'
 import { Deferred, Effect, Exit, Fiber, Option, Queue, Stream, type Scope } from 'effect'
 import { RpcClient, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
@@ -201,6 +203,8 @@ const clientLayers =
 
 interface Started {
   readonly origin: string
+  readonly token: string
+  readonly wsUrl: string
   readonly stop: Deferred.Deferred<void>
 }
 
@@ -286,7 +290,42 @@ const start = (
         interrupt: Deferred.await(stop),
       }),
     )
-    return { origin: (yield* Deferred.await(ready)).replace(/\/$/, ''), stop }
+    const page = new URL(yield* Deferred.await(ready))
+    const token = page.searchParams.get('token')
+    if (token === null) throw new Error('the server reported no token')
+    return {
+      origin: page.origin,
+      token,
+      wsUrl: 'ws://' + page.host + '/ui?token=' + token,
+      stop,
+    }
+  })
+
+/** What one socket attempt got: an open, or the status the handshake was refused with. */
+interface Attempt {
+  readonly opened: boolean
+  readonly status: number
+}
+
+/** Tries one socket with the headers a browser would or would not send. */
+const attemptSocket = (
+  url: string,
+  options: { readonly origin?: string; readonly headers?: Record<string, string> } = {},
+): Promise<Attempt> =>
+  new Promise((resolve) => {
+    const socket = new WebSocket(url, {
+      ...(options.origin === undefined ? {} : { origin: options.origin }),
+      ...(options.headers === undefined ? {} : { headers: options.headers }),
+    })
+    socket.once('open', () => {
+      socket.close()
+      resolve({ opened: true, status: 101 })
+    })
+    socket.once('unexpected-response', (_request, response) => {
+      response.resume()
+      resolve({ opened: false, status: response.statusCode ?? 0 })
+    })
+    socket.once('error', () => resolve({ opened: false, status: 0 }))
   })
 
 const tick = (): UiEvent => ({
@@ -307,7 +346,7 @@ describe('the web transport', () => {
       Effect.scoped(
         Effect.gen(function* () {
           const started = yield* start(root, web, settings)
-          const wsUrl = 'ws://' + started.origin.replace(/^http:\/\//, '') + '/ui'
+          const wsUrl = started.wsUrl
 
           // The client layers own a scoped socket: they must wrap every call.
           const useClient = Effect.gen(function* () {
@@ -367,7 +406,7 @@ describe('the web transport', () => {
       Effect.scoped(
         Effect.gen(function* () {
           const started = yield* start(root, web, settings)
-          const wsUrl = 'ws://' + started.origin.replace(/^http:\/\//, '') + '/ui'
+          const wsUrl = started.wsUrl
           const useTabs = Effect.gen(function* () {
             const one = yield* RpcClient.make(UiRpcs)
             const two = yield* RpcClient.make(UiRpcs)
@@ -405,7 +444,7 @@ describe('the web transport', () => {
       Effect.scoped(
         Effect.gen(function* () {
           const started = yield* start(root, web, settings)
-          const wsUrl = 'ws://' + started.origin.replace(/^http:\/\//, '') + '/ui'
+          const wsUrl = started.wsUrl
           const useClient = Effect.gen(function* () {
             const client = yield* RpcClient.make(UiRpcs)
             const listed = yield* client.sessions()
@@ -479,7 +518,7 @@ describe('the web transport', () => {
       Effect.scoped(
         Effect.gen(function* () {
           const started = yield* start(root, web, settings, workspaces)
-          const wsUrl = 'ws://' + started.origin.replace(/^http:\/\//, '') + '/ui'
+          const wsUrl = started.wsUrl
           const useClient = Effect.gen(function* () {
             const client = yield* RpcClient.make(UiRpcs)
             const offered = yield* client.workspaces()
@@ -541,7 +580,7 @@ describe('the web transport', () => {
       Effect.scoped(
         Effect.gen(function* () {
           const started = yield* start(root, web, settings)
-          const wsUrl = 'ws://' + started.origin.replace(/^http:\/\//, '') + '/ui'
+          const wsUrl = started.wsUrl
           const useClient = Effect.gen(function* () {
             const client = yield* RpcClient.make(UiRpcs)
             const files = yield* client.files({ sessionId: 'a', query: 'comp' })
@@ -592,7 +631,7 @@ describe('the web transport', () => {
       Effect.scoped(
         Effect.gen(function* () {
           const started = yield* start(root, web, settings)
-          const wsUrl = 'ws://' + started.origin.replace(/^http:\/\//, '') + '/ui'
+          const wsUrl = started.wsUrl
           const useClient = Effect.gen(function* () {
             const client = yield* RpcClient.make(UiRpcs)
             const branch = yield* client.branch({ sessionId: 'a' })
@@ -636,7 +675,7 @@ describe('the web transport', () => {
       Effect.scoped(
         Effect.gen(function* () {
           const started = yield* start(root, web, settings)
-          const wsUrl = 'ws://' + started.origin.replace(/^http:\/\//, '') + '/ui'
+          const wsUrl = started.wsUrl
           const useClient = Effect.gen(function* () {
             const client = yield* RpcClient.make(UiRpcs)
             yield* client.sessionAction({
@@ -679,7 +718,7 @@ describe('the web transport', () => {
       Effect.scoped(
         Effect.gen(function* () {
           const started = yield* start(root, web, settings)
-          const wsUrl = 'ws://' + started.origin.replace(/^http:\/\//, '') + '/ui'
+          const wsUrl = started.wsUrl
           const useClient = Effect.gen(function* () {
             const client = yield* RpcClient.make(UiRpcs)
             const running = yield* client.state({ sessionId: 'a' })
@@ -744,7 +783,7 @@ describe('the web transport', () => {
       Effect.scoped(
         Effect.gen(function* () {
           const started = yield* start(root, web, settings)
-          const wsUrl = 'ws://' + started.origin.replace(/^http:\/\//, '') + '/ui'
+          const wsUrl = started.wsUrl
           const useClient = Effect.gen(function* () {
             const client = yield* RpcClient.make(UiRpcs)
             const listed = yield* client.commands({ sessionId: 'a' })
@@ -780,7 +819,7 @@ describe('the web transport', () => {
       Effect.scoped(
         Effect.gen(function* () {
           const started = yield* start(root, web, settings)
-          const wsUrl = 'ws://' + started.origin.replace(/^http:\/\//, '') + '/ui'
+          const wsUrl = started.wsUrl
           const useClient = Effect.gen(function* () {
             const client = yield* RpcClient.make(UiRpcs)
             const view = yield* client.settings()
@@ -825,7 +864,7 @@ describe('the web transport', () => {
       Effect.scoped(
         Effect.gen(function* () {
           const started = yield* start(root, web, { port: failing, wrote: [] })
-          const wsUrl = 'ws://' + started.origin.replace(/^http:\/\//, '') + '/ui'
+          const wsUrl = started.wsUrl
           const useClient = Effect.gen(function* () {
             const client = yield* RpcClient.make(UiRpcs)
             const stopped = yield* client
@@ -849,6 +888,94 @@ describe('the web transport', () => {
     expect(observed.stopped).toBe('no such job')
     expect(observed.settings).toBe('no settings here')
     expect(observed.models).toBe('no models here')
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('the ready url carries a token the socket must repeat', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-root-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const settings = makeSettings()
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const socket = 'ws://' + new URL(started.origin).host + '/ui'
+          const noToken = yield* Effect.promise(() => attemptSocket(socket))
+          const wrongToken = yield* Effect.promise(() =>
+            attemptSocket(socket + '?token=' + 'x'.repeat(started.token.length)),
+          )
+          const rightToken = yield* Effect.promise(() => attemptSocket(started.wsUrl))
+          const foreignOrigin = yield* Effect.promise(() =>
+            attemptSocket(started.wsUrl, { origin: 'http://evil.example' }),
+          )
+          const pageOrigin = yield* Effect.promise(() =>
+            attemptSocket(started.wsUrl, { origin: started.origin }),
+          )
+          yield* Deferred.succeed(started.stop, undefined)
+          return {
+            token: started.token,
+            noToken,
+            wrongToken,
+            rightToken,
+            foreignOrigin,
+            pageOrigin,
+          }
+        }),
+      ),
+    )
+
+    expect(observed.token).toMatch(/^[0-9a-f]{64}$/)
+    expect(observed.noToken).toEqual({ opened: false, status: 401 })
+    expect(observed.wrongToken).toEqual({ opened: false, status: 401 })
+    expect(observed.rightToken.opened).toBe(true)
+    expect(observed.foreignOrigin).toEqual({ opened: false, status: 403 })
+    expect(observed.pageOrigin.opened).toBe(true)
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('a request from a foreign host is refused before it is served', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-root-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const settings = makeSettings()
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const port = Number(new URL(started.origin).port)
+          const status = yield* Effect.promise(
+            () =>
+              new Promise<number>((resolve, reject) => {
+                const asked = request(
+                  {
+                    hostname: '127.0.0.1',
+                    port,
+                    path: '/',
+                    headers: { host: 'evil.example' },
+                  },
+                  (response) => {
+                    response.resume()
+                    resolve(response.statusCode ?? 0)
+                  },
+                )
+                asked.on('error', reject)
+                asked.end()
+              }),
+          )
+          const socket = yield* Effect.promise(() =>
+            attemptSocket(started.wsUrl, { headers: { host: 'evil.example' } }),
+          )
+          yield* Deferred.succeed(started.stop, undefined)
+          return { status, socket }
+        }),
+      ),
+    )
+
+    expect(observed.status).toBe(403)
+    expect(observed.socket).toEqual({ opened: false, status: 403 })
     await rm(root, { recursive: true, force: true })
   })
 })

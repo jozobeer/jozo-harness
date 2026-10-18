@@ -134,14 +134,14 @@ describe('the browser UI through the command', () => {
               web: { port: 0, staticRoot },
               stdout: () => undefined,
               stderr: (text) => {
-                const match = /http:\/\/127\.0\.0\.1:\d+\//.exec(text)
+                const match = /http:\/\/127\.0\.0\.1:\d+\/\S*/.exec(text)
                 if (match !== null) void Effect.runSync(Deferred.succeed(ready, match[0]))
               },
               interrupt: Deferred.await(stop),
             }),
           )
-          const url = (yield* Deferred.await(ready)).replace(/\/$/, '')
-          const wsUrl = 'ws://' + url.replace(/^http:\/\//, '') + '/ui'
+          const page = new URL(yield* Deferred.await(ready))
+          const wsUrl = 'ws://' + page.host + '/ui?token=' + (page.searchParams.get('token') ?? '')
 
           const used = Effect.gen(function* () {
             const client = yield* RpcClient.make(UiRpcs)
@@ -213,15 +213,16 @@ describe('the browser UI through the command', () => {
               web: { port: 0, staticRoot },
               stdout: () => undefined,
               stderr: (text) => {
-                const match = /http:\/\/127\.0\.0\.1:\d+\//.exec(text)
+                const match = /http:\/\/127\.0\.0\.1:\d+\/\S*/.exec(text)
                 if (match !== null) void Effect.runSync(Deferred.succeed(ready, match[0]))
               },
               interrupt: Deferred.await(stop),
             }),
           )
-          const url = (yield* Deferred.await(ready)).replace(/\/$/, '')
-          const wsUrl = 'ws://' + url.replace(/^http:\/\//, '') + '/ui'
+          const page = new URL(yield* Deferred.await(ready))
+          const wsUrl = 'ws://' + page.host + '/ui?token=' + (page.searchParams.get('token') ?? '')
 
+          const origin = page.origin
           const used = Effect.gen(function* () {
             const client = yield* RpcClient.make(UiRpcs)
             const seen = yield* Deferred.make<string>()
@@ -243,13 +244,13 @@ describe('the browser UI through the command', () => {
               command: { kind: 'submit', text: 'ping' },
             })
             const answer = yield* Deferred.await(seen)
-            const page = yield* Effect.promise(() => fetch(url + '/'))
-            const home = yield* Effect.promise(() => page.text())
+            const served = yield* Effect.promise(() => fetch(origin + '/'))
+            const home = yield* Effect.promise(() => served.text())
             return {
               held: listed.initial,
               accepted,
               answer,
-              status: page.status,
+              status: served.status,
               home,
             }
           })
@@ -306,14 +307,14 @@ describe('the browser UI through the command', () => {
               web: { port: 0, staticRoot },
               stdout: () => undefined,
               stderr: (text) => {
-                const match = /http:\/\/127\.0\.0\.1:\d+\//.exec(text)
+                const match = /http:\/\/127\.0\.0\.1:\d+\/\S*/.exec(text)
                 if (match !== null) void Effect.runSync(Deferred.succeed(ready, match[0]))
               },
               interrupt: Deferred.await(stop),
             }),
           )
-          const url = (yield* Deferred.await(ready)).replace(/\/$/, '')
-          const wsUrl = 'ws://' + url.replace(/^http:\/\//, '') + '/ui'
+          const page = new URL(yield* Deferred.await(ready))
+          const wsUrl = 'ws://' + page.host + '/ui?token=' + (page.searchParams.get('token') ?? '')
 
           const used = Effect.gen(function* () {
             const client = yield* RpcClient.make(UiRpcs)
@@ -472,14 +473,14 @@ describe('the browser UI through the command', () => {
               web: { port: 0, staticRoot },
               stdout: () => undefined,
               stderr: (text) => {
-                const match = /http:\/\/127\.0\.0\.1:\d+\//.exec(text)
+                const match = /http:\/\/127\.0\.0\.1:\d+\/\S*/.exec(text)
                 if (match !== null) void Effect.runSync(Deferred.succeed(ready, match[0]))
               },
               interrupt: Deferred.await(stop),
             }),
           )
-          const url = (yield* Deferred.await(ready)).replace(/\/$/, '')
-          const wsUrl = 'ws://' + url.replace(/^http:\/\//, '') + '/ui'
+          const page = new URL(yield* Deferred.await(ready))
+          const wsUrl = 'ws://' + page.host + '/ui?token=' + (page.searchParams.get('token') ?? '')
 
           const used = Effect.gen(function* () {
             const client = yield* RpcClient.make(UiRpcs)

@@ -82,10 +82,10 @@ jzh --dump-config                       # 読み込んだプロファイルと�
 
 ```sh
 pnpm run build:web    # apps/web/dist に束ねる
-jzh web              # http://127.0.0.1:<port>/ を stderr に出す（--port で固定）
+jzh web              # トークン付きの URL を stderr に出す（--port で固定）
 ```
 
-同じセッションを複数タブで購読できる。承認は Allow / Deny、質問は入力して Enter。サーバは 127.0.0.1 にだけ bind し、認証は無い。
+同じセッションを複数タブで購読できる。承認は Allow / Deny、質問は入力して Enter。サーバは 127.0.0.1 にだけ bind し、起動ごとのトークンと Host / Origin の検査で守る。トークンは stderr の URL に載る。
 
 セッションログは既定で `~/.jzh/sessions/<id>/session.v1.jsonl` に残る。設定ファイルのパスは `--config` で差し替えられる。
 

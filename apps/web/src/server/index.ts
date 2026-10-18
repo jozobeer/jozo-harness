@@ -1,4 +1,5 @@
 export * from '../shared/rpc.ts'
+export * from './auth.ts'
 export * from './errors.ts'
 export * from './git-branch.ts'
 export * from './protocol.ts'
