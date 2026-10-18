@@ -39,8 +39,8 @@ export interface WebState {
   readonly theme: Theme
   /** What the server says about this run; undefined until the page has read it. */
   readonly settings: SettingsView | undefined
-  /** The provider's models, once the reader asked for them. */
-  readonly models: ReadonlyArray<string>
+  /** The provider's models, once the reader asked for them; undefined while nobody has. */
+  readonly models: ReadonlyArray<string> | undefined
   /** Which surface the right pane shows; undefined leaves the tab strip alone and the body empty. */
   readonly pane: Pane | undefined
   /** Every turn this session ran, oldest first, as the log recorded it. */
@@ -61,7 +61,7 @@ export const initialState: WebState = {
   problem: '',
   theme: DEFAULT_THEME,
   settings: undefined,
-  models: [],
+  models: undefined,
   pane: { kind: 'run' },
   turns: [],
   run: undefined,

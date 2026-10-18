@@ -123,7 +123,7 @@ const Settings = (props: { store: SessionStore; settings: SettingsView | undefin
             {row('settings', settings().settingsPath === '' ? '(none)' : settings().settingsPath)}
           </div>
           <Show
-            when={props.store.state().models.length > 0}
+            when={props.store.state().models}
             fallback={
               <div class="panel-actions">
                 <Button id="ask-models" type="button" onClick={() => props.store.askModels()}>
@@ -132,27 +132,32 @@ const Settings = (props: { store: SessionStore; settings: SettingsView | undefin
               </div>
             }
           >
-            <div class="panel-actions">
-              <select id="model-choice">
-                <For each={props.store.state().models}>
-                  {(route) => <option value={route}>{route}</option>}
-                </For>
-              </select>
-              <Button
-                id="use-model"
-                variant="primary"
-                type="button"
-                onClick={() => {
-                  const choice = document.getElementById('model-choice')
-                  if (choice instanceof HTMLSelectElement && choice.value !== '') {
-                    props.store.setModel(choice.value)
-                  }
-                }}
-              >
-                Use for later runs
-              </Button>
-            </div>
-            <div class="card-hint">the next run reads it from the settings file</div>
+            {(models) => (
+              <>
+                <div class="panel-actions">
+                  <select id="model-choice">
+                    <For each={models()}>{(route) => <option value={route}>{route}</option>}</For>
+                  </select>
+                  <Button
+                    id="use-model"
+                    variant="primary"
+                    type="button"
+                    onClick={() => {
+                      const choice = document.getElementById('model-choice')
+                      if (choice instanceof HTMLSelectElement && choice.value !== '') {
+                        props.store.setModel(choice.value)
+                      }
+                    }}
+                  >
+                    Use for new sessions
+                  </Button>
+                </div>
+                <div class="card-hint">
+                  each session opened from now on starts from it; the settings file keeps it for
+                  later runs, and the seat switches the session in front of you
+                </div>
+              </>
+            )}
           </Show>
         </>
       )}
