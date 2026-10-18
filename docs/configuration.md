@@ -22,6 +22,8 @@ plugin ごとの config キー、フラグ、環境変数の一覧は `jzh --dum
 | `model` | `provider/model` | 使うルート。`--model` > この値 > 行の `config.model`。ブラウザ UI の席の選択はこの run の中だけのもので、これから開くセッションもその route で始まる（設定ファイルには書かない） |
 | `effort` | provider が読む語 | 推論の強さ。`--effort` > この値 > 行の `config.effort`。未設定なら provider の既定。ブラウザ UI の席から走っているセッションだけ切り替えることもできる（その run が開いている間だけ効く） |
 | `profile` | profile 名 | 層2で重ねる profile。既定は `headless`。`--profile` > この値 |
+| `search` | `brave` / `deepseek` | `web_search` の provider。未設定は `BRAVE_API_KEY` があるときだけ brave。`deepseek` は `DEEPSEEK_API_KEY` を DeepSeek Search API に送る |
+| `deepseekToolsBaseUrl` | URL | DeepSeek Search / Fetch API の base。既定は `https://api.deepseek.com/v1/tools`。provider は `/search` を足す |
 | `skills` | 文字列の配列 | `<name>/SKILL.md` を持つディレクトリを追加する。```/x``` は展開する |
 | `plugins` | 行の配列 | 層3として重なる |
 
@@ -119,7 +121,8 @@ tool が宣言する能力（`exec` や `network`）では承認を求めない�
 | 変数 | 効果 |
 |---|---|
 | `OLLAMA_API_KEY` / `OPENAI_API_KEY` | provider のキー。名前は行の `apiKeyEnv` が決める |
-| `BRAVE_API_KEY` | あると `web_search` tool が付く |
+| `BRAVE_API_KEY` | あると既定の `web_search` provider が付く |
+| `DEEPSEEK_API_KEY` | `search: deepseek` のとき `web_search` が DeepSeek Search API を呼ぶ。無い場合は tool error が `jzh auth add deepseek` を案内する |
 | `XDG_CONFIG_HOME` | `config.yaml` と `secrets.env` を置くディレクトリ |
 
 優先順位はシェル環境、作業ディレクトリに近い `.env`、`secrets.env` の順である。先に値がある場所が勝ち、後ろは空いているキーだけを埋める。どのファイルがそのキーを埋めたかは `jzh --dump-config` の `in effect for a run from here:` に出る。

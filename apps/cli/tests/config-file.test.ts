@@ -24,6 +24,8 @@ describe('parseConfigText', () => {
         [
           'model: my-cloud/some-model',
           'profile: repl',
+          'search: deepseek',
+          'deepseekToolsBaseUrl: https://example.com/v1/tools',
           'skills:',
           '  - /tmp/skills',
           'unknown_key: ignored',
@@ -38,6 +40,8 @@ describe('parseConfigText', () => {
 
     expect(config.model).toBe('my-cloud/some-model')
     expect(config.profile).toBe('repl')
+    expect(config.search).toBe('deepseek')
+    expect(config.deepseekToolsBaseUrl).toBe('https://example.com/v1/tools')
     expect(config.skills).toEqual(['/tmp/skills'])
     expect(config.plugins?.length).toBe(1)
     expect(config.plugins?.[0]?.id).toBe('safety')

@@ -9,6 +9,8 @@ export const ConfigFileSchema = Schema.Struct({
   model: Schema.optionalKey(Schema.String),
   effort: Schema.optionalKey(Schema.String),
   profile: Schema.optionalKey(Schema.String),
+  search: Schema.optionalKey(Schema.Literals(['brave', 'deepseek'])),
+  deepseekToolsBaseUrl: Schema.optionalKey(Schema.String),
   skills: Schema.optionalKey(Schema.Array(Schema.String)),
   plugins: Schema.optionalKey(Schema.Array(PluginRowSchema)),
 })
@@ -17,6 +19,8 @@ export interface JozoHarnessConfig {
   readonly model?: string | undefined
   readonly effort?: string | undefined
   readonly profile?: string | undefined
+  readonly search?: 'brave' | 'deepseek' | undefined
+  readonly deepseekToolsBaseUrl?: string | undefined
   readonly skills?: ReadonlyArray<string> | undefined
   readonly plugins?: ReadonlyArray<PluginRow> | undefined
 }

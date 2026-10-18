@@ -3,7 +3,7 @@ import { FLAG_NAMES } from './args.ts'
 import { CONFIG_HOME_ENV, configPaths } from './config.ts'
 import type { JozoHarnessConfig } from './config-file.ts'
 import type { CredentialSource, Resolved, SettingsSurface } from './settings.ts'
-import { SEARCH_KEY_ENV } from './search-env.ts'
+import { DEEPSEEK_KEY_ENV, SEARCH_KEY_ENV } from './search-env.ts'
 
 /** Row keys the command reads from a row's config itself; no plugin declares them. */
 export const MODEL_KEY = 'model'
@@ -98,6 +98,19 @@ export const SETTINGS_KEYS: ReadonlyArray<SettingsNote> = [
     example: ['profile: headless'],
   },
   {
+    name: 'search',
+    summary: 'the web_search provider: brave (default when BRAVE_API_KEY is set) or deepseek',
+    value: (settings) => settings?.search ?? 'not set, so brave when BRAVE_API_KEY is set',
+    example: ['search: deepseek'],
+  },
+  {
+    name: 'deepseekToolsBaseUrl',
+    summary: 'the DeepSeek Search / Fetch API base; /search and /fetch are appended',
+    value: (settings) =>
+      settings?.deepseekToolsBaseUrl ?? 'not set, so https://api.deepseek.com/v1/tools',
+    example: ['deepseekToolsBaseUrl: https://api.deepseek.com/v1/tools'],
+  },
+  {
     name: 'skills',
     summary: 'directories that hold <name>/SKILL.md',
     value: (settings) =>
@@ -158,7 +171,8 @@ const renderEnvironment = (): string =>
   [
     'environment (the shell wins, then the nearest .env, then secrets.env):',
     '  - ' + CONFIG_HOME_ENV + ': moves the directory that holds config.yaml and secrets.env',
-    '  - ' + SEARCH_KEY_ENV + ': with it the web_search tool is registered',
+    '  - ' + SEARCH_KEY_ENV + ': with it the default web_search provider is registered',
+    '  - ' + DEEPSEEK_KEY_ENV + ': the key search: deepseek sends to the Search API',
   ].join('\n') + '\n'
 
 const describeValue = (value: unknown): string =>

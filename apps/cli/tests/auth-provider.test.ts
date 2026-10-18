@@ -34,6 +34,20 @@ describe('jzh auth add', () => {
     await rm(directory, { recursive: true, force: true })
   })
 
+  test('deepseek stores DEEPSEEK_API_KEY', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'jozo-harness-auth-provider-'))
+    const env = { XDG_CONFIG_HOME: directory }
+    const { io, out } = collector('key-value')
+
+    const code = await runAuth(['add', 'deepseek'], io, env)
+
+    const path = join(directory, 'jzh', 'secrets.env')
+    expect(code).toBe(0)
+    expect(await readFile(path, 'utf8')).toBe('DEEPSEEK_API_KEY=key-value\n')
+    expect(out.join('')).toContain('stored the deepseek key')
+    await rm(directory, { recursive: true, force: true })
+  })
+
   test('list names the service and the variable', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'jozo-harness-auth-provider-'))
     const env = { XDG_CONFIG_HOME: directory }

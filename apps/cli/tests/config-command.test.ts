@@ -102,6 +102,50 @@ describe('jzh config', () => {
     })
   })
 
+  test('sets the search provider and its endpoint', async () => {
+    await withHome(async (env, path) => {
+      const sink = collector()
+
+      const code = await runConfig(['set', 'search', 'deepseek'], sink.io, env)
+      expect(sink.errs.join('')).toBe('')
+      expect(code).toBe(0)
+      expect(readFileSync(path, 'utf8')).toContain('search: deepseek')
+
+      const endpoint = collector()
+      const endpointCode = await runConfig(
+        ['set', 'deepseekToolsBaseUrl', 'https://api.deepseek.com/v1/tools'],
+        endpoint.io,
+        env,
+      )
+      const settings = await Effect.runPromise(loadConfigFile(path))
+      expect(endpointCode).toBe(0)
+      expect(settings.search).toBe('deepseek')
+      expect(settings.deepseekToolsBaseUrl).toBe('https://api.deepseek.com/v1/tools')
+    })
+  })
+
+  test('refuses a search provider it does not know', async () => {
+    await withHome(async (env) => {
+      const sink = collector()
+
+      const code = await runConfig(['set', 'search', 'exa'], sink.io, env)
+
+      expect(code).toBe(2)
+      expect(sink.errs.join('')).toContain('search takes brave or deepseek')
+    })
+  })
+
+  test('refuses a deepseek endpoint that is not http(s)', async () => {
+    await withHome(async (env) => {
+      const sink = collector()
+
+      const code = await runConfig(['set', 'deepseekToolsBaseUrl', 'file:///tools'], sink.io, env)
+
+      expect(code).toBe(2)
+      expect(sink.errs.join('')).toContain('deepseekToolsBaseUrl takes an http(s) URL')
+    })
+  })
+
   test('refuses a key the settings file does not take', async () => {
     await withHome(async (env) => {
       const sink = collector()
@@ -109,7 +153,9 @@ describe('jzh config', () => {
       const code = await runConfig(['set', 'nope', 'x'], sink.io, env)
 
       expect(code).toBe(2)
-      expect(sink.errs.join('')).toContain('model, effort, profile, skills, plugins')
+      expect(sink.errs.join('')).toContain(
+        'model, effort, profile, search, deepseekToolsBaseUrl, skills, plugins',
+      )
     })
   })
 
