@@ -20,7 +20,10 @@
   --color-text: var(--text);
   --color-dim: var(--dim);
   --color-accent: var(--accent);
+  --color-accent-fill: var(--accent-fill);
   --color-accent-ink: var(--accent-ink);
+  --color-foam: var(--foam);
+  --color-beer-ink: var(--beer-ink);
 }
 
 /*
@@ -73,6 +76,31 @@
   }
 }
 
+/* A bubble leaves the foot of the glass and is gone by the head of foam. */
+@keyframes jzh-fizz {
+  from {
+    opacity: 0;
+    transform: translateY(0);
+  }
+  15% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(calc(var(--head, 0px) - 100cqh));
+  }
+}
+
+/* A level with no end it knows of: quick at first, slower as it fills, never quite full. */
+@keyframes jzh-pour {
+  from {
+    width: 6%;
+  }
+  to {
+    width: 92%;
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   #conversation .block {
     animation: jzh-block-in 180ms ease-out both;
@@ -97,6 +125,25 @@
 
   footer[data-takeover='true'] #composer {
     transform: translateY(-4px);
+  }
+
+  .fizz i {
+    animation: jzh-fizz 2.4s ease-out var(--delay, 0s) infinite;
+  }
+
+  /*
+   * --pour-from is how long the work has run already, as a negative delay, so a
+   * reload picks up the level. Ten minutes to the brim: work here runs for
+   * minutes, and the level should still be climbing while it does.
+   */
+  .pour.rising::before,
+  .pour.rising::after {
+    animation: jzh-pour 600s cubic-bezier(0.1, 0.6, 0.3, 1) var(--pour-from, 0s) both;
+  }
+
+  .process-dot,
+  .session-mark {
+    transition: background-color 600ms ease-out;
   }
 }
 
@@ -172,15 +219,20 @@
     color: var(--text);
   }
 
+  /* A turn that finished rests as a quiet dot; for a moment after it finished well, it is green. */
   .process-dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
+    background: var(--rest);
+  }
+
+  .process-dot.finished {
     background: var(--tool);
   }
 
   .process-dot.running {
-    border: 2px solid var(--tool);
+    border: 2px solid var(--accent-fill);
     background: none;
   }
 
@@ -661,16 +713,16 @@
   }
 
   .session.running .session-mark {
-    border: 2px solid var(--tool);
+    border: 2px solid var(--accent-fill);
     background: none;
   }
 
   .session.waiting .session-mark {
-    background: var(--accent);
+    background: var(--accent-fill);
   }
 
   .session.idle .session-mark {
-    background: var(--tool);
+    background: var(--rest);
   }
 
   #session-list .session-name {
@@ -915,19 +967,50 @@
     color: var(--text);
   }
 
+  /*
+   * The glass itself is drawn with the takeover's; the session's row is its head
+   * of foam, set like the takeover's head: centred in the foam, the name small and
+   * firm, the kind in mono at the right edge, the ⋯ laid over it on hover.
+   */
   .board-card {
+    --head: 34px;
     display: flex;
     flex-direction: column;
     gap: var(--s2);
-    padding: var(--s2) var(--s2) var(--s3);
-    border: 1px solid var(--accent);
-    border-radius: var(--radius);
-    background: var(--takeover-bg);
+    padding: 0 var(--s2) var(--s3);
+  }
+
+  .board-card > .session-row {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: var(--head);
   }
 
   .board-card .session {
     border-left: 0;
     border-radius: var(--radius-sm);
+    background: transparent;
+  }
+
+  .board-card .session-name {
+    font-size: var(--text-xs);
+    font-weight: 650;
+  }
+
+  .board-card .session-detail {
+    color: var(--beer-dim);
+    font-family: var(--mono);
+  }
+
+  .board-card .session-menu {
+    position: absolute;
+    top: 50%;
+    right: 2px;
+    background: var(--foam);
+    transform: translateY(-50%);
+  }
+
+  .board-card .session.waiting .session-mark {
+    background: var(--beer-mark);
   }
 
   .board-asked {
@@ -953,7 +1036,7 @@
     margin: 0;
     padding: 0 10px 0 30px;
     overflow: hidden;
-    color: var(--tool);
+    color: var(--accent);
     font-family: var(--mono);
     font-size: var(--text-xs);
     text-overflow: ellipsis;
@@ -1171,7 +1254,7 @@
     bottom: 0;
     min-width: 2px;
     border-radius: 2px;
-    background: var(--tool);
+    background: var(--rest);
   }
 
   .wf-row.model .wf-bar {
@@ -1188,8 +1271,13 @@
     background: none;
   }
 
+  /*
+   * A call still running pours: its bar is the pale gold level, growing with the
+   * clock, and its leading edge is the gold line so a short bar still shows.
+   */
   .wf-row.running .wf-bar {
-    background: repeating-linear-gradient(90deg, var(--tool) 0 4px, transparent 4px 7px);
+    background: var(--pour);
+    box-shadow: inset -2px 0 0 var(--accent-fill);
   }
 
   .wf-took {

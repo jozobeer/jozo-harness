@@ -1,6 +1,6 @@
 import { fireEvent, render } from '@solidjs/testing-library'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
-import { createSignal } from 'solid-js'
+import { createRoot, createSignal } from 'solid-js'
 import type { UiCommand } from '@jozo-harness/ui-protocol'
 import { emptyConversation } from '@jozo-harness/ui-view'
 import { initialState, withDraft, withTheme, type Pane, type WebState } from '../../src/ui/state.ts'
@@ -16,6 +16,7 @@ import { Markdown } from '../components/turns.tsx'
 import { Waterfall } from '../components/waterfall.tsx'
 import { LensSwitch } from '../components/lens-switch.tsx'
 import { lensFrom, type Lens } from '../lens.ts'
+import { FINISHED_MS, justFinished, levelOf, pourFrom } from '../pour.ts'
 import type { SessionStore } from '../store.ts'
 import type { DirectoryView, SessionAction } from '../../src/shared/rpc.ts'
 import { traceOf } from '../../src/ui/trace.ts'
@@ -421,8 +422,18 @@ describe('the Solid page', () => {
 
     const { container } = render(() => <Composer store={store} />)
 
+    // The head of foam names what is asked and the keys that answer it; the reason sits below.
+    const head = container.querySelector('#takeover .card-head')
+    expect(head?.querySelector('strong')?.textContent).toBe('Approve · bash')
+    expect(head?.querySelector('.card-keys')?.textContent).toBe('y / n')
+    expect(container.querySelector('#takeover .approval-reason')?.textContent).toBe(
+      'runs a command',
+    )
+    expect(container.querySelector('#takeover .fizz')?.getAttribute('aria-hidden')).toBe('true')
+
     const allow = container.querySelector('#takeover [data-approve="true"]')
     expect(allow?.textContent).toBe('Allow')
+    expect(allow?.className).toContain('bg-foam')
     fireEvent.click(allow as Element)
     expect(calls).toContainEqual({
       kind: 'command',
@@ -508,6 +519,8 @@ describe('the Solid page', () => {
     expect(bar?.textContent).toContain('ship it')
     expect(bar?.textContent).toContain('active')
     expect(bar?.textContent).toContain('2/8')
+    // Two rounds of eight: the goal has poured a quarter of the way.
+    expect((bar as HTMLElement).style.getPropertyValue('--level')).toBe('0.25')
 
     // The rules stay in the command: a button only says what the human typed.
     fireEvent.click(container.querySelector('[data-goal-action="pause"]') as Element)
@@ -1697,5 +1710,39 @@ describe('the workspace picker', () => {
     )
     expect(container.querySelector('.workspace-browse-use')).toBeNull()
     expect(calls.filter((call) => call.kind === 'addWorkspace')).toEqual([])
+  })
+})
+
+describe('the pour', () => {
+  test('a rising level starts from how long the work has run, never from the future', () => {
+    expect(pourFrom(1_000, 4_500)).toBe('-3.5s')
+    expect(pourFrom(5_000, 4_000)).toBe('0s')
+  })
+
+  test('a level with an end is as full as its share of it, and no fuller', () => {
+    expect(levelOf(2, 8)).toBe('0.25')
+    expect(levelOf(9, 8)).toBe('1')
+    expect(levelOf(1, 0)).toBe('0')
+  })
+
+  test('a finish lights once while the page watched it, then rests', () => {
+    vi.useFakeTimers()
+    try {
+      const [running, setRunning] = createSignal(true)
+      const lit = createRoot(() => justFinished(running))
+      expect(lit()).toBe(false)
+
+      setRunning(false)
+      expect(lit()).toBe(true)
+      vi.advanceTimersByTime(FINISHED_MS)
+      expect(lit()).toBe(false)
+
+      // Work that had already finished when the page drew it never lights.
+      const [done] = createSignal(false)
+      const quiet = createRoot(() => justFinished(done))
+      expect(quiet()).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

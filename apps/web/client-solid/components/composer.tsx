@@ -15,8 +15,10 @@ import {
   referencesFor,
   type ReferenceToken,
 } from '../../src/ui/references.ts'
+import { levelOf } from '../pour.ts'
 import type { SessionStore } from '../store.ts'
 import { Button } from './ui/button.tsx'
+import { Fizz } from './ui/fizz.tsx'
 
 /** How long the composer waits after the last key before it asks for files. */
 const REFERENCE_ASK_DELAY = 150
@@ -63,7 +65,12 @@ const GoalBar = (props: { store: SessionStore; onEdit: (objective: string) => vo
   return (
     <Show when={goal()}>
       {(current) => (
-        <section id="goal-bar" class="goal-bar" aria-label="the goal this session works toward">
+        <section
+          id="goal-bar"
+          class="goal-bar pour"
+          style={{ '--level': levelOf(current().rounds, current().maxRounds) }}
+          aria-label="the goal this session works toward"
+        >
           <div class="goal-line">
             <span class={'goal-phase ' + current().phase}>{current().phase}</span>
             <span class="goal-objective">{current().objective}</span>
@@ -127,15 +134,19 @@ const Takeover = (props: { store: SessionStore }) => {
       <Match when={conversation().approval}>
         {(approval) => (
           <section class="block approval takeover-card">
-            <div class="approval-text">
-              <strong>{'Approve ' + approval().tool + '?'}</strong>
-              <Show when={approval().reason !== ''}>
-                <span class="approval-reason">{' ' + approval().reason}</span>
-              </Show>
+            <Fizz />
+            <div class="card-head">
+              <strong>{'Approve · ' + approval().tool}</strong>
+              <span class="card-keys">y / n</span>
             </div>
+            <Show when={approval().reason !== ''}>
+              <div class="approval-text">
+                <span class="approval-reason">{approval().reason}</span>
+              </div>
+            </Show>
             <div class="approval-actions">
               <Button
-                variant="primary"
+                variant="foam"
                 type="button"
                 data-approve="true"
                 data-call-id={approval().callId}
@@ -150,6 +161,7 @@ const Takeover = (props: { store: SessionStore }) => {
                 Allow
               </Button>
               <Button
+                variant="rim"
                 type="button"
                 data-approve="false"
                 data-call-id={approval().callId}
@@ -164,13 +176,17 @@ const Takeover = (props: { store: SessionStore }) => {
                 Deny
               </Button>
             </div>
-            <div class="card-hint">or press y / n</div>
           </section>
         )}
       </Match>
       <Match when={conversation().ask}>
         {(ask) => (
           <section class="block takeover-card">
+            <Fizz />
+            <div class="card-head">
+              <strong>Question</strong>
+              <span class="card-keys">type an answer, Enter</span>
+            </div>
             <div
               class="takeover-text markdown"
               innerHTML={renderMarkdown(plainText(ask().question))}
@@ -179,7 +195,8 @@ const Takeover = (props: { store: SessionStore }) => {
               <div class="ask-options">
                 <For each={ask().options}>
                   {(option) => (
-                    <button
+                    <Button
+                      variant="scoop"
                       type="button"
                       data-ask-id={ask().id}
                       data-answer={option}
@@ -188,12 +205,11 @@ const Takeover = (props: { store: SessionStore }) => {
                       }
                     >
                       {plainText(option)}
-                    </button>
+                    </Button>
                   )}
                 </For>
               </div>
             </Show>
-            <div class="card-hint">or type an answer and press Enter</div>
           </section>
         )}
       </Match>
