@@ -766,4 +766,104 @@ describe('agent loop', () => {
     expect(kinds.indexOf('tool/result')).toBeLessThan(kinds.indexOf('turn/start'))
     expect(reason(events)).toEqual([{ kind: 'completed' }])
   })
+
+  test('records parallel results in call order even when they finish out of order', async () => {
+    const wait: ToolDefinition<
+      { readonly ms: number; readonly label: string },
+      { readonly label: string }
+    > = {
+      name: 'wait',
+      description: 'Waits, then answers with its label',
+      parameters: Schema.Struct({ ms: Schema.Number, label: Schema.String }),
+      output: {
+        schema: Schema.Struct({ label: Schema.String }),
+        render: (_args, value) => [{ type: 'text', text: value.label }],
+      },
+      execute: (args) => Effect.sleep(`${args.ms} millis`).pipe(Effect.as({ label: args.label })),
+      isConcurrencySafe: () => true,
+    }
+    const call = (index: number, id: string, ms: number, label: string) => ({
+      type: 'block-end' as const,
+      index,
+      block: {
+        type: 'tool-call' as const,
+        id,
+        name: 'wait',
+        arguments: JSON.stringify({ ms, label }),
+      },
+    })
+    const events = await scenario(
+      [
+        chunks([
+          call(0, 'c1', 30, 'slow'),
+          call(1, 'c2', 1, 'fast'),
+          { type: 'finish', kind: 'tool-calls' },
+        ]),
+        chunks(textTurn('done')),
+      ],
+      (ctx) =>
+        Effect.gen(function* () {
+          yield* ctx.tools.register(wait)
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+    )
+
+    const results = events.session
+      .events()
+      .flatMap((event) => (event.type === 'tool/result' ? [event.data.callId] : []))
+    // The log pairs each call with its result in the order the model asked them.
+    expect(results).toEqual(['c1', 'c2'])
+  })
+
+  test('runs at most ten calls at once in a parallel batch', async () => {
+    let active = 0
+    let peak = 0
+    const probe: ToolDefinition<{}, { readonly ok: boolean }> = {
+      name: 'probe',
+      description: 'Counts how many of its calls are in flight',
+      parameters: Schema.Struct({}),
+      output: {
+        schema: Schema.Struct({ ok: Schema.Boolean }),
+        render: () => [{ type: 'text', text: 'ok' }],
+      },
+      execute: () =>
+        Effect.gen(function* () {
+          active += 1
+          peak = Math.max(peak, active)
+          yield* Effect.sleep('5 millis')
+          active -= 1
+          return { ok: true }
+        }),
+      isConcurrencySafe: () => true,
+    }
+    const calls = Array.from({ length: 12 }, (_, index) => ({
+      type: 'block-end' as const,
+      index,
+      block: {
+        type: 'tool-call' as const,
+        id: `c${index}`,
+        name: 'probe',
+        arguments: '{}',
+      },
+    }))
+    const events = await scenario(
+      [chunks([...calls, { type: 'finish', kind: 'tool-calls' }]), chunks(textTurn('done'))],
+      (ctx) =>
+        Effect.gen(function* () {
+          yield* ctx.tools.register(probe)
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+    )
+
+    const results = events.session.events().filter((event) => event.type === 'tool/result')
+    expect(results).toHaveLength(12)
+    expect(peak).toBeGreaterThan(1)
+    expect(peak).toBeLessThanOrEqual(10)
+  })
 })

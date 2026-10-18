@@ -84,6 +84,13 @@ export const DEFAULT_COMPACT_HEADROOM_TOKENS = 65_536
  */
 export const DEFAULT_COMPACT_RETAIN_RATIO = 0.16
 
+/** The calls one parallel batch may run at once when no profile says otherwise. */
+export const DEFAULT_MAX_PARALLEL_TOOL_CALLS = 10
+
+/** The fan-out a profile asks for; a non-positive value still runs one call at a time. */
+const maxParallelCallsOf = (config: AgentLoopConfig): number =>
+  Math.max(1, config.maxParallelToolCalls ?? DEFAULT_MAX_PARALLEL_TOOL_CALLS)
+
 /** Results larger than this are written to a file; only their head stays in the log. */
 const SPILL_BYTES = 32_000
 
@@ -146,6 +153,8 @@ const agentLoopEffect = (
         config.retainTokens ?? Math.floor(messageBudgetOf(budget) * DEFAULT_COMPACT_RETAIN_RATIO),
       maxBytes: config.maxBytes ?? DEFAULT_COMPACT_MAX_BYTES,
     }
+    // A parallel batch fans out to this many calls at most.
+    const maxParallelToolCalls = maxParallelCallsOf(config)
 
     // A session that cannot be written stops the agent: `orDie` turns the failure into
     // a defect, which `runTurn` records as an error turn and which kills the runner.
@@ -395,11 +404,8 @@ const agentLoopEffect = (
         return yield* streamUntilSettled(agent, request)
       })
 
-    const runOne = (
-      agent: Agent,
-      call: ToolCall,
-      pending: Map<string, ToolCall>,
-    ): Effect.Effect<void> =>
+    /** Runs one call and returns the record it earns; nothing is appended yet. */
+    const runOne = (agent: Agent, call: ToolCall): Effect.Effect<SessionEventMap['tool/result']> =>
       Effect.gen(function* () {
         const spill = spillOf(agent)
         const outcome = yield* tools.call({
@@ -423,7 +429,7 @@ const agentLoopEffect = (
         // The presentation is rendered where the tool is known, and recorded with
         // the result: every UI reads the same line out of the log instead of
         // guessing one from the raw content.
-        yield* append(agent, 'tool/result', {
+        return {
           callId: call.id,
           isError: shown.isError,
           content: shown.content,
@@ -431,8 +437,7 @@ const agentLoopEffect = (
             isError: shown.isError,
             summary: resultSummary(shown.content),
           }).summary,
-        })
-        pending.delete(call.id)
+        }
       })
 
     const declareBatch = (
@@ -452,16 +457,35 @@ const agentLoopEffect = (
         }
       })
 
+    /** Records finished results in call order, whatever order they finished in. */
+    const commitResults = (
+      agent: Agent,
+      results: ReadonlyArray<SessionEventMap['tool/result']>,
+      pending: Map<string, ToolCall>,
+    ): Effect.Effect<void> =>
+      Effect.forEach(
+        results,
+        (result) =>
+          Effect.gen(function* () {
+            yield* append(agent, 'tool/result', result)
+            pending.delete(result.callId)
+          }),
+        { discard: true },
+      )
+
     const runBatch = (
       agent: Agent,
       batch: CallBatch<ToolCall>,
       pending: Map<string, ToolCall>,
-    ): Effect.Effect<void> => {
-      const run = (call: ToolCall) => runOne(agent, call, pending)
-      return batch.parallel
-        ? Effect.forEach(batch.calls, run, { concurrency: 'unbounded' })
-        : Effect.forEach(batch.calls, run, { discard: true })
-    }
+    ): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        // The fan-out is bounded, and the collection keeps the call order while
+        // the calls themselves finish in whatever order they take.
+        const results = yield* Effect.forEach(batch.calls, (call) => runOne(agent, call), {
+          concurrency: batch.parallel ? maxParallelToolCalls : 1,
+        })
+        yield* commitResults(agent, results, pending)
+      })
 
     /** What a call gets when the run that made it never finished it. */
     const didNotFinish = (agent: Agent, callId: string, name: string): Effect.Effect<void> =>
@@ -628,6 +652,8 @@ export const agentLoopConfigSchema = Schema.Struct({
    * by this much before the headroom is taken off. Unset reserves nothing.
    */
   maxTokens: Schema.optionalKey(Schema.Int),
+  /** Calls one parallel batch runs at once. Defaults to 10. */
+  maxParallelToolCalls: Schema.optionalKey(Schema.Int),
 })
 
 export type AgentLoopConfig = Schema.Schema.Type<typeof agentLoopConfigSchema>
