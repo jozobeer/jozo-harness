@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import type { UiCommand, UiEvent, UiHost, UiSessionEvent } from '@jozo-harness/ui-protocol'
 import { Cause, Deferred, Effect, Queue, Stream, type Scope } from 'effect'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -261,6 +261,14 @@ const openOf = (host: FakeHost): OpenSession => ({
   jobOutput: host.jobOutput,
   stopJob: host.stopJob,
   stopSubagent: host.stopSubagent,
+  // These tests never delete a session; the state still says what runs.
+  busy: () => {
+    const state = host.runState()
+    return (
+      state.jobs.some((job) => job.running) ||
+      state.subagents.some((child) => child.status === 'running')
+    )
+  },
 })
 
 interface FakeSettings {
@@ -347,7 +355,9 @@ const serve = (
     const root = yield* Effect.promise(() => mkdtemp(join(tmpdir(), 'jzh-store-test-')))
     yield* Effect.forkScoped(
       serveWeb({
-        ...(options.held === false ? {} : { initial: openOf(host) }),
+        ...(options.held === false
+          ? {}
+          : { initial: { session: openOf(host), close: () => Effect.void } }),
         factory,
         settings: (options.settings ?? makeSettings()).port,
         workspaces: workspacesPort,
@@ -1038,6 +1048,57 @@ describe('the page store', () => {
           expect(browser.stored(draftKey('a'))).toBeUndefined()
           again.stop()
         }),
+      ),
+    )
+  }, 15_000)
+
+  test('deleting the open session leaves the page blank and forgets it', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    const sessionRoot = await mkdtemp(join(tmpdir(), 'jzh-store-delete-'))
+    await mkdir(join(sessionRoot, 'a'), { recursive: true })
+    const base = makeSettings()
+    const settings: FakeSettings = {
+      ...base,
+      port: {
+        ...base.port,
+        read: () =>
+          Effect.succeed({
+            model: 'stub/model',
+            effort: '',
+            efforts: ['low', 'high'],
+            settingsPath: '/work/settings.yml',
+            cwd: '/work',
+            sessionRoot,
+          }),
+      },
+    }
+    await Effect.runPromise(
+      withStore(
+        host,
+        (store) =>
+          Effect.gen(function* () {
+            yield* until(() => store.state().opened.includes('a'), 'listed the open session')
+            store.act('a', { kind: 'delete' })
+            yield* until(() => store.state().sessionId === '', 'stood on a blank page')
+            yield* until(() => !store.state().opened.includes('a'), 'forgot the deleted session')
+            // The page stays on the blank one and says nothing went wrong.
+            yield* Effect.sleep('600 millis')
+            expect(store.state().sessionId).toBe('')
+            expect(store.state().problem).toBe('')
+            const gone = yield* Effect.promise(async () => {
+              try {
+                await stat(join(sessionRoot, 'a'))
+                return false
+              } catch {
+                return true
+              }
+            })
+            expect(gone).toBe(true)
+          }),
+        { settings },
+      ).pipe(
+        Effect.ensuring(Effect.promise(() => rm(sessionRoot, { recursive: true, force: true }))),
       ),
     )
   }, 15_000)

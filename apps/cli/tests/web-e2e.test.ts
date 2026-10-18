@@ -7,7 +7,7 @@ import { sessionPlugin, type AssistantMessageData } from '@jozo-harness/session'
 import { jsonlSessions, sessionJsonlPlugin } from '@jozo-harness/session-jsonl'
 import { systemPromptPlugin } from '@jozo-harness/system-prompt'
 import { toolsPlugin } from '@jozo-harness/tools'
-import { Deferred, Effect, Layer, Schema, Stream } from 'effect'
+import { Deferred, Effect, Layer, Schema, Stream, type Scope } from 'effect'
 import { RpcClient, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -86,6 +86,17 @@ const plugins: ReadonlyArray<Plugin<any, any, any>> = [
 const textOf = (data: AssistantMessageData): string =>
   data.content.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('')
 
+/** The client layers every page's socket needs, as a test that drives one uses them. */
+const clientLayers =
+  (wsUrl: string) =>
+  <A, E>(self: Effect.Effect<A, E, unknown>): Effect.Effect<A, E> =>
+    self.pipe(
+      Effect.provide(RpcClient.layerProtocolSocket()),
+      Effect.provide(Socket.layerWebSocket(wsUrl)),
+      Effect.provide(Socket.layerWebSocketConstructorGlobal),
+      Effect.provide(RpcSerialization.layerJson),
+    ) as Effect.Effect<A, E>
+
 describe('the browser UI through the command', () => {
   /**
    * The build this test serves lives in a directory of its own. The app's `dist` is one
@@ -110,6 +121,43 @@ describe('the browser UI through the command', () => {
   afterAll(async () => {
     await rm(staticRoot, { recursive: true, force: true })
   })
+
+  /**
+   * Runs the command with the browser UI for as long as the body takes, and
+   * hands it the socket a page would use. A resumed run starts on that session.
+   */
+  const withPage = <A, E>(
+    place: { readonly root: string; readonly workspace: string; readonly resume?: string },
+    body: (wsUrl: string) => Effect.Effect<A, E, Scope.Scope>,
+  ): Effect.Effect<A, E> =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const ready = yield* Deferred.make<string>()
+        const stop = yield* Deferred.make<void>()
+        yield* Effect.forkScoped(
+          runCommand({
+            profiles: [profile(place.root)],
+            plugins,
+            cwd: place.workspace,
+            route: 'stub/model',
+            ...(place.resume === undefined ? {} : { resume: place.resume }),
+            web: { port: 0, staticRoot },
+            stdout: () => undefined,
+            stderr: (text) => {
+              const match = /http:\/\/127\.0\.0\.1:\d+\/\S*/.exec(text)
+              if (match !== null) void Effect.runSync(Deferred.succeed(ready, match[0]))
+            },
+            interrupt: Deferred.await(stop),
+          }),
+        )
+        const page = new URL(yield* Deferred.await(ready))
+        const result = yield* body(
+          'ws://' + page.host + '/ui?token=' + (page.searchParams.get('token') ?? ''),
+        )
+        yield* Deferred.succeed(stop, undefined)
+        return result
+      }),
+    )
 
   test('a model a page picks is what the session it opens next starts from', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-model-'))
@@ -193,6 +241,62 @@ describe('the browser UI through the command', () => {
       { provider: 'stub', model: 'model' },
       { provider: 'stub', model: 'other' },
     ])
+  }, 30_000)
+
+  test('a page deletes the session a resumed run opened, log and all', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-delete-'))
+    const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-web-delete-ws-'))
+
+    // A first run leaves one session behind, the way a resume finds one.
+    const started = await Effect.runPromise(
+      withPage({ root, workspace }, (wsUrl) =>
+        withoutServices(
+          Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const opened = yield* client.open({})
+            yield* client.command({
+              sessionId: opened.id,
+              command: { kind: 'submit', text: 'ping' },
+            })
+            // The turn finishes before the page deletes the session: a working
+            // session is the one moment the delete refuses.
+            yield* Effect.sleep('700 millis')
+            return opened.id
+          }).pipe(clientLayers(wsUrl)),
+        ),
+      ),
+    )
+
+    const seen = await Effect.runPromise(
+      withPage({ root, workspace, resume: started }, (wsUrl) =>
+        withoutServices(
+          Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const before = yield* client.sessions()
+            const opened = yield* client.open({ sessionId: started })
+            const deleted = yield* client.sessionAction({
+              sessionId: opened.id,
+              action: { kind: 'delete' },
+            })
+            const after = yield* client.sessions()
+            return { before, opened, deleted, after }
+          }).pipe(clientLayers(wsUrl)),
+        ),
+      ),
+    )
+    const left = await Effect.runPromise(jsonlSessions({ root }).list())
+
+    // The resumed session is open from the start, and the page deletes it anyway.
+    expect(seen.before.initial).toBe(started)
+    expect(seen.before.opened).toEqual([started])
+    expect(seen.opened.id).toBe(started)
+    expect(seen.deleted).toBe(true)
+    // Neither the page nor the store holds the id once the log is gone.
+    expect(seen.after.initial).toBe('')
+    expect(seen.after.opened).toEqual([])
+    expect(left.map((session) => session.id)).not.toContain(started)
+    await rm(root, { recursive: true, force: true })
+    await rm(workspace, { recursive: true, force: true })
   }, 30_000)
 
   test('a browser client drives a real turn and the static app is served', async () => {
