@@ -1,5 +1,5 @@
 import { Effect } from 'effect'
-import type { Agent } from '@jozo-harness/agent'
+import type { Agent, AgentsShape } from '@jozo-harness/agent'
 import type { SessionEvent } from '@jozo-harness/session'
 import {
   currentGoal,
@@ -63,14 +63,21 @@ const blockAtLimit = (agent: Agent, state: GoalState): Effect.Effect<void> =>
     })
     .pipe(Effect.catchCause(() => Effect.void))
 
+/** Waits for every direct child to settle: idle, or disposed. */
+const childrenIdle = (agents: AgentsShape, id: Agent['id']): Effect.Effect<void> =>
+  Effect.forEach(agents.childrenOf(id), (child) => child.whenIdle, { discard: true })
+
 /**
  * Runs at the end of a turn of the goal's own agent: an active goal gets its next
  * round queued as a user message of its own, so the turn that follows starts on its
- * own, and a goal that has run its limit is stopped instead. Queueing before the
- * turn ends keeps the agent from settling in between, and the log stays the only
- * state the decision reads.
+ * own, and a goal that has run its limit is stopped instead. The round waits for
+ * the agent's children to settle first: a child still working would only make the
+ * next round wait, spending one of the goal's rounds for nothing. After the wait
+ * the log is read again, because the goal may have been paused or completed while
+ * the child ran. Queueing before the turn ends keeps the agent from settling in
+ * between, and the log stays the only state the decision reads.
  */
-export const startGoalRound = (agent: Agent): Effect.Effect<void> =>
+export const startGoalRound = (agent: Agent, agents: AgentsShape): Effect.Effect<void> =>
   Effect.gen(function* () {
     const decision = goalRoundDecision(agent.session.events())
     if (decision.kind === 'none') return
@@ -78,7 +85,14 @@ export const startGoalRound = (agent: Agent): Effect.Effect<void> =>
       yield* blockAtLimit(agent, decision.state)
       return
     }
+    yield* childrenIdle(agents, agent.id)
+    const settled = goalRoundDecision(agent.session.events())
+    if (settled.kind === 'none') return
+    if (settled.kind === 'limit') {
+      yield* blockAtLimit(agent, settled.state)
+      return
+    }
     yield* agent
-      .followup({ text: decision.text, source: GOAL_ROUND_SOURCE })
+      .followup({ text: settled.text, source: GOAL_ROUND_SOURCE })
       .pipe(Effect.catchCause(() => Effect.void))
   })
