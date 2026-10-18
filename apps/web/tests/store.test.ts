@@ -25,6 +25,8 @@ import { createSessionStore, type SessionStore } from '../client-solid/store.ts'
 interface StubbedBrowser {
   readonly kept: () => string | undefined
   readonly attribute: () => string | undefined
+  /** The URL the page last put in the address bar. */
+  readonly address: () => string | undefined
   /** Paints the frame the page is waiting on, if it is waiting on one. */
   readonly paint: () => void
 }
@@ -33,6 +35,7 @@ interface StubbedBrowser {
 const stubTheBrowser = (options: { readonly frames?: boolean } = {}): StubbedBrowser => {
   const globals = globalThis as unknown as Record<string, unknown>
   let kept: string | undefined
+  let address: string | undefined
   const dataset: Record<string, string | undefined> = {}
   globals.localStorage = {
     getItem: () => kept ?? null,
@@ -41,8 +44,14 @@ const stubTheBrowser = (options: { readonly frames?: boolean } = {}): StubbedBro
     },
   }
   globals.document = { documentElement: { dataset } }
-  globals.history = { replaceState: () => undefined }
-  globals.window = { location: { protocol: 'http:', host: '127.0.0.1:8080', search: '?session=a' } }
+  globals.history = {
+    replaceState: (_data: unknown, _unused: string, url?: string) => {
+      address = url
+    },
+  }
+  globals.window = {
+    location: { protocol: 'http:', host: '127.0.0.1:8080', pathname: '/', search: '?session=a' },
+  }
   // The page folds what arrived once per frame. A run that watches that hands the
   // page a clock of its own and paints when it means to; every other run has no
   // frame to wait for and folds on the next turn of the event loop.
@@ -57,6 +66,7 @@ const stubTheBrowser = (options: { readonly frames?: boolean } = {}): StubbedBro
   return {
     kept: () => kept,
     attribute: () => dataset.theme,
+    address: () => address,
     paint: () => {
       for (const run of waiting.splice(0, waiting.length)) run()
     },
@@ -228,25 +238,32 @@ const makeSettings = (): FakeSettings => {
   }
 }
 
+interface Served {
+  readonly wsUrl: string
+  readonly stop: Deferred.Deferred<void>
+  readonly root: string
+  /** How many times the page asked the server to open or create a session. */
+  readonly opens: () => number
+}
+
 /** Serves one fake host until the test's scope closes. */
 const serve = (
   host: FakeHost,
   /** False serves a server that holds no session yet, as one just started does. */
   options: { readonly held?: boolean; readonly settings?: FakeSettings } = {},
-): Effect.Effect<
-  { readonly wsUrl: string; readonly stop: Deferred.Deferred<void>; readonly root: string },
-  never,
-  Scope.Scope
-> =>
+): Effect.Effect<Served, never, Scope.Scope> =>
   Effect.gen(function* () {
     const ready = yield* Deferred.make<string>()
     const stop = yield* Deferred.make<void>()
+    let opens = 0
     const factory: SessionFactory = {
       list: () => Effect.succeed([host.summary]),
-      open: () =>
-        host.refusing
+      open: () => {
+        opens += 1
+        return host.refusing
           ? Effect.fail(new WebError({ message: 'the session was refused' }))
-          : Effect.succeed(openOf(host)),
+          : Effect.succeed(openOf(host))
+      },
     }
     const root = yield* Effect.promise(() => mkdtemp(join(tmpdir(), 'jzh-store-test-')))
     yield* Effect.forkScoped(
@@ -263,7 +280,12 @@ const serve = (
       }),
     )
     const origin = (yield* Deferred.await(ready)).replace(/\/$/, '')
-    return { wsUrl: 'ws://' + origin.replace(/^http:\/\//, '') + '/ui', stop, root }
+    return {
+      wsUrl: 'ws://' + origin.replace(/^http:\/\//, '') + '/ui',
+      stop,
+      root,
+      opens: () => opens,
+    }
   })
 
 /** Waits for what the page reaches on its own, or fails saying what never came. */
@@ -282,13 +304,13 @@ const saidTexts = (store: SessionStore): ReadonlyArray<string> =>
 /** Serves one host, starts the page's store on it, and hands both to the body. */
 const withStore = (
   host: FakeHost,
-  body: (store: SessionStore) => Effect.Effect<void>,
+  body: (store: SessionStore, served: Served) => Effect.Effect<void>,
   options: { readonly held?: boolean; readonly settings?: FakeSettings } = {},
 ): Effect.Effect<void> =>
   Effect.scoped(
     Effect.gen(function* () {
-      const { wsUrl, stop, root } = yield* serve(host, options)
-      const store = createSessionStore({ url: wsUrl, search: '' })
+      const served = yield* serve(host, options)
+      const store = createSessionStore({ url: served.wsUrl, search: '' })
       store.start()
       // A server that holds nothing leaves the page with nothing open: the
       // connection is what says the page is ready, not a session.
@@ -296,10 +318,10 @@ const withStore = (
       if (options.held !== false) {
         yield* until(() => store.state().sessionId === 'a', 'opened the session')
       }
-      yield* body(store)
+      yield* body(store, served)
       store.stop()
-      yield* Deferred.succeed(stop, undefined)
-      yield* Effect.promise(() => rm(root, { recursive: true, force: true }))
+      yield* Deferred.succeed(served.stop, undefined)
+      yield* Effect.promise(() => rm(served.root, { recursive: true, force: true }))
     }),
   )
 
@@ -428,6 +450,62 @@ describe('the page store', () => {
     expect(browser.kept()).toBe('dark')
     expect(browser.attribute()).toBe('dark')
   })
+
+  test('New session moves the page to a blank one without asking for a session', async () => {
+    const browser = stubTheBrowser()
+    const host = makeHost('a')
+    await Effect.runPromise(
+      withStore(host, (store, served) =>
+        Effect.gen(function* () {
+          const opened = served.opens()
+          expect(browser.address()).toBe('?session=a')
+
+          store.moveTo(undefined)
+          yield* until(() => store.state().sessionId === '', 'moved to the blank page')
+          // A second and a third press are the same move, not two more sessions.
+          store.moveTo(undefined)
+          store.moveTo(undefined)
+          yield* Effect.sleep('100 millis')
+
+          // Nothing reached the server, and the page holds no session on screen.
+          expect(served.opens()).toBe(opened)
+          expect(store.state().sessions.map((item) => item.id)).toEqual(['a'])
+          expect(store.state().conversation.blocks).toEqual([])
+          expect(store.state().run).toBeUndefined()
+          // The address bar names no session, so a reload does not go back to one.
+          expect(browser.address()).toBe('/')
+        }),
+      ),
+    )
+  }, 15_000)
+
+  test('the first line typed on the blank page opens one session and is sent to it', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    await Effect.runPromise(
+      withStore(host, (store, served) =>
+        Effect.gen(function* () {
+          store.moveTo(undefined)
+          yield* until(() => store.state().sessionId === '', 'moved to the blank page')
+          const opened = served.opens()
+
+          store.setDraft('the first line')
+          store.submit()
+
+          yield* until(() => served.opens() === opened + 1, 'opened one session for the line')
+          yield* until(
+            () => host.commands.some((command) => command.kind === 'submit'),
+            'sent the line',
+          )
+          // One line asked for one session, and the line went there as it was.
+          yield* Effect.sleep('100 millis')
+          expect(served.opens()).toBe(opened + 1)
+          expect(host.commands).toContainEqual({ kind: 'submit', text: 'the first line' })
+          expect(store.state().draft).toBe('')
+        }),
+      ),
+    )
+  }, 15_000)
 
   test('a page the server holds no session for opens one for the first line', async () => {
     stubTheBrowser()
