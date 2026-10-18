@@ -58,6 +58,7 @@ import {
   goalRounds,
   lastFiredAt,
   ruleText,
+  scheduleTitle,
 } from '@jozo-harness/tools-tier1'
 import { runConfig } from './config-command.ts'
 import { runContextOf } from './run-state.ts'
@@ -1169,6 +1170,7 @@ const runStateOf = (
     schedules: currentSchedules(events).map((schedule) => ({
       id: schedule.id,
       when: ruleText(schedule.rule),
+      title: scheduleTitle(schedule),
       prompt: schedule.prompt,
       lastFiredAt: lastFiredAt(events, schedule.id) ?? 0,
     })),

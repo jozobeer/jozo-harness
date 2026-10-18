@@ -195,8 +195,13 @@ const Run = (props: { store: SessionStore }) => {
                 <For each={state().schedules}>
                   {(schedule) => (
                     <li>
-                      <span class="run-when">{schedule.when}</span>
-                      <span class="run-prompt">{schedule.prompt}</span>
+                      <details class="run-schedule">
+                        <summary>
+                          <span class="run-when">{schedule.when}</span>
+                          <span class="run-title">{schedule.title}</span>
+                        </summary>
+                        <p class="run-prompt">{schedule.prompt}</p>
+                      </details>
                     </li>
                   )}
                 </For>

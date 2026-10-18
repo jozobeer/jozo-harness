@@ -876,7 +876,15 @@ describe('the Solid page', () => {
       pane: { kind: 'run' },
       run: {
         goal: { objective: 'ship the port', phase: 'active', rounds: 1, maxRounds: 8 },
-        schedules: [],
+        schedules: [
+          {
+            id: 'sched-1',
+            when: 'every 60s',
+            title: 'check the build',
+            prompt: 'run pnpm run check and report',
+            lastFiredAt: 0,
+          },
+        ],
         jobs: [],
         subagents: [],
         todos: [
@@ -904,6 +912,11 @@ describe('the Solid page', () => {
     expect(container.querySelector('.run-skill')?.textContent).toBe('code-complete')
     expect(container.querySelectorAll('.run-prompt-section')).toHaveLength(2)
     expect(container.querySelector('.run-prompt-section')?.textContent).toBe('identity')
+    expect(container.querySelector('.run-when')?.textContent).toBe('every 60s')
+    expect(container.querySelector('.run-title')?.textContent).toBe('check the build')
+    expect(container.querySelector('.run-schedule .run-prompt')?.textContent).toBe(
+      'run pnpm run check and report',
+    )
 
     const turns = [...container.querySelectorAll('button.tab')].find(
       (tab) => tab.textContent === 'turns',

@@ -44,7 +44,13 @@ const RUN: RunStateView = {
     maxRounds: 8,
   },
   schedules: [
-    { id: 's1', when: 'every 30m', prompt: 'pnpm run check を回して報告', lastFiredAt: 0 },
+    {
+      id: 's1',
+      when: 'every 30m',
+      title: 'check を回して報告',
+      prompt: 'pnpm run check を回して報告',
+      lastFiredAt: 0,
+    },
   ],
   jobs: [
     {

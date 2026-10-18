@@ -21,6 +21,12 @@ const Parameters = Schema.Struct({
       description: 'What to tell the model when the time arrives. Required with create.',
     }),
   ),
+  title: Schema.optionalKey(
+    Schema.String.annotate({
+      description:
+        "A short name for lists, at most 120 characters: the action and its subject in the user's language, keeping identifiers such as PR numbers and branch names, without the frequency, dates, times, time zone, status, execution settings, or parenthetical notes.",
+    }),
+  ),
   every: Schema.optionalKey(
     Schema.Int.annotate({ description: 'Repeat every this many seconds.' }),
   ),
@@ -98,12 +104,25 @@ const checkedRule = (rule: ScheduleRule, from: number): ScheduleRule => {
   return rule
 }
 
-const scheduleOf = (args: ScheduleArgs, log: ScheduleLog): Schedule => ({
-  id: log.nextId(),
-  rule: checkedRule(ruleOf(args), log.now()),
-  prompt: args.prompt ?? '',
-  createdAt: log.now(),
-})
+/** A title the lists can show: trimmed, non-empty, and no longer than dsh's 120 characters. */
+const checkedTitle = (title: string | undefined): string | undefined => {
+  if (title === undefined) return undefined
+  const trimmed = title.trim()
+  if (trimmed === '') throw refuse('title cannot be empty')
+  if (trimmed.length > 120) throw refuse('title is at most 120 characters')
+  return trimmed
+}
+
+const scheduleOf = (args: ScheduleArgs, log: ScheduleLog): Schedule => {
+  const title = checkedTitle(args.title)
+  return {
+    id: log.nextId(),
+    rule: checkedRule(ruleOf(args), log.now()),
+    prompt: args.prompt ?? '',
+    ...(title === undefined ? {} : { title }),
+    createdAt: log.now(),
+  }
+}
 
 const createSchedule = (args: ScheduleArgs, log: ScheduleLog) => {
   if (args.prompt === undefined || args.prompt.trim() === '') {
@@ -127,10 +146,12 @@ const updateSchedule = (args: ScheduleArgs, log: ScheduleLog) => {
     args.cron === undefined
       ? current.rule
       : checkedRule(ruleOf(args), log.now())
+  const title = checkedTitle(args.title)
   const schedule: Schedule = {
     ...current,
     rule,
     ...(args.prompt === undefined ? {} : { prompt: args.prompt }),
+    ...(title === undefined ? {} : { title }),
   }
   return log
     .write({ kind: 'updated', schedule })
@@ -179,6 +200,7 @@ export const makeScheduleTool = (
           id: Schema.String,
           rule: RuleSchema,
           prompt: Schema.String,
+          title: Schema.optionalKey(Schema.String),
           createdAt: Schema.Number,
         }),
       ),

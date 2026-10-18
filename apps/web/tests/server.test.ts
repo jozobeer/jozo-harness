@@ -78,7 +78,15 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
     ],
     runState: () => ({
       goal: { objective: 'ship the UI', phase: 'active', rounds: 2, maxRounds: 8 },
-      schedules: [{ id: 's-1', when: 'every 60s', prompt: 'check the build', lastFiredAt: 0 }],
+      schedules: [
+        {
+          id: 's-1',
+          when: 'every 60s',
+          title: 'check the build',
+          prompt: 'run pnpm run check',
+          lastFiredAt: 0,
+        },
+      ],
       jobs: [
         {
           id: 'j-1',

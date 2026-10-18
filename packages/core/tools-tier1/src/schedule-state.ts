@@ -13,6 +13,8 @@ export interface Schedule {
   readonly rule: ScheduleRule
   /** What to tell the model when the time arrives. */
   readonly prompt: string
+  /** A short name for the list; older schedules have none and fall back to the prompt. */
+  readonly title?: string
   /** When the schedule was written, which is where an interval counts from. */
   readonly createdAt: number
 }
@@ -45,6 +47,7 @@ const ScheduleSchema = Schema.Struct({
   id: Schema.String,
   rule: RuleSchema,
   prompt: Schema.String,
+  title: Schema.optionalKey(Schema.String),
   createdAt: Schema.Number,
 })
 
@@ -99,9 +102,16 @@ export const ruleText = (rule: ScheduleRule): string => {
   return 'cron ' + rule.expression
 }
 
+/** The shortest name a schedule carries: its title, or the prompt's first line for older ones. */
+export const scheduleTitle = (schedule: Schedule): string => {
+  if (schedule.title !== undefined && schedule.title !== '') return schedule.title
+  const [first = ''] = schedule.prompt.split('\n')
+  return first
+}
+
 /** How a schedule reads in a list. */
 export const scheduleLine = (schedule: Schedule): string =>
-  schedule.id + ' ' + ruleText(schedule.rule) + ' -> ' + schedule.prompt
+  schedule.id + ' ' + ruleText(schedule.rule) + ' -> ' + scheduleTitle(schedule)
 
 /** The message the driver sends when a schedule comes due. */
 export const renderSchedulePrompt = (schedule: Schedule): string =>
