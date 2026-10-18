@@ -47,7 +47,7 @@ const TOOL_GUIDANCE: ReadonlyArray<readonly [name: string, line: string]> = [
   ['edit', 'Use edit for a targeted change; oldString must match exactly once unless all is set.'],
   [
     'bash',
-    'Check the [exit code: N] marker on every bash result; investigate failures before moving on. A command that outlives its timeout is killed and marked; use job_start for work that should keep running.',
+    'Check the [exit code: N] marker on every bash result; investigate failures before moving on. A command that outlives its timeout is promoted to a background job and marked with its id; read it with job_output.',
   ],
   ['todo_write', "Keep a multi-step task's plan and progress in todo_write as steps finish."],
   [

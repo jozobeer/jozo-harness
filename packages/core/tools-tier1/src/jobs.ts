@@ -27,6 +27,8 @@ export interface JobReadOptions {
 export interface JobsShape {
   /** Starts a command in the background and returns its handle. */
   readonly start: (command: string, cwd: string) => Effect.Effect<Job, ToolError>
+  /** Takes over a child a timed-out call already spawned, so its work is not lost. */
+  readonly promote: (command: string, child: Child) => Effect.Effect<Job, ToolError>
   /** Reads what the job produced since the previous read, waiting up to `waitMs` for more. */
   readonly read: (id: string, options?: JobReadOptions) => Effect.Effect<JobRead, ToolError>
   readonly kill: (id: string) => Effect.Effect<void, ToolError>
@@ -75,6 +77,22 @@ export const makeJobs = (): Effect.Effect<JobsShape> =>
       })()
     }
 
+    /** Registers a child under a fresh job id; the caller owns how the child was spawned. */
+    const register = (command: string, child: Child): Job => {
+      counter += 1
+      const id = 'job-' + String(counter)
+      const job: Job = { id, command, running: true, output: '' }
+      const entry: Entry = { job, process: child, produced: 0, seen: 0, wake: [] }
+      collect(entry, child.stdout)
+      collect(entry, child.stderr)
+      void child.exited.then(() => {
+        job.running = false
+        notify(entry)
+      })
+      jobs.set(id, entry)
+      return job
+    }
+
     /** Resolves on output the reader has not seen, on the job stopping, or on the wait running out. */
     const waitForChange = (entry: Entry, waitMs: number): Promise<void> =>
       new Promise((resolve) => {
@@ -95,25 +113,13 @@ export const makeJobs = (): Effect.Effect<JobsShape> =>
 
     return {
       start: (command, cwd) =>
-        Effect.sync(() => {
-          counter += 1
-          const id = 'job-' + String(counter)
-          const child = spawn(['bash', '-lc', command], {
-            cwd,
-            stdout: 'pipe',
-            stderr: 'pipe',
-          })
-          const job: Job = { id, command, running: true, output: '' }
-          const entry: Entry = { job, process: child, produced: 0, seen: 0, wake: [] }
-          collect(entry, child.stdout)
-          collect(entry, child.stderr)
-          void child.exited.then(() => {
-            job.running = false
-            notify(entry)
-          })
-          jobs.set(id, entry)
-          return job
-        }),
+        Effect.sync(() =>
+          register(
+            command,
+            spawn(['bash', '-lc', command], { cwd, stdout: 'pipe', stderr: 'pipe' }),
+          ),
+        ),
+      promote: (command, child) => Effect.sync(() => register(command, child)),
       read: (id, options) =>
         Effect.gen(function* () {
           const entry = jobs.get(id)

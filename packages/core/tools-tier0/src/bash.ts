@@ -9,17 +9,25 @@ import {
   type SandboxMode,
   type SandboxShape,
 } from '@jozo-harness/safety'
-import { spawn } from '@jozo-harness/process'
+import { spawn, type Child } from '@jozo-harness/process'
 import { escalates, escalationFields, modeOfCall } from './escalation.ts'
 import { resolveInside } from './workspace.ts'
 import { exitSummaryOf } from './present.ts'
 
-/** A command that has not finished by then is killed. */
+/** A command that has not finished by then is promoted to a job, or killed when there is none. */
 export const BASH_DEFAULT_TIMEOUT_MS = 120_000
 /** The longest a caller may ask for; a command beyond this is background work. */
 export const BASH_MAX_TIMEOUT_MS = 600_000
 /** After the soft kill, a command that ignores it gets this long before the hard one. */
 export const BASH_HARD_KILL_GRACE_MS = 5_000
+
+/** A live child the job registry takes over when a call runs out of time. */
+export interface TimeoutJobs {
+  readonly promote: (
+    command: string,
+    child: Child,
+  ) => Effect.Effect<{ readonly id: string }, ToolError>
+}
 
 const Parameters = Schema.Struct({
   command: Schema.String.annotate({ description: 'The shell command line to run.' }),
@@ -46,6 +54,8 @@ export interface BashValue {
   readonly stderr: string
   readonly timedOut: boolean
   readonly timeoutMs: number
+  /** The job a timed-out command was handed to, when the run has a job registry. */
+  readonly jobId?: string
   /** The mode the command ran under, and whether the sandbox refused a file effect. */
   readonly sandbox: {
     readonly mode: SandboxMode
@@ -72,10 +82,46 @@ interface Run {
   readonly stderr: string
   readonly timedOut: boolean
   readonly timeoutMs: number
+  readonly jobId?: string
 }
 
-/** Runs the wrapped command, killing it softly at the timeout and hard shortly after. */
-const runWrapped = async (
+/** The output of a child that has stopped, read without locking the streams of one still running. */
+const outputOf = async (child: Child): Promise<{ stdout: string; stderr: string }> => {
+  const [stdout, stderr] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ])
+  return { stdout, stderr }
+}
+
+/** True when the child stopped before the timeout, false when the time ran out. */
+const stoppedInTime = (child: Child, timeoutMs: number): Promise<boolean> =>
+  new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), timeoutMs)
+    void child.exited.then(
+      () => {
+        clearTimeout(timer)
+        resolve(true)
+      },
+      () => {
+        clearTimeout(timer)
+        resolve(true)
+      },
+    )
+  })
+
+/** Sends the soft signal, then the hard one, and waits for the child to stop. */
+const killWrapped = async (child: Child): Promise<number> => {
+  child.kill()
+  // A command may trap the soft signal; the hard one is not optional.
+  const hard = setTimeout(() => child.kill(9), BASH_HARD_KILL_GRACE_MS)
+  const exitCode = await child.exited
+  clearTimeout(hard)
+  return exitCode
+}
+
+/** Runs the wrapped command and kills it at the timeout: the path for a run without a job registry. */
+const runToKill = async (
   wrapped: { readonly argv: ReadonlyArray<string>; readonly cwd: string },
   timeoutMs: number,
 ): Promise<Run> => {
@@ -84,21 +130,49 @@ const runWrapped = async (
     stdout: 'pipe',
     stderr: 'pipe',
   })
-  const stdoutText = new Response(child.stdout).text()
-  const stderrText = new Response(child.stderr).text()
-  let timedOut = false
-  const soft = setTimeout(() => {
-    timedOut = true
-    child.kill()
-  }, timeoutMs)
-  // A command may trap the soft signal; the hard one is not optional.
-  const hard = setTimeout(() => child.kill(9), timeoutMs + BASH_HARD_KILL_GRACE_MS)
-  const exitCode = await child.exited
-  clearTimeout(soft)
-  clearTimeout(hard)
-  const [stdout, stderr] = await Promise.all([stdoutText, stderrText])
-  return { exitCode, stdout, stderr, timedOut, timeoutMs }
+  const timedOut = !(await stoppedInTime(child, timeoutMs))
+  const exitCode = timedOut ? await killWrapped(child) : await child.exited
+  return { exitCode, ...(await outputOf(child)), timedOut, timeoutMs }
 }
+
+/**
+ * Runs the wrapped command and, at the timeout, hands the still-running child to
+ * the job registry instead of killing it. A registry that refuses the child is
+ * not a reason to leave it running: the kill path is the fallback.
+ */
+const runToPromote = async (
+  wrapped: { readonly argv: ReadonlyArray<string>; readonly cwd: string },
+  timeoutMs: number,
+  command: string,
+  jobs: TimeoutJobs,
+): Promise<Run> => {
+  const child = spawn([...wrapped.argv], {
+    cwd: wrapped.cwd,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+  if (await stoppedInTime(child, timeoutMs)) {
+    return { exitCode: await child.exited, ...(await outputOf(child)), timedOut: false, timeoutMs }
+  }
+  try {
+    const job = await Effect.runPromise(jobs.promote(command, child))
+    return { exitCode: 0, stdout: '', stderr: '', timedOut: true, timeoutMs, jobId: job.id }
+  } catch {
+    const exitCode = await killWrapped(child)
+    return { exitCode, ...(await outputOf(child)), timedOut: true, timeoutMs }
+  }
+}
+
+/** Runs the wrapped command; a timeout promotes it when the run has jobs, and kills it otherwise. */
+const runWrapped = async (
+  wrapped: { readonly argv: ReadonlyArray<string>; readonly cwd: string },
+  timeoutMs: number,
+  command: string,
+  jobs: TimeoutJobs | undefined,
+): Promise<Run> =>
+  jobs === undefined
+    ? runToKill(wrapped, timeoutMs)
+    : runToPromote(wrapped, timeoutMs, command, jobs)
 
 /** The output as the model reads it, before anything is said about the run. */
 const bodyOf = (value: BashValue): string => {
@@ -111,9 +185,21 @@ const bodyOf = (value: BashValue): string => {
 }
 
 /** What the run itself has to say: a timeout, the exit code, and a sandbox denial. */
+const timeoutMarker = (value: BashValue): string =>
+  value.jobId === undefined
+    ? '[timed out after ' + String(value.timeoutMs) + 'ms]'
+    : '[timed out after ' +
+      String(value.timeoutMs) +
+      'ms; still running as job ' +
+      value.jobId +
+      ']'
+
 const markersOf = (value: BashValue, escalation: boolean): ReadonlyArray<string> => [
-  ...(value.timedOut ? ['[timed out after ' + String(value.timeoutMs) + 'ms]'] : []),
-  ...(value.exitCode === 0 ? [] : ['[exit code: ' + String(value.exitCode) + ']']),
+  ...(value.timedOut ? [timeoutMarker(value)] : []),
+  // A promoted job has no exit code yet; the job id is what the caller acts on.
+  ...(value.jobId === undefined && value.exitCode !== 0
+    ? ['[exit code: ' + String(value.exitCode) + ']']
+    : []),
   ...(value.sandbox.denied ? [sandboxDenialMarker(value.sandbox.mode)] : []),
   ...(value.sandbox.denied && escalation ? [escalationHintMarker('command')] : []),
 ]
@@ -129,6 +215,7 @@ const renderOutput = (value: BashValue, escalation: boolean): string => {
 export const makeBashTool = (
   sandbox: SandboxShape = noneSandbox,
   approval?: ApprovalShape,
+  jobs?: TimeoutJobs,
 ): ToolDefinition<BashArgs, BashValue> => {
   const canEscalate = escalates(sandbox, approval)
   return {
@@ -136,7 +223,7 @@ export const makeBashTool = (
     presentCall: (args) => ({ summary: 'bash ' + oneLine(args.command).slice(0, 120) }),
     presentResult: (_args, result) => ({ ...result, summary: exitSummaryOf(result.summary) }),
     description:
-      'Runs a shell command in the workspace through the configured sandbox and returns what it printed. Check the [exit code: N] marker: a non-zero exit means the command failed. A command still running at the timeout is killed and marked; use job_start for work that should outlive the call. When the output was spilled, read the saved file with offset and limit to see the rest.' +
+      'Runs a shell command in the workspace through the configured sandbox and returns what it printed. Check the [exit code: N] marker: a non-zero exit means the command failed. A command still running at the timeout is handed to a background job and marked with its id, so read it with job_output; without a job registry it is killed and marked. When the output was spilled, read the saved file with offset and limit to see the rest.' +
       (sandbox.confines
         ? ' A file effect the sandbox refuses is reported as `[sandbox: file access denied under <mode> mode]`: that is a policy denial, so do not retry another way.'
         : ''),
@@ -148,6 +235,7 @@ export const makeBashTool = (
         stderr: Schema.String,
         timedOut: Schema.Boolean,
         timeoutMs: Schema.Int,
+        jobId: Schema.optionalKey(Schema.String),
         sandbox: Schema.Struct({
           mode: Schema.Literals([...ESCALATION_TARGETS, 'read-only']),
           denied: Schema.Boolean,
@@ -177,7 +265,7 @@ export const makeBashTool = (
         // A sandbox that refuses the command is an infrastructure failure; a command
         // that runs and exits non-zero is not.
         const run = yield* Effect.tryPromise({
-          try: () => runWrapped(wrapped, clampTimeout(args.timeoutMs)),
+          try: () => runWrapped(wrapped, clampTimeout(args.timeoutMs), args.command, jobs),
           catch: () => new ToolError({ code: 'execution', message: 'cannot run: ' + args.command }),
         })
         return {
