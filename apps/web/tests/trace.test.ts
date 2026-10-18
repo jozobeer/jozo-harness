@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import type { UiSessionEvent } from '@jozo-harness/ui-protocol'
-import { toolsOf, traceOf, writtenPath } from '../src/ui/trace.ts'
+import { axisEndOf, toolsOf, traceOf, writtenPath } from '../src/ui/trace.ts'
 
 const event = (type: string, data: unknown, time: number): UiSessionEvent => ({
   seq: time,
@@ -78,6 +78,25 @@ describe('the trace', () => {
     expect(turn?.endedAt).toBeUndefined()
     expect(turn?.outcome).toBe('')
     expect(turn === undefined ? [] : toolsOf(turn).map((tool) => tool.status)).toEqual(['running'])
+  })
+
+  test('a running turn ends its axis at its last event, and a finished one at its end', () => {
+    const running = traceOf([
+      event('turn/start', { turn: 1 }, 10),
+      event('step/start', { step: 1 }, 20),
+      event('tool/call', { callId: 'c1', name: 'bash', arguments: '{}', summary: 'bash ls' }, 30),
+      event('tool/result', { callId: 'c1', isError: false, summary: 'ok', content: [] }, 40),
+      event('step/start', { step: 2 }, 50),
+      event('tool/call', { callId: 'c2', name: 'bash', arguments: '{}', summary: 'bash pwd' }, 60),
+    ])
+    expect(running[0] === undefined ? 0 : axisEndOf(running[0])).toBe(60)
+
+    const finished = traceOf([
+      event('turn/start', { turn: 1 }, 100),
+      event('step/start', { step: 1 }, 110),
+      event('turn/end', { turn: 1, reason: { kind: 'completed' } }, 120),
+    ])
+    expect(finished[0] === undefined ? 0 : axisEndOf(finished[0])).toBe(120)
   })
 
   test('events before any turn and bodies it cannot read change nothing', () => {
