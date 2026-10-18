@@ -23,6 +23,23 @@ describe('jobs', () => {
     expect(observed.running).toBe(false)
   })
 
+  test('a job runs in a non-login shell', async () => {
+    const output = await Effect.runPromise(
+      Effect.gen(function* () {
+        const jobs = yield* makeJobs()
+        const running = yield* jobs.start(
+          'if shopt -q login_shell; then echo login; else echo nonlogin; fi',
+          '/tmp',
+        )
+        const read = yield* jobs.read(running.id, { waitMs: 5_000 })
+        yield* jobs.kill(running.id)
+        return read.output
+      }),
+    )
+
+    expect(output).toContain('nonlogin')
+  })
+
   test('a later read returns only what the job produced since the previous read', async () => {
     const observed = await Effect.runPromise(
       Effect.gen(function* () {

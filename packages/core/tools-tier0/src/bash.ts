@@ -256,7 +256,7 @@ export const makeBashTool = (
           approval,
         })
         const wrapped = yield* sandbox
-          .wrap({ argv: ['bash', '-lc', args.command], cwd, mode })
+          .wrap({ argv: ['bash', '-c', args.command], cwd, mode })
           .pipe(
             Effect.mapError(
               (error) => new ToolError({ code: 'execution', message: 'sandbox: ' + error.message }),

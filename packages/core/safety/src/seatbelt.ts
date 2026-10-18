@@ -8,9 +8,6 @@ import type { SandboxMode } from './policy.ts'
 export interface SeatbeltProfileOptions {
   /** Directories the sandboxed process may write, on top of its own cwd and the temp dir. */
   readonly writableRoots: ReadonlyArray<string>
-  /** Directories it may read; the system paths and every writable root are always readable. */
-  readonly readableRoots?: ReadonlyArray<string>
-  readonly allowNetwork?: boolean
 }
 
 export interface SeatbeltOptions extends SeatbeltProfileOptions {
@@ -23,27 +20,6 @@ const quote = (value: string): string =>
 
 const subpaths = (roots: ReadonlyArray<string>): string =>
   roots.map((root) => '  (subpath ' + quote(root) + ')').join('\n')
-
-/**
- * What a process on this machine has to read to run at all: the toolchain, the
- * system libraries, the device nodes, and the temp dir. A sandbox that denies
- * everything needs this list, or bash cannot even load.
- */
-export const systemReadRoots = (): ReadonlyArray<string> => {
-  const paths = [
-    '/usr',
-    '/bin',
-    '/sbin',
-    '/System',
-    '/Library',
-    '/etc',
-    '/private/etc',
-    '/dev',
-    '/opt',
-  ]
-  const temp = tmpdir()
-  return [...paths, temp, ...(realpathOf(temp) === temp ? [] : [realpathOf(temp)])]
-}
 
 /** The path a sandbox sees: on macOS the temp dir is reached through /private. */
 const realpathOf = (path: string): string => {
@@ -62,31 +38,24 @@ const asRoots = (roots: ReadonlyArray<string>): ReadonlyArray<string> => [
   ...new Set([...roots, ...roots.map(realpathOf)]),
 ]
 
-/** Builds the SBPL profile macOS sandbox-exec reads. Deny by default. */
+/**
+ * Builds the SBPL profile macOS sandbox-exec reads. Reads are open, like the shell
+ * the tools replace: denying them made every login shell fail on `~/.profile` and
+ * git fail on `/dev/null`. Writes are closed to the roots the mode names.
+ */
 export function seatbeltProfile(options: SeatbeltProfileOptions): string {
-  const roots = asRoots([...(options.readableRoots ?? systemReadRoots()), ...options.writableRoots])
+  const writable = asRoots(options.writableRoots)
   const lines = [
     '(version 1)',
-    '(deny default)',
-    '(allow process-fork)',
-    '(allow sysctl-read)',
-    '(allow process-exec)',
-    '(allow file-read*',
-    subpaths(roots),
-    // `subpath` never matches the root itself, and bash reads it as it starts; denied,
-    // the shell aborts before it runs a single command.
-    '  (literal "/")',
+    '(allow default)',
+    // The one write outside the roots that ordinary commands need: git opens it,
+    // and a denied command exits with "could not open '/dev/null'".
+    '(deny file-write*)',
+    '(allow file-write*',
+    '  (literal "/dev/null")',
+    ...(writable.length > 0 ? [subpaths(writable)] : []),
     ')',
   ]
-  // An `(allow file-write*)` with no paths after it would grant every path, so a
-  // profile that may write nowhere says nothing about writes at all.
-  const writable = asRoots(options.writableRoots)
-  if (writable.length > 0) {
-    lines.push('(allow file-write*', subpaths(writable), ')')
-  }
-  if (options.allowNetwork === true) {
-    lines.splice(4, 0, '(allow network*)')
-  }
   return lines.join('\n') + '\n'
 }
 

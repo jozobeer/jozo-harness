@@ -64,7 +64,7 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 
 同梱の `base` profile は `root` に `~/.jzh/sessions`、`preset` に `workspace-write`、`baseUrl` に `https://ollama.com/v1`、`apiKeyEnv` に `OLLAMA_API_KEY` を置いている。
 
-`preset` は sandbox モードを決める。モードはコマンドの書き込み範囲と、`write` / `edit` が触れる範囲の両方を決める。`read-only` は書き込み不可、`workspace-write` はコマンドの cwd と一時ディレクトリと `writableRoots` に書き込み可（`write` / `edit` は cwd の中だけ）、`full` は封じ込めなしである。`sandbox` の既定は `seatbelt` で、`seatbelt` が使えない platform では、黙って無制限にするのではなく起動が失敗する。`sandbox: none` は封じ込めを外す明示的な選択である。
+`preset` は sandbox モードを決める。モードはコマンドの書き込み範囲と、`write` / `edit` が触れる範囲の両方を決める。`read-only` は書き込み不可、`workspace-write` はコマンドの cwd と一時ディレクトリと `writableRoots` に書き込み可（`write` / `edit` は cwd の中だけ）、`full` は封じ込めなしである。`sandbox` の既定は `seatbelt` で、`seatbelt` が使えない platform では、黙って無制限にするのではなく起動が失敗する。`sandbox: none` は封じ込めを外す明示的な選択である。sandbox は読み取りを制限せず、書き込みだけを閉じる（`/dev/null` への書き込みは許可する）。
 
 tool が宣言する能力（`exec` や `network`）では承認を求めない。境界を越えようとした呼び出しは sandbox が拒否し、結果に `[sandbox: file access denied under <mode> mode]` と、1回だけ許される再試行の案内が付く。`bash` / `write` / `edit` の `sandbox_permissions`（より広いモード）と `justification`（1文の理由）を付けて同じ呼び出しをやり直すと、人間に1回だけ確認が出る。拒否されれば呼び出しは拒否されたままで、その往復はセッションログに残る。答える者がいない実行は拒否される。
 

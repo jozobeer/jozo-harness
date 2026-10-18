@@ -182,6 +182,23 @@ describe('the sandbox a profile did not ask for', () => {
     }
   })
 
+  test.skipIf(!applies)('lets a command read the home directory and write /dev/null', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-ws-'))
+    const observed = await runBash(
+      'test -r "$HOME" && echo home-readable; echo probe > /dev/null && echo null-writable',
+      workspace,
+    )
+
+    try {
+      expect(observed.code).toBe(0)
+      expect(observed.results[0]?.isError).toBe(false)
+      expect(observed.results[0]?.text).toContain('home-readable')
+      expect(observed.results[0]?.text).toContain('null-writable')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test.skipIf(applies)('reports a sandbox the host refuses as a result, not a crash', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-ws-'))
     const observed = await runBash('echo hi', workspace)

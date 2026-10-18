@@ -26,7 +26,7 @@
 | edit | write | 一意一致を要求。all で全置換 |
 | glob | read | Bun.Glob で走査し、相対パスをソートして返す |
 | grep | read | 正規表現を先にコンパイル。file / line / text を返す |
-| bash | exec | sandbox.wrap を通してから bash -lc を spawn。非 0 は出力付きのエラー |
+| bash | exec | sandbox.wrap を通してから bash -c を spawn。非 0 は出力付きのエラー |
 
 ## パスをどこで 1 本にするか（2026-10-14 追記）
 
