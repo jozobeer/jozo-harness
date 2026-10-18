@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import type { UiCommand, UiEvent, UiHost, UiSessionEvent } from '@jozo-harness/ui-protocol'
 import { Cause, Deferred, Effect, Queue, Stream, type Scope } from 'effect'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -111,7 +111,7 @@ const event = (seq: number, type: string, data: unknown): UiEvent => ({
 const turn = (seq: number, text: string): UiEvent =>
   event(seq, 'user/message', { text, source: 'user' })
 
-const makeHost = (id: string): FakeHost => {
+const makeHost = (id: string, cwd = '/work'): FakeHost => {
   const log: Array<UiEvent> = []
   const subscribers = new Set<Queue.Queue<UiEvent>>()
   const commands: Array<UiCommand> = []
@@ -120,7 +120,7 @@ const makeHost = (id: string): FakeHost => {
   let effort = ''
   let model = 'stub/model'
   const host: FakeHost = {
-    summary: { id, cwd: '/work', createdAt: 1, updatedAt: 1, title: '' },
+    summary: { id, cwd, createdAt: 1, updatedAt: 1, title: '' },
     runState: () => {
       states += 1
       return {
@@ -365,6 +365,30 @@ describe('the page store', () => {
           yield* until(() => host.states() >= 2, 'read the run state again')
         }),
       ),
+    )
+  }, 15_000)
+
+  test('an @word reads the files of the session workspace and lands tagged', async () => {
+    stubTheBrowser()
+    const root = await mkdtemp(join(tmpdir(), 'jzh-store-files-'))
+    await mkdir(join(root, 'components'), { recursive: true })
+    await writeFile(join(root, 'components', 'composer.tsx'), 'export {}')
+    const host = makeHost('a', root)
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          store.askFiles('comp')
+          yield* until(
+            () => (store.state().files?.paths.length ?? 0) > 0,
+            'read the files of the workspace',
+          )
+          expect(store.state().files).toEqual({
+            sessionId: 'a',
+            query: 'comp',
+            paths: ['components/composer.tsx'],
+          })
+        }),
+      ).pipe(Effect.ensuring(Effect.promise(() => rm(root, { recursive: true, force: true })))),
     )
   }, 15_000)
 

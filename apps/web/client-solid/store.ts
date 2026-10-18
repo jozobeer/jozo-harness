@@ -11,6 +11,7 @@ import {
   withCommands,
   withConnection,
   withDraft,
+  withFiles,
   withModels,
   withOpened,
   withPane,
@@ -112,6 +113,7 @@ type Move = { readonly kind: 'open'; readonly id: string | undefined } | { reado
 type PanelAsk =
   | { readonly kind: 'models' }
   | { readonly kind: 'commands'; readonly sessionId: string }
+  | { readonly kind: 'files'; readonly sessionId: string; readonly query: string }
   | { readonly kind: 'chooseModel'; readonly model: string }
   | { readonly kind: 'setModel'; readonly model: string }
   | { readonly kind: 'job'; readonly id: string }
@@ -141,6 +143,8 @@ export interface SessionStore {
   readonly askModels: () => void
   /** Reads what the session on screen can be told, the first time the composer offers it. */
   readonly askCommands: () => void
+  /** Reads the workspace paths an @word names, once the composer has waited for the typing to stop. */
+  readonly askFiles: (query: string) => void
   /**
    * Picks the route for this session and for the sessions opened from now on.
    * Nothing is written down, so the runs after this one keep their own choice.
@@ -537,6 +541,20 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
             )
             return
           }
+          if (asked.kind === 'files') {
+            const paths = yield* client.files({ sessionId: asked.sessionId, query: asked.query })
+            // The answer says who asked, so a late one never lands as another session's.
+            yield* Effect.sync(() =>
+              update((now) =>
+                withFiles(now, {
+                  sessionId: asked.sessionId,
+                  query: asked.query,
+                  paths,
+                }),
+              ),
+            )
+            return
+          }
           if (asked.kind === 'sessionAction') {
             yield* applySessionAction(asked)
             return
@@ -684,6 +702,8 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     askModels: () => Queue.offerUnsafe(panelAsks, { kind: 'models' }),
     askCommands: () =>
       Queue.offerUnsafe(panelAsks, { kind: 'commands', sessionId: state().sessionId }),
+    askFiles: (query) =>
+      Queue.offerUnsafe(panelAsks, { kind: 'files', sessionId: state().sessionId, query }),
     chooseModel: (model) => {
       const current = state()
       // The session on screen switches with the command; the choice is the run's, so

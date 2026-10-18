@@ -113,8 +113,8 @@ interface FakeWeb {
 }
 
 /** The sessions one fake store holds: the boot one, plus whatever a page opens. */
-const makeWeb = (initialId: string): FakeWeb => {
-  const first = makeHost(initialId)
+const makeWeb = (initialId: string, cwd = '/work'): FakeWeb => {
+  const first = makeHost(initialId, cwd)
   const hosts = new Map<string, FakeHost>([[initialId, first]])
   return {
     hosts,
@@ -472,6 +472,43 @@ describe('the web transport', () => {
     expect(observed.added).toBe(true)
     expect(workspaces.added).toEqual(['/elsewhere'])
     expect(observed.refused).toBe('no such directory')
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('a page reads the files of the session cwd, and the walk keeps .gitignore', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-files-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    await writeFileDeep(join(root, 'apps/web/client-solid/components/composer.tsx'), 'export {}')
+    await writeFileDeep(join(root, 'ignored/comp.ts'), 'export {}')
+    await writeFile(join(root, '.gitignore'), 'ignored/\n')
+    const web = makeWeb('a', root)
+    const settings = makeSettings()
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const wsUrl = 'ws://' + started.origin.replace(/^http:\/\//, '') + '/ui'
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const files = yield* client.files({ sessionId: 'a', query: 'comp' })
+            const empty = yield* client.files({ sessionId: 'a', query: '  ' })
+            const refused = yield* client
+              .files({ sessionId: 'gone', query: 'comp' })
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
+            return { files, empty, refused }
+          }).pipe(clientLayers(wsUrl))
+          const result = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    expect(observed.files).toContain('apps/web/client-solid/components/composer.tsx')
+    expect(observed.files).not.toContain('ignored/comp.ts')
+    expect(observed.empty).toEqual([])
+    expect(observed.refused).toBe('the session is not open')
     await rm(root, { recursive: true, force: true })
   })
 
