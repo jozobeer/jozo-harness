@@ -586,16 +586,19 @@ const touchedPathOf = (exec: ToolExecution): string | undefined => {
  * files between the workspace root and the touched file are read once and injected
  * as the next step's input, so the model learns they apply where it is working.
  */
-const installNestedAgentsMd = (input: {
+export const installNestedAgentsMd = (input: {
   readonly hooks: HookRegistry
   readonly agent: Agent
   readonly root: string
   readonly loaded: Map<string, string>
 }) =>
-  input.hooks.on('tools/post-execute', (exec, result) =>
+  input.hooks.on('tools/post-execute', (exec, result, next) =>
     Effect.gen(function* () {
+      // Let the listeners after this one transform the result first: the input
+      // queued below belongs to the next step, not to this result.
+      const posted = (yield* next()) ?? result
       const path = touchedPathOf(exec)
-      if (path === undefined) return result
+      if (path === undefined) return posted
       const cwd = cwdOf(input.agent.session.events(), input.agent.session.header)
       const files = yield* nestedAgentsFiles(input.loaded, { root: input.root, cwd, path })
       for (const file of files) {
@@ -609,7 +612,7 @@ const installNestedAgentsMd = (input: {
           })
           .pipe(Effect.orDie)
       }
-      return result
+      return posted
     }),
   )
 
