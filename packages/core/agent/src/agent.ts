@@ -17,6 +17,11 @@ export interface MakeAgentOptions {
   readonly options: AgentOptions
   readonly scope: Scope.Scope
   readonly handle: AgentHandle
+  /**
+   * Stops the agents this one started. Read when cancel runs, so children
+   * started after this shell was built are reached too.
+   */
+  readonly cancelDescendants: Effect.Effect<void>
 }
 
 /**
@@ -129,7 +134,12 @@ export function makeAgent(input: MakeAgentOptions): Effect.Effect<Agent> {
         Effect.gen(function* () {
           if (status === 'disposed') return
           cancelCause = cause
-          if (input.handle.fiber === undefined) return
+          // A parent may be idle while the children it started still work.
+          yield* input.cancelDescendants
+          if (input.handle.fiber === undefined) {
+            cancelCause = undefined
+            return
+          }
           yield* setStatus('cancelling')
           // The interrupt waits for the turn's finalizer, which records this cause.
           yield* Fiber.interrupt(input.handle.fiber)

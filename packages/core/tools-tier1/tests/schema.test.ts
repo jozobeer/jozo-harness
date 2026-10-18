@@ -27,6 +27,7 @@ const agents: AgentsShape = {
   create: () => Effect.die('not used by a schema check'),
   get: () => undefined,
   list: () => [],
+  childrenOf: () => [],
   dispose: () => Effect.void,
   disposeAll: () => Effect.void,
 }

@@ -94,6 +94,7 @@ export const makeSubagentTool = (
             cwd: args.cwd ?? context.cwd,
             options: { route },
             seed: args.context === 'fresh' ? [] : forkSeed(parentEvents()),
+            parent: context.sessionId,
           })
           .pipe(
             Effect.mapError(

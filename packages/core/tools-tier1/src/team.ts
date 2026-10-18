@@ -110,7 +110,7 @@ const render = (value: TeamValue, agents: AgentsShape): string => {
   return roster + '\n' + board
 }
 
-const spawn = (host: TeamHost, args: TeamArgs, cwd: string) =>
+const spawn = (host: TeamHost, args: TeamArgs, cwd: string, parent: string) =>
   Effect.gen(function* () {
     const name = required(args.name, 'name')
     if (name instanceof ToolError) return yield* Effect.fail(name)
@@ -122,6 +122,7 @@ const spawn = (host: TeamHost, args: TeamArgs, cwd: string) =>
         cwd,
         options: { route: host.route },
         seed: forkSeed(host.parentEvents()),
+        parent,
       })
       .pipe(
         Effect.mapError(
@@ -228,7 +229,7 @@ export const makeTeamTool = (host: TeamHost): ToolDefinition<TeamArgs, TeamValue
           tasks: teamTasks(host.log.events()),
         } satisfies TeamValue
       }
-      if (args.action === 'spawn') return yield* spawn(host, args, context.cwd)
+      if (args.action === 'spawn') return yield* spawn(host, args, context.cwd, context.sessionId)
       if (args.action === 'create') return yield* create(host, args)
       if (args.action === 'get') return yield* get(host, args)
       return yield* update(host, args)

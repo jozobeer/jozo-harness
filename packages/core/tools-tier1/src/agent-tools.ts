@@ -11,7 +11,7 @@ const IdParameters = Schema.Struct({
   }),
 })
 
-/** Resolves the child a call names, refusing the caller itself and unknown ids. */
+/** Resolves the child a call names, refusing the caller itself and agents it did not start. */
 const childOf = (
   agents: AgentsShape,
   sessionId: string,
@@ -26,8 +26,18 @@ const childOf = (
         }),
       )
     }
-    const child = agents.get(id)
+    const child = agents.childrenOf(sessionId).find((agent) => agent.id === id)
     if (child === undefined) {
+      // An agent of another session is not this caller's to reach, so it is
+      // refused without telling the caller which session started it.
+      if (agents.get(id) !== undefined) {
+        return yield* Effect.fail(
+          new ToolError({
+            code: 'invalid-arguments',
+            message: 'not a child of this session: ' + id,
+          }),
+        )
+      }
       return yield* Effect.fail(
         new ToolError({ code: 'execution', message: 'unknown agent: ' + id }),
       )
@@ -63,10 +73,7 @@ export const makeListAgentsTool = (
   },
   execute: (_args, context) =>
     Effect.sync(() =>
-      agents
-        .list()
-        .filter((agent) => agent.id !== context.sessionId)
-        .map((agent) => ({ id: agent.id, status: agent.status })),
+      agents.childrenOf(context.sessionId).map((agent) => ({ id: agent.id, status: agent.status })),
     ),
 })
 

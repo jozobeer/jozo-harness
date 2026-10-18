@@ -308,4 +308,97 @@ describe('Agents', () => {
     expect(seen.switched).toBe('stub/other')
     expect(seen.effort).toBe('low')
   })
+
+  test('childrenOf answers only the agents this one started', async () => {
+    const seen = await withAgents(turnRunner(), () =>
+      Effect.gen(function* () {
+        const agents = yield* Agents
+        const left = yield* agents.create({ cwd: '/work', options: { route: 'r' } })
+        const right = yield* agents.create({ cwd: '/work', options: { route: 'r' } })
+        const leftChild = yield* agents.create({
+          cwd: '/work',
+          options: { route: 'r' },
+          parent: left.id,
+        })
+        return {
+          left: agents.childrenOf(left.id).map((agent) => agent.id),
+          right: agents.childrenOf(right.id).map((agent) => agent.id),
+          child: leftChild.id,
+          all: agents.list().length,
+        }
+      }),
+    )
+
+    expect(seen.left).toEqual([seen.child])
+    expect(seen.right).toEqual([])
+    expect(seen.all).toBe(3)
+  })
+
+  test('cancelling a parent cancels the child it started', async () => {
+    const interrupted: Array<string> = []
+    const blocking: AgentRunner = {
+      run: (agent) =>
+        Effect.gen(function* () {
+          while (true) {
+            yield* Queue.take(agent.driver.wake)
+            if (!agent.inbox.pending) continue
+            yield* agent.driver.setStatus('running')
+            yield* agent.inbox.claim(true)
+            yield* Effect.never.pipe(Effect.ensuring(Effect.sync(() => interrupted.push(agent.id))))
+          }
+        }).pipe(Effect.catchCause(() => Effect.void)),
+    }
+
+    const seen = await withAgents(blocking, () =>
+      Effect.gen(function* () {
+        const agents = yield* Agents
+        const parent = yield* agents.create({ cwd: '/work', options: { route: 'r' } })
+        const child = yield* agents.create({
+          cwd: '/work',
+          options: { route: 'r' },
+          parent: parent.id,
+        })
+        yield* parent.followup(message('go'))
+        yield* child.followup(message('go'))
+        while (parent.status !== 'running' || child.status !== 'running') yield* Effect.yieldNow
+        yield* parent.cancel('user')
+        yield* child.whenIdle
+        return {
+          child: child.id,
+          interrupted: [...interrupted],
+          parentStatus: parent.status,
+          childStatus: child.status,
+        }
+      }),
+    )
+
+    // The parent's own turn is interrupted too; the child must be among them.
+    expect(seen.interrupted).toContain(seen.child)
+    expect(seen.parentStatus).toBe('idle')
+    expect(seen.childStatus).toBe('idle')
+  })
+
+  test('disposing a parent disposes the child it started', async () => {
+    const seen = await withAgents(turnRunner(), () =>
+      Effect.gen(function* () {
+        const agents = yield* Agents
+        const parent = yield* agents.create({ cwd: '/work', options: { route: 'r' } })
+        const child = yield* agents.create({
+          cwd: '/work',
+          options: { route: 'r' },
+          parent: parent.id,
+        })
+        yield* agents.dispose(parent.id)
+        return {
+          child: agents.get(child.id),
+          status: child.status,
+          listed: agents.list().map((agent) => agent.id),
+        }
+      }),
+    )
+
+    expect(seen.child).toBeUndefined()
+    expect(seen.status).toBe('disposed')
+    expect(seen.listed).toEqual([])
+  })
 })
