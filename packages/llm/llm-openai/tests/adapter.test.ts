@@ -115,6 +115,31 @@ describe('openAiAdapter', () => {
     expect(error.code).toBe('AUTH')
   })
 
+  test('a context-length rejection becomes a CONTEXT_WINDOW_EXCEEDED LlmFailure', async () => {
+    const error = await Effect.runPromise(
+      Effect.flip(
+        collect(
+          new Response(
+            '{"error":{"message":"This model\'s maximum context length is 131072 tokens. Your request was 140000 tokens."}}',
+            { status: 400 },
+          ),
+        ),
+      ),
+    )
+    expect(error.code).toBe('CONTEXT_WINDOW_EXCEEDED')
+  })
+
+  test('a server error becomes a SERVER LlmFailure, and other rejections stay PROVIDER', async () => {
+    const server = await Effect.runPromise(
+      Effect.flip(collect(new Response('overloaded', { status: 503 }))),
+    )
+    const refused = await Effect.runPromise(
+      Effect.flip(collect(new Response('bad argument', { status: 400 }))),
+    )
+    expect(server.code).toBe('SERVER')
+    expect(refused.code).toBe('PROVIDER')
+  })
+
   test('a rejected fetch becomes a TRANSPORT LlmFailure', async () => {
     const failing = openAiAdapter({
       baseUrl: 'https://example.test/v1',

@@ -126,6 +126,28 @@ describe('loadAgentsFiles', () => {
 })
 
 describe('agentsMdSections', () => {
+  test('states the precedence of the instructions before any file', () => {
+    const rendered = agentsMdSections(
+      {
+        files: [
+          { path: '/work/AGENTS.md', text: 'outer\n' },
+          { path: '/work/a/AGENTS.md', text: 'inner\n' },
+        ],
+        omitted: [],
+      },
+      { order: 10 },
+    )
+
+    expect(rendered.sections.map((section) => section.name)).toEqual([
+      'agents-md:precedence',
+      'agents-md:1',
+      'agents-md:2',
+    ])
+    const precedence = textOf(rendered.sections[0])
+    expect(precedence).toContain('More specific instructions take precedence over broader ones.')
+    expect(precedence).toContain('direct user instructions')
+  })
+
   test('gives the nearest file the highest order', () => {
     const rendered = agentsMdSections(
       {
@@ -138,9 +160,13 @@ describe('agentsMdSections', () => {
       { order: 10 },
     )
 
-    expect(rendered.sections.map((section) => section.name)).toEqual(['agents-md:1', 'agents-md:2'])
-    expect(rendered.sections.map((section) => section.order)).toEqual([11, 12])
-    expect(textOf(rendered.sections[0])).toBe('Instructions from /work/AGENTS.md:\nouter')
+    expect(rendered.sections.map((section) => section.name)).toEqual([
+      'agents-md:precedence',
+      'agents-md:1',
+      'agents-md:2',
+    ])
+    expect(rendered.sections.map((section) => section.order)).toEqual([10, 11, 12])
+    expect(textOf(rendered.sections[1])).toBe('Instructions from /work/AGENTS.md:\nouter')
     expect(rendered.notice).toBeUndefined()
   })
 
@@ -151,11 +177,11 @@ describe('agentsMdSections', () => {
       { maxBytes: 100 },
     )
 
-    expect(rendered.sections).toHaveLength(1)
+    expect(rendered.sections).toHaveLength(2)
     expect(textOf(rendered.notice)).toContain(
       'Workspace instruction budget 100 bytes: truncated /work/AGENTS.md from',
     )
-    const text = textOf(rendered.sections[0])
+    const text = textOf(rendered.sections[1])
     expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(100)
     expect(text.startsWith('Instructions from /work/AGENTS.md:\n')).toBe(true)
   })
@@ -172,7 +198,7 @@ describe('agentsMdSections', () => {
       { maxBytes: 100 },
     )
 
-    expect(rendered.sections).toHaveLength(1)
+    expect(rendered.sections).toHaveLength(2)
     expect(textOf(rendered.notice)).toContain('omitted /work/a/AGENTS.md')
   })
 

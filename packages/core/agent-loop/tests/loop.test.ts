@@ -28,7 +28,7 @@ import {
   type ToolRegistry,
 } from '@jozo-harness/tools'
 import { Effect, Layer, Schema, Scope, Stream } from 'effect'
-import { AgentLoop, agentLoopLayer, type AgentRequest } from '../src/index.ts'
+import { AgentLoop, agentLoopLayer, installRetry, type AgentRequest } from '../src/index.ts'
 
 type Script = () => Stream.Stream<StreamChunk, LlmFailure>
 
@@ -634,6 +634,54 @@ describe('agent loop', () => {
     expect(reason(events)).toEqual([{ kind: 'completed' }])
   })
 
+  test('an installed retry policy retries a rate limit and logs the wait', async () => {
+    const text = crypto.randomUUID()
+    const events = await scenario(
+      [fails(new LlmFailure({ code: 'RATE_LIMIT', message: 'slow down' })), chunks(textTurn(text))],
+      (ctx) =>
+        Effect.gen(function* () {
+          yield* installRetry(ctx.hooks, { maxRetries: 1, initialDelayMs: 0, jitterRatio: 0 })
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+    )
+
+    const retries = events.session
+      .events()
+      .flatMap((event) => (event.type === 'llm/retry' ? [event.data] : []))
+    expect(retries).toEqual([{ attempt: 1, code: 'RATE_LIMIT', delayMs: 0, cause: 'transient' }])
+    expect(reason(events)).toEqual([{ kind: 'completed' }])
+  })
+
+  test('a context overflow compacts once and retries the rebuilt request', async () => {
+    const huge = 'x'.repeat(200_000)
+    const events = await scenario(
+      [
+        fails(new LlmFailure({ code: 'CONTEXT_WINDOW_EXCEEDED', message: 'too long' })),
+        chunks(textTurn('the summary')),
+        chunks(textTurn('done')),
+      ],
+      (ctx) =>
+        Effect.gen(function* () {
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.session.append('user/message', { text: huge, source: 'user' })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+    )
+
+    const retries = events.session
+      .events()
+      .flatMap((event) => (event.type === 'llm/retry' ? [event.data] : []))
+    expect(retries).toEqual([
+      { attempt: 1, code: 'CONTEXT_WINDOW_EXCEEDED', delayMs: 0, cause: 'context-overflow' },
+    ])
+    expect(reason(events)).toEqual([{ kind: 'completed' }])
+  })
+
   test('cancel records a cancelled turn end', async () => {
     const events = await scenario(
       [forever([{ type: 'block-start', index: 0, blockType: 'text' }])],
@@ -762,8 +810,63 @@ describe('agent loop', () => {
     const kinds = types(events)
     const result = events.session.events().find((event) => event.type === 'tool/result')
     expect(result?.data.isError).toBe(true)
-    expect(result?.data.content).toEqual([{ type: 'text', text: 'tool echo did not finish' }])
+    expect(result?.data.content).toEqual([
+      {
+        type: 'text',
+        text: 'tool echo did not finish: its outcome is unknown. Do not retry blindly; retry only a read-only or idempotent call, and verify external state before retrying one with side effects.',
+      },
+    ])
     expect(kinds.indexOf('tool/result')).toBeLessThan(kinds.indexOf('turn/start'))
     expect(reason(events)).toEqual([{ kind: 'completed' }])
+  })
+
+  test('a resumed log closes the interrupted turn and separates started calls from unstarted ones', async () => {
+    const events = await scenario([chunks(textTurn('done'))], (ctx) =>
+      Effect.gen(function* () {
+        const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+        // The process died inside a turn: the turn and its step are open, one
+        // call was dispatched, and the second request never left the log.
+        yield* agent.session.append('turn/start', { turn: 1 })
+        yield* agent.session.append('step/start', { step: 1 })
+        yield* agent.session.append('assistant/message', {
+          provider: 'fake',
+          model: 'model',
+          content: [
+            { type: 'tool-call', id: 'c1', name: 'echo', arguments: '{}' },
+            { type: 'tool-call', id: 'c2', name: 'echo', arguments: '{}' },
+          ],
+          stream: [],
+        })
+        yield* agent.session.append('tool/call', { callId: 'c1', name: 'echo', arguments: '{}' })
+        yield* agent.followup({ text: 'go', source: 'user' })
+        yield* agent.whenIdle
+        return agent
+      }),
+    )
+
+    const stored = events.session.events()
+    const results = stored.flatMap((event) => (event.type === 'tool/result' ? [event.data] : []))
+    expect(results.map((data) => data.callId)).toEqual(['c1', 'c2'])
+    expect(results[0]?.content).toEqual([
+      {
+        type: 'text',
+        text: 'tool echo did not finish: its outcome is unknown. Do not retry blindly; retry only a read-only or idempotent call, and verify external state before retrying one with side effects.',
+      },
+    ])
+    expect(results[1]?.content).toEqual([
+      { type: 'text', text: 'tool echo did not start; retry it if it is still needed.' },
+    ])
+    // The interrupted turn closes with its step, before the next turn opens.
+    expect(reason(events)).toEqual([{ kind: 'interrupted' }, { kind: 'completed' }])
+    const stepEnd = stored.findIndex((event) => event.type === 'step/end' && event.data.step === 1)
+    const interrupted = stored.findIndex(
+      (event) => event.type === 'turn/end' && event.data.reason.kind === 'interrupted',
+    )
+    const nextTurn = stored.findIndex(
+      (event) => event.type === 'turn/start' && event.data.turn === 2,
+    )
+    expect(stepEnd).toBeGreaterThanOrEqual(0)
+    expect(stepEnd).toBeLessThan(interrupted)
+    expect(interrupted).toBeLessThan(nextTurn)
   })
 })
