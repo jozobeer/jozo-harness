@@ -1,7 +1,7 @@
 import { fireEvent, render } from '@solidjs/testing-library'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { createRoot, createSignal } from 'solid-js'
-import type { UiCommand } from '@jozo-harness/ui-protocol'
+import type { SubmitMode, UiCommand } from '@jozo-harness/ui-protocol'
 import { emptyConversation } from '@jozo-harness/ui-view'
 import { initialState, withDraft, withTheme, type Pane, type WebState } from '../../src/ui/state.ts'
 import { App } from '../app.tsx'
@@ -28,13 +28,14 @@ import {
   railWidthFrom,
 } from '../rail.ts'
 import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY } from '../recent.ts'
+import { BUSY_ENTER_KEY } from '../submission.ts'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /** One call a component made, in the order it made them. */
 type Call =
-  | { readonly kind: 'submit' }
+  | { readonly kind: 'submit'; readonly mode?: SubmitMode }
   | { readonly kind: 'draft'; readonly text: string }
   | { readonly kind: 'moveTo'; readonly id: string | undefined; readonly cwd?: string | undefined }
   | { readonly kind: 'pane'; readonly pane: Pane | undefined }
@@ -81,7 +82,8 @@ const makeStore = (
       calls.push({ kind: 'draft', text })
       update((current) => withDraft(current, text))
     },
-    submit: () => calls.push({ kind: 'submit' }),
+    submit: (mode) =>
+      calls.push(mode === undefined ? { kind: 'submit' } : { kind: 'submit', mode }),
     send: (command) => calls.push({ kind: 'command', command }),
     moveTo: (id, cwd) => calls.push({ kind: 'moveTo', id, cwd }),
     chooseTheme: (theme) => update((current) => withTheme(current, theme)),
@@ -619,7 +621,104 @@ describe('the Solid page', () => {
     expect(calls).toContainEqual({ kind: 'draft', text: 'ping' })
 
     fireEvent.keyDown(input, { key: 'Enter' })
-    expect(calls).toContainEqual({ kind: 'submit' })
+    expect(calls).toContainEqual({ kind: 'submit', mode: 'queue' })
+  })
+
+  test('the composer sends a running turn the mode the reader picked', () => {
+    const running = makeStore({ conversation: { ...emptyConversation, running: true } })
+    const { container } = render(() => <Composer store={running.store} busyEnter="steer" />)
+
+    const input = container.querySelector('#input') as HTMLTextAreaElement
+    fireEvent.input(input, { target: { value: 'join the step' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(running.calls).toContainEqual({ kind: 'submit', mode: 'steer' })
+    // The chip only switches the setting; it does not send the draft.
+    fireEvent.click(container.querySelector('#busy-enter') as Element)
+    expect(running.calls.filter((call) => call.kind === 'submit')).toHaveLength(1)
+  })
+
+  test('the accelerated gesture asks for the other mode, and an idle page always queues', () => {
+    const running = makeStore({ conversation: { ...emptyConversation, running: true } })
+    const first = render(() => <Composer store={running.store} />)
+    const input = first.container.querySelector('#input') as HTMLTextAreaElement
+    fireEvent.input(input, { target: { value: 'join now' } })
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true })
+    expect(running.calls).toContainEqual({ kind: 'submit', mode: 'steer' })
+    first.unmount()
+
+    const idle = makeStore()
+    const second = render(() => <Composer store={idle.store} />)
+    const idleInput = second.container.querySelector('#input') as HTMLTextAreaElement
+    fireEvent.input(idleInput, { target: { value: 'later' } })
+    fireEvent.keyDown(idleInput, { key: 'Enter', metaKey: true })
+    expect(idle.calls).toContainEqual({ kind: 'submit', mode: 'queue' })
+  })
+
+  test('the busy-Enter chip shows the mode and hands the switch to the page', () => {
+    const running = makeStore({ conversation: { ...emptyConversation, running: true } })
+    const chosen: Array<SubmitMode> = []
+    const { container } = render(() => (
+      <Composer
+        store={running.store}
+        onBusyEnter={(mode) => {
+          chosen.push(mode)
+        }}
+      />
+    ))
+
+    const chip = container.querySelector('#busy-enter') as HTMLButtonElement
+    expect(chip.textContent).toBe('queue')
+    expect(chip.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(chip)
+    expect(chosen).toEqual(['steer'])
+
+    const idle = makeStore()
+    const bare = render(() => <Composer store={idle.store} />)
+    expect(bare.container.querySelector('#busy-enter')).toBeNull()
+  })
+
+  test('the busy-Enter chip keeps the choice the next page reads', () => {
+    localStorage.clear()
+    const running = makeStore({ conversation: { ...emptyConversation, running: true } })
+    const first = render(() => <App store={running.store} />)
+    fireEvent.click(first.container.querySelector('#busy-enter') as Element)
+    expect(localStorage.getItem(BUSY_ENTER_KEY)).toBe('steer')
+    first.unmount()
+
+    const again = render(() => <App store={running.store} />)
+    expect(again.container.querySelector('#busy-enter')?.textContent).toBe('steer')
+  })
+
+  test('the queue tells a steer from a line waiting for the next turn', () => {
+    const run = {
+      goal: null,
+      schedules: [],
+      jobs: [],
+      subagents: [],
+      todos: [],
+      todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+      skills: [],
+      promptSections: [],
+      queued: ['after this'],
+      steering: ['inside now'],
+      model: 'stub/model',
+      effort: '',
+      efforts: [],
+    }
+    const { store } = makeStore({ sessionId: 'a', run })
+    const { container } = render(() => <Composer store={store} />)
+
+    const rows = [...container.querySelectorAll('#queue .queued')]
+    expect(rows.map((row) => row.querySelector('.queued-label')?.textContent)).toEqual([
+      'steering',
+      'queued',
+    ])
+    expect(rows.map((row) => row.querySelector('.queued-text')?.textContent)).toEqual([
+      'inside now',
+      'after this',
+    ])
+    expect(rows[0]?.classList.contains('steering')).toBe(true)
   })
 
   test('the composer names its icon actions, and Stop only cancels a run', () => {
@@ -685,6 +784,7 @@ describe('the Solid page', () => {
       skills: [],
       promptSections: [],
       queued: [],
+      steering: [],
       model: 'stub/model',
       effort: '',
       efforts: [],
@@ -727,6 +827,7 @@ describe('the Solid page', () => {
       skills: [],
       promptSections: [],
       queued: [],
+      steering: [],
       model: 'stub/model',
       effort: '',
       efforts: [],
@@ -804,7 +905,7 @@ describe('the Solid page', () => {
 
     // The word is complete now, so the next Enter sends it.
     fireEvent.keyDown(input, { key: 'Enter' })
-    expect(calls).toContainEqual({ kind: 'submit' })
+    expect(calls).toContainEqual({ kind: 'submit', mode: 'queue' })
   })
 
   test('an @ word offers the files of the session, and Enter inserts the picked path', () => {
@@ -840,7 +941,7 @@ describe('the Solid page', () => {
 
     // The word is complete now, so the next Enter sends it.
     fireEvent.keyDown(input, { key: 'Enter' })
-    expect(calls).toContainEqual({ kind: 'submit' })
+    expect(calls).toContainEqual({ kind: 'submit', mode: 'queue' })
   })
 
   test('the @ word waits before it asks for files, and an empty word asks for none', () => {
@@ -907,6 +1008,7 @@ describe('the Solid page', () => {
         skills: [],
         promptSections: [],
         queued: [],
+        steering: [],
         model: 'stub/model',
         effort: 'low',
         efforts: ['low', 'high'],
@@ -943,6 +1045,7 @@ describe('the Solid page', () => {
         skills: [],
         promptSections: [],
         queued: [],
+        steering: [],
         model: 'stub/model',
         effort: 'max',
         efforts: ['low', 'high'],
@@ -970,6 +1073,7 @@ describe('the Solid page', () => {
         skills: [],
         promptSections: [],
         queued: [],
+        steering: [],
         model: 'stub/model',
         effort: '',
         efforts: [],
@@ -1118,6 +1222,7 @@ describe('the Solid page', () => {
         skills: ['code-complete'],
         promptSections: ['identity', 'agents-md:1'],
         queued: [],
+        steering: [],
         model: 'stub/model',
         effort: '',
         efforts: [],
@@ -1164,6 +1269,7 @@ describe('the Solid page', () => {
         skills: [],
         promptSections: [],
         queued: [],
+        steering: [],
         model: 'stub/model',
         effort: '',
         efforts: [],
@@ -1218,6 +1324,7 @@ describe('the Solid page', () => {
         skills: [],
         promptSections: [],
         queued: [],
+        steering: [],
         model: 'stub/model',
         effort: '',
         efforts: [],
@@ -1273,6 +1380,7 @@ describe('the Solid page', () => {
         skills: [],
         promptSections: [],
         queued: [],
+        steering: [],
         model: 'stub/model',
         effort: '',
         efforts: [],
@@ -1630,6 +1738,7 @@ describe('the rail', () => {
         skills: [],
         promptSections: [],
         queued: [],
+        steering: [],
         model: 'stub/model',
         effort: '',
         efforts: [],

@@ -83,6 +83,7 @@ const runStateOf = (): RunStateView => ({
   skills: [],
   promptSections: [],
   queued: [],
+  steering: [],
   model: 'stub/model',
   effort: '',
   efforts: [],

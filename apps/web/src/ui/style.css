@@ -1905,6 +1905,11 @@ footer {
   font-size: var(--text-xs);
 }
 
+/* A steer waits inside the running turn, so its label wears the gold of work in progress. */
+.queued.steering .queued-label {
+  color: var(--accent);
+}
+
 .queued-text {
   overflow: hidden;
   color: var(--text);

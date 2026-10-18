@@ -72,6 +72,12 @@ plugins:
 
 セッションを開いた後の切り替えはそのセッションだけに効き、**これから開くセッションには持ち越さない**（新しいセッションは run の解決から始まる）。開く前の選択は、この run で次に開くセッションの出発点になる。次の run に持ち越す値は設定ファイルの `effort` なので、`jzh config set effort <level>` で書く。
 
+### 走っている turn に送る（steer）
+
+turn が走っている間に composer から送った行は、既定では**次の turn** に積まれる（`queued`）。走っている turn の**次の step** に届けたいときは、送信モードを `steer` にする。turn が走っているときだけ、composer の席に `queue` / `steer` のチップが出る。押すと切り替わり、選んだモードはブラウザに残る。`Enter`（と送信ボタン）はそのモードで送り、`Cmd/Ctrl+Enter` は反対のモードで送る。turn が走っていないときはどちらも queue として扱われ、次の turn になる。
+
+積まれた行は composer の上に出る。`queued` は次の turn、`steering` は走っている turn の next step。steer は turn を止めない。止めたいときは `Stop` を使う。
+
 ## 設定ファイルを雛形から始める
 
 ```sh

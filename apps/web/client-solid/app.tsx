@@ -1,3 +1,4 @@
+import type { SubmitMode } from '@jozo-harness/ui-protocol'
 import { createSignal, onCleanup, onMount } from 'solid-js'
 import { Board } from './components/board.tsx'
 import { Composer } from './components/composer.tsx'
@@ -18,6 +19,7 @@ import {
   railWidthFrom,
   watchWidth,
 } from './rail.ts'
+import { keepBusyEnter, keptBusyEnter } from './dom.ts'
 import { createSessionStore, type SessionStore } from './store.ts'
 
 /** How far the arrow keys move the boundary between the rail and the page. */
@@ -55,6 +57,7 @@ const drawerAttr = (open: boolean): string | undefined => (open ? '' : undefined
 export const App = (props: { store?: SessionStore; lens?: Lens }) => {
   const store = props.store ?? createSessionStore()
   const [lens, setLens] = createSignal(props.lens ?? lensFrom(localStorage.getItem(LENS_KEY)))
+  const [busyEnter, setBusyEnter] = createSignal(keptBusyEnter())
   const [railWidth, setRailWidth] = createSignal(railWidthFrom(localStorage.getItem(RAIL_KEY)))
   const [folded, setFolded] = createSignal(
     railCollapsedFrom(localStorage.getItem(RAIL_COLLAPSED_KEY)),
@@ -71,6 +74,11 @@ export const App = (props: { store?: SessionStore; lens?: Lens }) => {
   const choose = (next: Lens): void => {
     setLens(next)
     localStorage.setItem(LENS_KEY, next)
+  }
+  /** The busy-Enter choice outlives the page, as the lens and the theme do. */
+  const chooseBusyEnter = (mode: SubmitMode): void => {
+    setBusyEnter(mode)
+    keepBusyEnter(mode)
   }
   const widen = (width: number): void => {
     setRailWidth(clampRailWidth(width))
@@ -182,7 +190,7 @@ export const App = (props: { store?: SessionStore; lens?: Lens }) => {
           </div>
           <Conversation store={store} />
           <Waterfall store={store} live={lens() === 'timeline'} />
-          <Composer store={store} />
+          <Composer store={store} busyEnter={busyEnter()} onBusyEnter={chooseBusyEnter} />
         </div>
         <aside
           id="context"

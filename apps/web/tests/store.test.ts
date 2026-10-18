@@ -152,6 +152,7 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
         skills: [],
         promptSections: [],
         queued: [],
+        steering: [],
         model,
         effort,
         efforts: ['low', 'high'],
@@ -217,9 +218,11 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
           }),
         ),
       ),
-      submit: (text) =>
+      submit: (text, mode) =>
         Effect.suspend(() => {
-          commands.push({ kind: 'submit', text })
+          commands.push(
+            mode === undefined ? { kind: 'submit', text } : { kind: 'submit', text, mode },
+          )
           return host.accepting ? Effect.void : Effect.die(new Error('the core fell over'))
         }),
       approve: (callId, approved) =>
@@ -722,6 +725,28 @@ describe('the page store', () => {
           store.sendTo('nobody-holds-this', { kind: 'submit', text: 'into the void' })
           yield* until(() => host.followed() > followed, 'looked at the session again')
           yield* until(() => store.state().problem !== '', 'said the session was refused')
+        }),
+      ),
+    )
+  })
+
+  test('a steer reaches the core with the mode the composer asked for', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          store.setDraft('join the step')
+          store.submit('steer')
+          yield* until(
+            () => host.commands.some((command) => command.kind === 'submit'),
+            'sent the steer',
+          )
+          expect(host.commands).toContainEqual({
+            kind: 'submit',
+            text: 'join the step',
+            mode: 'steer',
+          })
         }),
       ),
     )

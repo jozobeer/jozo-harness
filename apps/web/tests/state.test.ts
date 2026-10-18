@@ -174,6 +174,7 @@ describe('the browser state', () => {
       skills: [],
       promptSections: [],
       queued: ['hold this'],
+      steering: [],
       model: 'stub/model',
       effort: '',
       efforts: [],

@@ -1330,6 +1330,9 @@ const runStateOf = (
     queued: projectInbox(events)
       .nextTurn.filter((message) => message.source === 'user')
       .map((message) => message.text),
+    steering: projectInbox(events)
+      .nextStep.filter((message) => message.source === 'user')
+      .map((message) => message.text),
     jobs: jobsOf(jobs),
     subagents: subagentsOf(children),
     goal:

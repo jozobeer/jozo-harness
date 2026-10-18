@@ -217,6 +217,8 @@ export const RunStateViewSchema = Schema.Struct({
   promptSections: Schema.Array(Schema.String),
   /** What the human typed while a turn was running; it becomes the next turn. */
   queued: Schema.Array(Schema.String),
+  /** What the human sent into the running turn's next step; it does not become a turn. */
+  steering: Schema.Array(Schema.String),
   /** The route this session asks now, `provider/model`, as the next request will. */
   model: Schema.String,
   /** The effort this session asks the provider for now; '' leaves the choice to the provider. */

@@ -7,7 +7,7 @@ import {
   type SessionError,
 } from '@jozo-harness/session'
 import { loadSkill, type LoadedSkill } from '@jozo-harness/tools-tier1'
-import type { UiEvent, UiHost } from '@jozo-harness/ui-protocol'
+import type { SubmitMode, UiEvent, UiHost } from '@jozo-harness/ui-protocol'
 import { Deferred, Effect, Queue, Stream, type Scope } from 'effect'
 
 export type { UiHost } from '@jozo-harness/ui-protocol'
@@ -111,14 +111,28 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
       })
 
     /**
+     * Hands one line to the agent. A steer joins the running turn at its next
+     * step; with nothing running the same queue wakes the runner and starts the
+     * turn a followup would have started, so the fallback needs no check here.
+     */
+    const deliver = (
+      message: { readonly text: string; readonly source: 'user' },
+      mode: SubmitMode,
+    ): Effect.Effect<void, SessionError> =>
+      mode === 'steer' ? options.agent.steer(message) : options.agent.followup(message)
+
+    /**
      * Writes a forced load the way a model's own call would write it: the assistant
      * turn that names the call, the call, and its result. The history stays one
      * shape, and the Run pane folds the load out of the same records.
      */
-    const recordSkillLoad = (loaded: {
-      readonly skill: LoadedSkill
-      readonly input: string
-    }): Effect.Effect<void, SessionError> =>
+    const recordSkillLoad = (
+      loaded: {
+        readonly skill: LoadedSkill
+        readonly input: string
+      },
+      mode: SubmitMode,
+    ): Effect.Effect<void, SessionError> =>
       Effect.gen(function* () {
         const callId = 'skill-' + String(options.session.events().length + 1)
         const args = JSON.stringify({ name: loaded.skill.name })
@@ -144,8 +158,7 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
           summary: loaded.skill.description,
         })
         // No arguments is a load without a turn: the human asked to read it.
-        if (loaded.input !== '')
-          yield* options.agent.followup({ text: loaded.input, source: 'user' })
+        if (loaded.input !== '') yield* deliver({ text: loaded.input, source: 'user' }, mode)
       })
 
     return {
@@ -167,14 +180,16 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
         ),
       ),
       // A command is answered without consuming a turn; its answer reaches the UI
-      // through the session events, so a reconnecting client sees it too.
-      submit: (text) =>
+      // through the session events, so a reconnecting client sees it too. That is
+      // why the mode only reaches a message: a command or a skill load answers or
+      // writes now either way, and steering it would wait for a step it does not need.
+      submit: (text, mode = 'queue') =>
         Effect.gen(function* () {
           // A slash the registry does not answer may still name a skill; the loaded
           // skill becomes the turn's input, and its arguments become the message.
           const loaded = yield* forcedSkillOf(text)
           if (loaded !== undefined) {
-            yield* recordSkillLoad(loaded)
+            yield* recordSkillLoad(loaded, mode)
             return
           }
           if (options.commands !== undefined) {
@@ -186,7 +201,7 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
             })
             if (outcome !== undefined) return
           }
-          yield* options.agent.followup({ text, source: 'user' })
+          yield* deliver({ text, source: 'user' }, mode)
         }),
       approve: (callId, approved) => Effect.asVoid(settle(approvals, callId, approved)),
       /**
