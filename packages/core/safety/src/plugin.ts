@@ -72,12 +72,27 @@ const policyLayerWithContexts = (config: SafetyConfig): Layer.Layer<Policy, neve
       yield* prompt.context({
         name: 'approval',
         order: APPROVAL_CONTEXT_ORDER,
-        text: () => Effect.succeed('approval: ' + config.preset),
+        text: () =>
+          Effect.succeed(
+            'approval: ' +
+              config.preset +
+              ' (a call this preset refuses is denied; retry it once with sandbox_permissions,' +
+              ' which asks the user and is refused at once when nobody can answer)',
+          ),
       })
       yield* prompt.context({
         name: 'sandbox',
         order: SANDBOX_CONTEXT_ORDER,
-        text: () => Effect.succeed('sandbox: ' + (confined ? mode : 'none')),
+        text: () =>
+          Effect.succeed(
+            'sandbox: ' +
+              (confined ? mode : 'none') +
+              (confined
+                ? ' (commands run confined; a file effect the sandbox refuses comes back as [sandbox: file access denied under ' +
+                  mode +
+                  ' mode])'
+                : ' (commands run without a sandbox)'),
+          ),
       })
       const shape: PolicyShape = { preset: config.preset, mode }
       return shape
