@@ -242,11 +242,22 @@ const infoAfter = (info: SessionInfo, event: UiSessionEvent): SessionInfo => {
   return read === undefined ? info : read(info, event.data)
 }
 
+/**
+ * True when the log moved in a way that may have changed what the session can be
+ * told: a turn ended, or the run handed the model a skill catalog it had not read.
+ * The composer reads the list again rather than keeping what it cached.
+ */
+const commandsStale = (event: UiSessionEvent): boolean =>
+  event.type === 'turn/end' ||
+  (event.type === 'user/message' && fieldOf(event.data, 'source') === 'skill-catalog')
+
 export const applyUiEvent = (state: WebState, event: UiEvent): WebState => {
   // The transport may replay the boundary event: only a seq the page has not seen counts.
   const fresh = event.kind === 'session' && event.event.seq > state.conversation.lastSeq
   return {
     ...state,
+    commands:
+      event.kind === 'session' && fresh && commandsStale(event.event) ? undefined : state.commands,
     info: event.kind === 'session' ? infoAfter(state.info, event.event) : state.info,
     turns: fresh ? turnsAfter(state.turns, event.event) : state.turns,
     trace: fresh ? traceAfter(state.trace, event.event) : state.trace,
