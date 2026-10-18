@@ -2,6 +2,7 @@ import { Schema, Effect } from 'effect'
 import type { AgentsShape } from '@jozo-harness/agent'
 import { forkSeed, type SessionEvent } from '@jozo-harness/session'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
+import { delegationRefusal, eventsOfAgent } from './delegation.ts'
 import {
   taskOf,
   teamRoster,
@@ -11,21 +12,19 @@ import {
   type TeamTaskState,
 } from './team-state.ts'
 
-/** How a team call writes to the lead's log. */
+/** How a team call reads and writes the log of the agent that called it. */
 export interface TeamLog {
-  readonly events: () => ReadonlyArray<SessionEvent>
-  readonly spawnMember: (member: TeamMember) => Effect.Effect<void, unknown>
-  readonly createTask: (task: TeamTask) => Effect.Effect<void, unknown>
-  readonly updateTask: (task: TeamTask) => Effect.Effect<void, unknown>
+  readonly events: (sessionId: string) => ReadonlyArray<SessionEvent>
+  readonly spawnMember: (sessionId: string, member: TeamMember) => Effect.Effect<void, unknown>
+  readonly createTask: (sessionId: string, task: TeamTask) => Effect.Effect<void, unknown>
+  readonly updateTask: (sessionId: string, task: TeamTask) => Effect.Effect<void, unknown>
   /** Names the next board row. */
-  readonly nextId: () => string
+  readonly nextId: (sessionId: string) => string
 }
 
 export interface TeamHost {
   readonly agents: AgentsShape
   readonly route: string
-  /** The lead's log; every member starts from it, minus the last instruction. */
-  readonly parentEvents: () => ReadonlyArray<SessionEvent>
   readonly log: TeamLog
 }
 
@@ -110,19 +109,19 @@ const render = (value: TeamValue, agents: AgentsShape): string => {
   return roster + '\n' + board
 }
 
-const spawn = (host: TeamHost, args: TeamArgs, cwd: string, parent: string) =>
+const spawn = (host: TeamHost, args: TeamArgs, cwd: string, sessionId: string) =>
   Effect.gen(function* () {
     const name = required(args.name, 'name')
     if (name instanceof ToolError) return yield* Effect.fail(name)
-    if (teamRoster(host.log.events()).some((member) => member.name === name)) {
+    if (teamRoster(host.log.events(sessionId)).some((member) => member.name === name)) {
       return yield* Effect.fail(refuse(name + ' is already on the roster'))
     }
     const child = yield* host.agents
       .create({
         cwd,
         options: { route: host.route },
-        seed: forkSeed(host.parentEvents()),
-        parent,
+        seed: forkSeed(eventsOfAgent(host.agents, sessionId)),
+        parent: sessionId,
       })
       .pipe(
         Effect.mapError(
@@ -130,28 +129,28 @@ const spawn = (host: TeamHost, args: TeamArgs, cwd: string, parent: string) =>
         ),
       )
     const member: TeamMember = { name, role: args.role ?? '', sessionId: child.id }
-    yield* host.log.spawnMember(member).pipe(Effect.orDie)
+    yield* host.log.spawnMember(sessionId, member).pipe(Effect.orDie)
     return { action: 'spawn', members: [member], tasks: [] } satisfies TeamValue
   })
 
-const create = (host: TeamHost, args: TeamArgs) =>
+const create = (host: TeamHost, args: TeamArgs, sessionId: string) =>
   Effect.gen(function* () {
     const title = required(args.title, 'title')
     if (title instanceof ToolError) return yield* Effect.fail(title)
     const task: TeamTask = {
-      id: host.log.nextId(),
+      id: host.log.nextId(sessionId),
       title,
       state: 'pending',
       revision: 1,
       ...(args.owner === undefined ? {} : { owner: args.owner }),
     }
-    yield* host.log.createTask(task).pipe(Effect.orDie)
+    yield* host.log.createTask(sessionId, task).pipe(Effect.orDie)
     return { action: 'create', members: [], tasks: [task] } satisfies TeamValue
   })
 
-const get = (host: TeamHost, args: TeamArgs) =>
+const get = (host: TeamHost, args: TeamArgs, sessionId: string) =>
   Effect.gen(function* () {
-    const task = taskOf(host.log.events(), String(args.id))
+    const task = taskOf(host.log.events(sessionId), String(args.id))
     if (task === undefined) {
       return yield* Effect.fail(refuse('no task with that id: ' + String(args.id)))
     }
@@ -180,15 +179,15 @@ const moved = (current: TeamTask, args: TeamArgs): TeamTask | ToolError => {
   }
 }
 
-const update = (host: TeamHost, args: TeamArgs) =>
+const update = (host: TeamHost, args: TeamArgs, sessionId: string) =>
   Effect.gen(function* () {
-    const current = taskOf(host.log.events(), String(args.id))
+    const current = taskOf(host.log.events(sessionId), String(args.id))
     if (current === undefined) {
       return yield* Effect.fail(refuse('no task with that id: ' + String(args.id)))
     }
     const task = moved(current, args)
     if (task instanceof ToolError) return yield* Effect.fail(task)
-    yield* host.log.updateTask(task).pipe(Effect.orDie)
+    yield* host.log.updateTask(sessionId, task).pipe(Effect.orDie)
     return { action: 'update', members: [], tasks: [task] } satisfies TeamValue
   })
 
@@ -222,16 +221,19 @@ export const makeTeamTool = (host: TeamHost): ToolDefinition<TeamArgs, TeamValue
   },
   execute: (args, context) =>
     Effect.gen(function* () {
+      const refused = delegationRefusal(host.agents, context.sessionId)
+      if (refused !== undefined) return yield* Effect.fail(refused)
+      const sessionId = context.sessionId
       if (args.action === 'list') {
         return {
           action: 'list',
-          members: teamRoster(host.log.events()),
-          tasks: teamTasks(host.log.events()),
+          members: teamRoster(host.log.events(sessionId)),
+          tasks: teamTasks(host.log.events(sessionId)),
         } satisfies TeamValue
       }
-      if (args.action === 'spawn') return yield* spawn(host, args, context.cwd, context.sessionId)
-      if (args.action === 'create') return yield* create(host, args)
-      if (args.action === 'get') return yield* get(host, args)
-      return yield* update(host, args)
+      if (args.action === 'spawn') return yield* spawn(host, args, context.cwd, sessionId)
+      if (args.action === 'create') return yield* create(host, args, sessionId)
+      if (args.action === 'get') return yield* get(host, args, sessionId)
+      return yield* update(host, args, sessionId)
     }),
 })

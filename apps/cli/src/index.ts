@@ -35,6 +35,7 @@ import {
   nestedAgentsFiles,
   registerAgentsMd,
   type AgentsMdOptions,
+  type RuntimeContextSubject,
 } from '@jozo-harness/system-prompt'
 import { ToolError, type ToolExecution } from '@jozo-harness/tools'
 import { Tools, type ToolRegistry } from '@jozo-harness/tools'
@@ -85,6 +86,8 @@ import {
   makeExitPlanModeTool,
   makeGoalTool,
   makeRalphTool,
+  DELEGATION_CONTEXT_ORDER,
+  delegationLine,
   makeScheduleTool,
   makeWorkflowTool,
   makePluginTool,
@@ -419,28 +422,40 @@ const tier1ToolList = (
   )
   list.push(makeRalphTool({ agents, route }))
   if (options.subagents === true) {
+    // The tools are shared with every child, so a call reads and writes the log
+    // of the session that made it, not the root session this run opened.
+    const sessionOf = (sessionId: string) => agents.get(sessionId)?.session
     list.push(
-      makeSubagentTool({
-        agents,
-        route,
-        parentEvents: () => agent.session.events(),
-      }),
+      makeSubagentTool({ agents, route }),
       ...agentTools(agents),
-      makeWorkflowTool({ agents, route, parentEvents: () => agent.session.events() }),
+      makeWorkflowTool({ agents, route }),
       makeTeamTool({
         agents,
         route,
-        parentEvents: () => agent.session.events(),
         log: {
-          events: () => agent.session.events(),
-          spawnMember: (member) => agent.session.append('team/spawned', member),
-          createTask: (task) => agent.session.append('team/task/created', { task }),
-          updateTask: (task) => agent.session.append('team/task/updated', { task }),
-          nextId: () =>
+          events: (sessionId) => sessionOf(sessionId)?.events() ?? [],
+          spawnMember: (sessionId, member) => {
+            const session = sessionOf(sessionId)
+            return session === undefined ? Effect.void : session.append('team/spawned', member)
+          },
+          createTask: (sessionId, task) => {
+            const session = sessionOf(sessionId)
+            return session === undefined
+              ? Effect.void
+              : session.append('team/task/created', { task })
+          },
+          updateTask: (sessionId, task) => {
+            const session = sessionOf(sessionId)
+            return session === undefined
+              ? Effect.void
+              : session.append('team/task/updated', { task })
+          },
+          nextId: (sessionId) =>
             'task-' +
             String(
-              agent.session.events().filter((event) => event.type === 'team/task/created').length +
-                1,
+              (sessionOf(sessionId)?.events() ?? []).filter(
+                (event) => event.type === 'team/task/created',
+              ).length + 1,
             ),
         },
       }),
@@ -664,6 +679,32 @@ interface ProfileWiring {
   readonly jobs: JobsShape
 }
 
+/**
+ * Registers the line an agent at the delegation limit reads. The entry reads the
+ * agents registry, so every child sharing the prompt service sees its own depth.
+ */
+const installDelegationContext = (
+  wiring: ProfileWiring,
+): Effect.Effect<void, ToolError, Scope.Scope> =>
+  Effect.gen(function* () {
+    if (wiring.options.subagents !== true) return
+    const agents = Context.get(wiring.context, Agents)
+    yield* Context.get(wiring.context, SystemPrompt)
+      .context({
+        name: 'delegation',
+        order: DELEGATION_CONTEXT_ORDER,
+        text: (subject: RuntimeContextSubject) =>
+          Effect.sync(() =>
+            subject.agentId === undefined
+              ? undefined
+              : delegationLine(agents.depthOf(subject.agentId)),
+          ),
+      })
+      .pipe(
+        Effect.mapError((error) => new ToolError({ code: 'execution', message: error.message })),
+      )
+  })
+
 /** Tiers and guards come from the profile's rows. */
 /**
  * Installs what the profile's rows ask for and reports the composition the session
@@ -703,6 +744,9 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
         wiring.rows,
         wiring.jobs,
       )
+      // An agent at the delegation limit reads it in the next runtime snapshot;
+      // the tool stays visible and refuses the call, as dsh does.
+      yield* installDelegationContext(wiring)
     }
     // A failed provider attempt is retried for the codes the loop row lists; the
     // loop only decides what to do when a listener answers, so this is the wiring

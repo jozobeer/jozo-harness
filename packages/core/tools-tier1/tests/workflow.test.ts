@@ -1,5 +1,6 @@
 import type { Agent, AgentsShape } from '@jozo-harness/agent'
 import { HooksLive } from '@jozo-harness/kernel'
+import type { SessionEvent } from '@jozo-harness/session'
 import {
   Tools,
   toolsLayer,
@@ -14,7 +15,16 @@ import { makeWorkflowTool, type WorkflowTask } from '../src/index.ts'
 /** What one child is told to answer, by the task it was given. */
 type Answers = Readonly<Record<string, string>>
 
-const fakeAgents = (answers: Answers, started: Array<string>): AgentsShape => {
+interface FakeAgentsOptions {
+  readonly depth?: number
+  readonly events?: ReadonlyArray<SessionEvent>
+}
+
+const fakeAgents = (
+  answers: Answers,
+  started: Array<string>,
+  options: FakeAgentsOptions = {},
+): AgentsShape => {
   let counter = 0
   return {
     create: () =>
@@ -43,6 +53,9 @@ const fakeAgents = (answers: Answers, started: Array<string>): AgentsShape => {
         } as unknown as Agent
         return agent
       }),
+    get: (id: string) =>
+      id === 's1' ? { session: { events: () => options.events ?? [] } } : undefined,
+    depthOf: () => options.depth ?? 0,
   } as unknown as AgentsShape
 }
 
@@ -78,7 +91,7 @@ describe('the workflow tool', () => {
     const agents = fakeAgents({ 'first job': 'one', 'second job': 'two' }, started)
 
     const result = await Effect.runPromise(
-      call(makeWorkflowTool({ agents, route: 'stub/model', parentEvents: () => [] }), { tasks }),
+      call(makeWorkflowTool({ agents, route: 'stub/model' }), { tasks }),
     )
 
     expect(result?.isError).toBe(false)
@@ -94,7 +107,7 @@ describe('the workflow tool', () => {
     const agents = fakeAgents({ 'first job': 'not json at all', 'second job': '{"ok":true}' }, [])
 
     const result = await Effect.runPromise(
-      call(makeWorkflowTool({ agents, route: 'stub/model', parentEvents: () => [] }), {
+      call(makeWorkflowTool({ agents, route: 'stub/model' }), {
         tasks: [
           { id: 'a', task: 'first job', expect: 'json' },
           { id: 'b', task: 'second job', expect: 'json' },
@@ -116,7 +129,7 @@ describe('the workflow tool', () => {
     const agents = fakeAgents({}, started)
 
     const result = await Effect.runPromise(
-      call(makeWorkflowTool({ agents, route: 'stub/model', parentEvents: () => [] }), {
+      call(makeWorkflowTool({ agents, route: 'stub/model' }), {
         tasks: [
           { id: 'a', task: 'one' },
           { id: 'a', task: 'two' },
@@ -126,6 +139,21 @@ describe('the workflow tool', () => {
 
     expect(result?.isError).toBe(true)
     expect(textOf(result)).toContain('same id')
+    expect(started).toEqual([])
+  })
+
+  test('a workflow at the depth limit is refused before anything runs', async () => {
+    const started: Array<string> = []
+    const agents = fakeAgents({ 'first job': 'one' }, started, { depth: 1 })
+
+    const result = await Effect.runPromise(
+      call(makeWorkflowTool({ agents, route: 'stub/model' }), {
+        tasks: [{ id: 'a', task: 'first job' }],
+      }),
+    )
+
+    expect(result?.isError).toBe(true)
+    expect(textOf(result)).toContain('delegation depth')
     expect(started).toEqual([])
   })
 })

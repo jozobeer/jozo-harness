@@ -286,7 +286,7 @@ const agentLoopEffect = (
      */
     const recordRuntimeContext = (agent: Agent, cwd: string): Effect.Effect<void> =>
       Effect.gen(function* () {
-        const text = yield* promptService.runtimeContext({ cwd })
+        const text = yield* promptService.runtimeContext({ cwd, agentId: agent.id })
         if (text === '' || text === lastRuntimeContext(agent.session.events())) return
         yield* append(agent, 'user/message', { text, source: 'runtime-context' })
       })

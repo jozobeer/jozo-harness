@@ -1,5 +1,6 @@
-import { forkSeed, type SessionEvent } from '@jozo-harness/session'
+import { forkSeed } from '@jozo-harness/session'
 import { childAnswerOf } from './child-answer.ts'
+import { delegationRefusal, eventsOfAgent } from './delegation.ts'
 import { Schema, Effect } from 'effect'
 import type { AgentsShape } from '@jozo-harness/agent'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
@@ -56,14 +57,12 @@ export interface SubagentValue {
 export interface SubagentHost {
   readonly agents: AgentsShape
   readonly route: string
-  /** The parent's log; the child starts from it, minus the last instruction. */
-  readonly parentEvents: () => ReadonlyArray<SessionEvent>
 }
 
 export const makeSubagentTool = (
   host: SubagentHost,
 ): ToolDefinition<SubagentArgs, SubagentValue> => {
-  const { agents, parentEvents } = host
+  const { agents } = host
   return {
     name: 'subagent',
     description:
@@ -87,13 +86,16 @@ export const makeSubagentTool = (
     },
     execute: (args, context) =>
       Effect.gen(function* () {
+        const refused = delegationRefusal(agents, context.sessionId)
+        if (refused !== undefined) return yield* Effect.fail(refused)
         const route = routeFor(args.model, host.route)
         if (route instanceof ToolError) return yield* Effect.fail(route)
         const child = yield* agents
           .create({
             cwd: args.cwd ?? context.cwd,
             options: { route },
-            seed: args.context === 'fresh' ? [] : forkSeed(parentEvents()),
+            seed:
+              args.context === 'fresh' ? [] : forkSeed(eventsOfAgent(agents, context.sessionId)),
             parent: context.sessionId,
           })
           .pipe(

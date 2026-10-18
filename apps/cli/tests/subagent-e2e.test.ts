@@ -142,6 +142,28 @@ describe('subagent through the command', () => {
 
     expect(texts).toContain('child done')
     expect(JSON.stringify(result)).toContain('child done')
+
+    // The depth-limited child is told to do the work itself; the root is not.
+    const snapshots = (events: (typeof opened)[number]['events']): ReadonlyArray<string> =>
+      events.flatMap((event) =>
+        event.type === 'user/message' &&
+        (event.data as { source?: string }).source === 'runtime-context'
+          ? [(event.data as { text: string }).text]
+          : [],
+      )
+    const answers = (session: (typeof opened)[number]): ReadonlyArray<string> =>
+      session.events.flatMap((event) =>
+        event.type === 'assistant/message'
+          ? event.data.content.flatMap((block) => (block.type === 'text' ? [block.text] : []))
+          : [],
+      )
+    const child = opened.find((session) => answers(session).includes('child done'))
+    const parent = opened.find((session) => session !== child)
+    expect(snapshots(child?.events ?? []).join('\n')).toContain(
+      'Delegation depth for subagent: current 1, maximum 1',
+    )
+    expect(snapshots(parent?.events ?? []).join('\n')).not.toContain('Delegation depth')
+
     await rm(root, { recursive: true, force: true })
   })
 })

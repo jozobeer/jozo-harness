@@ -1,7 +1,8 @@
 import { Schema, Effect } from 'effect'
 import type { AgentsShape } from '@jozo-harness/agent'
-import { forkSeed, type JsonValue, type SessionEvent } from '@jozo-harness/session'
+import { forkSeed, type JsonValue } from '@jozo-harness/session'
 import { childAnswerOf } from './child-answer.ts'
+import { delegationRefusal, eventsOfAgent } from './delegation.ts'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
 
 /** How many children a workflow runs at once unless the caller says otherwise. */
@@ -46,8 +47,6 @@ export interface WorkflowItem {
 export interface WorkflowHost {
   readonly agents: AgentsShape
   readonly route: string
-  /** The parent's log; every child starts from it, minus the last instruction. */
-  readonly parentEvents: () => ReadonlyArray<SessionEvent>
 }
 
 const failed = (id: string, error: string): WorkflowItem => ({ id, value: null, error })
@@ -74,7 +73,7 @@ const runTask = (
       .create({
         cwd: task.cwd ?? cwd,
         options: { route: host.route },
-        seed: forkSeed(host.parentEvents()),
+        seed: forkSeed(eventsOfAgent(host.agents, parent)),
         parent,
       })
       .pipe(Effect.orElseSucceed(() => undefined))
@@ -132,6 +131,8 @@ export const makeWorkflowTool = (
   },
   execute: (args, context) =>
     Effect.gen(function* () {
+      const refused = delegationRefusal(host.agents, context.sessionId)
+      if (refused !== undefined) return yield* Effect.fail(refused)
       const repeated = duplicateId(args.tasks)
       if (repeated !== undefined) {
         return yield* Effect.fail(

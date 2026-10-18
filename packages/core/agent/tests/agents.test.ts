@@ -398,4 +398,31 @@ describe('Agents', () => {
     expect(seen.status).toBe('disposed')
     expect(seen.listed).toEqual([])
   })
+
+  test('depthOf counts the parents above an agent', async () => {
+    const seen = await withAgents(turnRunner(), () =>
+      Effect.gen(function* () {
+        const agents = yield* Agents
+        const root = yield* agents.create({ cwd: '/work', options: { route: 'r' } })
+        const child = yield* agents.create({
+          cwd: '/work',
+          options: { route: 'r' },
+          parent: root.id,
+        })
+        const grandchild = yield* agents.create({
+          cwd: '/work',
+          options: { route: 'r' },
+          parent: child.id,
+        })
+        return {
+          root: agents.depthOf(root.id),
+          child: agents.depthOf(child.id),
+          grandchild: agents.depthOf(grandchild.id),
+          unknown: agents.depthOf('not-a-session' as SessionId),
+        }
+      }),
+    )
+
+    expect(seen).toEqual({ root: 0, child: 1, grandchild: 2, unknown: 0 })
+  })
 })
