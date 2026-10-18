@@ -132,6 +132,7 @@ describe('the tool declarations the model receives', () => {
       'schedule',
       'goal',
       'working_directory',
+      'ralph',
     ])
     expect(tools.flatMap((tool) => toolSchemaIssues(tool))).toEqual([])
 

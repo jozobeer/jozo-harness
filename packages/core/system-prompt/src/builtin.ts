@@ -55,6 +55,10 @@ const TOOL_GUIDANCE: ReadonlyArray<readonly [name: string, line: string]> = [
     'Record the objective with goal so it survives the session; while the phase is active the next round runs on its own, so complete it when the objective is achieved.',
   ],
   ['skill', 'Read a skill with the skill tool before acting on a task that names or matches one.'],
+  [
+    'ralph',
+    'Use ralph only when the human explicitly asks for a Ralph or fresh-agent iteration; ordinary long work belongs to goal.',
+  ],
   ['ask_user', 'Use ask_user when only the human can decide; do not guess at their choice.'],
   ['read_image', 'Use read_image for png, jpeg, webp, and gif files instead of read.'],
   [

@@ -128,6 +128,7 @@
   - 学び: 承認（boolean）と質問（文字列）は似て非なる seam である。plan の却下は「どこを直せ」を伴うので、boolean の承認 seam に載せると理由が落ちる。どの seam に載せるかは、答えの型が決める。
   - `subagent_fork` は `subagent` の `forkSeed` が既に担っていたので、設計文書の表を「対応済み」に直した（実装は不要）。採用 3 群と除外の判定はすべて設計文書の表にあり、ここから先の残りは無い。
   - 方針（2026-10-14）: どのツールを採るかを設計文書に決めた（`docs/superpowers/specs/2026-10-13-jozo-harness-kernel-design.md` の「dsh にあって jozo-harness が持たないツール」表）。採用は `job_list`、subagent 制御（send_message / interrupt_agent / list_agents / wait_agent）、`subagent_fork`、`exit_plan_mode` の 4 群。除外は pwsh、list_subagent_models、present、lsp、terminal、computer/browser、plugin_manager、ralph、create_worktree、team_*、MCP resources。`workflow` はツールにせず、S6 の決定 4（同じ turn の並列ツール呼び出し）が担う。`str_replace_editor` は `edit` が対応済み。session query 5 種は D4、schedule 4 種は C2 が引き受ける。pwsh、`job_list`、subagent 制御（send_message / interrupt_agent / list_agents / wait_agent）、subagent_fork、list_subagent_models、exit_plan_mode、present、lsp、workflow、MCP resources、session query 5種、schedule 4種、terminal 6種、computer/browser use、plugin_manager、str_replace_editor、ralph、create_worktree、team_*。
+  - 追記（2026-10-18、Issue #143）: 上の方針のうち `ralph` だけを反転し、既定の tier1 に採用する。round ごとに親の会話を seed しない子を起こし、objective と前 round の handoff だけを渡す。subagent / workflow / team の opt-in 判断は変えない。
 
 ## C. 自律性・委譲
 
