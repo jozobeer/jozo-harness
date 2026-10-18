@@ -47,6 +47,12 @@ const streamOf = (stream: Readable | null): ReadableStream<Uint8Array> =>
 const codeOf = (code: number | null, signal: NodeJS.Signals | null): number =>
   code ?? 128 + (signal === null ? 0 : (constants.signals[signal] ?? 0))
 
+/**
+ * True where a child can lead a process group. A POSIX group lets a kill reach
+ * the descendants a command started; Node cannot group children on Windows.
+ */
+const groupsChildren = process.platform !== 'win32'
+
 export const spawn = (command: ReadonlyArray<string>, options: SpawnOptions = {}): Child => {
   const [program, ...args] = command
   if (program === undefined) throw new Error('spawn needs a command to run')
@@ -54,6 +60,8 @@ export const spawn = (command: ReadonlyArray<string>, options: SpawnOptions = {}
     stdio: [options.stdin ?? 'ignore', options.stdout ?? 'pipe', options.stderr ?? 'pipe'],
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     ...(options.env === undefined ? {} : { env: options.env }),
+    // The child leads its own group, so the kill below can take the whole tree.
+    detached: groupsChildren,
   })
   return {
     exited: new Promise<number>((resolve, reject) => {
@@ -71,7 +79,18 @@ export const spawn = (command: ReadonlyArray<string>, options: SpawnOptions = {}
       },
     },
     kill: (signal) => {
-      child.kill(signal)
+      const pid = child.pid
+      if (!groupsChildren || pid === undefined) {
+        child.kill(signal)
+        return
+      }
+      try {
+        // A negative pid names the process group the child leads.
+        process.kill(-pid, signal ?? 'SIGTERM')
+      } catch {
+        // The group may have ended already; the direct child may still be there.
+        child.kill(signal)
+      }
     },
   }
 }

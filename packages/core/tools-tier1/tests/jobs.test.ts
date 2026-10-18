@@ -1,6 +1,20 @@
 import { describe, expect, test } from 'vitest'
+import { existsSync } from 'node:fs'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Effect } from 'effect'
 import { makeJobs } from '../src/index.ts'
+
+/** Waits for a child to create a marker file, or reports that it never did. */
+const waitForFile = async (path: string, timeoutMs = 5_000): Promise<boolean> => {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (existsSync(path)) return true
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  return existsSync(path)
+}
 
 describe('jobs', () => {
   test('starts a command, reads its output, and stops it', async () => {
@@ -22,6 +36,29 @@ describe('jobs', () => {
     expect(observed.listed).toEqual(['job-1'])
     expect(observed.running).toBe(false)
   })
+
+  test('killing a job ends the descendants its command started', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'jozo-harness-jobs-'))
+    const ready = join(directory, 'grandchild-ready')
+    const stopped = join(directory, 'grandchild-stopped')
+    try {
+      const command = `bash -c 'trap "touch ${stopped}" TERM; touch ${ready}; sleep 30' & wait`
+      const observed = await Effect.runPromise(
+        Effect.gen(function* () {
+          const jobs = yield* makeJobs()
+          const running = yield* jobs.start(command, '/tmp')
+          const started = yield* Effect.promise(() => waitForFile(ready))
+          yield* jobs.kill(running.id)
+          const ended = yield* Effect.promise(() => waitForFile(stopped))
+          return { started, ended }
+        }),
+      )
+      expect(observed.started).toBe(true)
+      expect(observed.ended).toBe(true)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  }, 15_000)
 
   test('a job runs in a non-login shell', async () => {
     const output = await Effect.runPromise(
