@@ -545,7 +545,9 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .session-search {
+  .session-search,
+  .workspace-select,
+  .workspace-add input {
     width: 100%;
     padding: 7px 10px;
     border: 1px solid var(--line);
@@ -556,13 +558,44 @@
     font-size: var(--text-sm);
   }
 
-  .session-search::placeholder {
+  .session-search::placeholder,
+  .workspace-add input::placeholder {
     color: var(--dim);
   }
 
-  .session-search:focus-visible {
+  .session-search:focus-visible,
+  .workspace-select:focus-visible,
+  .workspace-add input:focus-visible {
     border-color: var(--accent);
     outline: none;
+  }
+
+  .workspace-pick {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+  }
+
+  .workspace-add summary {
+    padding: 0 var(--s1);
+    color: var(--dim);
+    font-size: var(--text-sm);
+    cursor: pointer;
+  }
+
+  .workspace-add summary:hover {
+    color: var(--text);
+  }
+
+  .workspace-add form {
+    display: flex;
+    gap: var(--s2);
+    margin-top: var(--s2);
+  }
+
+  .workspace-add form input {
+    flex: 1;
+    min-width: 0;
   }
 
   .board-empty {

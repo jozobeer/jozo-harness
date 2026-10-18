@@ -8,6 +8,7 @@ import {
   withSession,
   withSessions,
   withTheme,
+  withWorkspaces,
   type WebState,
 } from '../../src/ui/state.ts'
 import type {
@@ -111,7 +112,19 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
   }
   const first: WebState = {
     ...withSessions(
-      { ...initialState, connected: true, settings: SETTINGS, models: MODELS },
+      {
+        ...initialState,
+        connected: true,
+        settings: SETTINGS,
+        models: MODELS,
+        workspaces: {
+          cwd: SETTINGS.cwd,
+          items: [
+            { cwd: SETTINGS.cwd, lastUsedAt: now },
+            { cwd: '/Users/dev/src/fudo', lastUsedAt: now - 60_000 },
+          ],
+        },
+      },
       sessions.map((s) => s.summary),
     ),
   }
@@ -152,6 +165,15 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
     askModels: () => undefined,
     askCommands: () => undefined,
     askFiles: () => undefined,
+    askWorkspaces: () => undefined,
+    // The made-up picker grows when the reader adds a folder, so the form answers visibly.
+    addWorkspace: (cwd) =>
+      setState((now) =>
+        withWorkspaces(now, {
+          cwd: now.workspaces?.cwd ?? SETTINGS.cwd,
+          items: [...(now.workspaces?.items ?? []), { cwd, lastUsedAt: 0 }],
+        }),
+      ),
     // The preview has one session at a time, so the pick is both the switch and
     // the choice the ones opened after it would start from.
     chooseModel: (picked) => {

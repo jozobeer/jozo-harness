@@ -6,6 +6,7 @@ import type {
   RunStateView,
   SessionSummary,
   SettingsView,
+  WorkspaceView,
 } from '../shared/rpc.ts'
 import { DEFAULT_THEME, type Theme } from './theme.ts'
 import { traceAfter, type TraceTurn } from './trace.ts'
@@ -53,6 +54,8 @@ export interface WebState {
   readonly commands: ReadonlyArray<CommandView> | undefined
   /** The workspace paths the last reference word named; undefined until one asked. */
   readonly files: FileMatches | undefined
+  /** The folders a new session may start in; undefined until the page asked. */
+  readonly workspaces: Workspaces | undefined
   /** Which surface the right pane shows; undefined leaves the tab strip alone and the body empty. */
   readonly pane: Pane | undefined
   /** Every turn this session ran, oldest first, as the log recorded it. */
@@ -61,6 +64,12 @@ export interface WebState {
   readonly run: RunStateView | undefined
   /** Every turn this session ran, folded one event at a time down to its steps and calls. */
   readonly trace: ReadonlyArray<TraceTurn>
+}
+
+/** The folders a new session may start in, and the one it starts in by default. */
+export interface Workspaces {
+  readonly cwd: string
+  readonly items: ReadonlyArray<WorkspaceView>
 }
 
 /** One answer to a reference query: the paths, and the session and word that asked. */
@@ -84,6 +93,7 @@ export const initialState: WebState = {
   models: undefined,
   commands: undefined,
   files: undefined,
+  workspaces: undefined,
   pane: { kind: 'run' },
   turns: [],
   run: undefined,
@@ -125,6 +135,12 @@ export const withModels = (state: WebState, models: ReadonlyArray<string>): WebS
 export const withCommands = (state: WebState, commands: ReadonlyArray<CommandView>): WebState => ({
   ...state,
   commands,
+})
+
+/** The folders a new session may start in, as the server last listed them. */
+export const withWorkspaces = (state: WebState, workspaces: Workspaces): WebState => ({
+  ...state,
+  workspaces,
 })
 
 /** The paths one reference word named; a late answer is tagged, so the page can tell whose it is. */

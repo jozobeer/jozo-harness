@@ -458,6 +458,78 @@ const RecentFolder = (props: {
 }
 
 /**
+ * The folder a new session starts in. The list arrives newest use first, so the
+ * first option is the last folder used; Add workspace registers another one by
+ * path, and the picker reads the list again when it lands.
+ */
+const WorkspacePicker = (props: { store: SessionStore }) => {
+  const [choice, setChoice] = createSignal('')
+  const [path, setPath] = createSignal('')
+  const listed = () => props.store.state().workspaces
+  const folders = () => listed()?.items ?? []
+  const value = (): string => {
+    const items = folders()
+    const chosen = choice()
+    if (chosen !== '' && items.some((item) => item.cwd === chosen)) return chosen
+    return items[0]?.cwd ?? listed()?.cwd ?? ''
+  }
+  const add = (event: SubmitEvent): void => {
+    event.preventDefault()
+    const cwd = path().trim()
+    if (cwd === '') return
+    props.store.addWorkspace(cwd)
+    setPath('')
+  }
+  onMount(() => props.store.askWorkspaces())
+  return (
+    <div class="workspace-pick">
+      <select
+        id="workspace"
+        class="workspace-select"
+        aria-label="Workspace for a new session"
+        value={value()}
+        onChange={(event) => setChoice(event.currentTarget.value)}
+      >
+        <Show when={folders().length === 0}>
+          <option value={listed()?.cwd ?? ''}>{listed()?.cwd ?? 'No workspace yet'}</option>
+        </Show>
+        <For each={folders()}>
+          {(item) => (
+            <option value={item.cwd}>
+              {basenameOf(item.cwd)} — {item.cwd}
+            </option>
+          )}
+        </For>
+      </select>
+      <Button
+        id="new-session"
+        variant="quiet"
+        type="button"
+        onClick={() => props.store.moveTo(undefined, value() === '' ? undefined : value())}
+      >
+        + New session
+      </Button>
+      <details class="workspace-add">
+        <summary>Add workspace</summary>
+        <form onSubmit={add}>
+          <input
+            id="workspace-path"
+            type="text"
+            aria-label="Workspace path"
+            placeholder="/path/to/folder"
+            value={path()}
+            onInput={(event) => setPath(event.currentTarget.value)}
+          />
+          <Button type="submit" variant="quiet">
+            Add
+          </Button>
+        </form>
+      </details>
+    </div>
+  )
+}
+
+/**
  * The cockpit: every session the store holds, sorted by what the reader has to
  * do — answer, watch, or nothing. Sessions the server has open are followed
  * live; the others read as closed until opened.
@@ -516,14 +588,7 @@ export const Board = (props: { store: SessionStore }) => {
   return (
     <>
       <div class="brand">jozo-harness</div>
-      <Button
-        id="new-session"
-        variant="quiet"
-        type="button"
-        onClick={() => props.store.moveTo(undefined)}
-      >
-        + New session
-      </Button>
+      <WorkspacePicker store={props.store} />
       <Search query={query()} onQuery={setQuery} />
       <Show when={archivedCount() > 0}>
         <button
