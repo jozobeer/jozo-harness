@@ -358,6 +358,94 @@ describe('agent loop', () => {
     expect(header?.params).toEqual({ reasoning_effort: 'high' })
   })
 
+  test('an effort a session was switched to reaches the request after the switch', async () => {
+    const events = await scenario([chunks(textTurn('one')), chunks(textTurn('two'))], (ctx) =>
+      Effect.gen(function* () {
+        const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+        yield* agent.followup({ text: 'first', source: 'user' })
+        yield* agent.whenIdle
+        yield* agent.setEffort('high')
+        yield* agent.followup({ text: 'second', source: 'user' })
+        yield* agent.whenIdle
+        return agent
+      }),
+    )
+
+    const params = events.session
+      .events()
+      .flatMap((event) => (event.type === 'request/header' ? [event.data.params] : []))
+
+    // The first request named no effort; the one after the switch asks for it.
+    expect(params).toEqual([{}, { reasoning_effort: 'high' }])
+  })
+
+  test('a route a session was switched to reaches the request after the switch', async () => {
+    const events = await scenario([chunks(textTurn('one')), chunks(textTurn('two'))], (ctx) =>
+      Effect.gen(function* () {
+        const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+        yield* agent.followup({ text: 'first', source: 'user' })
+        yield* agent.whenIdle
+        yield* agent.setRoute('other/model')
+        yield* agent.followup({ text: 'second', source: 'user' })
+        yield* agent.whenIdle
+        return agent
+      }),
+    )
+
+    const headers = events.session
+      .events()
+      .flatMap((event) => (event.type === 'request/header' ? [event.data] : []))
+
+    // The switch is a change of route, so the log opens a second series rather
+    // than reusing the header the session started with.
+    expect(headers.map((data) => [data.provider, data.model, data.reason])).toEqual([
+      ['fake', 'model', 'opened'],
+      ['other', 'model', 'changed'],
+    ])
+  })
+
+  test('an effort switched while a turn runs reaches that turn', async () => {
+    const events = await scenario(
+      [
+        chunks([
+          {
+            type: 'block-end',
+            index: 0,
+            block: { type: 'tool-call', id: 'c1', name: 'switch-effort', arguments: '{}' },
+          },
+          { type: 'finish', kind: 'tool-calls' },
+        ]),
+        chunks(textTurn('done')),
+      ],
+      (ctx) =>
+        Effect.gen(function* () {
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          // Anything the human does while the turn runs, standing in for the command.
+          const pick: ToolDefinition<{}, { readonly ok: boolean }> = {
+            name: 'switch-effort',
+            description: 'switches the effort from inside a turn',
+            parameters: Schema.Struct({}),
+            output: {
+              schema: Schema.Struct({ ok: Schema.Boolean }),
+              render: () => [{ type: 'text', text: 'switched' }],
+            },
+            execute: () => agent.setEffort('high').pipe(Effect.as({ ok: true })),
+          }
+          yield* ctx.tools.register(pick)
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+    )
+
+    const params = events.session
+      .events()
+      .flatMap((event) => (event.type === 'request/header' ? [event.data.params] : []))
+
+    // One turn, two requests: the one that called the tool, and the one after it.
+    expect(params).toEqual([{}, { reasoning_effort: 'high' }])
+  })
+
   test('a turn that changes nothing reuses the header it opened', async () => {
     const events = await scenario([chunks(textTurn('one')), chunks(textTurn('two'))], (ctx) =>
       Effect.gen(function* () {

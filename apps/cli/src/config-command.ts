@@ -84,6 +84,8 @@ const refusal = async (key: string, value: string): Promise<string | undefined> 
     const shaped = parts.length === 2 && parts.every((part) => part !== '' && !/\s/.test(part))
     return shaped ? undefined : 'model takes provider/model (jzh models lists them)'
   }
+  // Which words an endpoint takes is the endpoint's to say, so the file takes any of them.
+  if (key === 'effort') return undefined
   return await loadBundledProfileNamed(value).then(
     () => undefined,
     () => 'no bundled profile named ' + value + ' (base, headless, repl)',

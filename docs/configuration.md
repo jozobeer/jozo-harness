@@ -19,8 +19,8 @@ plugin ごとの config キー、フラグ、環境変数の一覧は `jzh --dum
 
 | キー | 値 | 効果 |
 |---|---|---|
-| `model` | `provider/model` | 使うルート。`--model` > この値 > 行の `config.model` |
-| `effort` | provider が読む語 | 推論の強さ。`--effort` > この値 > 行の `config.effort`。未設定なら provider の既定 |
+| `model` | `provider/model` | 使うルート。`--model` > この値 > 行の `config.model`。ブラウザ UI の席の選択はこの run の中だけのもので、これから開くセッションもその route で始まる（設定ファイルには書かない） |
+| `effort` | provider が読む語 | 推論の強さ。`--effort` > この値 > 行の `config.effort`。未設定なら provider の既定。ブラウザ UI の席から走っているセッションだけ切り替えることもできる（その run が開いている間だけ効く） |
 | `profile` | profile 名 | 層2で重ねる profile。既定は `headless`。`--profile` > この値 |
 | `skills` | 文字列の配列 | `<name>/SKILL.md` を持つディレクトリを追加する。```/x``` は展開する |
 | `plugins` | 行の配列 | 層3として重なる |
@@ -58,7 +58,7 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 |---|---|
 | `@jozo-harness/session-jsonl` | `root`（必須）— セッションログのディレクトリ |
 | `@jozo-harness/safety` | `preset`（必須）— `read-only` / `workspace-write` / `full`。コマンドと file tool が従う sandbox モードを決める、`sandbox` — `none` / `seatbelt`（macOS の sandbox-exec。**既定は `seatbelt`**）、`writableRoots` — sandbox が書き込めるディレクトリ（既定はコマンドの cwd と一時ディレクトリ。ここに足す） |
-| `@jozo-harness/llm-openai` | `baseUrl`（必須）、`apiKeyEnv`（必須）— キーを持つ環境変数の名前、`streamIdleTimeoutMs` — 1回の試行が無応答でいられる上限（ミリ秒、既定 300000） |
+| `@jozo-harness/llm-openai` | `baseUrl`（必須）、`apiKeyEnv`（必須）— キーを持つ環境変数の名前、`streamIdleTimeoutMs` — 1回の試行が無応答でいられる上限（ミリ秒、既定 300000）、`reasoningEfforts` — この endpoint が受ける effort の語（UI が選択肢に並べる。既定は `low` / `medium` / `high` / `xhigh` / `max`、空配列なら選択肢を出さない） |
 | `@jozo-harness/agent-loop` | `retainTokens` — 末尾で内容を置き換えない範囲を、推定トークンで表した目標（既定は窓の 16%。最新の 1 件は大きさによらず残る）、`maxBytes` — これを超える text block を、保持の外でスタブに置き換える（バイト、既定 32000）、`maxTokens` — 1 リクエストが答えのために予約するトークン。provider へ `max_tokens` として送り、発火点から先に引く（既定は無し＝予約しない） |
 | `@jozo-harness/mcp` | `command`（必須）、`prefix` |
 

@@ -33,15 +33,21 @@ const isEmpty = (conversation: ConversationState): boolean =>
  */
 export const Conversation = (props: { store: SessionStore }) => {
   let element: HTMLElement | undefined
+  /** The conversation this column last followed to the bottom. */
+  let followed: ConversationState | undefined
   const [atBottom, setAtBottom] = createSignal(true)
 
   createEffect(() => {
     // Reading the conversation is what subscribes this effect to every event.
     const conversation = props.store.state().conversation
     // The effect runs after the blocks land; a reader at the bottom follows them.
-    if (element !== undefined && atBottom() && !isEmpty(conversation)) {
-      element.scrollTop = element.scrollHeight
-    }
+    // Only a conversation that changed is worth laying the column out for: reading
+    // and writing the height of a long log is work of its own, and a write to any
+    // other part of the state, a keystroke included, does not move the tail.
+    if (element === undefined || !atBottom() || isEmpty(conversation)) return
+    if (conversation === followed) return
+    followed = conversation
+    element.scrollTop = element.scrollHeight
   })
 
   return (

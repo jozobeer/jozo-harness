@@ -84,6 +84,92 @@ S2 は「1 プロセス = 1 セッション」を「サーバがセッション�
 未着手は、選択を今のセッションに効かせること（agent の route を差し替える設計が要る）、
 effort や profile など他のキーの編集、右サイドバーである。
 
+## セッションの effort 切り替え（2026-10-18）
+
+- effort は agent の options にあり、runner が step ごとに読む
+  （`jzh:packages/core/agent-loop/src/runner.ts`）。だから agent の options を
+  作った時の値で固定せず、`agent.setEffort(effort)` で差し替えられるようにした
+  （`jzh:packages/core/agent/src/agent.ts`）。`''` は provider に任せる。
+- 口は既にある UI のコマンド経路に足した。`UiCommandSchema` の `effort` →
+  `UiHost.setEffort` → `agent.setEffort`（`jzh:packages/ui/protocol/src/index.ts`、
+  `jzh:packages/ui/host/src/index.ts`）。Web も TUI も `sendCommand` を通るので、
+  transport 側に新しい配線は要らない。
+- いま効いている値は `RunStateView.effort` として `state` RPC が返す（**メモリ上の
+  真実**。job の台帳と同じで、ログには残さない）。ページは切り替えのコマンドが
+  通ったときに run state を読み直す（`jzh:apps/web/client-solid/store.ts`）。
+- 操作子は composer の席の選択（`#seat-effort`）。モデルのチップは今までどおり
+  で、その隣に選択が並ぶ（`jzh:apps/web/client-solid/components/composer.tsx`）。
+  自由入力にはしない: **宣伝されていない語は出さない**ので、並ぶのは adapter が
+  宣言した語と `default`（provider に任せる）だけで、いま効いている語が宣言に
+  無ければそれも1つ足す（選択が嘘をつかないように）。
+- 並べる語は endpoint が受ける語なので、llm の行の `reasoningEfforts` が決める。
+  書かなければ adapter の既定（`low` / `medium` / `high`）、空配列なら選択肢を
+  出さない（`jzh:packages/llm/llm-openai/src/plugin.ts`）。同梱の `base` profile も
+  同じ3語を書いている。宣言は `LlmCapabilities.reasoningEffort` として
+  `RunStateView.efforts` でページに届く（`jzh:apps/cli/src/index.ts`）。
+- 効くのは次のリクエストから。turn の途中なら次の step、待っていれば次の turn。
+- **run をまたぐと消える。** ログに残さないので、`jzh web` を止めて再開した
+  セッションは `--effort` > 設定ファイル > 行 の解決に戻る。次の run に持ち越す
+  値は今までどおり設定ファイルの `effort` である。
+- 未着手は、effort / profile / plugins の設定ファイル編集、モデルごとの語の宣言（DSH の
+  catalog は model ごとに `reasoningEfforts` を持つが、jozo は行 = endpoint 単位）、
+  右サイドバーである（モデルを今のセッションに効かせることは
+  [セッションのモデル切り替え](#セッションのモデル切り替え2026-10-18) で入れた）。
+
+## セッションの始まりと、新しいセッションのモデル（2026-10-18）
+
+- **ページを開いただけではセッションを作らない。** 以前は `jzh web` が起動時に1つ組み立てて
+  登録簿の `initial` にしていたので、UI を覗くたびに使われないセッションがログに残った。
+  いまは `serveWeb` の `initial` は任意で、`jzh web` は層と、rail が読む一覧だけを用意する
+  （`jzh:apps/cli/src/index.ts`、`jzh:apps/web/src/server/sessions.ts`）。
+- 最初のセッションは、ページが `open` を呼んだときに作られる（最初の送信か New session）。
+  ページはサーバが何も持っていなければ何も開かず、最初の1通は「これから開くセッション」に
+  預けられ、開いた時点でそこへ送られる。開けなかったときは composer に戻る
+  （`jzh:apps/web/client-solid/store.ts`）。`--resume <id>` は指示なので、その run は
+  そのセッションを `initial` として配る。
+- 設定シートの `model` は**これから開くセッション**に効く。`RunChoice` を port と factory が
+  共有し、`setModel` が設定ファイルに書くと同時にそれを差し替える。開いているセッションの
+  route は agent を組み立てた時に決まるので変わらない。`settings` が返す `model` もこの選択
+  なので、押した結果がその場で見える。
+- effort の切り替えはそのセッションのもので、これから開くセッションには持ち越さない
+  （新しいセッションは run の解決から始まる）。
+
+## セッションのモデル切り替え（2026-10-18）
+
+- effort と同じ形にした。runner は step ごとに `agent.options.route` を読むので、
+  `Agent.setRoute(route)` が options の route だけを差し替えれば、次のリクエストから
+  新しい route で送られる（`jzh:packages/core/agent/src/agent.ts`）。
+- 口は UI のコマンド経路に足した。`UiCommandSchema` の `model` → `UiHost.setModel` →
+  `agent.setRoute`（`jzh:packages/ui/protocol/src/index.ts`、
+  `jzh:packages/ui/host/src/index.ts`）。Web も TUI も `sendCommand` を通るので、
+  transport 側の新しい配線は要らない。
+- いま効いている route は `RunStateView.model` として `state` RPC が返す（effort と
+  同じくメモリ上の真実で、ログには残さない）。ページは切り替えのコマンドが通ったときに
+  run state を読み直すので、席のチップは次のリクエストが使うモデルをすぐに出す。
+- 操作子は composer の席のモデルのチップ（`#seat-model`）。押すとその endpoint が持つ
+  モデルの一覧（`#model-list`）が開き、選ぶとそのセッションの route が変わる。一覧は
+  provider の `GET /models` を叩くので**押されたときだけ**読み（`models` RPC は
+  設定シートの `List models` と共有する。読む前は「reading the models…」と出す）、
+  いま効いている route には印が付く（選択が嘘をつかないように）。行は読める大きさで
+  描く（`--text-base`、`jzh:apps/web/src/ui/style.css`）。
+- **席の選択は run の選択でもある。** 選ぶと、そのセッションの route と、この run が
+  これから開くセッションの route（`RunChoice`）の両方が変わる。セッションをまだ開いて
+  いなければ、チップは「いま始めるとしたら使う route」（`settings.model`）を出し、
+  最初のメッセージの前に選べる。`setModel` RPC に `remember` を足し、席は
+  `remember: false`（この run の中だけ）、設定シートの `Use for new sessions` は
+  `remember: true`（設定ファイルにも書く）を通る（`jzh:apps/web/src/shared/rpc.ts`、
+  `jzh:apps/cli/src/index.ts`）。
+- 設定ファイルに書くのは設定シートだけで、席の選択は書かない。
+  `jzh:apps/cli/tests/model-switch-e2e.test.ts` が「切り替えたセッションの次の
+  リクエストがその route で送られる」「そのとき開いていたセッションは元のまま」
+  「これから開くセッションはその route で始まる」「`remember` 無しでは書き込みが
+  起きない」「run をまたぐと消える」ことを固定している。
+- 未着手は、切り替えをログに残して再開したセッションでも効かせること（DSH は
+  `model/selection` を残し、既定モデルも別に書く）、切り替えたことを会話に注記すること
+  （DSH の `[model changed: …]`）、subagent / workflow / team が子に渡す route を
+  生きた値にすること（いまはセッションを組み立てたときの route を渡している）、
+  モデルごとの語の宣言である。
+
 ## S4 で入れたもの（goal と schedule、2026-10-16）
 
 - ログが既に持っているものだけを、まず見せた。`goal/updated` と
@@ -120,8 +206,10 @@ effort や profile など他のキーの編集、右サイドバーである。
   （transport が境界のイベントを二度運ぶことがある）。ページはイベントから直接数える
   ので、サーバには何も足していない。
 
-未着手は、右サイドバー（ファイル・端末・プレビュー）、選んだモデルを今のセッションに
-効かせること、job の出力の自動更新である。
+未着手は、右サイドバー（ファイル・端末・プレビュー）、job の出力の自動更新である
+（effort とモデルのセッション切り替えは
+[セッションの effort 切り替え](#セッションの-effort-切り替え2026-10-18) と
+[セッションのモデル切り替え](#セッションのモデル切り替え2026-10-18) で入れた）。
 
 - subagent が始めた子セッションは、レールの RUN に `subagent · <id の先頭>` として
   出る。押すとそのセッションに移る（セッションの切り替えは既にある経路をそのまま使う）。
