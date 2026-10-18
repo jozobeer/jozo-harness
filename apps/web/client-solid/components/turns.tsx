@@ -1,16 +1,33 @@
-import { For, Index, Show, createMemo, createSignal, onCleanup } from 'solid-js'
+import { For, Index, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import { plainText } from '@jozo-harness/ui-view'
 import { renderMarkdown } from '../../src/ui/markdown.ts'
 import { toolsOf, type TraceStep, type TraceTool, type TraceTurn } from '../../src/ui/trace.ts'
 import { spanOf } from '../edits.ts'
 import type { SessionStore } from '../store.ts'
 
-const Markdown = (props: { text: string; class?: string }) => (
-  <div
-    class={'markdown ' + (props.class ?? '')}
-    innerHTML={renderMarkdown(plainText(props.text))}
-  />
-)
+/**
+ * The answer as HTML. A text that renders where it did leaves the nodes it
+ * already wrote alone, so only a change to the answer rebuilds its body.
+ */
+export const Markdown = (props: { text: string; class?: string }) => {
+  let node: HTMLDivElement | undefined
+  let written = ''
+  const html = createMemo(() => renderMarkdown(plainText(props.text)))
+  createEffect(() => {
+    const next = html()
+    if (node === undefined || next === written) return
+    written = next
+    node.innerHTML = next
+  })
+  return (
+    <div
+      class={'markdown ' + (props.class ?? '')}
+      ref={(element) => {
+        node = element
+      }}
+    />
+  )
+}
 
 /** The clock a running turn reads its elapsed time from; one tick a second. */
 const createNow = () => {

@@ -161,6 +161,25 @@ export interface RecentGroup {
 const folderFirst = (left: RecentGroup, right: RecentGroup): number =>
   right.updatedAt - left.updatedAt || left.cwd.localeCompare(right.cwd)
 
+/** The key each item keeps, in the order the list draws it. */
+export const keysOf = <Item>(
+  items: ReadonlyArray<Item>,
+  keyOf: (item: Item) => string,
+): ReadonlyArray<string> => items.map(keyOf)
+
+/** The items by the key they keep, so a key finds the item the list just built. */
+export const byKey = <Item>(
+  items: ReadonlyArray<Item>,
+  keyOf: (item: Item) => string,
+): ReadonlyMap<string, Item> => new Map(items.map((item) => [keyOf(item), item]))
+
+/** The one item a key names. A key comes from the same list, so the item is there. */
+export const atKey = <Item>(items: ReadonlyMap<string, Item>, key: string): Item => {
+  const item = items.get(key)
+  if (item === undefined) throw new Error('no entry for ' + key)
+  return item
+}
+
 /**
  * Recent folded by workspace: each cwd once, the folders by their latest update,
  * and the rows inside a folder as the board sorts them. A folder keeps every

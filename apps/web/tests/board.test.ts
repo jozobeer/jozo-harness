@@ -2,9 +2,12 @@ import { describe, expect, test } from 'vitest'
 import type { UiEvent } from '@jozo-harness/ui-protocol'
 import {
   RECENT_PAGE,
+  atKey,
   boardOf,
+  byKey,
   emptyWatched,
   entryOf,
+  keysOf,
   recentGroupsOf,
   visibleSessions,
   watchedAfter,
@@ -129,6 +132,34 @@ describe('the board', () => {
 
   test('a workspace shows five rows before Show more', () => {
     expect(RECENT_PAGE).toBe(5)
+  })
+
+  test('a row is found again by the key its session keeps, though the board builds it anew', () => {
+    const sessions = [summary('a', 3), summary('b', 2), summary('c', 1)]
+    const first = boardOf(sessions, new Map())
+    const second = boardOf(sessions, new Map())
+
+    // The board builds new rows every time; the rail must key by what does not move.
+    expect(second.rest[0]).not.toBe(first.rest[0])
+    expect(keysOf(second.rest, (entry) => entry.summary.id)).toEqual(['a', 'b', 'c'])
+    expect(keysOf(second.rest, (entry) => entry.summary.id)).toEqual(
+      keysOf(first.rest, (entry) => entry.summary.id),
+    )
+
+    const rows = byKey(second.rest, (entry) => entry.summary.id)
+    expect(atKey(rows, 'b')).toBe(second.rest[1])
+    expect(() => atKey(rows, 'gone')).toThrow('no entry for gone')
+  })
+
+  test('a folder is found again by its cwd, so Recent keeps the fold it drew', () => {
+    const groups = recentGroupsOf(boardOf([summary('a', 2), summary('b', 1)], new Map()).rest)
+    expect(keysOf(groups, (group) => group.cwd)).toEqual(['/work/a', '/work/b'])
+    expect(
+      atKey(
+        byKey(groups, (group) => group.cwd),
+        '/work/b',
+      ),
+    ).toBe(groups[1])
   })
 
   test('a finished session keeps the first line of its answer, and a replayed event counts once', () => {
