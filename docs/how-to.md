@@ -217,6 +217,17 @@ jzh --patch sessions.yml "…"
 
 `auto` で sandbox が使えないとき、または明示した backend がその platform で動かないときは、無制限に切り替えず起動が失敗する。Linux では `bwrap` の probe が通らない（未導入、user namespace を作れない）場合も起動が失敗する。
 
+Ubuntu 23.10 以降は AppArmor が非特権の user namespace を拒むので、bubblewrap を入れただけでは probe が通らない。bwrap に user namespace を許す profile を置く（CI も同じ手順を踏む）。
+
+```sh
+sudo apt-get install -y bubblewrap
+printf '%s\n' 'abi <abi/4.0>,' 'include <tunables/global>' \
+  'profile bwrap /usr/bin/bwrap flags=(unconfined) {' '  userns,' '}' \
+  | sudo tee /etc/apparmor.d/bwrap
+sudo apparmor_parser -r /etc/apparmor.d/bwrap
+bwrap --ro-bind / / --dev /dev --proc /proc --unshare-pid true && echo ok
+```
+
 ## チームで分担させる
 
 `ralph` は `--subagents` を要さず、tier1 行がある run で既定でモデルに渡る。objective と前 round の handoff だけを受け取る fresh な子を round ごとに起こすので、親の会話を長期記憶にしない反復に向く。通常の長い仕事は同じ session を続ける `goal` を使う。

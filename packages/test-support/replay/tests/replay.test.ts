@@ -64,6 +64,27 @@ describe('normalizeLog', () => {
     expect(parsed.data.stream[0]?.dt).toEqual([0, 0, 0])
     expect(parsed.data.stream[0]?.time0).toBe(0)
   })
+
+  test('writes the sandbox backend as a token so a recording replays on any platform', () => {
+    const lines = ['seatbelt', 'bwrap'].map((backend) =>
+      normalizeLog(
+        [
+          {
+            seq: 1,
+            time: 0,
+            type: 'user/message',
+            data: {
+              text: '- sandbox: workspace-write (backend: ' + backend + '; enforcement: full;',
+            },
+          },
+        ],
+        [],
+      ),
+    )
+
+    expect(lines[0]).toContain('backend: <native>;')
+    expect(lines[1]).toBe(lines[0])
+  })
 })
 
 describe('replayAdapter', () => {

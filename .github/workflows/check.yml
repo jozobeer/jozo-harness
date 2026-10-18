@@ -1,9 +1,10 @@
 name: check
 
-# The end-to-end tests run the sandbox the profile defaults to (seatbelt, macOS), so the
-# job runs where that exists; a host that refuses to apply it is covered by a test of its
-# own. Node and pnpm come from mise.toml and Rust from rust-toolchain.toml, so the runner
-# and a laptop run the same versions.
+# The end-to-end tests run the sandbox the profile defaults to, so each platform
+# runs where its backend exists: seatbelt on macOS, bwrap on Linux. A host that
+# refuses to apply it is covered by a test of its own. Node and pnpm come from
+# mise.toml and Rust from rust-toolchain.toml, so the runner and a laptop run the
+# same versions.
 on:
   push:
     branches: [main]
@@ -11,10 +12,25 @@ on:
 
 jobs:
   check:
-    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
+      # Ubuntu 24.04 denies unprivileged user namespaces through AppArmor, so bwrap
+      # needs a profile that allows them; docs/how-to.md gives the same steps.
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          printf '%s\n' 'abi <abi/4.0>,' 'include <tunables/global>' \
+            'profile bwrap /usr/bin/bwrap flags=(unconfined) {' '  userns,' '}' \
+            | sudo tee /etc/apparmor.d/bwrap
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap
+          bwrap --ro-bind / / --dev /dev --proc /proc --unshare-pid true
       - uses: jdx/mise-action@v4
       # rustup is already on the runner; this takes the channel from
       # rust-toolchain.toml, so a failed download is not buried in the check.

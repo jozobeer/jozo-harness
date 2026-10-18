@@ -33,6 +33,8 @@ pnpm install
 rustup show   # rust-toolchain.toml の版を（無ければ）入れて確認する
 ```
 
+Linux ではコマンドを bubblewrap（`bwrap`）で封じ込めるので、先に入れておく。Ubuntu 23.10 以降は AppArmor の設定も要る（[docs/how-to.md](docs/how-to.md#コマンドを-sandbox-の外で走らせる)）。
+
 `jzh` をコマンドとして使うには、pnpm の global bin を先に PATH へ通し、そこに CLI を入れる。pnpm 12 に `pnpm link --global` は無く、bin の場所が PATH に無いと pnpm は入れてくれないので、順序が要る。
 
 ```sh
