@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'vitest'
 import type { UiEvent } from '@jozo-harness/ui-protocol'
-import { boardOf, emptyWatched, entryOf, watchedAfter, type Watched } from '../src/ui/board.ts'
+import {
+  RECENT_PAGE,
+  boardOf,
+  emptyWatched,
+  entryOf,
+  recentGroupsOf,
+  watchedAfter,
+  type Watched,
+} from '../src/ui/board.ts'
 
 const at = (seq: number, type: string, data: unknown): UiEvent => ({
   kind: 'session',
@@ -68,6 +76,37 @@ describe('the board', () => {
       new Map(),
     )
     expect(board.rest.map((entry) => entry.summary.id)).toEqual(['pinned', 'newer'])
+  })
+
+  test('Recent folds by workspace, with the workspaces by their latest update', () => {
+    const folder = (id: string, cwd: string, updatedAt: number, pinned = false) => ({
+      id,
+      cwd,
+      createdAt: 1,
+      updatedAt,
+      title: id,
+      pinned,
+    })
+    const groups = recentGroupsOf(
+      boardOf(
+        [
+          folder('one-new', '/work/one', 9000),
+          folder('two-old', '/work/two', 1000),
+          folder('one-pinned', '/work/one', 2000, true),
+          folder('two-new', '/work/two', 7000),
+        ],
+        new Map(),
+      ).rest,
+    )
+
+    expect(groups.map((group) => group.cwd)).toEqual(['/work/one', '/work/two'])
+    expect(groups[0]?.updatedAt).toBe(9000)
+    expect(groups[0]?.entries.map((entry) => entry.summary.id)).toEqual(['one-pinned', 'one-new'])
+    expect(groups[1]?.entries.map((entry) => entry.summary.id)).toEqual(['two-new', 'two-old'])
+  })
+
+  test('a workspace shows five rows before Show more', () => {
+    expect(RECENT_PAGE).toBe(5)
   })
 
   test('a finished session keeps the first line of its answer, and a replayed event counts once', () => {
