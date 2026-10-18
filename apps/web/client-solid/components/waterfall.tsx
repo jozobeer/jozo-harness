@@ -1,4 +1,5 @@
 import { For, Index, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
+import { summaryBodyOf } from '@jozo-harness/ui-view'
 import {
   axisEndOf,
   toolsOf,
@@ -52,7 +53,8 @@ interface Filter {
 
 const matches = (tool: TraceTool, filter: Filter): boolean =>
   (!filter.failedOnly || tool.status === 'error') &&
-  (filter.text === '' || (tool.name + ' ' + tool.summary).toLowerCase().includes(filter.text))
+  (filter.text === '' ||
+    (tool.name + ' ' + summaryBodyOf(tool.name, tool.summary)).toLowerCase().includes(filter.text))
 
 /** One model call on the axis: the time the model spent before it asked for tools. */
 const ModelRow = (props: {
@@ -95,7 +97,7 @@ const ToolRow = (props: {
       }
     >
       <span class="wf-name">{props.tool.name}</span>
-      <span class="wf-summary">{props.tool.summary}</span>
+      <span class="wf-summary">{summaryBodyOf(props.tool.name, props.tool.summary)}</span>
       <span class="wf-track">
         <span class="wf-bar" style={barOf(props.turn, props.tool.startedAt, to(), props.axisEnd)} />
       </span>

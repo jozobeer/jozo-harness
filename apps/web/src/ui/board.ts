@@ -1,5 +1,10 @@
 import type { UiEvent } from '@jozo-harness/ui-protocol'
-import { applyEvent, emptyConversation, type Conversation } from '@jozo-harness/ui-view'
+import {
+  applyEvent,
+  emptyConversation,
+  summaryBodyOf,
+  type Conversation,
+} from '@jozo-harness/ui-view'
 import type { SessionSummary } from '../shared/rpc.ts'
 import { toolsOf, traceAfter, type TraceTurn } from './trace.ts'
 
@@ -76,7 +81,10 @@ const lastTurnFacts = (last: TraceTurn | undefined) => {
   return {
     since: last.endedAt ?? last.startedAt,
     calls: tools.length,
-    doing: running === undefined ? '' : running.name + ' ' + running.summary,
+    doing:
+      running === undefined
+        ? ''
+        : running.name + ' ' + summaryBodyOf(running.name, running.summary),
     said: last.answer.split('\n')[0] ?? '',
   }
 }

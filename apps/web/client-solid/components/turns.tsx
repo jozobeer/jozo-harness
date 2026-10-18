@@ -1,5 +1,5 @@
 import { For, Index, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
-import { plainText } from '@jozo-harness/ui-view'
+import { plainText, summaryBodyOf } from '@jozo-harness/ui-view'
 import { renderMarkdown } from '../../src/ui/markdown.ts'
 import { toolsOf, type TraceStep, type TraceTool, type TraceTurn } from '../../src/ui/trace.ts'
 import { spanOf } from '../edits.ts'
@@ -41,7 +41,7 @@ const Tool = (props: { tool: TraceTool }) => (
   <details class={'tool-card ' + props.tool.status} open={props.tool.status === 'error'}>
     <summary class="tool-line">
       <span class="tool-name">{props.tool.name}</span>
-      <span class="tool-summary">{props.tool.summary}</span>
+      <span class="tool-summary">{summaryBodyOf(props.tool.name, props.tool.summary)}</span>
       <span class="tool-result">{props.tool.result}</span>
       <span class="tool-took">
         {props.tool.endedAt === undefined ? '…' : spanOf(props.tool.endedAt - props.tool.startedAt)}
@@ -128,7 +128,11 @@ const ProcessLine = (props: { turn: TraceTurn; now: number }) => {
         <span class="process-failed">{plural(failed(), 'failure')}</span>
       </Show>
       <Show when={current()}>
-        {(tool) => <span class="process-now">{tool().name + ' ' + tool().summary}</span>}
+        {(tool) => (
+          <span class="process-now">
+            {tool().name + ' ' + summaryBodyOf(tool().name, tool().summary)}
+          </span>
+        )}
       </Show>
     </summary>
   )

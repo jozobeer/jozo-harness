@@ -321,7 +321,7 @@ describe('the Solid page', () => {
           callId: 'c1',
           name: 'edit',
           arguments: '{"path":"a.ts"}',
-          summary: 'a.ts',
+          summary: 'edit a.ts',
         }),
         at(5, 'tool/result', {
           callId: 'c1',
@@ -341,6 +341,7 @@ describe('the Solid page', () => {
     expect(container.querySelector('.block.user .body')?.textContent).toBe('hello')
     expect(container.querySelector('.process-count')?.textContent).toBe('2 steps, 1 call')
     expect(container.querySelector('.answer h1')?.textContent).toBe('Heading')
+    expect(container.querySelector('.tool-card .tool-summary')?.textContent).toBe('a.ts')
     expect(container.querySelector('.tool-card .tool-output')?.textContent).toBe('the file said so')
 
     fireEvent.click(container.querySelector('button.change') as Element)
@@ -838,7 +839,12 @@ describe('the Solid page', () => {
       trace: traceOf([
         at(1, 'turn/start', { turn: 1 }),
         at(2, 'step/start', { step: 1 }),
-        at(3, 'tool/call', { callId: 'c1', name: 'bash', arguments: '{}', summary: 'pnpm test' }),
+        at(3, 'tool/call', {
+          callId: 'c1',
+          name: 'bash',
+          arguments: '{}',
+          summary: 'bash pnpm test',
+        }),
         at(5, 'tool/result', { callId: 'c1', isError: true, summary: 'exit 1', content: [] }),
         at(6, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
       ]),
@@ -848,6 +854,8 @@ describe('the Solid page', () => {
 
     expect(container.querySelector('.wf-turn-failed')?.textContent).toBe('1 failed')
     const row = container.querySelector('button.wf-row.tool.error')
+    expect(row?.querySelector('.wf-name')?.textContent).toBe('bash')
+    expect(row?.querySelector('.wf-summary')?.textContent).toBe('pnpm test')
     expect(row?.querySelector('.wf-took')?.textContent).toBe('2.0s')
     fireEvent.click(row as Element)
     expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'inspect', turn: 1, callId: 'c1' } })

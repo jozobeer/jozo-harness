@@ -92,6 +92,24 @@ describe('tui render', () => {
     expect(view.lines[0]).toContain('approval')
   })
 
+  test('a tool line names the tool once even when the log repeats it', () => {
+    const view = screen(
+      state({
+        conversation: fold([
+          session('tool/call', {
+            callId: 'c1',
+            name: 'bash',
+            arguments: '{"command":"ls -la"}',
+            summary: 'bash ls -la',
+          }),
+        ]),
+      }),
+    )
+    const text = view.lines.join('\n')
+    expect(text).toContain('⏺ bash ls -la')
+    expect(text).not.toContain('bash bash')
+  })
+
   test('tool output cannot inject terminal controls', () => {
     const view = screen(
       state({

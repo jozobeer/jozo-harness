@@ -33,7 +33,7 @@ const summary = (id: string, createdAt = 1, updatedAt = createdAt) => ({
 const working = follow(
   at(1, 'turn/start', { turn: 1 }),
   at(2, 'step/start', { step: 1 }),
-  at(3, 'tool/call', { callId: 'c1', name: 'bash', arguments: '{}', summary: 'pnpm test' }),
+  at(3, 'tool/call', { callId: 'c1', name: 'bash', arguments: '{}', summary: 'bash pnpm test' }),
 )
 
 describe('the board', () => {

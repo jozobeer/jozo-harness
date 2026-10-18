@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { applyEvent, emptyConversation, type Conversation } from '../src/index.ts'
+import { applyEvent, emptyConversation, summaryBodyOf, type Conversation } from '../src/index.ts'
 import type { UiSessionEvent } from '@jozo-harness/ui-protocol'
 
 const event = (seq: number, type: string, data: unknown): UiSessionEvent =>
@@ -43,5 +43,25 @@ describe('the line a tool shows', () => {
     )
 
     expect(toolBlock(state)).toMatchObject({ summary: '{"command":"ls -la"}', result: 'boom' })
+  })
+})
+
+describe('the body of a recorded summary', () => {
+  test('drops the tool name the line starts with', () => {
+    expect(summaryBodyOf('bash', 'bash ls -la')).toBe('ls -la')
+    expect(summaryBodyOf('glob', 'glob **/*.{ts,tsx}')).toBe('**/*.{ts,tsx}')
+  })
+
+  test('leaves a line alone when it does not begin with the name', () => {
+    expect(summaryBodyOf('bash', 'pnpm test')).toBe('pnpm test')
+    expect(summaryBodyOf('web_fetch', 'fetch https://example.com')).toBe(
+      'fetch https://example.com',
+    )
+    expect(summaryBodyOf('read', 'readme.md')).toBe('readme.md')
+  })
+
+  test('a line that is only the name leaves an empty body', () => {
+    expect(summaryBodyOf('bash', 'bash')).toBe('')
+    expect(summaryBodyOf('', 'anything')).toBe('anything')
   })
 })
