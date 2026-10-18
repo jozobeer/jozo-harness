@@ -14,6 +14,7 @@ import {
   withSessions,
   withSettings,
   withTheme,
+  withWorkspaces,
 } from '../src/ui/state.ts'
 
 let seq = 0
@@ -148,7 +149,10 @@ describe('the browser state', () => {
     const listed = withModels(shown, ['stub/model'])
     const inspecting = withPane(listed, { kind: 'inspect', turn: 1, callId: 'c1' })
     const state = withRun(inspecting, run)
+    const workspaces = { cwd: '/work/one', items: [{ cwd: '/work/one', lastUsedAt: 1 }] }
+    const spread = withWorkspaces(state, workspaces)
 
+    expect(spread.workspaces).toEqual(workspaces)
     expect(state.connected).toBe(true)
     expect(state.draft).toBe('half typed')
     expect(state.settings).toEqual(settings)
