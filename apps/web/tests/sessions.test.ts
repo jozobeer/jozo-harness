@@ -4,7 +4,7 @@ import { Effect, Stream } from 'effect'
 import { WebError } from '../src/server/errors.ts'
 import {
   makeSessionRegistry,
-  type OpenSession,
+  type InitialSession,
   type SessionFactory,
 } from '../src/server/sessions.ts'
 import type { JobDetailView, RunStateView, SessionSummary } from '../src/shared/rpc.ts'
@@ -66,6 +66,7 @@ const makeFactory = (): Fake => {
             jobOutput,
             stopJob: () => Effect.void,
             stopSubagent: () => Effect.void,
+            busy: () => false,
           }
         }),
     },
@@ -90,14 +91,18 @@ const runStateOf = (): RunStateView => ({
 const jobOutput = (): Effect.Effect<JobDetailView, WebError> =>
   Effect.fail(new WebError({ message: 'no such job' }))
 
-const initial = (id: string): OpenSession => ({
-  summary: summaryOf(id),
-  host: hostOf(),
-  commands: () => [],
-  runState: runStateOf,
-  jobOutput,
-  stopJob: () => Effect.void,
-  stopSubagent: () => Effect.void,
+const initial = (id: string): InitialSession => ({
+  session: {
+    summary: summaryOf(id),
+    host: hostOf(),
+    commands: () => [],
+    runState: runStateOf,
+    jobOutput,
+    stopJob: () => Effect.void,
+    stopSubagent: () => Effect.void,
+    busy: () => false,
+  },
+  close: () => Effect.void,
 })
 
 describe('the session registry', () => {
@@ -238,5 +243,78 @@ describe('the session registry', () => {
       ),
     )
     expect(fake.closed).toEqual(['a'])
+  })
+
+  test('closing an open session releases its scope, and a page may open it again', async () => {
+    const fake = makeFactory()
+    const seen = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* makeSessionRegistry({ factory: fake.factory })
+          const before = yield* registry.open('a', undefined)
+          yield* registry.close('a')
+          const released = [...fake.closed]
+          const forgotten =
+            registry.hostOf('a') === undefined &&
+            registry.sessionOf('a') === undefined &&
+            registry.openedIds().length === 0
+          const after = yield* registry.open('a', undefined)
+          return {
+            released,
+            forgotten,
+            asked: fake.asked,
+            replaced: before.host !== after.host,
+          }
+        }),
+      ),
+    )
+    expect(seen.released).toEqual(['a'])
+    expect(seen.forgotten).toBe(true)
+    // Closing forgets the session, so asking again builds a new core.
+    expect(seen.asked).toEqual(['a', 'a'])
+    expect(seen.replaced).toBe(true)
+  })
+
+  test('closing a session nobody opened does nothing', async () => {
+    const fake = makeFactory()
+    const seen = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* makeSessionRegistry({ factory: fake.factory })
+          yield* registry.close('nobody')
+          return { released: [...fake.closed], opened: registry.openedIds() }
+        }),
+      ),
+    )
+    expect(seen).toEqual({ released: [], opened: [] })
+  })
+
+  test('closing the boot session releases what the caller built and clears the initial id', async () => {
+    const fake = makeFactory()
+    let released = 0
+    const seen = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* makeSessionRegistry({
+            initial: {
+              ...initial('boot'),
+              close: () =>
+                Effect.sync(() => {
+                  released += 1
+                }),
+            },
+            factory: fake.factory,
+          })
+          yield* registry.close('boot')
+          return {
+            initial: registry.initial,
+            known: registry.hostOf('boot') !== undefined,
+            opened: registry.openedIds(),
+          }
+        }),
+      ),
+    )
+    expect(seen).toEqual({ initial: '', known: false, opened: [] })
+    expect(released).toBe(1)
   })
 })

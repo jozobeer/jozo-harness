@@ -17,6 +17,17 @@ export interface OpenSession {
   readonly stopJob: (id: string) => Effect.Effect<void, WebError>
   /** Stops one child agent this session started. */
   readonly stopSubagent: (id: string) => Effect.Effect<void, WebError>
+  /** Whether the session still owns running work: a turn, a job, or a child agent. */
+  readonly busy: () => boolean
+}
+
+/**
+ * The session a server starts with, and how to release what the caller built it
+ * in. The registry closes it like any other session when a page deletes it.
+ */
+export interface InitialSession {
+  readonly session: OpenSession
+  readonly close: () => Effect.Effect<void>
 }
 
 /** What the app that owns the profiles gives the server: the store's list, and one more session. */
@@ -38,6 +49,8 @@ export interface SessionRegistry {
     id: string | undefined,
     cwd: string | undefined,
   ) => Effect.Effect<OpenSession, WebError>
+  /** Releases a session that is open; a no-op when nobody opened it. */
+  readonly close: (id: string) => Effect.Effect<void>
   /** The host of a session already open; undefined when the page names one nobody opened. */
   readonly hostOf: (id: string) => UiHost | undefined
   /** What an open session says about itself; undefined when nobody opened it. */
@@ -50,19 +63,27 @@ export interface SessionRegistry {
   readonly openedIds: () => ReadonlyArray<string>
 }
 
+/** One session the registry holds, with the way to release what it runs in. */
+interface OpenEntry {
+  readonly session: OpenSession
+  readonly close: () => Effect.Effect<void>
+}
+
 /**
  * Keeps one running core per session. A session opens the first time a page asks
- * for it and stays open until the server stops, so switching back is free. A
- * server may start with none: the first session is the one a page asks for.
+ * for it and stays open until the page deletes it or the server stops, so
+ * switching back is free. A server may start with none: the first session is
+ * the one a page asks for.
  */
 export const makeSessionRegistry = (input: {
-  readonly initial?: OpenSession
+  readonly initial?: InitialSession
   readonly factory: SessionFactory
 }): Effect.Effect<SessionRegistry, never, Scope.Scope> =>
   Effect.gen(function* () {
-    const opened = new Map<string, OpenSession>(
-      input.initial === undefined ? [] : [[input.initial.summary.id, input.initial]],
+    const opened = new Map<string, OpenEntry>(
+      input.initial === undefined ? [] : [[input.initial.session.summary.id, input.initial]],
     )
+    let initialId = input.initial?.session.summary.id ?? ''
     // The scope this registry lives in: every session it opens is closed with it.
     const own = yield* Scope.Scope
 
@@ -72,26 +93,48 @@ export const makeSessionRegistry = (input: {
     ): Effect.Effect<OpenSession, WebError> =>
       Effect.gen(function* () {
         const known = id === undefined ? undefined : opened.get(id)
-        if (known !== undefined) return known
+        if (known !== undefined) return known.session
         // One scope per session: the server's own scope closes it when the server stops.
         const scope = yield* Scope.make()
         yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
         const session = yield* input.factory
           .open(id, cwd)
           .pipe(Effect.provideService(Scope.Scope, scope))
-        opened.set(session.summary.id, session)
+        opened.set(session.summary.id, {
+          session,
+          close: () => Scope.close(scope, Exit.void),
+        })
         return session
       }).pipe(Effect.provideService(Scope.Scope, own))
 
+    const close = (id: string): Effect.Effect<void> =>
+      Effect.suspend(() => {
+        const entry = opened.get(id)
+        if (entry === undefined) return Effect.void
+        // The scope goes first and the entry second: a page that asks while the
+        // core is closing still finds it, and the next request never does.
+        return entry.close().pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              opened.delete(id)
+              if (initialId === id) initialId = ''
+            }),
+          ),
+        )
+      })
+
     return {
-      // '' when the server holds none yet: a page then starts one itself.
-      initial: input.initial?.summary.id ?? '',
+      // '' when the server holds none yet, or once the page deleted the boot one.
+      get initial() {
+        return initialId
+      },
       list: input.factory.list,
       open: openInOwnScope,
-      hostOf: (id) => opened.get(id)?.host,
-      stateOf: (id) => opened.get(id)?.runState(),
-      commandsOf: (id) => opened.get(id)?.commands(),
-      sessionOf: (id) => opened.get(id),
+      close,
+      hostOf: (id) => opened.get(id)?.session.host,
+      stateOf: (id) => opened.get(id)?.session.runState(),
+      commandsOf: (id) => opened.get(id)?.session.commands(),
+      sessionOf: (id) => opened.get(id)?.session,
       openedIds: () => [...opened.keys()],
     }
   })

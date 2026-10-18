@@ -11,7 +11,7 @@ import { makeWebProtocol, type Connection } from './protocol.ts'
 import { applyMeta, readMeta, sessionActionOf, withMeta } from './session-meta.ts'
 import {
   makeSessionRegistry,
-  type OpenSession,
+  type InitialSession,
   type SessionFactory,
   type SessionRegistry,
 } from './sessions.ts'
@@ -25,7 +25,7 @@ export const UI_PATH = '/ui'
 
 export interface ServeWebOptions {
   /** The session a page opens when it names none; absent while the server holds none. */
-  readonly initial?: OpenSession
+  readonly initial?: InitialSession
   /** Opens the rest: a page may ask for any session the store holds. */
   readonly factory: SessionFactory
   /** What the page may read and change about the run behind it. */
@@ -78,10 +78,19 @@ const handlersOf = (
       }),
     sessionAction: ({ sessionId, action }) =>
       Effect.gen(function* () {
-        // A running core owns its log; deleting the directory under it is not a
-        // rename but a race with the next append. The reader stops it first.
-        if (action.kind === 'delete' && registry.hostOf(sessionId) !== undefined) {
-          return yield* Effect.fail('stop the session before deleting it')
+        if (action.kind === 'delete') {
+          const open = registry.sessionOf(sessionId)
+          // A core that is working owns its log: closing it mid-turn would cut a
+          // write. The page already offers a stop for each kind of work, so only
+          // that moment is refused, and the strip says what to stop.
+          if (open?.busy() === true) {
+            return yield* Effect.fail(
+              'stop the running turn, job, or subagent, then delete the session',
+            )
+          }
+          // An idle open session is safe to release: wait for its scope to close
+          // before the directory goes, so the delete is never a race with a write.
+          yield* registry.close(sessionId)
         }
         const view = yield* settings.read()
         yield* sessionActionOf(view.sessionRoot, sessionId, action)

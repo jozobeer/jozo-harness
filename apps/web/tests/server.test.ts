@@ -6,7 +6,7 @@ import { WebSocket } from 'ws'
 import { Deferred, Effect, Exit, Fiber, Option, Queue, Stream, type Scope } from 'effect'
 import { RpcClient, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -47,7 +47,8 @@ interface FakeHost {
   readonly publish: (event: UiEvent) => void
 }
 
-const makeHost = (id: string, cwd = '/work'): FakeHost => {
+/** A host as the run holds it: working puts a job and a child agent in its state. */
+const makeHost = (id: string, cwd = '/work', working = true): FakeHost => {
   const commands: Array<UiCommand> = []
   const stopped: Array<string> = []
   const subscribers = new Set<Queue.Queue<UiEvent>>()
@@ -89,21 +90,25 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
           lastFiredAt: 0,
         },
       ],
-      jobs: [
-        {
-          id: 'j-1',
-          command: 'sleep 5',
-          running: true,
-          startedAt: 1_700_000_000_000,
-          tail: 'still going',
-        },
-      ],
-      subagents: [{ id: 'child-1', status: 'running', startedAt: 1_700_000_000_000 }],
+      jobs: working
+        ? [
+            {
+              id: 'j-1',
+              command: 'sleep 5',
+              running: true,
+              startedAt: 1_700_000_000_000,
+              tail: 'still going',
+            },
+          ]
+        : [],
+      subagents: working
+        ? [{ id: 'child-1', status: 'running', startedAt: 1_700_000_000_000 }]
+        : [],
       todos: [],
       todoCounts: { pending: 0, inProgress: 0, completed: 0 },
       skills: [],
       promptSections: [],
-      queued: ['one more thing'],
+      queued: working ? ['one more thing'] : [],
       model: 'stub/model',
       effort: 'high',
       efforts: ['low', 'high'],
@@ -139,16 +144,21 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
 
 interface FakeWeb {
   readonly initial: OpenSession
+  readonly initialClose: () => Effect.Effect<void>
   readonly factory: SessionFactory
   readonly hosts: Map<string, FakeHost>
+  /** The boot sessions the server released, in the order it asked. */
+  readonly closed: Array<string>
 }
 
 /** The sessions one fake store holds: the boot one, plus whatever a page opens. */
-const makeWeb = (initialId: string, cwd = '/work'): FakeWeb => {
-  const first = makeHost(initialId, cwd)
+const makeWeb = (initialId: string, cwd = '/work', working = true): FakeWeb => {
+  const first = makeHost(initialId, cwd, working)
   const hosts = new Map<string, FakeHost>([[initialId, first]])
+  const closed: Array<string> = []
   return {
     hosts,
+    closed,
     initial: {
       summary: first.summary,
       host: first.host,
@@ -157,7 +167,12 @@ const makeWeb = (initialId: string, cwd = '/work'): FakeWeb => {
       jobOutput: first.jobOutput,
       stopJob: first.stopJob,
       stopSubagent: first.stopSubagent,
+      busy: () => working,
     },
+    initialClose: () =>
+      Effect.sync(() => {
+        closed.push(initialId)
+      }),
     factory: {
       list: () => Effect.succeed([...hosts.values()].map((fake) => fake.summary)),
       open: (id, cwd) =>
@@ -173,9 +188,10 @@ const makeWeb = (initialId: string, cwd = '/work'): FakeWeb => {
               jobOutput: known.jobOutput,
               stopJob: known.stopJob,
               stopSubagent: known.stopSubagent,
+              busy: () => working,
             }
           }
-          const fresh = makeHost(made, cwd)
+          const fresh = makeHost(made, cwd, working)
           hosts.set(made, fresh)
           return {
             summary: fresh.summary,
@@ -185,6 +201,7 @@ const makeWeb = (initialId: string, cwd = '/work'): FakeWeb => {
             jobOutput: fresh.jobOutput,
             stopJob: fresh.stopJob,
             stopSubagent: fresh.stopSubagent,
+            busy: () => working,
           }
         }),
     },
@@ -279,7 +296,7 @@ const start = (
     const stop = yield* Deferred.make<void>()
     yield* Effect.forkScoped(
       serveWeb({
-        initial: web.initial,
+        initial: { session: web.initial, close: web.initialClose },
         factory: web.factory,
         settings: settings.port,
         workspaces: workspaces.port,
@@ -658,12 +675,12 @@ describe('the web transport', () => {
     await rm(workspace, { recursive: true, force: true })
   })
 
-  test('the row menu renames a session, and refuses to delete one that is open', async () => {
+  test('the row menu deletes an open session, and the page lets go of it', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-menu-'))
     await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
     const sessionRoot = await mkdtemp(join(tmpdir(), 'jozo-harness-web-menu-logs-'))
     await mkdir(join(sessionRoot, 'a'), { recursive: true })
-    const web = makeWeb('a')
+    const web = makeWeb('a', '/work', false)
     const base = makeSettings()
     const settings = {
       ...base,
@@ -690,10 +707,20 @@ describe('the web transport', () => {
             })
             const listed = yield* client.sessions()
             const opened = yield* client.open({ sessionId: 'a' })
-            const refused = yield* client
-              .sessionAction({ sessionId: 'a', action: { kind: 'delete' } })
-              .pipe(Effect.catch((message) => Effect.succeed(message)))
-            return { pinned, listed, opened, refused }
+            const deleted = yield* client.sessionAction({
+              sessionId: 'a',
+              action: { kind: 'delete' },
+            })
+            const after = yield* client.sessions()
+            const gone = yield* Effect.promise(async () => {
+              try {
+                await stat(join(sessionRoot, 'a'))
+                return false
+              } catch {
+                return true
+              }
+            })
+            return { pinned, listed, opened, deleted, after, gone }
           }).pipe(clientLayers(wsUrl))
           const result = yield* withoutServices(useClient)
           yield* Deferred.succeed(started.stop, undefined)
@@ -704,8 +731,70 @@ describe('the web transport', () => {
 
     expect(observed.pinned).toBe(true)
     expect(observed.listed.items[0]).toMatchObject({ title: 'named by hand', pinned: true })
+    expect(observed.listed.opened).toEqual(['a'])
     expect(observed.opened).toMatchObject({ title: 'named by hand', pinned: true })
-    expect(observed.refused).toBe('stop the session before deleting it')
+    expect(observed.deleted).toBe(true)
+    // The log is gone from disk, and the page no longer lists it as open.
+    expect(observed.gone).toBe(true)
+    expect(observed.after.opened).toEqual([])
+    expect(observed.after.initial).toBe('')
+    // The core was released before the directory went away.
+    expect(web.closed).toEqual(['a'])
+    await rm(root, { recursive: true, force: true })
+    await rm(sessionRoot, { recursive: true, force: true })
+  })
+
+  test('the row menu refuses to delete a session that is still working, and says what to stop', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-menu-busy-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const sessionRoot = await mkdtemp(join(tmpdir(), 'jozo-harness-web-menu-busy-logs-'))
+    await mkdir(join(sessionRoot, 'a'), { recursive: true })
+    const web = makeWeb('a')
+    const base = makeSettings()
+    const settings = {
+      ...base,
+      port: {
+        ...base.port,
+        read: () => Effect.succeed({ ...settingsView, sessionRoot }),
+      } satisfies SettingsPort,
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const wsUrl = started.wsUrl
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            yield* client.open({ sessionId: 'a' })
+            const refused = yield* client
+              .sessionAction({ sessionId: 'a', action: { kind: 'delete' } })
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
+            const after = yield* client.sessions()
+            const stillThere = yield* Effect.promise(async () => {
+              try {
+                await stat(join(sessionRoot, 'a'))
+                return true
+              } catch {
+                return false
+              }
+            })
+            return { refused, after, stillThere }
+          }).pipe(clientLayers(wsUrl))
+          const result = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    expect(observed.refused).toBe(
+      'stop the running turn, job, or subagent, then delete the session',
+    )
+    // Nothing was closed or removed: the page still holds the working session.
+    expect(observed.after.opened).toEqual(['a'])
+    expect(observed.stillThere).toBe(true)
+    expect(web.closed).toEqual([])
     await rm(root, { recursive: true, force: true })
     await rm(sessionRoot, { recursive: true, force: true })
   })

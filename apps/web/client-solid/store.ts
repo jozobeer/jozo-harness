@@ -381,30 +381,37 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
 
   const program = Effect.gen(function* () {
     const client = yield* RpcClient.make(UiRpcs)
-    /** The sessions this connection follows for the board; a dropped stream may follow again. */
-    const watching = new Set<string>()
+    /**
+     * The sessions this connection follows for the board, and the fiber doing
+     * it each. A dropped stream may follow again, but a deleted session cannot.
+     */
+    const watching = new Map<string, Fiber.Fiber<unknown, unknown>>()
 
     const watch = (id: string) =>
       Effect.suspend(() => {
         if (watching.has(id)) return Effect.void
-        watching.add(id)
         return Effect.forkScoped(
-          client.events({ sessionId: id }).pipe(
-            Stream.runForEach((event) =>
-              Effect.sync(() => {
-                watchedArrived.push({ id, event })
-                scheduleFold()
-              }),
-            ),
-            // A row that stops moving is not worth the reader's attention: the
-            // board follows the session again without saying anything about it.
-            Effect.catchCause((cause) => unlessInterrupted(cause, Effect.void)),
-            Effect.andThen(Effect.sleep(RESTART_DELAY)),
-            Effect.forever,
+          Effect.gen(function* () {
             // The claim on the id stands for the whole life of this fiber, so a
             // second look at the same session does not open a second stream.
-            Effect.ensuring(Effect.sync(() => watching.delete(id))),
-          ),
+            yield* Effect.withFiberSucceed((fiber) => {
+              watching.set(id, fiber)
+            })
+            yield* client.events({ sessionId: id }).pipe(
+              Stream.runForEach((event) =>
+                Effect.sync(() => {
+                  watchedArrived.push({ id, event })
+                  scheduleFold()
+                }),
+              ),
+              // A row that stops moving is not worth the reader's attention: the
+              // board follows the session again without saying anything about it.
+              Effect.catchCause((cause) => unlessInterrupted(cause, Effect.void)),
+              Effect.andThen(Effect.sleep(RESTART_DELAY)),
+              Effect.forever,
+              Effect.ensuring(Effect.sync(() => watching.delete(id))),
+            )
+          }),
         ).pipe(Effect.asVoid)
       })
 
@@ -417,8 +424,10 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       Effect.gen(function* () {
         const listed = yield* client.sessions()
         const current = state()
+        // A session the server no longer holds cannot answer: a reader deleted it
+        // here or elsewhere, and the blank page it leaves has no run state to read.
         const running =
-          current.sessionId === ''
+          current.sessionId === '' || !listed.opened.includes(current.sessionId)
             ? undefined
             : yield* client.state({ sessionId: current.sessionId })
         yield* Effect.sync(() => {
@@ -655,6 +664,12 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     }) =>
       Effect.gen(function* () {
         yield* client.sessionAction({ sessionId: asked.sessionId, action: asked.action })
+        if (asked.action.kind === 'delete') {
+          // The server closed the session with the log: following its events
+          // again would retry a stream that can never return.
+          const followed = watching.get(asked.sessionId)
+          if (followed !== undefined) yield* Fiber.interrupt(followed)
+        }
         yield* relist()
         // A deleted session cannot stay on screen; the page stands on a blank one
         // the way it does when the reader asks for a new session.

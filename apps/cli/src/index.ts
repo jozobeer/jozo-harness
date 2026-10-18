@@ -135,6 +135,7 @@ import {
   pageIsThere,
   serveWeb,
   type CommandView,
+  type InitialSession,
   type OpenSession,
   type RunStateView,
   type SessionFactory,
@@ -142,7 +143,7 @@ import {
   type WorkspacesPort,
 } from '@jozo-harness/web'
 import { Llm } from '@jozo-harness/llm'
-import { Cause, Context, Effect, Layer, Scope, Stream } from 'effect'
+import { Cause, Context, Effect, Exit, Layer, Scope, Stream } from 'effect'
 import {
   EFFORT_KEY,
   MODEL_KEY,
@@ -1028,6 +1029,7 @@ const sessionFactoryOf = (
         jobOutput: (jobId: string) => jobDetailOf(built.runtime.jobs, jobId),
         stopJob: (jobId: string) => stopJobOf(built.runtime.jobs, jobId),
         stopSubagent: (childId: string) => stopSubagentOf(built.runtime.agents, agent.id, childId),
+        busy: () => busyOf(agent, built.runtime.jobs, built.runtime.agents.childrenOf(agent.id)),
       }
     }).pipe(
       Effect.mapError((error) =>
@@ -1149,7 +1151,7 @@ const serveWebUi = (
   layer: Layer.Layer<any, PluginError, never>,
   work: Extract<Work, { kind: 'web' }>,
   /** The session the page opens first, when the command named one to resume. */
-  initial: OpenSession | undefined,
+  initial: InitialSession | undefined,
 ): Effect.Effect<number, PluginError> =>
   Effect.gen(function* () {
     const staticRoot = work.staticRoot ?? defaultStaticRoot
@@ -1199,6 +1201,7 @@ const openSessionOf = (runtime: SessionRuntime): OpenSession | undefined => {
     jobOutput: (jobId: string) => jobDetailOf(jobs, jobId),
     stopJob: (jobId: string) => stopJobOf(jobs, jobId),
     stopSubagent: (childId: string) => stopSubagentOf(agents, agent.id, childId),
+    busy: () => busyOf(agent, jobs, agents.childrenOf(agent.id)),
   }
 }
 
@@ -1281,6 +1284,13 @@ const commandViewsOf = (
       })),
   ]
 }
+
+/** Whether a session still owns running work: a turn, a job, or a child agent. */
+const busyOf = (agent: Agent, jobs: JobsShape, children: ReadonlyArray<Agent>): boolean =>
+  agent.status === 'running' ||
+  agent.status === 'cancelling' ||
+  jobs.list().some((job) => job.running) ||
+  children.some((child) => child.status === 'running' || child.status === 'cancelling')
 
 /** What the session can say about itself right now: its goal, its schedules, its background work. */
 const runStateOf = (
@@ -1477,31 +1487,43 @@ const serveWebWork = (
     const resumed =
       options.resume === undefined
         ? undefined
-        : yield* buildSession(
-            options,
-            rows,
-            route,
-            effort,
-            spillBytes,
-            layer,
-            true,
-            options.resume,
-            options.cwd,
-          )
-    if (resumed !== undefined && resumed.kind === 'refused') {
-      options.stderr('jzh: ' + resumed.message + '\n')
+        : yield* Effect.gen(function* () {
+            // The boot session must be releasable while the server keeps running,
+            // so its resources live in a scope the registry can close.
+            const scope = yield* Scope.make()
+            const built = yield* buildSession(
+              options,
+              rows,
+              route,
+              effort,
+              spillBytes,
+              layer,
+              true,
+              options.resume,
+              options.cwd,
+            ).pipe(
+              Effect.provideService(Scope.Scope, scope),
+              // A build that fails or is interrupted must not leave its scope open.
+              Effect.onExit((exit) =>
+                Exit.isFailure(exit) ? Scope.close(scope, Exit.void) : Effect.void,
+              ),
+            )
+            if (built.kind === 'refused') yield* Scope.close(scope, Exit.void)
+            return { built, scope }
+          })
+    if (resumed !== undefined && resumed.built.kind === 'refused') {
+      options.stderr('jzh: ' + resumed.built.message + '\n')
       return 1
     }
-    return yield* serveWebUi(
-      options,
-      rows,
-      route,
-      effort,
-      spillBytes,
-      layer,
-      work,
-      resumed?.kind === 'ready' ? openSessionOf(resumed.runtime) : undefined,
-    )
+    let initial: InitialSession | undefined
+    if (resumed !== undefined && resumed.built.kind === 'ready') {
+      const session = openSessionOf(resumed.built.runtime)
+      if (session !== undefined) {
+        const scope = resumed.scope
+        initial = { session, close: () => Scope.close(scope, Exit.void) }
+      }
+    }
+    return yield* serveWebUi(options, rows, route, effort, spillBytes, layer, work, initial)
   })
 
 /** The scoped body that owns the built layer and serves one run. */
