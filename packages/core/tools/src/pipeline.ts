@@ -87,6 +87,8 @@ const runBody = (tool: AnyTool, exec: ToolExecution): Effect.Effect<ToolExecutio
 /**
  * Runs the `tools/execute` waterfall around the tool body. The body is a
  * listener for this call only, so around-plugins can wrap it with `next()`.
+ * Listeners live on the shared registry, so a concurrent call reaching a body
+ * that belongs to another call hands the chain on instead of running it.
  */
 const runWithBody = (
   hooks: HookRegistry,
@@ -95,7 +97,9 @@ const runWithBody = (
 ): Effect.Effect<ToolExecutionResult> =>
   Effect.scoped(
     Effect.gen(function* () {
-      yield* hooks.on('tools/execute', () => runBody(tool, exec))
+      yield* hooks.on('tools/execute', (incoming, next) =>
+        incoming.callId === exec.callId ? runBody(tool, exec) : next(),
+      )
       const decided = yield* hooks.waterfall('tools/execute', exec)
       return decided ?? (yield* runBody(tool, exec))
     }),
