@@ -1,5 +1,14 @@
 # The workspace root. pnpm reads this file, not the `workspaces` field in
 # package.json, and the crates/ tree is deliberately left out: cargo owns it.
+#
+# pnpm 12 can take Rust over with `cargo.enabled: true` here: since 12.4 it
+# resolves crates into Cargo.lock, and since 12.11 it installs the toolchain
+# rust-toolchain.toml names. It stays off while crates/ has no dependencies
+# and the toolchain install is unproven on macOS, which CI runs. Revisit it
+# when crates/ gains real dependencies, or when rustup is to leave CI and the
+# README's setup; switching moves the README, the `rustup show` step in
+# .github/workflows/check.yml, the comments in Cargo.toml and vite.config.ts,
+# and AGENTS.md's toolchain section along with it.
 packages:
   - 'apps/*'
   - 'packages/*/*'
