@@ -108,6 +108,8 @@ describe('commands in the REPL', () => {
     expect(observed.code).toBe(0)
     expect(observed.printed).toContain('model: stub/model')
     expect(observed.printed).toContain('turns: 1')
+    // The stub reports no usage: the stats say so with dashes rather than zeroes.
+    expect(observed.printed).toContain('stats: tok/s — · — · cache —')
     expect(observed.printed).toContain('goal: none')
     expect(observed.printed).toContain('schedules: none')
     // The command was answered, and the model was never woken with it.

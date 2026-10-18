@@ -186,6 +186,17 @@ export const TodoViewSchema = Schema.Struct({
   status: Schema.Literals(['pending', 'in_progress', 'completed']),
 })
 
+/**
+ * The stats a status line shows, already rounded from the log. Missing numbers
+ * are an em dash, so an old log never reads as zero use or a zero cache hit.
+ */
+export const StatsViewSchema = Schema.Struct({
+  tokensPerSecond: Schema.String,
+  tokens: Schema.String,
+  cache: Schema.String,
+  context: Schema.String,
+})
+
 /** What one session can say about itself right now, folded from its own log and its live work. */
 export const RunStateViewSchema = Schema.Struct({
   goal: Schema.Union([GoalViewSchema, Schema.Null]),
@@ -212,6 +223,8 @@ export const RunStateViewSchema = Schema.Struct({
   effort: Schema.String,
   /** The effort words the provider takes, as a page offers them; empty declares none. */
   efforts: Schema.Array(Schema.String),
+  /** The token and context stats, when the log carries enough to state them. */
+  stats: Schema.optionalKey(StatsViewSchema),
 })
 
 export type RunStateView = typeof RunStateViewSchema.Type

@@ -268,8 +268,10 @@ REPL・TUI・Web では、行頭が `/` の行はコマンドとしてその場�
 
 ```
 /help     使えるコマンドを並べる
-/status   このセッションの居場所（モデル、cwd、turn 数、goal、schedule）
+/status   このセッションの居場所（モデル、cwd、turn 数、token 統計、goal、schedule）
 ```
+
+`/status` の `stats` 行はセッションログから読める値だけを出す。tok/s は最後の turn の decode 区間、token は非キャッシュ入力・cache read / write・output・課金入力、cache は cache read ÷ 課金入力、context は runner が compaction に使うのと同じ budget に対する推定値の割合である。ログに無い値は `—` になり、0 と偽らない。
 
 知らない名前は登録済みの一覧を返す。コマンドの答えは TUI と Web では会話の notice として出る。
 

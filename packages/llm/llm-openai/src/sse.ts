@@ -16,6 +16,7 @@ interface OpenAiUsage {
   readonly prompt_tokens?: number
   readonly completion_tokens?: number
   readonly completion_tokens_details?: { readonly reasoning_tokens?: number }
+  readonly prompt_tokens_details?: { readonly cached_tokens?: number }
 }
 
 interface OpenAiChunk {
@@ -46,10 +47,15 @@ const finishKindOf = (reason: string | null | undefined): FinishKind => {
 const toUsage = (usage: OpenAiUsage | null | undefined): LlmUsage | undefined => {
   if (usage === undefined || usage === null) return undefined
   const reasoningTokens = usage.completion_tokens_details?.reasoning_tokens
+  // The wire counts prompt_tokens with the cache included; jozo's buckets are
+  // disjoint, so the cached share moves out of the non-cache input.
+  const cached = usage.prompt_tokens_details?.cached_tokens
+  const promptTokens = usage.prompt_tokens ?? 0
   return {
-    inputTokens: usage.prompt_tokens ?? 0,
+    inputTokens: Math.max(0, promptTokens - (cached ?? 0)),
     outputTokens: usage.completion_tokens ?? 0,
     ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+    ...(cached === undefined ? {} : { cacheReadTokens: cached }),
   }
 }
 

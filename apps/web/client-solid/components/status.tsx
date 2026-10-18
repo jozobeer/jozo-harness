@@ -1,6 +1,6 @@
 import { Show, createMemo } from 'solid-js'
 import { boardOf } from '../../src/ui/board.ts'
-import { hintOf } from '../lib.ts'
+import { hintOf, statsTextOf } from '../lib.ts'
 import type { SessionStore } from '../store.ts'
 
 /** The strip along the top: the connection, where the session runs, what happens next. */
@@ -11,6 +11,11 @@ export const Status = (props: { store: SessionStore; drawer: boolean; onDrawer: 
     state().conversation.approval !== undefined || state().conversation.ask !== undefined
   /** The branch the workspace stands on; '' until the page read one or when it names none. */
   const branch = (): string => state().info.branch ?? ''
+  /** What the log counted; '' until the page has read the run. */
+  const stats = (): string => {
+    const view = state().run?.stats
+    return view === undefined ? '' : statsTextOf(view)
+  }
   /** How the whole fleet stands, so a wait in another session is seen from any of them. */
   const fleet = createMemo(() => boardOf(state().sessions, props.store.watched()))
   const hintClass = (): string =>
@@ -39,6 +44,12 @@ export const Status = (props: { store: SessionStore; drawer: boolean; onDrawer: 
         {/* The branch is one word beside the path, so a long name is clipped, not wrapped. */}
         <span class="branch" title={'git branch ' + branch()}>
           <bdi>{branch()}</bdi>
+        </span>
+      </Show>
+      <Show when={stats() !== ''}>
+        {/* One line of numbers, clipped before it pushes the hint off the strip. */}
+        <span class="stats" title={stats()}>
+          {stats()}
         </span>
       </Show>
       <span class={hintClass()}>{hintOf(state())}</span>

@@ -1335,6 +1335,7 @@
 
     #status .where,
     #status .branch,
+    #status .stats,
     #status .fleet {
       display: none;
     }
