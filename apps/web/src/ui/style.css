@@ -197,7 +197,12 @@ body {
   color: var(--error);
 }
 
-/* Where am I (rail), what is being said (conversation), what is going on (pane). */
+/*
+ * Where am I (rail), what is being said (conversation), what is going on (pane).
+ * Each column names its item: folding the rail hides the sidebar, and the pane
+ * floats below 1100px, so auto-placement would drop the page into the first,
+ * zero-width column. Explicit lines keep the page in the middle at every width.
+ */
 #shell {
   flex: 1;
   display: grid;
@@ -206,6 +211,7 @@ body {
 }
 
 #sidebar {
+  grid-column: 1;
   display: flex;
   flex-direction: column;
   gap: var(--s3);
@@ -218,6 +224,7 @@ body {
 
 /* The right pane: a tab strip that stays, and a body that comes and goes. */
 #context {
+  grid-column: 3;
   display: flex;
   flex-direction: column;
   width: var(--context-w);
@@ -843,6 +850,7 @@ body:has(.context-body[data-open='false'][data-closing='false']) #status {
 
 /* The middle column, when the page puts the composer under the conversation. */
 #main {
+  grid-column: 2;
   display: flex;
   flex-direction: column;
   min-width: 0;
