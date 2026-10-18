@@ -204,6 +204,7 @@ const makeHost = (id: string): FakeHost => {
 const openOf = (host: FakeHost): OpenSession => ({
   summary: host.summary,
   host: host.host,
+  commands: () => [],
   runState: host.runState,
   jobOutput: host.jobOutput,
   stopJob: host.stopJob,
@@ -279,6 +280,7 @@ const serve = (
         factory,
         settings: (options.settings ?? makeSettings()).port,
         workspaces: workspacesPort,
+        commands: () => [],
         port: 0,
         staticRoot: root,
         onReady: (url) => {

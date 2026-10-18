@@ -3,7 +3,7 @@ import { WebSocketServer, type RawData, type WebSocket } from 'ws'
 import { Effect, Layer, Stream } from 'effect'
 import { RpcSerialization, RpcServer } from 'effect/rpc'
 import { sendCommand } from '@jozo-harness/ui-protocol'
-import { UiRpcs } from '../shared/rpc.ts'
+import { UiRpcs, type CommandView } from '../shared/rpc.ts'
 import { makeWebProtocol, type Connection } from './protocol.ts'
 import { applyMeta, readMeta, sessionActionOf, withMeta } from './session-meta.ts'
 import {
@@ -27,6 +27,8 @@ export interface ServeWebOptions {
   readonly settings: SettingsPort
   /** The folders a page may start a session in. */
   readonly workspaces: WorkspacesPort
+  /** What the run can be told before any session exists: the blank page's own list. */
+  readonly commands: () => ReadonlyArray<CommandView>
   /** 0 picks a free port; the chosen one arrives through `onReady`. */
   readonly port: number
   /** Where the browser app to serve sits; the caller owns where its tree keeps it. */
@@ -40,6 +42,7 @@ const handlersOf = (
   registry: SessionRegistry,
   settings: SettingsPort,
   workspaces: WorkspacesPort,
+  commands: () => ReadonlyArray<CommandView>,
 ) =>
   UiRpcs.toLayer({
     sessions: () =>
@@ -87,6 +90,13 @@ const handlersOf = (
     state: ({ sessionId }) => {
       const view = registry.stateOf(sessionId)
       return view === undefined ? Effect.fail('the session is not open') : Effect.succeed(view)
+    },
+    commands: ({ sessionId }) => {
+      // The blank page has no session to ask, so the run answers for it: the
+      // first line typed must complete before the session that receives it exists.
+      if (sessionId === '') return Effect.succeed(commands())
+      const list = registry.commandsOf(sessionId)
+      return list === undefined ? Effect.fail('the session is not open') : Effect.succeed(list)
     },
     jobDetail: ({ sessionId, id }) => {
       const session = registry.sessionOf(sessionId)
@@ -212,7 +222,7 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
       // Our schemas need no decoding services, but Effect types a stream RPC's
       // service requirement as `unknown`; the layer is pinned to what it is.
       const rpc: Layer.Layer<never> = RpcServer.layer(UiRpcs).pipe(
-        Layer.provide(handlersOf(registry, options.settings, options.workspaces)),
+        Layer.provide(handlersOf(registry, options.settings, options.workspaces, options.commands)),
         Layer.provide(Layer.succeed(RpcServer.Protocol, protocol)),
       ) as unknown as Layer.Layer<never>
       yield* Effect.forkScoped(Layer.launch(rpc))

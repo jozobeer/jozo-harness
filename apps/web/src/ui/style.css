@@ -1376,6 +1376,69 @@ footer {
   font-weight: 600;
 }
 
+/* The slash completion hangs off the composer, above the input it completes. */
+.command-list {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + var(--s2));
+  left: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 22rem;
+  overflow-y: auto;
+  padding: var(--s2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 35%);
+}
+
+.command-list .card-hint {
+  margin-top: 0;
+  padding: var(--s2);
+  font-size: var(--text-sm);
+}
+
+.command-option {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.command-option:hover,
+.command-option[aria-selected='true'] {
+  background: var(--bg-hover);
+}
+
+.command-name {
+  font-family: var(--mono);
+  font-size: var(--text-base);
+}
+
+.command-kind {
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.command-summary {
+  overflow: hidden;
+  color: var(--dim);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The effort switch reads as a caption beside the model chip until it is used. */
 .seat-effort {
   max-width: 7rem;
@@ -1425,6 +1488,7 @@ footer {
 
 /* One box: the draft on top, and under it the model it goes to and the two actions. */
 #composer {
+  position: relative;
   display: flex;
   flex-direction: column;
   max-width: var(--prose-w);

@@ -1,6 +1,12 @@
 import type { UiEvent, UiSessionEvent } from '@jozo-harness/ui-protocol'
 import { applyEvent, emptyConversation, type Conversation } from '@jozo-harness/ui-view'
-import type { JobDetailView, RunStateView, SessionSummary, SettingsView } from '../shared/rpc.ts'
+import type {
+  CommandView,
+  JobDetailView,
+  RunStateView,
+  SessionSummary,
+  SettingsView,
+} from '../shared/rpc.ts'
 import { DEFAULT_THEME, type Theme } from './theme.ts'
 import { traceAfter, type TraceTurn } from './trace.ts'
 import { turnsAfter, type TurnView } from './trajectory.ts'
@@ -43,6 +49,8 @@ export interface WebState {
   readonly settings: SettingsView | undefined
   /** The provider's models, once the reader asked for them; undefined while nobody has. */
   readonly models: ReadonlyArray<string> | undefined
+  /** What this session can be told, once the composer asked; undefined while nobody has. */
+  readonly commands: ReadonlyArray<CommandView> | undefined
   /** Which surface the right pane shows; undefined leaves the tab strip alone and the body empty. */
   readonly pane: Pane | undefined
   /** Every turn this session ran, oldest first, as the log recorded it. */
@@ -65,6 +73,7 @@ export const initialState: WebState = {
   theme: DEFAULT_THEME,
   settings: undefined,
   models: undefined,
+  commands: undefined,
   pane: { kind: 'run' },
   turns: [],
   run: undefined,
@@ -103,6 +112,11 @@ export const withModels = (state: WebState, models: ReadonlyArray<string>): WebS
   models,
 })
 
+export const withCommands = (state: WebState, commands: ReadonlyArray<CommandView>): WebState => ({
+  ...state,
+  commands,
+})
+
 export const withPane = (state: WebState, pane: Pane | undefined): WebState => ({
   ...state,
   pane,
@@ -122,6 +136,8 @@ export const withBlank = (state: WebState): WebState => ({
   info: emptyInfo,
   problem: '',
   run: undefined,
+  // The list belonged to the session left behind; the next one reads its own on demand.
+  commands: undefined,
   turns: [],
   trace: [],
 })
@@ -143,6 +159,7 @@ export const withSession = (state: WebState, summary: SessionSummary): WebState 
     // which is what a page that reopens a refused session has to say for itself.
     problem: state.sessionId === summary.id ? state.problem : '',
     run: undefined,
+    commands: state.sessionId === summary.id ? state.commands : undefined,
     turns: [],
     trace: [],
   }
