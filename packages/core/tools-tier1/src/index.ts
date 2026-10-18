@@ -6,6 +6,7 @@ import type { ToolDefinition } from '@jozo-harness/tools'
 import { askUserToolFor } from './ask.ts'
 import { webFetchTool } from './fetch.ts'
 import { readImageTool } from './image.ts'
+import { makeRunCodeTool, type RunCodeHost } from './run-code.ts'
 import { makeSkillTool } from './skill.ts'
 
 import { todoWriteTool } from './todo.ts'
@@ -14,6 +15,7 @@ import { todoWriteTool } from './todo.ts'
 export const tier1Tools = (
   ask: AskShape,
   skillRoots: ReadonlyArray<string> = [],
+  runCode?: RunCodeHost,
 ): ReadonlyArray<ToolDefinition<any, any>> => [
   todoWriteTool,
 
@@ -21,6 +23,7 @@ export const tier1Tools = (
   webFetchTool,
   readImageTool,
   ...(skillRoots.length === 0 ? [] : [makeSkillTool(skillRoots)]),
+  ...(runCode === undefined ? [] : [makeRunCodeTool(runCode)]),
 ]
 export * from './plugin.ts'
 export * from './skill.ts'
@@ -54,6 +57,7 @@ export * from './search-provider.ts'
 export * from './deepseek-search.ts'
 export * from './mcp-codec.ts'
 export * from './timeouts.ts'
+export * from './run-code.ts'
 export * from './mcp.ts'
 export * from './mcp-tools.ts'
 export * from './mcp-plugin.ts'
