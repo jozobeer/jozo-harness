@@ -17,6 +17,7 @@ import type { SessionStore } from '../store.ts'
 import type { SessionAction } from '../../src/shared/rpc.ts'
 import { traceOf } from '../../src/ui/trace.ts'
 import { RAIL_COLLAPSED_KEY, RAIL_KEY, railCollapsedFrom, railWidthFrom } from '../rail.ts'
+import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY } from '../recent.ts'
 
 /** One call a component made, in the order it made them. */
 type Call =
@@ -778,5 +779,69 @@ describe('the rail', () => {
     expect(handle.getAttribute('aria-valuenow')).toBe('272')
     expect(shell.style.getPropertyValue('--rail-w')).toBe('272px')
     expect(localStorage.getItem(RAIL_KEY)).toBe('272')
+  })
+})
+
+describe('the recent workspaces', () => {
+  beforeEach(() => localStorage.clear())
+
+  const listed = (id: string, cwd: string, updatedAt: number) => ({
+    id,
+    cwd,
+    createdAt: updatedAt,
+    updatedAt,
+    title: id,
+  })
+
+  test('Recent folds by workspace, shows five rows, and Show more keeps the rest in reach', () => {
+    const sessions = Array.from({ length: 7 }, (_, index) =>
+      listed('alpha-' + String(index), '/work/alpha', 10_000 - index),
+    )
+    sessions.push(listed('beta-1', '/work/beta', 5_000))
+    const { store } = makeStore({ sessions })
+
+    const { container } = render(() => <Board store={store} />)
+
+    const groups = [...container.querySelectorAll('.recent-group')]
+    expect(groups.map((group) => group.getAttribute('data-cwd'))).toEqual([
+      '/work/alpha',
+      '/work/beta',
+    ])
+    const head = groups[0]?.querySelector('button.recent-fold') as HTMLButtonElement
+    expect(head.textContent).toContain('alpha')
+    expect(head.getAttribute('title')).toBe('/work/alpha')
+    expect(head.getAttribute('aria-expanded')).toBe('true')
+    expect(groups[0]?.querySelectorAll('button.session')).toHaveLength(5)
+    expect(groups[1]?.querySelectorAll('button.session')).toHaveLength(1)
+
+    fireEvent.click(groups[0]?.querySelector('.recent-more') as Element)
+
+    expect(groups[0]?.querySelectorAll('button.session')).toHaveLength(7)
+    expect(localStorage.getItem(RECENT_SHOWN_KEY)).toContain('/work/alpha')
+  })
+
+  test('a folded workspace stays folded, except the one holding the open session', () => {
+    localStorage.setItem(RECENT_FOLDED_KEY, JSON.stringify(['/work/alpha', '/work/beta']))
+    const { store } = makeStore({
+      sessions: [listed('open-1', '/work/alpha', 10_000), listed('beta-1', '/work/beta', 9_000)],
+      sessionId: 'open-1',
+    })
+
+    const { container } = render(() => <Board store={store} />)
+
+    const groups = [...container.querySelectorAll('.recent-group')]
+    expect(groups[0]?.querySelectorAll('button.session')).toHaveLength(1)
+    expect(groups[0]?.querySelector('button.recent-fold')?.getAttribute('aria-expanded')).toBe(
+      'true',
+    )
+    expect(groups[1]?.querySelectorAll('button.session')).toHaveLength(0)
+    expect(groups[1]?.querySelector('button.recent-fold')?.getAttribute('aria-expanded')).toBe(
+      'false',
+    )
+
+    fireEvent.click(groups[1]?.querySelector('button.recent-fold') as Element)
+
+    expect(groups[1]?.querySelectorAll('button.session')).toHaveLength(1)
+    expect(localStorage.getItem(RECENT_FOLDED_KEY)).not.toContain('/work/beta')
   })
 })
