@@ -23,6 +23,8 @@ import {
   type WebState,
 } from '../src/ui/state.ts'
 import type { Theme } from '../src/ui/theme.ts'
+import { draftOnMove, drafted } from '../src/ui/draft.ts'
+import { readDraft, writeDraft } from './drafts.ts'
 import {
   addressSession,
   keptTheme,
@@ -41,6 +43,9 @@ const messageOf = (error: unknown): string =>
 
 /** The one line a whole cause reads as, defects included. */
 const causeText = (cause: Cause.Cause<unknown>): string => messageOf(Cause.squash(cause))
+
+/** How long one keystroke waits before the draft is written for the next visit. */
+const DRAFT_SAVE_DELAY = 300
 
 /** How long a pipeline the page cannot lose waits before it runs again. */
 const RESTART_DELAY = '250 millis'
@@ -159,6 +164,40 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
   }
 
   const [watched, setWatched] = createSignal<ReadonlyMap<string, Watched>>(new Map())
+
+  /**
+   * Each session's own line, and the one the blank page holds for the first
+   * session it opens. The composer shows one at a time; a move swaps which.
+   */
+  let drafts: ReadonlyMap<string, string> = new Map()
+  /** Lines typed but not yet written, and the one timer that writes them. */
+  const pendingDrafts = new Map<string, string>()
+  let savingDrafts: ReturnType<typeof setTimeout> | undefined
+
+  /** Writes every pending line, so a reload a moment later reads it back. */
+  const flushDrafts = (): void => {
+    if (savingDrafts !== undefined) clearTimeout(savingDrafts)
+    savingDrafts = undefined
+    for (const [sessionId, text] of pendingDrafts) writeDraft(sessionId, text)
+    pendingDrafts.clear()
+  }
+
+  /** Remembers one session's line here, and a moment later for the next visit. */
+  const rememberDraft = (sessionId: string, text: string): void => {
+    drafts = drafted(drafts, sessionId, text)
+    pendingDrafts.set(sessionId, text)
+    if (savingDrafts === undefined) savingDrafts = setTimeout(flushDrafts, DRAFT_SAVE_DELAY)
+  }
+
+  /** The line one session already holds: this visit's first, or the one storage kept. */
+  const draftOf = (sessionId: string): string =>
+    drafts.has(sessionId) ? (drafts.get(sessionId) ?? '') : readDraft(sessionId)
+
+  /** Empties the composer and forgets the line once it has been sent. */
+  const clearDraft = (sessionId: string): void => {
+    rememberDraft(sessionId, '')
+    update((now) => withDraft(now, ''))
+  }
 
   /**
    * What has arrived but is not yet what the view reads. One session's history
@@ -355,8 +394,12 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
         const summary = yield* client.open(id === undefined ? {} : { sessionId: id })
         if (following !== undefined) yield* Fiber.interrupt(following)
         const running = yield* client.state({ sessionId: summary.id })
+        // The session being left keeps its line; the one being opened shows its
+        // own, and a line typed on the blank page belongs to the first it opens.
+        const moved = draftOnMove(drafts, state().sessionId, summary.id, draftOf(summary.id))
+        drafts = moved.drafts
         yield* Effect.sync(() => {
-          update((now) => withRun(withSession(now, summary), running))
+          update((now) => withDraft(withRun(withSession(now, summary), running), moved.text))
           addressSession(summary.id)
         })
         following = yield* Effect.forkScoped(follow(summary.id))
@@ -384,8 +427,9 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       Effect.gen(function* () {
         if (following !== undefined) yield* Fiber.interrupt(following)
         following = undefined
+        const text = draftOf('')
         yield* Effect.sync(() => {
-          update(withBlank)
+          update((now) => withDraft(withBlank(now), text))
           addressSession(undefined)
         })
       })
@@ -404,11 +448,13 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       why: string,
     ): Effect.Effect<void> =>
       Effect.sync(() => {
-        update((now) => {
-          const text = addressed.command.kind === 'submit' ? addressed.command.text : undefined
-          const kept = text !== undefined && now.draft.trim() === '' ? withDraft(now, text) : now
-          return withProblem(kept, why)
-        })
+        const now = state()
+        const text = addressed.command.kind === 'submit' ? addressed.command.text : undefined
+        const kept = text !== undefined && now.draft.trim() === '' ? text : undefined
+        if (kept !== undefined) rememberDraft(now.sessionId, kept)
+        update((current) =>
+          withProblem(kept === undefined ? current : withDraft(current, kept), why),
+        )
       })
 
     /**
@@ -523,6 +569,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
                 if (owed !== undefined) {
                   const text = owed
                   owed = undefined
+                  rememberDraft(state().sessionId, text)
                   update((now) => withDraft(now, text))
                 }
                 update((now) => withProblem(now, causeText(cause)))
@@ -545,6 +592,12 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
   )
 
   const start = (): void => {
+    // A page opened for no session keeps a line typed here before the reload.
+    const blank = readDraft('')
+    if (blank !== '') {
+      drafts = drafted(drafts, '', blank)
+      update((now) => withDraft(now, blank))
+    }
     const theme = keptTheme()
     update((now) => withTheme(now, theme))
     showTheme(theme)
@@ -559,8 +612,15 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     state,
     watched,
     start,
-    stop: () => bridge.stop(),
-    setDraft: (draft) => update((now) => withDraft(now, draft)),
+    stop: () => {
+      // The page is going away: what is pending is written before the timer is.
+      flushDrafts()
+      bridge.stop()
+    },
+    setDraft: (draft) => {
+      rememberDraft(state().sessionId, draft)
+      update((now) => withDraft(now, draft))
+    },
     submit: () => {
       const current = state()
       const value = current.draft.trim()
@@ -570,7 +630,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
         if (owed !== undefined) return
         owed = value
         Queue.offerUnsafe(moves, { kind: 'open', id: undefined })
-        update((now) => withDraft(now, ''))
+        clearDraft(current.sessionId)
         return
       }
       const ask = current.conversation.ask
@@ -580,7 +640,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
           ? { kind: 'submit', text: value }
           : { kind: 'answer', id: ask.id, answer: value },
       )
-      update((now) => withDraft(now, ''))
+      clearDraft(current.sessionId)
     },
     send: (command) => sendTo(state().sessionId, command),
     sendTo,
