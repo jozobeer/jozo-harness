@@ -150,6 +150,69 @@ describe('the Solid page', () => {
     expect(rows[1]?.querySelector('.session-detail')?.textContent).toBe('1m')
   })
 
+  test('the rail narrows to the sessions whose title or folder says what was typed', () => {
+    const { store } = makeStore({
+      sessions: [
+        { id: 'aaaabbbb', cwd: '/one/work', createdAt: Date.now() - 60_000, title: 'first' },
+        {
+          id: 'ccccdddd',
+          cwd: '/two/project-tail',
+          createdAt: Date.now() - 60_000,
+          title: 'second',
+        },
+      ],
+    })
+
+    const { container } = render(() => <Board store={store} />)
+
+    const search = container.querySelector('#session-search') as HTMLInputElement
+    const ids = () =>
+      [...container.querySelectorAll('#session-list button.session')].map((row) =>
+        row.getAttribute('data-session-id'),
+      )
+
+    fireEvent.input(search, { target: { value: 'PROJECT' } })
+    expect(ids()).toEqual(['ccccdddd'])
+
+    fireEvent.input(search, { target: { value: 'work' } })
+    expect(ids()).toEqual(['aaaabbbb'])
+
+    fireEvent.input(search, { target: { value: 'nothing here' } })
+    expect(ids()).toEqual([])
+    expect(container.querySelector('.board-empty')?.textContent).toContain('nothing here')
+
+    // Escape clears the search and hands the keys back to the page.
+    search.focus()
+    fireEvent.keyDown(search, { key: 'Escape' })
+    expect(search.value).toBe('')
+    expect(ids()).toHaveLength(2)
+    expect(document.activeElement).not.toBe(search)
+  })
+
+  test('the page opens the search from / or Mod+K, but not while a field has the keys', () => {
+    const { store } = makeStore({
+      sessions: [{ id: 'aaaabbbb', cwd: '/one/work', createdAt: Date.now(), title: 'first' }],
+    })
+
+    const { container } = render(() => <Board store={store} />)
+    const search = container.querySelector('#session-search') as HTMLInputElement
+
+    fireEvent.keyDown(document, { key: '/' })
+    expect(document.activeElement).toBe(search)
+    search.blur()
+
+    fireEvent.keyDown(document, { key: 'k', metaKey: true })
+    expect(document.activeElement).toBe(search)
+    search.blur()
+
+    const field = document.createElement('textarea')
+    document.body.append(field)
+    field.focus()
+    fireEvent.keyDown(field, { key: '/' })
+    expect(document.activeElement).toBe(field)
+    field.remove()
+  })
+
   test('the rail keeps the elapsed time and calls at the right of a running row', () => {
     const now = Date.now()
     const running = traceOf([

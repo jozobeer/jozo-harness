@@ -455,6 +455,33 @@
     font-variant-numeric: tabular-nums;
   }
 
+  .session-search {
+    width: 100%;
+    padding: 7px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--text-sm);
+  }
+
+  .session-search::placeholder {
+    color: var(--dim);
+  }
+
+  .session-search:focus-visible {
+    border-color: var(--accent);
+    outline: none;
+  }
+
+  .board-empty {
+    margin: 0;
+    padding: 0 var(--s2);
+    color: var(--dim);
+    font-size: var(--text-sm);
+  }
+
   #session-list .session {
     grid-template-columns: 12px minmax(0, 1fr) auto;
     gap: 0 8px;
