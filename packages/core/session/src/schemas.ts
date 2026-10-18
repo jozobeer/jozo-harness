@@ -33,7 +33,13 @@ const catalog = new Map<string, Schema.Schema<unknown>>([
     'session/header',
     Schema.Struct({ formatVersion: Schema.Int, createdAt: Schema.Number, cwd: Schema.String }),
   ],
-  ['session/cwd/changed', Schema.Struct({ cwd: Schema.String }) as Schema.Schema<unknown>],
+  [
+    'session/cwd/changed',
+    Schema.Struct({
+      cwd: Schema.String,
+      root: Schema.optionalKey(Schema.String),
+    }) as Schema.Schema<unknown>,
+  ],
   ['session/repaired', Schema.Struct({ tornBytes: Schema.Int }) as Schema.Schema<unknown>],
   [
     'compaction/prune',

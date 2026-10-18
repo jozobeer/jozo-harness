@@ -34,7 +34,7 @@ describe('working_directory tool', () => {
   test('records a move inside the workspace', async () => {
     const moved: Array<string> = []
     const tool = makeWorkingDirectoryTool({
-      root: '/work',
+      root: () => '/work',
       change: (cwd) => Effect.sync(() => void moved.push(cwd)),
     })
 
@@ -48,7 +48,7 @@ describe('working_directory tool', () => {
   test('returns to the workspace root with "."', async () => {
     const moved: Array<string> = []
     const tool = makeWorkingDirectoryTool({
-      root: '/work',
+      root: () => '/work',
       change: (cwd) => Effect.sync(() => void moved.push(cwd)),
     })
 
@@ -62,7 +62,7 @@ describe('working_directory tool', () => {
   test('returns to the workspace root with its absolute path', async () => {
     const moved: Array<string> = []
     const tool = makeWorkingDirectoryTool({
-      root: '/work',
+      root: () => '/work',
       change: (cwd) => Effect.sync(() => void moved.push(cwd)),
     })
 
@@ -75,7 +75,7 @@ describe('working_directory tool', () => {
   test('refuses a move outside the workspace', async () => {
     const moved: Array<string> = []
     const tool = makeWorkingDirectoryTool({
-      root: '/work',
+      root: () => '/work',
       change: (cwd) => Effect.sync(() => void moved.push(cwd)),
     })
 
@@ -84,5 +84,20 @@ describe('working_directory tool', () => {
     expect(result?.isError).toBe(true)
     expect(moved).toEqual([])
     expect(JSON.stringify(result?.content)).toContain('escapes the workspace')
+  })
+
+  test('moves inside the root the session changed to', async () => {
+    let root = '/work'
+    const moved: Array<string> = []
+    const tool = makeWorkingDirectoryTool({
+      root: () => root,
+      change: (cwd) => Effect.sync(() => void moved.push(cwd)),
+    })
+
+    root = '/tree'
+    const result = await Effect.runPromise(call(tool, { path: 'sub' }, '/tree'))
+
+    expect(result?.isError).toBe(false)
+    expect(moved).toEqual([join('/', 'tree', 'sub')])
   })
 })

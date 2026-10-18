@@ -22,6 +22,7 @@ import {
 import {
   Sessions,
   cwdOf,
+  rootOf,
   lastSkillCatalog,
   titleOf,
   type SessionId,
@@ -50,7 +51,7 @@ import {
   type Preset,
   type SessionError,
 } from '@jozo-harness/session'
-import { Tier0Tools, type Tier0ToolBuilder } from '@jozo-harness/tools-tier0'
+import { Tier0Tools, type Tier0ToolBuilder, type WorktreeHost } from '@jozo-harness/tools-tier0'
 import { installRetry, type RetryConfig } from '@jozo-harness/agent-loop'
 import { installBuiltinCommands } from './commands.ts'
 import { listModels, modelEndpointOf } from './models.ts'
@@ -309,10 +310,12 @@ const installTier0 = (
   tier0: Tier0ToolBuilder,
   approval: ApprovalShape | undefined,
   jobs: JobsShape,
+  /** The session state the worktree tool moves; without it the tool is not offered. */
+  worktree: WorktreeHost,
 ) =>
   Effect.gen(function* () {
     // The registry lets a timed-out bash call keep running as a job instead of dying.
-    for (const tool of tier0(approval, jobs)) yield* tools.register(tool)
+    for (const tool of tier0(approval, jobs, worktree)) yield* tools.register(tool)
   })
 
 /** Tier 1 tools ask the user; their questions and answers join the log. */
@@ -412,7 +415,8 @@ const tier1ToolList = (
   )
   list.push(
     makeWorkingDirectoryTool({
-      root: options.cwd,
+      // A worktree moves the root, so the boundary is read from the log per call.
+      root: () => rootOf(agent.session.events(), agent.session.header),
       change: (cwd) =>
         agent.session.append('session/cwd/changed', { cwd }).pipe(
           Effect.mapError(
@@ -755,11 +759,35 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
       ? makePlanMode()
       : undefined
     if (hasRow(wiring.rows, '@jozo-harness/tools-tier0')) {
+      const sessions = Context.get(wiring.context, Agents)
+      // A worktree call is shared with every child, so it moves the log of the
+      // session that made the call rather than the run's root session.
+      const sessionOf = (sessionId: string) =>
+        sessions.get(sessionId)?.session ?? wiring.agent.session
+      const worktree: WorktreeHost = {
+        rootOf: (sessionId) => {
+          const session = sessionOf(sessionId)
+          return rootOf(session.events(), session.header)
+        },
+        change: (sessionId, cwd, root) =>
+          sessionOf(sessionId)
+            .append('session/cwd/changed', { cwd, root })
+            .pipe(
+              Effect.mapError(
+                () =>
+                  new ToolError({
+                    code: 'execution',
+                    message: 'cannot record the working directory',
+                  }),
+              ),
+            ),
+      }
       yield* installTier0(
         tools,
         Context.get(wiring.context, Tier0Tools),
         Context.get(wiring.context, Approval),
         wiring.jobs,
+        worktree,
       )
     }
     if (hasRow(wiring.rows, '@jozo-harness/tools-tier1')) {

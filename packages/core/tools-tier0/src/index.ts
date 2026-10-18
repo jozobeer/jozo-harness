@@ -9,6 +9,7 @@ export * from './grep.ts'
 export * from './walk.ts'
 export * from './text.ts'
 export * from './observed-files.ts'
+export * from './worktree.ts'
 
 import { noneSandbox, type ApprovalShape, type SandboxShape } from '@jozo-harness/safety'
 import type { ToolDefinition } from '@jozo-harness/tools'
@@ -19,6 +20,7 @@ import { globTool } from './glob.ts'
 import { grepTool } from './grep.ts'
 import { makeBashTool, type TimeoutJobs } from './bash.ts'
 import { makeObservedFiles, type ObservedFiles } from './observed-files.ts'
+import { makeWorktreeTool, type WorktreeHost } from './worktree.ts'
 
 /**
  * Every Tier 0 tool, with the sandbox the caller chose for bash and the approval
@@ -30,6 +32,8 @@ export const tier0Tools = (
   approval?: ApprovalShape,
   /** Present when the run has background jobs; a timed-out bash call is promoted to one. */
   jobs?: TimeoutJobs,
+  /** Present when the session can change its workspace; the worktree tool needs it. */
+  worktree?: WorktreeHost,
 ): ReadonlyArray<ToolDefinition<any, any>> => [
   makeReadTool(observed),
   makeWriteTool(observed, sandbox, approval),
@@ -37,5 +41,6 @@ export const tier0Tools = (
   globTool,
   grepTool,
   makeBashTool(sandbox, approval, jobs),
+  ...(worktree === undefined ? [] : [makeWorktreeTool(sandbox, approval, worktree)]),
 ]
 export * from './plugin.ts'

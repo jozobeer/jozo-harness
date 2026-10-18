@@ -3,6 +3,15 @@ import { describe, expect, test } from 'vitest'
 import { tier0Tools } from '../src/index.ts'
 
 describe('tier0Tools', () => {
+  test('adds the worktree tool when the session can move to one', () => {
+    const tools = tier0Tools(undefined, undefined, undefined, undefined, {
+      rootOf: () => '/work',
+      change: () => Effect.void,
+    })
+
+    expect(tools.map((tool) => tool.name)).toContain('create_worktree')
+  })
+
   test('lists the six tools', () => {
     const tools = tier0Tools()
 

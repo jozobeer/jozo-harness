@@ -72,10 +72,12 @@ UI と核の間は、プロセス境界を越えられる形に保つ。核の�
 | `plugin_manager` | 除外。上の表の「plugin-manager、typert」と同じ理由である |
 | `str_replace_editor` | 対応済み。jozo-harness の `edit` が同じ操作で、名前だけが違う |
 | `ralph` | **2026-10-18 改訂**: 採用。dsh 同様、round ごとに親の会話を seed しない子を起こす。既定の tier1 に登録し、通常の長い仕事は引き続き `goal`（C1）が担う |
-| `create_worktree` | 除外。git worktree の管理はどの S の範囲にも無い |
+| `create_worktree` | **2026-10-18 改訂**: 採用。新しい branch の worktree を作り、session の cwd とワークスペースの根をそこへ移す（issue #157）。削除・マージ・subagent ごとの自動分割は持たない |
 | `team_*` | **2026-10-14 改訂**: 採用。[dsh のギャップ表](../../notes/2026-10-14-dsh-gap-backlog.md)の C8 が roster・task board・inbox を求めるので、名前つきの子（roster）と共有の task board を 1 つの `team` ツールで持つ。メッセージ（inbox）は既存の `send_message` / `list_agents` / `wait_agent` / `interrupt_agent` が担う。dsh の Lead / teammate の権限制御（team:policy）と compare-and-set の remote 面は持たない（jozo-harness は 1 親とその子だけで、board の revision はログから導出する） |
 
-**2026-10-14 追記（ギャップ表の「除外したツールの方針変更」）**: 除外は変えない。再検討したのは 2 つで、どちらも v1 では持たない: `present` は提示層の判断（[S8 の追記](2026-10-13-jozo-harness-web-design.md)）と同じで、カードを描く client 契約を v1 は持たない。`terminal`（PTY）は `bash` と `job_*` が日常の用を足しており、端末セッションを持つと画面状態・再描画・入力の所有が増える。`lsp`・`computer` / browser・`create_worktree`・`pwsh`・MCP resources・`plugin_manager` は当初の理由のままである（`plugin_manager` の代わりは承認つきの `plugin` ツール）。
+**2026-10-14 追記（ギャップ表の「除外したツールの方針変更」）**: 除外は変えない。再検討したのは 2 つで、どちらも v1 では持たない: `present` は提示層の判断（[S8 の追記](2026-10-13-jozo-harness-web-design.md)）と同じで、カードを描く client 契約を v1 は持たない。`terminal`（PTY）は `bash` と `job_*` が日常の用を足しており、端末セッションを持つと画面状態・再描画・入力の所有が増える。`lsp`・`computer` / browser・`pwsh`・MCP resources・`plugin_manager` は当初の理由のままである（`plugin_manager` の代わりは承認つきの `plugin` ツール）。
+
+**2026-10-18 追記（Issue #157）**: `create_worktree` の除外を反転する。partial clone の repo で作成時の lazy fetch を止めるため、`git worktree add` には `GIT_NO_LAZY_FETCH=1` を渡す。作成はワークスペースの外へ書くので、`workspace-write` では既存の escalation（`sandbox_permissions` + `justification` と承認）を通す。移動は `session/cwd/changed` に `root` を足して表し、`working_directory` と以降の bash / write / edit は新しい根に従う。
 
 **2026-10-18 追記（Issue #143）**: `ralph` の除外を反転する。tier1 行がある run の既定ツールとして登録し、round worker は `subagent` の fresh 起動経路（`seed: []`）を使う。worker が受け取るのは immutable な objective と前 round の構造化 handoff だけで、完了・blocker は worker の自己報告として返す。通常の長い仕事を同じ session で続ける `goal` の役割は変えない。
 

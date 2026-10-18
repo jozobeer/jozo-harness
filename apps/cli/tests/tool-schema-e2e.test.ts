@@ -119,6 +119,7 @@ describe('the tool declarations the model receives', () => {
       'glob',
       'grep',
       'bash',
+      'create_worktree',
       'todo_write',
       'ask_user',
       'web_fetch',

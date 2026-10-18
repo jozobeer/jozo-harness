@@ -15,8 +15,8 @@ export interface WorkingDirectoryValue {
 }
 
 export interface WorkingDirectoryHost {
-  /** The workspace root; the new directory must stay inside it. */
-  readonly root: string
+  /** The workspace root in force; a worktree moves it, so it is read per call. */
+  readonly root: () => string
   /** Records the change; the agent loop then uses the newest one. */
   readonly change: (cwd: string) => Effect.Effect<void, ToolError>
 }
@@ -35,9 +35,10 @@ export const makeWorkingDirectoryTool = (
   },
   execute: (args) =>
     Effect.gen(function* () {
-      const target = isAbsolute(args.path) ? resolve(args.path) : resolve(host.root, args.path)
+      const root = host.root()
+      const target = isAbsolute(args.path) ? resolve(args.path) : resolve(root, args.path)
       // relative() returns '' when target is the root itself, which is inside the workspace.
-      const inside = relative(resolve(host.root), target)
+      const inside = relative(resolve(root), target)
       const escapes = isAbsolute(inside) || inside === '..' || inside.startsWith('..' + sep)
       if (escapes) {
         return yield* Effect.fail(
