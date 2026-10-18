@@ -10,6 +10,7 @@ import { ContextPane } from '../components/context-pane.tsx'
 import { Conversation } from '../components/conversation.tsx'
 import { Board } from '../components/board.tsx'
 import { emptyWatched, watchedAfter, type Watched } from '../../src/ui/board.ts'
+import { Markdown } from '../components/turns.tsx'
 import { Waterfall } from '../components/waterfall.tsx'
 import { LensSwitch } from '../components/lens-switch.tsx'
 import { lensFrom, type Lens } from '../lens.ts'
@@ -1236,6 +1237,106 @@ describe('the workspace picker', () => {
     fireEvent.change(select, { target: { value: '/work/alpha' } })
     fireEvent.click(container.querySelector('#new-session') as Element)
     expect(calls.at(-1)).toEqual({ kind: 'moveTo', id: undefined, cwd: '/work/alpha' })
+  })
+
+  test('the rail keeps the row it drew when only later facts change', () => {
+    const now = Date.now()
+    const listed = (id: string) => ({
+      id,
+      cwd: '/work/' + id,
+      createdAt: now,
+      updatedAt: now,
+      title: id,
+    })
+    const { store, setState } = makeStore({
+      sessions: [listed('aaaabbbb'), listed('ccccdddd')],
+    })
+
+    const { container } = render(() => <Board store={store} />)
+    const rows = [...container.querySelectorAll('.session-row')]
+    expect(rows).toHaveLength(2)
+
+    // A keystroke reads the board again; the DOM it already drew stays.
+    setState((current) => withDraft(current, 'typing'))
+    expect(container.querySelectorAll('.session-row')[0]).toBe(rows[0])
+    expect(container.querySelectorAll('.session-row')[1]).toBe(rows[1])
+
+    // So does a relist, even as the row's own text changes.
+    setState((current) => ({
+      ...current,
+      sessions: [{ ...listed('aaaabbbb'), title: 'renamed' }, listed('ccccdddd')],
+    }))
+    expect(container.querySelectorAll('.session-row')[0]).toBe(rows[0])
+    expect(rows[0]?.querySelector('.session-name')?.textContent).toBe('renamed')
+  })
+
+  test('a live answer keeps its nodes when the next state carries the same text', () => {
+    const writes = vi.spyOn(Element.prototype, 'innerHTML', 'set')
+    try {
+      const [state, setState] = createSignal({ live: 'streaming **now**' })
+      const { container } = render(() => <Markdown text={state().live} />)
+      const body = container.firstElementChild as HTMLElement
+      const drawn = body.firstChild
+      expect(body.querySelector('strong')?.textContent).toBe('now')
+      writes.mockClear()
+
+      setState({ live: 'streaming **now**' })
+
+      // A state that carries the same answer does not touch the body at all.
+      expect(writes).not.toHaveBeenCalled()
+      expect(body.firstChild).toBe(drawn)
+      expect(body.querySelector('strong')?.textContent).toBe('now')
+
+      setState({ live: 'streaming **now** more' })
+
+      expect(writes).toHaveBeenCalledTimes(1)
+      expect(body.textContent).toBe('streaming now more')
+    } finally {
+      writes.mockRestore()
+    }
+  })
+
+  test('the trace stops its clock while the answers lens hides it', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(10_000)
+    try {
+      const at = (seq: number, type: string, data: unknown) => ({
+        seq,
+        time: seq * 1000,
+        type,
+        data,
+      })
+      const { store } = makeStore({
+        trace: traceOf([
+          at(1, 'turn/start', { turn: 1 }),
+          at(2, 'step/start', { step: 1 }),
+          at(3, 'tool/call', {
+            callId: 'c1',
+            name: 'bash',
+            arguments: '{}',
+            summary: 'pnpm test',
+          }),
+        ]),
+      })
+      const [live, setLive] = createSignal(false)
+
+      const { container } = render(() => <Waterfall store={store} live={live()} />)
+      const facts = () => container.querySelector('.wf-turn-facts')?.textContent
+      const hidden = facts()
+      expect(hidden).toContain('9.0s')
+
+      // Five seconds pass behind the answers lens; nothing in the trace is touched.
+      vi.advanceTimersByTime(5_000)
+      expect(facts()).toBe(hidden)
+
+      // Opened, the clock catches up at once and then ticks.
+      setLive(true)
+      expect(facts()).toContain('14s')
+      vi.advanceTimersByTime(1_000)
+      expect(facts()).toContain('15s')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   test('Add workspace sends the path and keeps the field empty for the next one', () => {

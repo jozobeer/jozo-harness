@@ -13,7 +13,10 @@ import { plainText } from '@jozo-harness/ui-view'
 import type { SessionAction, SessionSummary } from '../../src/shared/rpc.ts'
 import {
   RECENT_PAGE,
+  atKey,
   boardOf,
+  byKey,
+  keysOf,
   recentGroupsOf,
   visibleSessions,
   type BoardEntry,
@@ -403,6 +406,8 @@ const restDetail = (entry: BoardEntry, now: number): string => whenOf(entry.sinc
  */
 const RecentFolder = (props: {
   group: RecentGroup
+  /** Every row the board built, so a row is found by the key it keeps. */
+  rows: ReadonlyMap<string, BoardEntry>
   store: SessionStore
   folded: ReadonlySet<string>
   shown: ReadonlySet<string>
@@ -437,10 +442,13 @@ const RecentFolder = (props: {
         <span class="recent-count">{String(props.group.entries.length)}</span>
       </button>
       <Show when={!folded()}>
-        <For each={rows()}>
-          {(entry) => (
-            <Row entry={entry} store={props.store} detail={restDetail(entry, props.now)} />
-          )}
+        <For each={keysOf(rows(), (entry) => entry.summary.id)}>
+          {(id) => {
+            const entry = () => atKey(props.rows, id)
+            return (
+              <Row entry={entry()} store={props.store} detail={restDetail(entry(), props.now)} />
+            )
+          }}
         </For>
         <Show when={more() && !all()}>
           <button class="recent-more" type="button" onClick={() => props.onShown(props.group.cwd)}>
@@ -559,6 +567,14 @@ export const Board = (props: { store: SessionStore }) => {
     }),
   )
   const board = createMemo(() => boardOf(matching(visible(), query()), props.store.watched()))
+  // The rail keys its rows by session and its folders by cwd, so a row whose
+  // facts change is found again instead of drawn from scratch: <For> compares
+  // the keys, and the row's own reads keep it current.
+  const rows = createMemo(() =>
+    byKey([...board().waiting, ...board().running, ...board().rest], (entry) => entry.summary.id),
+  )
+  const recent = createMemo(() => recentGroupsOf(board().rest))
+  const folders = createMemo(() => byKey(recent(), (group) => group.cwd))
   const noMatch = (): boolean =>
     query().trim() !== '' &&
     board().waiting.length + board().running.length + board().rest.length === 0
@@ -614,27 +630,31 @@ export const Board = (props: { store: SessionStore }) => {
       </Show>
       <nav id="session-list" aria-label="Sessions">
         <Section title="Waiting on you" count={board().waiting.length}>
-          <For each={board().waiting}>
-            {(entry) => <WaitingCard entry={entry} store={props.store} />}
+          <For each={keysOf(board().waiting, (entry) => entry.summary.id)}>
+            {(id) => <WaitingCard entry={atKey(rows(), id)} store={props.store} />}
           </For>
         </Section>
         <Section title="Running" count={board().running.length}>
-          <For each={board().running}>
-            {(entry) => (
-              <div class="board-running">
-                <Row entry={entry} store={props.store} detail={runningDetail(entry, now())} />
-                <Show when={entry.doing !== ''}>
-                  <p class="board-doing">{entry.doing}</p>
-                </Show>
-              </div>
-            )}
+          <For each={keysOf(board().running, (entry) => entry.summary.id)}>
+            {(id) => {
+              const entry = () => atKey(rows(), id)
+              return (
+                <div class="board-running">
+                  <Row entry={entry()} store={props.store} detail={runningDetail(entry(), now())} />
+                  <Show when={entry().doing !== ''}>
+                    <p class="board-doing">{entry().doing}</p>
+                  </Show>
+                </div>
+              )
+            }}
           </For>
         </Section>
         <Section title="Recent" count={board().rest.length}>
-          <For each={recentGroupsOf(board().rest)}>
-            {(group) => (
+          <For each={keysOf(recent(), (group) => group.cwd)}>
+            {(cwd) => (
               <RecentFolder
-                group={group}
+                group={atKey(folders(), cwd)}
+                rows={rows()}
                 store={props.store}
                 folded={foldedFolders()}
                 shown={shownFolders()}

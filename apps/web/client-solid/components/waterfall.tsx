@@ -1,4 +1,4 @@
-import { For, Index, Show, createMemo, createSignal, onCleanup } from 'solid-js'
+import { For, Index, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import {
   axisEndOf,
   toolsOf,
@@ -16,10 +16,20 @@ export const spanOf = (ms: number): string => {
   return String(Math.floor(seconds / 60)) + 'm ' + String(seconds % 60).padStart(2, '0') + 's'
 }
 
-const createNow = () => {
+/**
+ * The clock a running lane reads. It ticks only while the trace is on screen:
+ * the answers lens keeps the trace mounted but hidden, and a hidden lane has
+ * nothing to say each second.
+ */
+const createNow = (live: () => boolean) => {
   const [now, setNow] = createSignal(Date.now())
-  const timer = setInterval(() => setNow(Date.now()), 1000)
-  onCleanup(() => clearInterval(timer))
+  createEffect(() => {
+    if (!live()) return
+    // Opened after time away, the lane catches up before its first tick.
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    onCleanup(() => clearInterval(timer))
+  })
   return now
 }
 
@@ -156,9 +166,9 @@ const TurnLane = (props: { turn: TraceTurn; now: number; filter: Filter; store: 
  * tool call a bar where it happened. It answers where the time went and where
  * it broke; a row opens in the inspector.
  */
-export const Waterfall = (props: { store: SessionStore }) => {
+export const Waterfall = (props: { store: SessionStore; live?: boolean }) => {
   const turns = createMemo(() => props.store.state().trace)
-  const now = createNow()
+  const now = createNow(() => props.live !== false)
   const [text, setText] = createSignal('')
   const [failedOnly, setFailedOnly] = createSignal(false)
   const filter = (): Filter => ({ text: text().trim().toLowerCase(), failedOnly: failedOnly() })

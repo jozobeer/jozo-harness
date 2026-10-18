@@ -181,7 +181,7 @@ export const App = (props: { store?: SessionStore; lens?: Lens }) => {
             <LensSwitch lens={lens()} onChoose={choose} />
           </div>
           <Conversation store={store} />
-          <Waterfall store={store} />
+          <Waterfall store={store} live={lens() === 'timeline'} />
           <Composer store={store} />
         </div>
         <aside
