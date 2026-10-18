@@ -33,20 +33,25 @@ const hostOf = (): UiHost => ({
 interface Fake {
   readonly factory: SessionFactory
   readonly asked: Array<string | undefined>
+  /** The workspace each ask named, beside the session it named. */
+  readonly askedCwd: Array<string | undefined>
   readonly closed: Array<string>
 }
 
 const makeFactory = (): Fake => {
   const asked: Array<string | undefined> = []
+  const askedCwd: Array<string | undefined> = []
   const closed: Array<string> = []
   return {
     asked,
+    askedCwd,
     closed,
     factory: {
       list: () => Effect.succeed([summaryOf('a'), summaryOf('b')]),
-      open: (id) =>
+      open: (id, cwd) =>
         Effect.gen(function* () {
           asked.push(id)
+          askedCwd.push(cwd)
           const made = id ?? 'new-' + String(asked.length)
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
@@ -101,7 +106,7 @@ describe('the session registry', () => {
             factory: fake.factory,
           })
           const listed = yield* registry.list()
-          const opened = yield* registry.open('boot')
+          const opened = yield* registry.open('boot', undefined)
           return {
             initial: registry.initial,
             listed: listed.map((item) => item.id),
@@ -129,11 +134,12 @@ describe('the session registry', () => {
           const registry = yield* makeSessionRegistry({ factory: fake.factory })
           const before = registry.openedIds()
           // A page names no session, so this is the ask that starts one.
-          const created = yield* registry.open(undefined)
+          const created = yield* registry.open(undefined, '/elsewhere')
           return {
             initial: registry.initial,
             before: before.length,
             asked: fake.asked,
+            askedCwd: fake.askedCwd,
             created: created.summary.id,
             opened: registry.openedIds(),
           }
@@ -144,6 +150,8 @@ describe('the session registry', () => {
     expect(seen.before).toBe(0)
     // Nothing was opened on the server's behalf; the page's ask was the first.
     expect(seen.asked).toEqual([undefined])
+    // The workspace the page named is what the factory was asked to create in.
+    expect(seen.askedCwd).toEqual(['/elsewhere'])
   })
 
   test('a session asked for twice is opened once', async () => {
@@ -155,8 +163,8 @@ describe('the session registry', () => {
             initial: initial('boot'),
             factory: fake.factory,
           })
-          const first = yield* registry.open('a')
-          const second = yield* registry.open('a')
+          const first = yield* registry.open('a', '/one')
+          const second = yield* registry.open('a', '/two')
           return {
             asked: fake.asked,
             same: first.host === second.host,
@@ -179,7 +187,7 @@ describe('the session registry', () => {
             initial: initial('boot'),
             factory: fake.factory,
           })
-          const made = yield* registry.open(undefined)
+          const made = yield* registry.open(undefined, '/work')
           return { id: made.summary.id, known: registry.hostOf(made.summary.id) !== undefined }
         }),
       ),
@@ -201,7 +209,7 @@ describe('the session registry', () => {
             factory: failing,
           })
           const outcome = yield* registry
-            .open('gone')
+            .open('gone', undefined)
             .pipe(Effect.catch((error) => Effect.succeed(error.message)))
           return { outcome, known: registry.hostOf('gone') !== undefined }
         }),
@@ -220,7 +228,7 @@ describe('the session registry', () => {
             initial: initial('boot'),
             factory: fake.factory,
           })
-          yield* registry.open('a')
+          yield* registry.open('a', undefined)
         }),
       ),
     )

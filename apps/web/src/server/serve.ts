@@ -14,6 +14,7 @@ import {
 } from './sessions.ts'
 import type { SettingsPort } from './settings.ts'
 import { staticResponse } from './static.ts'
+import type { WorkspacesPort } from './workspaces.ts'
 
 export const UI_PATH = '/ui'
 
@@ -24,6 +25,8 @@ export interface ServeWebOptions {
   readonly factory: SessionFactory
   /** What the page may read and change about the run behind it. */
   readonly settings: SettingsPort
+  /** The folders a page may start a session in. */
+  readonly workspaces: WorkspacesPort
   /** 0 picks a free port; the chosen one arrives through `onReady`. */
   readonly port: number
   /** Where the browser app to serve sits; the caller owns where its tree keeps it. */
@@ -33,7 +36,11 @@ export interface ServeWebOptions {
   readonly interrupt?: Effect.Effect<void>
 }
 
-const handlersOf = (registry: SessionRegistry, settings: SettingsPort) =>
+const handlersOf = (
+  registry: SessionRegistry,
+  settings: SettingsPort,
+  workspaces: WorkspacesPort,
+) =>
   UiRpcs.toLayer({
     sessions: () =>
       Effect.gen(function* () {
@@ -46,9 +53,9 @@ const handlersOf = (registry: SessionRegistry, settings: SettingsPort) =>
           opened: registry.openedIds(),
         }
       }).pipe(Effect.mapError((error) => error.message)),
-    open: ({ sessionId }) =>
+    open: ({ sessionId, cwd }) =>
       Effect.gen(function* () {
-        const session = yield* registry.open(sessionId)
+        const session = yield* registry.open(sessionId, cwd)
         const view = yield* settings.read()
         const meta = yield* readMeta(view.sessionRoot)
         return withMeta(session.summary, meta[session.summary.id])
@@ -96,6 +103,12 @@ const handlersOf = (registry: SessionRegistry, settings: SettingsPort) =>
             Effect.mapError((error) => error.message),
           )
     },
+    workspaces: () => workspaces.list().pipe(Effect.mapError((error) => error.message)),
+    addWorkspace: ({ cwd }) =>
+      workspaces.add(cwd).pipe(
+        Effect.as(true),
+        Effect.mapError((error) => error.message),
+      ),
     settings: () => settings.read().pipe(Effect.mapError((error) => error.message)),
     models: () => settings.models().pipe(Effect.mapError((error) => error.message)),
     setModel: ({ model, remember }) =>
@@ -199,7 +212,7 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
       // Our schemas need no decoding services, but Effect types a stream RPC's
       // service requirement as `unknown`; the layer is pinned to what it is.
       const rpc: Layer.Layer<never> = RpcServer.layer(UiRpcs).pipe(
-        Layer.provide(handlersOf(registry, options.settings)),
+        Layer.provide(handlersOf(registry, options.settings, options.workspaces)),
         Layer.provide(Layer.succeed(RpcServer.Protocol, protocol)),
       ) as unknown as Layer.Layer<never>
       yield* Effect.forkScoped(Layer.launch(rpc))

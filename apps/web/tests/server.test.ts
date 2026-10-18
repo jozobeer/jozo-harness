@@ -13,6 +13,7 @@ import {
   type SessionFactory,
   type SettingsPort,
   type SettingsView,
+  type WorkspacesPort,
 } from '../src/server/index.ts'
 import {
   type JobDetailView,
@@ -38,7 +39,7 @@ interface FakeHost {
   readonly publish: (event: UiEvent) => void
 }
 
-const makeHost = (id: string): FakeHost => {
+const makeHost = (id: string, cwd = '/work'): FakeHost => {
   const commands: Array<UiCommand> = []
   const subscribers = new Set<Queue.Queue<UiEvent>>()
   const publish = (event: UiEvent): void => {
@@ -63,7 +64,7 @@ const makeHost = (id: string): FakeHost => {
       commands.push(command)
     })
   return {
-    summary: { id, cwd: '/work', createdAt: 1, updatedAt: 1, title: '' },
+    summary: { id, cwd, createdAt: 1, updatedAt: 1, title: '' },
     runState: () => ({
       goal: { objective: 'ship the UI', phase: 'active', rounds: 2, maxRounds: 8 },
       schedules: [{ id: 's-1', when: 'every 60s', prompt: 'check the build', lastFiredAt: 0 }],
@@ -120,7 +121,7 @@ const makeWeb = (initialId: string): FakeWeb => {
     },
     factory: {
       list: () => Effect.succeed([...hosts.values()].map((fake) => fake.summary)),
-      open: (id) =>
+      open: (id, cwd) =>
         Effect.sync(() => {
           const made = id ?? 'new-' + String(hosts.size + 1)
           const known = hosts.get(made)
@@ -133,7 +134,7 @@ const makeWeb = (initialId: string): FakeWeb => {
               stopJob: known.stopJob,
             }
           }
-          const fresh = makeHost(made)
+          const fresh = makeHost(made, cwd)
           hosts.set(made, fresh)
           return {
             summary: fresh.summary,
@@ -189,10 +190,34 @@ const makeSettings = (): { readonly port: SettingsPort; readonly wrote: Array<st
   }
 }
 
+const makeWorkspaces = (): { readonly port: WorkspacesPort; readonly added: Array<string> } => {
+  const added: Array<string> = []
+  return {
+    added,
+    port: {
+      list: () =>
+        Effect.succeed({
+          cwd: '/work',
+          items: [
+            { cwd: '/work/other', lastUsedAt: 20 },
+            { cwd: '/work', lastUsedAt: 0 },
+          ],
+        }),
+      add: (cwd) =>
+        cwd === '/missing'
+          ? Effect.fail(new WebError({ message: 'no such directory' }))
+          : Effect.sync(() => {
+              added.push(cwd)
+            }),
+    },
+  }
+}
+
 const start = (
   staticRoot: string,
   web: FakeWeb,
   settings: ReturnType<typeof makeSettings>,
+  workspaces: ReturnType<typeof makeWorkspaces> = makeWorkspaces(),
 ): Effect.Effect<Started, never, Scope.Scope> =>
   Effect.gen(function* () {
     const ready = yield* Deferred.make<string>()
@@ -202,6 +227,7 @@ const start = (
         initial: web.initial,
         factory: web.factory,
         settings: settings.port,
+        workspaces: workspaces.port,
         port: 0,
         staticRoot,
         onReady: (url) => {
@@ -389,6 +415,53 @@ describe('the web transport', () => {
     expect(observed.onNew).toEqual([{ kind: 'cancel' }])
     expect(observed.silent).toBe(true)
     expect(observed.refused).toBe(true)
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('a page opens a session in the workspace it names, and resuming keeps the header one', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-cwd-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const settings = makeSettings()
+    const workspaces = makeWorkspaces()
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings, workspaces)
+          const wsUrl = 'ws://' + started.origin.replace(/^http:\/\//, '') + '/ui'
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const offered = yield* client.workspaces()
+            const made = yield* client.open({ cwd: '/elsewhere' })
+            // A resume ignores the workspace the page named: the header is the session's.
+            const resumed = yield* client.open({ sessionId: made.id, cwd: '/work' })
+            const added = yield* client.addWorkspace({ cwd: '/elsewhere' })
+            const refused = yield* client
+              .addWorkspace({ cwd: '/missing' })
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
+            return { offered, made, resumed, added, refused }
+          }).pipe(clientLayers(wsUrl))
+          const result = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    expect(observed.offered).toEqual({
+      cwd: '/work',
+      items: [
+        { cwd: '/work/other', lastUsedAt: 20 },
+        { cwd: '/work', lastUsedAt: 0 },
+      ],
+    })
+    expect(observed.made.cwd).toBe('/elsewhere')
+    // The session keeps where it was created, whatever the page asks for now.
+    expect(observed.resumed.cwd).toBe('/elsewhere')
+    expect(observed.added).toBe(true)
+    expect(workspaces.added).toEqual(['/elsewhere'])
+    expect(observed.refused).toBe('no such directory')
     await rm(root, { recursive: true, force: true })
   })
 

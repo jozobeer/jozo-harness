@@ -43,10 +43,42 @@ export const SessionsRpc = Rpc.make('sessions', {
   error: Schema.String,
 })
 
-/** Opens one session: the named one, or a new one when no id is given. */
+/**
+ * Opens one session: the named one, or a new one when no id is given. A new
+ * session starts in `cwd`; a resumed one keeps the directory its header recorded.
+ */
 export const OpenRpc = Rpc.make('open', {
-  payload: Schema.Struct({ sessionId: Schema.optionalKey(Schema.String) }),
+  payload: Schema.Struct({
+    sessionId: Schema.optionalKey(Schema.String),
+    cwd: Schema.optionalKey(Schema.String),
+  }),
   success: SessionSummarySchema,
+  error: Schema.String,
+})
+
+/** One folder a page may start a session in, and when it last held a session. */
+export const WorkspaceViewSchema = Schema.Struct({
+  cwd: Schema.String,
+  /** When the newest session there last changed; 0 for a folder that holds none yet. */
+  lastUsedAt: Schema.Number,
+})
+
+export type WorkspaceView = typeof WorkspaceViewSchema.Type
+
+/** The workspaces a page offers beside New session, newest use first, with the server's own. */
+export const WorkspacesRpc = Rpc.make('workspaces', {
+  success: Schema.Struct({
+    /** Where a session opened without a workspace starts. */
+    cwd: Schema.String,
+    items: Schema.Array(WorkspaceViewSchema),
+  }),
+  error: Schema.String,
+})
+
+/** Registers one more folder a page may start a session in. */
+export const AddWorkspaceRpc = Rpc.make('addWorkspace', {
+  payload: Schema.Struct({ cwd: Schema.String }),
+  success: Schema.Boolean,
   error: Schema.String,
 })
 
@@ -196,6 +228,8 @@ export const SetModelRpc = Rpc.make('setModel', {
 export const UiRpcs = RpcGroup.make(
   SessionsRpc,
   OpenRpc,
+  WorkspacesRpc,
+  AddWorkspaceRpc,
   SessionActionRpc,
   UiCommandRpc,
   UiEventsRpc,
