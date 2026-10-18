@@ -723,6 +723,16 @@
     color: var(--accent);
   }
 
+  /* When the clipboard refuses, the id stays on screen to be selected by hand. */
+  .session-id-fallback {
+    padding: 2px 10px 6px;
+    color: var(--dim);
+    font-family: var(--mono);
+    font-size: var(--text-xs);
+    overflow-wrap: anywhere;
+    user-select: all;
+  }
+
   .session-rename {
     grid-column: 1;
     width: 100%;

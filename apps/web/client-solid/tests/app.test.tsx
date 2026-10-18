@@ -82,6 +82,15 @@ const makeStore = (
   return { store, calls, setState: update }
 }
 
+/** jsdom has no clipboard; lend the page one, then take it back. */
+const lendClipboard = (writeText: (text: string) => Promise<void>): void => {
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+}
+
+const takeBackClipboard = (): void => {
+  Reflect.deleteProperty(navigator, 'clipboard')
+}
+
 describe('the Solid page', () => {
   test('the board puts a session that waits first, and answers it in place', () => {
     const asking = [
@@ -974,6 +983,71 @@ describe('the Solid page', () => {
       sessionId: 'aaaabbbb',
       action: { kind: 'delete' },
     })
+  })
+
+  test('the row menu copies the whole session id and says so where it stands', async () => {
+    const written: Array<string> = []
+    lendClipboard((text) => {
+      written.push(text)
+      return Promise.resolve()
+    })
+    try {
+      const id = 'aaaabbbb-cccc-dddd-eeee-ffff00001111'
+      const { store } = makeStore({
+        sessions: [{ id, cwd: '/one/work', createdAt: 1, updatedAt: 1, title: 'first' }],
+      })
+      const { container } = render(() => <Board store={store} />)
+
+      fireEvent.click(container.querySelector('button.session-menu') as Element)
+      const copy = [...container.querySelectorAll('.session-menu-panel button')].find(
+        (button) => button.textContent === 'Copy session ID',
+      )
+      fireEvent.click(copy as Element)
+
+      await vi.waitFor(() => expect(container.textContent).toContain('Copied'))
+      expect(written).toEqual([id])
+      expect(container.querySelector('.session-menu-panel')).not.toBeNull()
+    } finally {
+      takeBackClipboard()
+    }
+  })
+
+  test('the row menu keeps the id in reach when the clipboard refuses it', async () => {
+    lendClipboard(() => Promise.reject(new Error('denied')))
+    try {
+      const id = 'aaaabbbb-cccc-dddd-eeee-ffff00001111'
+      const { store } = makeStore({
+        sessions: [{ id, cwd: '/one/work', createdAt: 1, updatedAt: 1, title: 'first' }],
+      })
+      const { container } = render(() => <Board store={store} />)
+
+      fireEvent.click(container.querySelector('button.session-menu') as Element)
+      const copy = [...container.querySelectorAll('.session-menu-panel button')].find(
+        (button) => button.textContent === 'Copy session ID',
+      )
+      fireEvent.click(copy as Element)
+
+      await vi.waitFor(() => expect(container.textContent).toContain('Copy failed'))
+      expect(container.querySelector('.session-id-fallback')?.textContent).toBe(id)
+    } finally {
+      takeBackClipboard()
+    }
+  })
+
+  test('the row menu does not go quiet when the page has no clipboard', async () => {
+    takeBackClipboard()
+    const { store } = makeStore({
+      sessions: [{ id: 'aaaabbbb', cwd: '/one/work', createdAt: 1, updatedAt: 1, title: 'first' }],
+    })
+    const { container } = render(() => <Board store={store} />)
+
+    fireEvent.click(container.querySelector('button.session-menu') as Element)
+    const copy = [...container.querySelectorAll('.session-menu-panel button')].find(
+      (button) => button.textContent === 'Copy session ID',
+    )
+    fireEvent.click(copy as Element)
+
+    await vi.waitFor(() => expect(container.textContent).toContain('Copy failed'))
   })
 
   test('an archived session stays out of the rail until the reader asks for it', () => {
