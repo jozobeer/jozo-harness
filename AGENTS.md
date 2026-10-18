@@ -56,3 +56,12 @@ vp test <path>          # 触ったパッケージのテストだけ先に回す
 - `.env` や `~/.config/jzh/secrets.env` の中身を読んで出力やログに載せること。
 - `pnpm-lock.yaml` を手で編集すること（`pnpm install` で再生成する）。
 - sandbox の既定（`seatbelt` / `workspace-write`）を緩める変更を、理由と承認なしに入れること。
+
+## Cursor Cloud specific instructions
+
+- イメージの `node` は 22 で、`/exec-daemon/node` が `/usr/local/bin` より前にある。`mise.toml` の Node 26.8.2 と pnpm 12.14.0、cccc 1.8.2 は `/usr/local/cargo/bin` にリンクしてある。`node -v` は v26.8.2 であること。
+- `mise install` をそのまま走らせると、pnpm の GitHub artifact attestation が `tuf-repo-cdn.sigstore.dev` を引き、既定の egress では失敗する。node と cccc は `mise install node` と `mise install github:moznion/cccc` で入れ、pnpm 12.14.0 は同じ Node の `npm install -g pnpm@12.14.0` で入れる。
+- Linux の sandbox backend は bubblewrap（`bwrap`）。この環境では user namespace が通り、workspace の外への書き込みは `Read-only file system` になる。
+- `jzh` は `pnpm add --global ./apps/cli` で PATH にある。ブラウザ UI は `pnpm run build:web` のあと `jzh web`。モデルが空だと web は起動しないので、先に `jzh config set model <provider/model>` する。
+- `pnpm run check` の静的検査（fmt、lint、型、doc gate、重複、complexity、`cargo check`）は Linux で通る。失敗するのは macOS の seatbelt を記録・実行するテストだけである（`sandbox-exec` が無い、snapshot が `backend: seatbelt`、plugin テストが seatbelt を期待する）。対象は `apps/cli/tests/sandbox-e2e.test.ts`、`apps/cli/tests/snapshot.test.ts`、`packages/core/safety/tests/plugin.test.ts`、`packages/core/tools-tier0/tests/plugin.test.ts`。skip や削除で緑にしない。CI は macOS。
+- `OLLAMA_API_KEY` は Real-API e2e と実モデルの呼び出しにだけ要る。無いとき、web で送った turn は `AUTH: no API key is configured` で終わる。開発中のテストは stub と replay で足りる。
