@@ -1,7 +1,7 @@
 import { Cause, Effect, Fiber, Queue, Stream } from 'effect'
 import { RpcClient, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
-import type { UiCommand, UiEvent } from '@jozo-harness/ui-protocol'
+import type { SubmitMode, UiCommand, UiEvent } from '@jozo-harness/ui-protocol'
 import { batch, createSignal, type Accessor } from 'solid-js'
 import {
   UiRpcs,
@@ -192,7 +192,11 @@ export interface SessionStore {
   /** Stops the program, for a page that is going away. */
   readonly stop: () => void
   readonly setDraft: (text: string) => void
-  readonly submit: () => void
+  /**
+   * Sends the draft, asking how it meets a running turn. No mode keeps the
+   * plain submit the page has always sent, which the core queues.
+   */
+  readonly submit: (mode?: SubmitMode) => void
   readonly send: (command: UiCommand) => void
   /** Sends one command to a session that need not be the one on screen. */
   readonly sendTo: (sessionId: string, command: UiCommand) => void
@@ -881,7 +885,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       rememberDraft(state().sessionId, draft)
       update((now) => withDraft(now, draft))
     },
-    submit: () => {
+    submit: (mode) => {
       const current = state()
       const value = current.draft.trim()
       if (value === '') return
@@ -897,7 +901,9 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       sendTo(
         current.sessionId,
         ask === undefined
-          ? { kind: 'submit', text: value }
+          ? mode === undefined
+            ? { kind: 'submit', text: value }
+            : { kind: 'submit', text: value, mode }
           : { kind: 'answer', id: ask.id, answer: value },
       )
       clearDraft(current.sessionId)

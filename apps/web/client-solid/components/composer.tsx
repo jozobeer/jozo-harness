@@ -1,5 +1,6 @@
 import { For, Match, Show, Switch, createSignal, onCleanup, onMount } from 'solid-js'
 import { plainText } from '@jozo-harness/ui-view'
+import type { SubmitMode } from '@jozo-harness/ui-protocol'
 import type { CommandView } from '../../src/shared/rpc.ts'
 import {
   commandCandidates,
@@ -18,6 +19,7 @@ import {
 } from '../../src/ui/references.ts'
 import { levelOf } from '../pour.ts'
 import type { SessionStore } from '../store.ts'
+import { acceleratedSend, oppositeMode, submitModeFor } from '../submission.ts'
 import { Button } from './ui/button.tsx'
 import { Fizz } from './ui/fizz.tsx'
 
@@ -44,18 +46,29 @@ const StopIcon = () => (
   </svg>
 )
 
-/** What the human typed while a turn was running waits above the composer. */
-const Queue = (props: { store: SessionStore }) => (
-  <For each={props.store.state().run?.queued ?? []}>
+/** Input waiting for its turn, each line labelled with where it is waiting. */
+const Waiting = (props: { label: 'queued' | 'steering'; messages: ReadonlyArray<string> }) => (
+  <For each={props.messages}>
     {(message) => (
-      <div class="queued">
-        <span class="queued-label">queued</span>
+      <div class={'queued ' + props.label}>
+        <span class="queued-label">{props.label}</span>
         <span class="queued-text">
           <Linkify text={plainText(message)} />
         </span>
       </div>
     )}
   </For>
+)
+
+/**
+ * What waits above the composer: a steer joins the running turn's next step,
+ * while a queued line becomes a turn of its own, so the two are told apart.
+ */
+const Queue = (props: { store: SessionStore }) => (
+  <>
+    <Waiting label="steering" messages={props.store.state().run?.steering ?? []} />
+    <Waiting label="queued" messages={props.store.state().run?.queued ?? []} />
+  </>
 )
 
 /**
@@ -561,8 +574,42 @@ const Reference = (props: {
   </div>
 )
 
+/**
+ * The mode Enter uses while a turn runs. It is a setting, so it stays where the
+ * model and the effort are; the accelerated gesture asks for the other mode
+ * without changing it.
+ */
+const BusyEnter = (props: {
+  store: SessionStore
+  mode: SubmitMode
+  onChoose: (mode: SubmitMode) => void
+}) => (
+  <Show when={props.store.state().conversation.running}>
+    <button
+      id="busy-enter"
+      class="seat-chip"
+      type="button"
+      aria-pressed={props.mode === 'steer'}
+      title={
+        'Enter while a turn runs sends ' +
+        props.mode +
+        '; Cmd/Ctrl+Enter sends the other. Click to switch.'
+      }
+      onClick={() => props.onChoose(oppositeMode(props.mode))}
+    >
+      {props.mode}
+    </button>
+  </Show>
+)
+
 /** The input, and what sits above it: waiting input and the thing to answer. */
-export const Composer = (props: { store: SessionStore }) => {
+export const Composer = (props: {
+  store: SessionStore
+  /** How Enter meets a running turn; absent keeps queue, as the core defaults. */
+  busyEnter?: SubmitMode
+  /** Records the reader's busy-Enter choice where the page keeps it. */
+  onBusyEnter?: (mode: SubmitMode) => void
+}) => {
   let textarea: HTMLTextAreaElement | undefined
   /** The slash word the popup belongs to; undefined closes it. */
   const [token, setToken] = createSignal<CommandToken | undefined>()
@@ -591,8 +638,12 @@ export const Composer = (props: { store: SessionStore }) => {
     onCleanup(() => document.removeEventListener('keydown', onKey))
   })
 
-  const send = (): void => {
-    props.store.submit()
+  /** The mode this page prefers while a turn runs; queue is the untouched default. */
+  const preferred = (): SubmitMode => props.busyEnter ?? 'queue'
+
+  /** Sends the draft; an accelerated gesture asks for the other of the two modes. */
+  const send = (accelerated = false): void => {
+    props.store.submit(submitModeFor(preferred(), running(), accelerated))
     if (textarea !== undefined) grow(textarea)
   }
 
@@ -828,7 +879,7 @@ export const Composer = (props: { store: SessionStore }) => {
             }
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault()
-              send()
+              send(acceleratedSend(event))
             }
           }}
         />
@@ -837,6 +888,11 @@ export const Composer = (props: { store: SessionStore }) => {
           <div id="seat">
             <Model store={props.store} />
             <Effort store={props.store} />
+            <BusyEnter
+              store={props.store}
+              mode={preferred()}
+              onChoose={props.onBusyEnter ?? (() => undefined)}
+            />
           </div>
           {/* While something waits on the reader, the card's button is the one in amber. */}
           <Button

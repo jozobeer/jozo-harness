@@ -21,6 +21,8 @@ interface FakeInput {
   readonly otherSession: Session
   readonly otherAgent: Agent
   readonly submitted: Array<string>
+  /** Every line the host put on the running turn's step queue. */
+  readonly steered: Array<string>
   readonly cancelled: Array<string>
   /** Every effort a command switched this session to. */
   readonly efforts: Array<string>
@@ -32,6 +34,7 @@ interface FakeInput {
 const makeInput = (): FakeInput => {
   const hooks = makeHooks()
   const submitted: Array<string> = []
+  const steered: Array<string> = []
   const cancelled: Array<string> = []
   const efforts: Array<string> = []
   const routes: Array<string> = []
@@ -73,6 +76,10 @@ const makeInput = (): FakeInput => {
       Effect.sync(() => {
         submitted.push(message.text)
       }),
+    steer: (message: { text: string }) =>
+      Effect.sync(() => {
+        steered.push(message.text)
+      }),
     cancel: (cause: string) =>
       Effect.sync(() => {
         cancelled.push(cause)
@@ -94,6 +101,7 @@ const makeInput = (): FakeInput => {
     otherSession,
     otherAgent,
     submitted,
+    steered,
     cancelled,
     efforts,
     routes,
@@ -263,6 +271,48 @@ describe('ui host', () => {
         expect(input.submitted).toEqual(['do it'])
       }),
     )
+  })
+
+  test('a steer joins the running turn, while a plain submit waits for the next one', async () => {
+    const input = makeInput()
+    await withHost(input, (host) =>
+      Effect.gen(function* () {
+        yield* host.submit('join now', 'steer')
+        yield* host.submit('after this')
+        expect(input.steered).toEqual(['join now'])
+        expect(input.submitted).toEqual(['after this'])
+      }),
+    )
+  })
+
+  test('a command still answers at once when the line asks to steer', async () => {
+    const input = makeInput()
+    await withCommands(input, (host) =>
+      Effect.gen(function* () {
+        yield* host.submit('/echo hi', 'steer')
+        expect(input.steered).toEqual([])
+        expect(input.submitted).toEqual([])
+        expect(
+          input.session.events().filter((event) => event.type === 'command/done'),
+        ).toHaveLength(1)
+      }),
+    )
+  })
+
+  test('a forced skill sends its arguments to the mode the line asked for', async () => {
+    const input = makeInput()
+    const root = await skillRoot('review', '# review\ncheck the diff')
+    try {
+      await withSkills(input, [root], (host) =>
+        Effect.gen(function* () {
+          yield* host.submit('/review the last commit', 'steer')
+          expect(input.steered).toEqual(['the last commit'])
+          expect(input.submitted).toEqual([])
+        }),
+      )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   test('an unknown command is answered through the log, not the model', async () => {

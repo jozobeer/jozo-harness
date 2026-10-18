@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { socketAt, tokenOfSearch } from '../dom.ts'
+import { keepBusyEnter, keptBusyEnter, socketAt, tokenOfSearch } from '../dom.ts'
 
 describe('the socket a page opens', () => {
   test('carries the token the page was opened with', () => {
@@ -13,5 +13,16 @@ describe('the socket a page opens', () => {
     expect(tokenOfSearch('?token=abc')).toBe('abc')
     expect(tokenOfSearch('?session=s-1')).toBeUndefined()
     expect(tokenOfSearch('?token=')).toBeUndefined()
+  })
+})
+
+describe('the busy-Enter choice a page keeps', () => {
+  test('reads queue until the reader keeps a mode, and then that mode', () => {
+    localStorage.clear()
+    expect(keptBusyEnter()).toBe('queue')
+    keepBusyEnter('steer')
+    expect(keptBusyEnter()).toBe('steer')
+    keepBusyEnter('queue')
+    expect(keptBusyEnter()).toBe('queue')
   })
 })

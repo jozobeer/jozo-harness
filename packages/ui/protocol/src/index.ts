@@ -4,9 +4,21 @@ import type { ApprovalRequested, AskRequested } from '@jozo-harness/safety'
 import type { SessionError, SessionEvent } from '@jozo-harness/session'
 import { Effect, Schema, Stream } from 'effect'
 
+/**
+ * How a submitted line meets a running turn: 'queue' waits for the next turn,
+ * 'steer' joins the running turn at its next step. Absent means 'queue'.
+ */
+export const SubmitModeSchema = Schema.Literals(['queue', 'steer'])
+
+export type SubmitMode = typeof SubmitModeSchema.Type
+
 /** One command a UI sends to the core. Serializable so a transport can carry it. */
 export const UiCommandSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal('submit'), text: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal('submit'),
+    text: Schema.String,
+    mode: Schema.optionalKey(SubmitModeSchema),
+  }),
   Schema.Struct({
     kind: Schema.Literal('approve'),
     callId: Schema.String,
@@ -72,8 +84,12 @@ export const timedStreamChunkOf = (chunk: UiStreamChunk): TimedStreamChunk => ch
  */
 export interface UiHost {
   readonly events: Stream.Stream<UiEvent>
-  /** Queues a user message for the next turn. */
-  readonly submit: (text: string) => Effect.Effect<void, SessionError>
+  /**
+   * Queues a user message: for the next turn by default, or for the running
+   * turn's next step when the mode is 'steer'. The line still falls back to the
+   * next turn when nothing is running, because a steer starts one.
+   */
+  readonly submit: (text: string, mode?: SubmitMode) => Effect.Effect<void, SessionError>
   /** Answers one approval request. */
   readonly approve: (callId: string, approved: boolean) => Effect.Effect<void>
   /** Answers one question; the answer may have to be written down, so it can fail. */
@@ -104,7 +120,7 @@ export const sendCommand = (
 ): Effect.Effect<void, SessionError> => {
   switch (command.kind) {
     case 'submit':
-      return host.submit(command.text)
+      return host.submit(command.text, command.mode)
     case 'approve':
       return host.approve(command.callId, command.approved)
     case 'answer':

@@ -73,6 +73,7 @@ const RUN: RunStateView = {
   skills: ['code-complete', 'typescript-best-practices'],
   promptSections: ['identity', 'tool-guidance', 'agents-md:1'],
   queued: [],
+  steering: [],
   model: 'ollama-cloud/qwen3-coder:480b',
   effort: 'high',
   efforts: ['low', 'high'],

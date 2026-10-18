@@ -18,6 +18,7 @@ describe('ui protocol', () => {
   test('every command survives a decode', async () => {
     const commands: ReadonlyArray<UiCommand> = [
       { kind: 'submit', text: 'hello' },
+      { kind: 'submit', text: 'join now', mode: 'steer' },
       { kind: 'approve', callId: 'call-1', approved: false },
       { kind: 'answer', id: 'ask-1', answer: 'yes' },
       { kind: 'cancel' },
@@ -27,6 +28,22 @@ describe('ui protocol', () => {
     for (const command of commands) {
       expect(await Effect.runPromise(decodeCommand(command))).toEqual(command)
     }
+  })
+
+  test('the submit command carries the mode that meets a running turn', async () => {
+    const sent: Array<{ readonly text: string; readonly mode?: string }> = []
+    const host = {
+      events: Stream.empty,
+      submit: (text: string, mode?: string) =>
+        Effect.sync(() => {
+          sent.push(mode === undefined ? { text } : { text, mode })
+        }),
+    } as unknown as UiHost
+
+    await Effect.runPromise(sendCommand(host, { kind: 'submit', text: 'join now', mode: 'steer' }))
+    await Effect.runPromise(sendCommand(host, { kind: 'submit', text: 'later' }))
+
+    expect(sent).toEqual([{ text: 'join now', mode: 'steer' }, { text: 'later' }])
   })
 
   test('the model command reaches the host as the route it names', async () => {

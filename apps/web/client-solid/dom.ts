@@ -1,4 +1,6 @@
+import type { SubmitMode } from '@jozo-harness/ui-protocol'
 import { THEME_KEY, themeAttribute, themeFrom, type Theme } from '../src/ui/theme.ts'
+import { BUSY_ENTER_KEY, busyEnterFrom } from './submission.ts'
 
 /**
  * The browser the page runs in, named once. These declarations are the surface
@@ -73,6 +75,14 @@ export const keptTheme = (): Theme => themeFrom(localStorage.getItem(THEME_KEY))
 /** Keeps the reader's choice for the next visit. */
 export const keepTheme = (theme: Theme): void => {
   localStorage.setItem(THEME_KEY, theme)
+}
+
+/** The busy-Enter mode the reader chose on an earlier visit; none means queue. */
+export const keptBusyEnter = (): SubmitMode => busyEnterFrom(localStorage.getItem(BUSY_ENTER_KEY))
+
+/** Keeps the busy-Enter choice for the next visit. */
+export const keepBusyEnter = (mode: SubmitMode): void => {
+  localStorage.setItem(BUSY_ENTER_KEY, mode)
 }
 
 /**

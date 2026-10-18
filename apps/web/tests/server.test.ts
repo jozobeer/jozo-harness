@@ -109,6 +109,7 @@ const makeHost = (id: string, cwd = '/work', working = true): FakeHost => {
       skills: [],
       promptSections: [],
       queued: working ? ['one more thing'] : [],
+      steering: [],
       model: 'stub/model',
       effort: 'high',
       efforts: ['low', 'high'],
@@ -130,7 +131,8 @@ const makeHost = (id: string, cwd = '/work', working = true): FakeHost => {
     publish,
     host: {
       events,
-      submit: (text) => record({ kind: 'submit', text }),
+      submit: (text, mode) =>
+        record(mode === undefined ? { kind: 'submit', text } : { kind: 'submit', text, mode }),
       approve: (callId, approved) => record({ kind: 'approve', callId, approved }),
       answer: (id2, answer) => record({ kind: 'answer', id: id2, answer }),
       cancel: () => record({ kind: 'cancel' }),
@@ -372,7 +374,7 @@ describe('the web transport', () => {
             const client = yield* RpcClient.make(UiRpcs)
             const accepted = yield* client.command({
               sessionId: 'a',
-              command: { kind: 'submit', text: 'hello' },
+              command: { kind: 'submit', text: 'hello', mode: 'steer' },
             })
             const collected = yield* Effect.forkScoped(
               client.events({ sessionId: 'a' }).pipe(Stream.take(1), Stream.runCollect),
@@ -405,7 +407,7 @@ describe('the web transport', () => {
     )
 
     expect(observed.accepted).toBe(true)
-    expect(observed.commands).toEqual([{ kind: 'submit', text: 'hello' }])
+    expect(observed.commands).toEqual([{ kind: 'submit', text: 'hello', mode: 'steer' }])
     expect(observed.received?.kind).toBe('session')
     expect(observed.homeStatus).toBe(200)
     expect(observed.home).toContain('<h1>jozo-harness</h1>')
