@@ -523,6 +523,160 @@
     white-space: nowrap;
   }
 
+  /* The row menu: a quiet ⋯ that appears on hover, and the panel it opens. */
+  .session-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 22px;
+    align-items: center;
+  }
+
+  .session-row > .session {
+    grid-column: 1;
+  }
+
+  .session-menu {
+    grid-column: 2;
+    display: flex;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--dim);
+    font: inherit;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+  }
+
+  .session-row:hover .session-menu,
+  .session-menu:focus-visible,
+  .session-menu[aria-expanded='true'] {
+    opacity: 1;
+  }
+
+  .session-menu:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+  }
+
+  .session-menu-panel {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 168px;
+    padding: 4px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    background: var(--bg);
+    box-shadow: 0 12px 32px rgb(0 0 0 / 0.35);
+  }
+
+  .session-menu-item {
+    padding: 7px 10px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text);
+    font: inherit;
+    font-size: var(--text-sm);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .session-menu-item:hover {
+    background: var(--bg-hover);
+  }
+
+  .session-menu-item.danger {
+    color: var(--accent);
+  }
+
+  .session-rename {
+    grid-column: 1;
+    width: 100%;
+    padding: 3px 9px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--text-sm);
+  }
+
+  .session-confirm {
+    gap: 6px;
+    padding: 10px;
+  }
+
+  .session-confirm-asked {
+    margin: 0;
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+
+  .session-confirm-hint {
+    margin: 0;
+    color: var(--dim);
+    font-size: var(--text-xs);
+  }
+
+  .session-confirm-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+  }
+
+  .session-delete-confirm,
+  .session-delete-cancel {
+    flex: 1;
+    padding: 6px 8px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text);
+    font: inherit;
+    font-size: var(--text-sm);
+    cursor: pointer;
+  }
+
+  .session-delete-confirm {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .session.pinned .session-name::before {
+    content: '★ ';
+    color: var(--accent);
+  }
+
+  .session.archived {
+    opacity: 0.55;
+  }
+
+  .show-archived {
+    align-self: flex-start;
+    padding: 4px 2px;
+    border: 0;
+    background: none;
+    color: var(--dim);
+    font: inherit;
+    font-size: var(--text-xs);
+    cursor: pointer;
+  }
+
+  .show-archived:hover {
+    color: var(--text);
+  }
+
   .board-card {
     display: flex;
     flex-direction: column;

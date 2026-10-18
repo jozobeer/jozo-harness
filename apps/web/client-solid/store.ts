@@ -3,7 +3,7 @@ import { RpcClient, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
 import type { UiCommand, UiEvent } from '@jozo-harness/ui-protocol'
 import { batch, createSignal, type Accessor } from 'solid-js'
-import { UiRpcs, withoutServices } from '../src/shared/rpc.ts'
+import { UiRpcs, withoutServices, type SessionAction } from '../src/shared/rpc.ts'
 import {
   applyUiEvent,
   initialState,
@@ -108,6 +108,7 @@ type PanelAsk =
   | { readonly kind: 'setModel'; readonly model: string }
   | { readonly kind: 'job'; readonly id: string }
   | { readonly kind: 'stopJob'; readonly id: string }
+  | { readonly kind: 'sessionAction'; readonly sessionId: string; readonly action: SessionAction }
 
 /** Everything the components may ask of the session. */
 export interface SessionStore {
@@ -137,6 +138,8 @@ export interface SessionStore {
   readonly chooseModel: (model: string) => void
   /** Picks the route the settings file keeps for the runs after this one. */
   readonly setModel: (model: string) => void
+  /** Renames, pins, archives, or deletes one session through its row menu. */
+  readonly act: (sessionId: string, action: SessionAction) => void
 }
 
 export interface SessionStoreOptions {
@@ -456,6 +459,16 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
             yield* Effect.sync(() => update((now) => withModels(now, models)))
             return
           }
+          if (asked.kind === 'sessionAction') {
+            yield* client.sessionAction({ sessionId: asked.sessionId, action: asked.action })
+            yield* relist()
+            // A deleted session cannot stay on screen; the page stands on a blank one
+            // the way it does when the reader asks for a new session.
+            if (asked.action.kind === 'delete' && state().sessionId === asked.sessionId) {
+              yield* Queue.offer(moves, { kind: 'blank' })
+            }
+            return
+          }
           if (asked.kind === 'job') {
             yield* showJob(asked.id)
             return
@@ -590,5 +603,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       Queue.offerUnsafe(panelAsks, { kind: 'chooseModel', model })
     },
     setModel: (model) => Queue.offerUnsafe(panelAsks, { kind: 'setModel', model }),
+    act: (sessionId, action) =>
+      Queue.offerUnsafe(panelAsks, { kind: 'sessionAction', sessionId, action }),
   }
 }

@@ -105,13 +105,19 @@ export interface Board {
 
 const newestFirst = (a: BoardEntry, b: BoardEntry): number => b.since - a.since
 
+/** What the reader pinned stays at the top of its group; the rest keeps recency. */
+const pinnedFirst = (a: BoardEntry, b: BoardEntry): number =>
+  Number(b.summary.pinned === true) - Number(a.summary.pinned === true)
+
 export const boardOf = (
   sessions: ReadonlyArray<SessionSummary>,
   watched: ReadonlyMap<string, Watched>,
 ): Board => {
   const entries = sessions.map((summary) => entryOf(summary, watched.get(summary.id)))
   const having = (...statuses: ReadonlyArray<BoardStatus>) =>
-    entries.filter((entry) => statuses.includes(entry.status)).toSorted(newestFirst)
+    entries
+      .filter((entry) => statuses.includes(entry.status))
+      .toSorted((left, right) => pinnedFirst(left, right) || newestFirst(left, right))
   return {
     waiting: having('waiting'),
     running: having('running'),

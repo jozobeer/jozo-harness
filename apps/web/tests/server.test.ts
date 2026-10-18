@@ -370,7 +370,17 @@ describe('the web transport', () => {
 
     expect(observed.listed).toEqual({
       initial: 'a',
-      items: [{ id: 'a', cwd: '/work', createdAt: 1, updatedAt: 1, title: '' }],
+      items: [
+        {
+          id: 'a',
+          cwd: '/work',
+          createdAt: 1,
+          updatedAt: 1,
+          title: '',
+          pinned: false,
+          archived: false,
+        },
+      ],
       opened: ['a'],
     })
     expect(observed.again).toBe('a')
@@ -380,6 +390,58 @@ describe('the web transport', () => {
     expect(observed.silent).toBe(true)
     expect(observed.refused).toBe(true)
     await rm(root, { recursive: true, force: true })
+  })
+
+  test('the row menu renames a session, and refuses to delete one that is open', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-menu-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const sessionRoot = await mkdtemp(join(tmpdir(), 'jozo-harness-web-menu-logs-'))
+    await mkdir(join(sessionRoot, 'a'), { recursive: true })
+    const web = makeWeb('a')
+    const base = makeSettings()
+    const settings = {
+      ...base,
+      port: {
+        ...base.port,
+        read: () => Effect.succeed({ ...settingsView, sessionRoot }),
+      } satisfies SettingsPort,
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const wsUrl = 'ws://' + started.origin.replace(/^http:\/\//, '') + '/ui'
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            yield* client.sessionAction({
+              sessionId: 'a',
+              action: { kind: 'rename', title: 'named by hand' },
+            })
+            const pinned = yield* client.sessionAction({
+              sessionId: 'a',
+              action: { kind: 'pin', pinned: true },
+            })
+            const listed = yield* client.sessions()
+            const opened = yield* client.open({ sessionId: 'a' })
+            const refused = yield* client
+              .sessionAction({ sessionId: 'a', action: { kind: 'delete' } })
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
+            return { pinned, listed, opened, refused }
+          }).pipe(clientLayers(wsUrl))
+          const result = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    expect(observed.pinned).toBe(true)
+    expect(observed.listed.items[0]).toMatchObject({ title: 'named by hand', pinned: true })
+    expect(observed.opened).toMatchObject({ title: 'named by hand', pinned: true })
+    expect(observed.refused).toBe('stop the session before deleting it')
+    await rm(root, { recursive: true, force: true })
+    await rm(sessionRoot, { recursive: true, force: true })
   })
 
   test('the page asks a session what it is working toward', async () => {

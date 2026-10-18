@@ -5,6 +5,7 @@ import { RpcSerialization, RpcServer } from 'effect/rpc'
 import { sendCommand } from '@jozo-harness/ui-protocol'
 import { UiRpcs } from '../shared/rpc.ts'
 import { makeWebProtocol, type Connection } from './protocol.ts'
+import { applyMeta, readMeta, sessionActionOf, withMeta } from './session-meta.ts'
 import {
   makeSessionRegistry,
   type OpenSession,
@@ -35,15 +36,34 @@ export interface ServeWebOptions {
 const handlersOf = (registry: SessionRegistry, settings: SettingsPort) =>
   UiRpcs.toLayer({
     sessions: () =>
-      registry.list().pipe(
-        Effect.map((items) => ({ initial: registry.initial, items, opened: registry.openedIds() })),
-        Effect.mapError((error) => error.message),
-      ),
+      Effect.gen(function* () {
+        const view = yield* settings.read()
+        const meta = yield* readMeta(view.sessionRoot)
+        const items = yield* registry.list()
+        return {
+          initial: registry.initial,
+          items: applyMeta(items, meta),
+          opened: registry.openedIds(),
+        }
+      }).pipe(Effect.mapError((error) => error.message)),
     open: ({ sessionId }) =>
-      registry.open(sessionId).pipe(
-        Effect.map((session) => session.summary),
-        Effect.mapError((error) => error.message),
-      ),
+      Effect.gen(function* () {
+        const session = yield* registry.open(sessionId)
+        const view = yield* settings.read()
+        const meta = yield* readMeta(view.sessionRoot)
+        return withMeta(session.summary, meta[session.summary.id])
+      }).pipe(Effect.mapError((error) => error.message)),
+    sessionAction: ({ sessionId, action }) =>
+      Effect.gen(function* () {
+        // A running core owns its log; deleting the directory under it is not a
+        // rename but a race with the next append. The reader stops it first.
+        if (action.kind === 'delete' && registry.hostOf(sessionId) !== undefined) {
+          return yield* Effect.fail('stop the session before deleting it')
+        }
+        const view = yield* settings.read()
+        yield* sessionActionOf(view.sessionRoot, sessionId, action)
+        return true
+      }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
     command: ({ sessionId, command }) => {
       const host = registry.hostOf(sessionId)
       return host === undefined

@@ -13,6 +13,7 @@ import { Waterfall } from '../components/waterfall.tsx'
 import { LensSwitch } from '../components/lens-switch.tsx'
 import { lensFrom, type Lens } from '../lens.ts'
 import type { SessionStore } from '../store.ts'
+import type { SessionAction } from '../../src/shared/rpc.ts'
 import { traceOf } from '../../src/ui/trace.ts'
 
 /** One call a component made, in the order it made them. */
@@ -26,6 +27,7 @@ type Call =
   | { readonly kind: 'model'; readonly model: string }
   | { readonly kind: 'chooseModel'; readonly model: string }
   | { readonly kind: 'askModels' }
+  | { readonly kind: 'act'; readonly sessionId: string; readonly action: SessionAction }
 
 /** A store the components can be rendered against: signals in, calls out. */
 const makeStore = (
@@ -57,6 +59,7 @@ const makeStore = (
     askModels: () => calls.push({ kind: 'askModels' }),
     setModel: (model) => calls.push({ kind: 'model', model }),
     chooseModel: (model) => calls.push({ kind: 'chooseModel', model }),
+    act: (sessionId, action) => calls.push({ kind: 'act', sessionId, action }),
   }
   return { store, calls, setState: update }
 }
@@ -177,11 +180,18 @@ describe('the Solid page', () => {
   test('the rail narrows to the sessions whose title or folder says what was typed', () => {
     const { store } = makeStore({
       sessions: [
-        { id: 'aaaabbbb', cwd: '/one/work', createdAt: Date.now() - 60_000, title: 'first' },
+        {
+          id: 'aaaabbbb',
+          cwd: '/one/work',
+          createdAt: Date.now() - 60_000,
+          updatedAt: Date.now() - 60_000,
+          title: 'first',
+        },
         {
           id: 'ccccdddd',
           cwd: '/two/project-tail',
           createdAt: Date.now() - 60_000,
+          updatedAt: Date.now() - 60_000,
           title: 'second',
         },
       ],
@@ -215,7 +225,15 @@ describe('the Solid page', () => {
 
   test('the page opens the search from / or Mod+K, but not while a field has the keys', () => {
     const { store } = makeStore({
-      sessions: [{ id: 'aaaabbbb', cwd: '/one/work', createdAt: Date.now(), title: 'first' }],
+      sessions: [
+        {
+          id: 'aaaabbbb',
+          cwd: '/one/work',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          title: 'first',
+        },
+      ],
     })
 
     const { container } = render(() => <Board store={store} />)
@@ -596,5 +614,83 @@ describe('the Solid page', () => {
       'answers',
       'answers',
     ])
+  })
+
+  test('the row menu renames a session where it sits, and keeps the line when Enter lands', () => {
+    const { store, calls } = makeStore({
+      sessions: [{ id: 'aaaabbbb', cwd: '/one/work', createdAt: 1, updatedAt: 1, title: 'first' }],
+    })
+
+    const { container } = render(() => <Board store={store} />)
+
+    fireEvent.contextMenu(container.querySelector('.session-row') as Element)
+    const rename = [...container.querySelectorAll('.session-menu-panel button')].find(
+      (button) => button.textContent === 'Rename',
+    )
+    fireEvent.click(rename as Element)
+
+    const input = container.querySelector('input.session-rename') as HTMLInputElement
+    expect(input.value).toBe('first')
+    fireEvent.input(input, { target: { value: 'renamed by hand' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(calls).toContainEqual({
+      kind: 'act',
+      sessionId: 'aaaabbbb',
+      action: { kind: 'rename', title: 'renamed by hand' },
+    })
+  })
+
+  test('the row menu asks a second time before deleting a session', () => {
+    const { store, calls } = makeStore({
+      sessions: [{ id: 'aaaabbbb', cwd: '/one/work', createdAt: 1, updatedAt: 1, title: 'first' }],
+    })
+
+    const { container } = render(() => <Board store={store} />)
+
+    fireEvent.click(container.querySelector('button.session-menu') as Element)
+    const remove = [...container.querySelectorAll('.session-menu-panel button')].find(
+      (button) => button.textContent === 'Delete',
+    )
+    fireEvent.click(remove as Element)
+
+    expect(calls.some((call) => call.kind === 'act')).toBe(false)
+    expect(container.textContent).toContain('Delete this session?')
+
+    fireEvent.click(container.querySelector('.session-delete-confirm') as Element)
+
+    expect(calls).toContainEqual({
+      kind: 'act',
+      sessionId: 'aaaabbbb',
+      action: { kind: 'delete' },
+    })
+  })
+
+  test('an archived session stays out of the rail until the reader asks for it', () => {
+    const { store } = makeStore({
+      sessions: [
+        { id: 'aaaabbbb', cwd: '/one/work', createdAt: 10, updatedAt: 10, title: 'here' },
+        {
+          id: 'ccccdddd',
+          cwd: '/one/work',
+          createdAt: 5,
+          updatedAt: 5,
+          title: 'put away',
+          archived: true,
+        },
+      ],
+    })
+
+    const { container } = render(() => <Board store={store} />)
+    const ids = () =>
+      [...container.querySelectorAll('#session-list button.session')].map((row) =>
+        row.getAttribute('data-session-id'),
+      )
+
+    expect(ids()).toEqual(['aaaabbbb'])
+
+    fireEvent.click(container.querySelector('#show-archived') as Element)
+
+    expect(ids()).toEqual(['aaaabbbb', 'ccccdddd'])
   })
 })

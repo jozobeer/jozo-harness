@@ -62,6 +62,14 @@ describe('the board', () => {
     expect(board.rest[0]?.since).toBe(9000)
   })
 
+  test('a pinned session sits at the top of its group even when it changed longer ago', () => {
+    const board = boardOf(
+      [summary('newer', 5000), { ...summary('pinned', 1000), pinned: true }],
+      new Map(),
+    )
+    expect(board.rest.map((entry) => entry.summary.id)).toEqual(['pinned', 'newer'])
+  })
+
   test('a finished session keeps the first line of its answer, and a replayed event counts once', () => {
     const step = at(2, 'step/start', { step: 1 })
     const done = follow(
