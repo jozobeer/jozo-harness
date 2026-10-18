@@ -157,7 +157,9 @@ const policyLayerWithContexts = (
         text: () =>
           Effect.succeed(
             'sandbox: ' +
-              (confined ? backend + ' (enforcement: ' + enforcement + ';' : 'none (') +
+              (confined
+                ? mode + ' (backend: ' + backend + '; enforcement: ' + enforcement + ';'
+                : 'none (') +
               (confined
                 ? ' commands run confined; a file effect the sandbox refuses comes back as [sandbox: file access denied under ' +
                   mode +
