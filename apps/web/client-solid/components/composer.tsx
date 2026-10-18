@@ -1,4 +1,4 @@
-import { For, Match, Show, Switch, onCleanup, onMount } from 'solid-js'
+import { For, Match, Show, Switch, createSignal, onCleanup, onMount } from 'solid-js'
 import { plainText } from '@jozo-harness/ui-view'
 import { renderMarkdown } from '../../src/ui/markdown.ts'
 import type { SessionStore } from '../store.ts'
@@ -104,6 +104,147 @@ const Takeover = (props: { store: SessionStore }) => {
   )
 }
 
+/**
+ * The effort this session asks the provider for, chosen beside the model it
+ * asks. Which words an endpoint takes is the endpoint's to say, so the choices
+ * are the ones its adapter declares; the provider choosing is one of them.
+ */
+const Effort = (props: { store: SessionStore }) => {
+  /** What the session asks for now; '' leaves the choice to the provider. */
+  const current = (): string => props.store.state().run?.effort ?? ''
+
+  const declared = (): ReadonlyArray<string> => props.store.state().run?.efforts ?? []
+
+  /** The effort in effect when the declared words do not name it, so the choice never lies. */
+  const extra = (): string | undefined => {
+    const now = current()
+    return now === '' || declared().includes(now) ? undefined : now
+  }
+
+  return (
+    <Show when={props.store.state().run !== undefined}>
+      <select
+        id="seat-effort"
+        class="seat-effort"
+        title="the reasoning effort this session asks the provider for"
+        aria-label="the reasoning effort this session asks the provider for"
+        value={current()}
+        onChange={(event) =>
+          props.store.send({ kind: 'effort', effort: event.currentTarget.value })
+        }
+      >
+        <option value="">default</option>
+        <For each={declared()}>{(effort) => <option value={effort}>{effort}</option>}</For>
+        <Show when={extra()}>{(effort) => <option value={effort()}>{effort()}</option>}</Show>
+      </select>
+    </Show>
+  )
+}
+
+/**
+ * The model this session asks, and the switch to another one the provider offers.
+ * With nothing open yet it is the route a session opened now would start from, so
+ * the model can be picked before the first message. Which models exist is the
+ * endpoint's to say, so the list is read when the chip is opened and not on every
+ * page load; the pick lands on the next request.
+ */
+const Model = (props: { store: SessionStore }) => {
+  const [open, setOpen] = createSignal(false)
+  let seat: HTMLDivElement | undefined
+
+  /**
+   * What the next request asks: the open session's own route, else the route a
+   * session opened now would be built with.
+   */
+  const current = (): string => {
+    const now = props.store.state()
+    return now.sessionId === '' ? (now.settings?.model ?? '') : (now.run?.model ?? now.info.model)
+  }
+
+  const models = (): ReadonlyArray<string> | undefined => props.store.state().models
+
+  const toggle = (): void => {
+    const next = !open()
+    setOpen(next)
+    if (next && models() === undefined) props.store.askModels()
+  }
+
+  onMount(() => {
+    // A list left open over the composer would sit in the way of typing.
+    const onPointer = (event: MouseEvent): void => {
+      if (!open() || seat?.contains(event.target as Node) === true) return
+      setOpen(false)
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onPointer)
+    document.addEventListener('keydown', onKey)
+    onCleanup(() => {
+      document.removeEventListener('mousedown', onPointer)
+      document.removeEventListener('keydown', onKey)
+    })
+  })
+
+  return (
+    <Show when={current() !== ''}>
+      <div
+        class="seat-model"
+        ref={(node) => {
+          seat = node
+        }}
+      >
+        <button
+          id="seat-model"
+          class="seat-chip"
+          type="button"
+          aria-expanded={open()}
+          title="the model this session asks; pick another one here"
+          onClick={toggle}
+        >
+          {current()}
+        </button>
+        <Show when={open()}>
+          <div
+            id="model-list"
+            class="model-list"
+            role="group"
+            aria-label="the models this provider offers"
+          >
+            <Show when={models()} fallback={<div class="card-hint">reading the models…</div>}>
+              {(routes) => (
+                <>
+                  <For each={routes()}>
+                    {(route) => (
+                      <button
+                        class="model-option"
+                        type="button"
+                        aria-current={route === current()}
+                        data-model={route}
+                        onClick={() => {
+                          props.store.chooseModel(route)
+                          setOpen(false)
+                        }}
+                      >
+                        {route}
+                      </button>
+                    )}
+                  </For>
+                  <div class="card-hint">
+                    {props.store.state().sessionId === ''
+                      ? 'the next session starts from it; the settings sheet keeps it for later runs'
+                      : 'this session and the next ones; the settings sheet keeps it for later runs'}
+                  </div>
+                </>
+              )}
+            </Show>
+          </div>
+        </Show>
+      </div>
+    </Show>
+  )
+}
+
 /** The input, and what sits above it: waiting input and the thing to answer. */
 export const Composer = (props: { store: SessionStore }) => {
   let textarea: HTMLTextAreaElement | undefined
@@ -167,17 +308,8 @@ export const Composer = (props: { store: SessionStore }) => {
         />
         <div class="actions">
           <div id="seat">
-            <Show when={props.store.state().info.model !== ''}>
-              <button
-                id="seat-model"
-                class="seat-chip"
-                type="button"
-                title="the model this run uses"
-                onClick={() => props.store.showPane({ kind: 'settings' })}
-              >
-                {props.store.state().info.model}
-              </button>
-            </Show>
+            <Model store={props.store} />
+            <Effort store={props.store} />
           </div>
           {/* While something waits on the reader, the card's button is the one in amber. */}
           <Button id="send" variant={takeover() ? 'default' : 'primary'} type="submit">

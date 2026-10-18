@@ -40,6 +40,7 @@ describe('base profile', () => {
     expect(llm?.config).toEqual({
       baseUrl: 'http://127.0.0.1:11434/v1',
       apiKeyEnv: 'OLLAMA_API_KEY',
+      reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
     })
     expect(merged.map((row) => row.id)).toEqual(base.plugins.map((row) => row.id))
   })
