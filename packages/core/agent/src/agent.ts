@@ -20,6 +20,20 @@ export interface MakeAgentOptions {
 }
 
 /**
+ * The options as they are with this effort. `''` drops the field, so the
+ * provider chooses; an effort that is already absent keeps the same object.
+ */
+const withEffort = (options: AgentOptions, effort: string): AgentOptions => {
+  const { reasoningEffort: before, ...rest } = options
+  if (effort !== '') return { ...rest, reasoningEffort: effort }
+  return before === undefined ? options : rest
+}
+
+/** The options as they are with this route; the route already asked keeps the same object. */
+const withRoute = (options: AgentOptions, route: string): AgentOptions =>
+  options.route === route ? options : { ...options, route }
+
+/**
  * Builds the agent shell: durable inbox, status, cancellation, and the
  * `whenIdle` wait. Turn execution is the runner's job.
  */
@@ -79,16 +93,31 @@ export function makeAgent(input: MakeAgentOptions): Effect.Effect<Agent> {
         yield* notify()
       })
 
+    // A human may switch the effort or the model while the session runs, so the
+    // options are read through this rather than handed out once: the runner takes
+    // them per request, and the switch lands on the request after it.
+    let current = input.options
+
     return {
       id: input.id,
       session: input.session,
-      options: input.options,
+      get options() {
+        return current
+      },
       inbox,
       scope: input.scope,
       driver,
       get status() {
         return status
       },
+      setEffort: (next) =>
+        Effect.sync(() => {
+          current = withEffort(current, next)
+        }),
+      setRoute: (next) =>
+        Effect.sync(() => {
+          current = withRoute(current, next)
+        }),
       followup: (message) =>
         Effect.gen(function* () {
           yield* queue('next-turn', message)

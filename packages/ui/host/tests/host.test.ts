@@ -19,6 +19,10 @@ interface FakeInput {
   readonly otherAgent: Agent
   readonly submitted: Array<string>
   readonly cancelled: Array<string>
+  /** Every effort a command switched this session to. */
+  readonly efforts: Array<string>
+  /** Every route a command switched this session to. */
+  readonly routes: Array<string>
   append<K extends keyof SessionEventMap>(type: K, data: SessionEventMap[K]): Effect.Effect<void>
 }
 
@@ -26,6 +30,8 @@ const makeInput = (): FakeInput => {
   const hooks = makeHooks()
   const submitted: Array<string> = []
   const cancelled: Array<string> = []
+  const efforts: Array<string> = []
+  const routes: Array<string> = []
   const events: Array<SessionEvent> = []
   const holder: { session?: Session } = {}
   const session = {
@@ -68,6 +74,14 @@ const makeInput = (): FakeInput => {
       Effect.sync(() => {
         cancelled.push(cause)
       }),
+    setEffort: (effort: string) =>
+      Effect.sync(() => {
+        efforts.push(effort)
+      }),
+    setRoute: (route: string) =>
+      Effect.sync(() => {
+        routes.push(route)
+      }),
   } as unknown as Agent
   const otherAgent = { session: otherSession } as unknown as Agent
   return {
@@ -78,6 +92,8 @@ const makeInput = (): FakeInput => {
     otherAgent,
     submitted,
     cancelled,
+    efforts,
+    routes,
     append: (type, data) => session.append(type, data) as Effect.Effect<void>,
   }
 }
@@ -293,5 +309,29 @@ describe('ui host', () => {
         expect([...collected].map((event) => event.kind)).toEqual(['session', 'session'])
       }),
     )
+  })
+
+  test('the effort a UI asks for is switched on the agent behind it', async () => {
+    const input = makeInput()
+    await withHost(input, (host) =>
+      Effect.gen(function* () {
+        yield* host.setEffort('high')
+        // The empty effort is the UI's way of letting the provider choose again.
+        yield* host.setEffort('')
+      }),
+    )
+
+    expect(input.efforts).toEqual(['high', ''])
+  })
+
+  test('the model a UI picks is switched on the agent behind it', async () => {
+    const input = makeInput()
+    await withHost(input, (host) =>
+      Effect.gen(function* () {
+        yield* host.setModel('stub/other')
+      }),
+    )
+
+    expect(input.routes).toEqual(['stub/other'])
   })
 })

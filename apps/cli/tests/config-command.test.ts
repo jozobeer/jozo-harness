@@ -88,6 +88,20 @@ describe('jzh config', () => {
     })
   })
 
+  test('sets the reasoning effort to a word only the endpoint judges', async () => {
+    await withHome(async (env, path) => {
+      const sink = collector()
+
+      const code = await runConfig(['set', 'effort', 'max'], sink.io, env)
+
+      expect(sink.errs.join('')).toBe('')
+      expect(code).toBe(0)
+      expect(readFileSync(path, 'utf8')).toContain('effort: max')
+      const settings = await Effect.runPromise(loadConfigFile(path))
+      expect(settings.effort).toBe('max')
+    })
+  })
+
   test('refuses a key the settings file does not take', async () => {
     await withHome(async (env) => {
       const sink = collector()

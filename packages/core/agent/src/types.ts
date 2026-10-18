@@ -38,12 +38,24 @@ export interface AgentDriver {
 export interface Agent {
   readonly id: SessionId
   readonly session: Session
+  /** What the loop reads as it works: the options as they are now, not as they were created. */
   readonly options: AgentOptions
   readonly inbox: Inbox
   readonly status: AgentStatus
   /** Agent-scoped registrations live until the agent is disposed. */
   readonly scope: Scope.Scope
   readonly driver: AgentDriver
+  /**
+   * Switches the reasoning effort the loop asks the provider for. It lands on
+   * the request after the switch; '' leaves the choice to the provider.
+   */
+  setEffort(effort: string): Effect.Effect<void>
+  /**
+   * Switches the route the loop asks, as `provider/model`. It lands on the
+   * request after the switch, and the session keeps it until it is switched
+   * again.
+   */
+  setRoute(route: string): Effect.Effect<void>
   /** Queues input for a new turn and wakes the runner. */
   followup(message: UserMessage): Effect.Effect<void, SessionError>
   /** Queues input for the next step boundary without waking an idle agent. */
