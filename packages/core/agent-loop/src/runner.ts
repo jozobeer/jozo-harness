@@ -100,6 +100,12 @@ const spillOf = (agent: Agent): SpillOptions => ({
 
 const isToolCall = (block: ContentBlock): block is ToolCall => block.type === 'tool-call'
 
+/** What the model reads for a call no result ever reached the log. */
+const interruptedText = (name: string, started: boolean): string =>
+  started
+    ? `tool ${name} did not finish: its outcome is unknown. Do not retry blindly; retry only a read-only or idempotent call, and verify external state before retrying one with side effects.`
+    : `tool ${name} did not start; retry it if it is still needed.`
+
 const splitRoute = (route: string): { readonly provider: string; readonly model: string } => {
   const index = route.indexOf('/')
   return index < 0
@@ -110,16 +116,68 @@ const splitRoute = (route: string): { readonly provider: string; readonly model:
 const countEvents = (session: Session, type: 'turn/start' | 'step/start'): number =>
   session.events().filter((event) => event.type === type).length
 
-/** The calls the log holds with no result: the run that made them is gone. */
-const openCalls = (
-  events: ReadonlyArray<SessionEvent>,
-): ReadonlyArray<{ readonly callId: string; readonly name: string }> => {
-  const open = new Map<string, string>()
+/** A call the log holds with no result: the run that made it is gone. */
+interface OpenCall {
+  readonly callId: string
+  readonly name: string
+  /** Whether the log records the call leaving for the tool: its outcome is then unknown. */
+  readonly started: boolean
+}
+
+/**
+ * The calls the log holds with no result: the run that made them is gone. A call
+ * the model requested but the pipeline never recorded dispatching has not
+ * started; one with a `tool/call` may already have run, so its outcome is unknown.
+ */
+const openCalls = (events: ReadonlyArray<SessionEvent>): ReadonlyArray<OpenCall> => {
+  const open = new Map<string, OpenCall>()
   for (const event of events) {
-    if (event.type === 'tool/call') open.set(event.data.callId, event.data.name)
-    if (event.type === 'tool/result') open.delete(event.data.callId)
+    switch (event.type) {
+      case 'assistant/message':
+        for (const call of event.data.content.filter(isToolCall)) {
+          open.set(call.id, { callId: call.id, name: call.name, started: false })
+        }
+        break
+      case 'tool/call':
+        open.set(event.data.callId, {
+          callId: event.data.callId,
+          name: event.data.name,
+          started: true,
+        })
+        break
+      case 'tool/result':
+        open.delete(event.data.callId)
+        break
+    }
   }
-  return [...open.entries()].map(([callId, name]) => ({ callId, name }))
+  return [...open.values()]
+}
+
+/** The newest turn and step the log opened and never closed. */
+const openBoundary = (
+  events: ReadonlyArray<SessionEvent>,
+): { readonly turn: number | undefined; readonly step: number | undefined } => {
+  let turn: number | undefined
+  let step: number | undefined
+  for (const event of events) {
+    switch (event.type) {
+      case 'turn/start':
+        turn = event.data.turn
+        step = undefined
+        break
+      case 'turn/end':
+        turn = undefined
+        step = undefined
+        break
+      case 'step/start':
+        step = event.data.step
+        break
+      case 'step/end':
+        step = undefined
+        break
+    }
+  }
+  return { turn, step }
 }
 
 const recordedTurnEnd = (session: Session, turn: number): boolean =>
@@ -464,33 +522,44 @@ const agentLoopEffect = (
     }
 
     /** What a call gets when the run that made it never finished it. */
-    const didNotFinish = (agent: Agent, callId: string, name: string): Effect.Effect<void> =>
+    const didNotFinish = (
+      agent: Agent,
+      callId: string,
+      name: string,
+      started: boolean,
+    ): Effect.Effect<void> =>
       append(agent, 'tool/result', {
         callId,
         isError: true,
-        content: [{ type: 'text' as const, text: `tool ${name} did not finish` }],
+        content: [{ type: 'text' as const, text: interruptedText(name, started) }],
       }).pipe(Effect.catchCause(() => Effect.void))
 
     const failPending = (
       agent: Agent,
       pending: ReadonlyMap<string, ToolCall>,
     ): Effect.Effect<void> =>
-      Effect.forEach([...pending.values()], (call) => didNotFinish(agent, call.id, call.name), {
-        discard: true,
-      })
-
-    /**
-     * The log a run resumes from can hold a call with no result: a process killed
-     * between the call and its answer, or a question the reader never answered. A
-     * turn that asks with that history asks the model about a call it never got an
-     * answer for, so those calls are written down as unfinished before it does.
-     */
-    const closeOpenCalls = (agent: Agent): Effect.Effect<void> =>
       Effect.forEach(
-        openCalls(agent.session.events()),
-        (call) => didNotFinish(agent, call.callId, call.name),
+        [...pending.values()],
+        (call) => didNotFinish(agent, call.id, call.name, true),
         { discard: true },
       )
+
+    /**
+     * The log a run resumes from can end inside a turn: a process killed between a
+     * call and its answer, or a question the reader never answered. The next turn
+     * writes down what did not finish, closes the step and turn the dead run left
+     * open, and so keeps turn numbering and history balanced before it asks again.
+     */
+    const repairInterruptedRun = (agent: Agent): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const { turn, step } = openBoundary(agent.session.events())
+        for (const call of openCalls(agent.session.events())) {
+          yield* didNotFinish(agent, call.callId, call.name, call.started)
+        }
+        if (turn === undefined) return
+        if (step !== undefined) yield* append(agent, 'step/end', { step })
+        yield* append(agent, 'turn/end', { turn, reason: { kind: 'interrupted' } })
+      })
 
     const executeCalls = (agent: Agent, calls: ReadonlyArray<ToolCall>): Effect.Effect<void> =>
       Effect.gen(function* () {
@@ -554,7 +623,7 @@ const agentLoopEffect = (
     const runTurn = (agent: Agent): Effect.Effect<void> => {
       const turn = countEvents(agent.session, 'turn/start') + 1
       const program = Effect.gen(function* () {
-        yield* closeOpenCalls(agent)
+        yield* repairInterruptedRun(agent)
         yield* append(agent, 'turn/start', { turn })
         const claimed = yield* agent.inbox.claim(true).pipe(Effect.orDie)
         const decision = yield* hooks.waterfall('agent/pre-step', { agent, messages: claimed })
