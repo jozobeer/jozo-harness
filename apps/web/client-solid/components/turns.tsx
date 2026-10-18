@@ -1,7 +1,13 @@
 import { For, Index, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import { plainText, summaryBodyOf } from '@jozo-harness/ui-view'
 import { renderMarkdown } from '../../src/ui/markdown.ts'
-import { toolsOf, type TraceStep, type TraceTool, type TraceTurn } from '../../src/ui/trace.ts'
+import {
+  toolsOf,
+  type TraceImage,
+  type TraceStep,
+  type TraceTool,
+  type TraceTurn,
+} from '../../src/ui/trace.ts'
 import { spanOf } from '../edits.ts'
 import { justFinished, pourFrom } from '../pour.ts'
 import type { SessionStore } from '../store.ts'
@@ -38,6 +44,43 @@ const createNow = () => {
   return now
 }
 
+/** A data URL for one image block, so the card draws it without another request. */
+const imageUrl = (image: TraceImage): string => 'data:' + image.mediaType + ';base64,' + image.data
+
+/** How many bytes a base64 string stands for. */
+const imageBytes = (data: string): number => {
+  const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0
+  return Math.floor((data.length * 3) / 4) - padding
+}
+
+const imageSize = (width: number, height: number): string =>
+  String(width) + '×' + String(height) + 'px'
+
+/** One image result: the picture, then the path, pixels, and bytes it was recorded at. */
+const ToolImage = (props: { image: TraceImage }) => {
+  const [size, setSize] = createSignal('')
+  return (
+    <figure class="tool-image">
+      <img
+        src={imageUrl(props.image)}
+        alt={props.image.name}
+        loading="lazy"
+        decoding="async"
+        onLoad={(event) =>
+          setSize(imageSize(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight))
+        }
+      />
+      <figcaption class="tool-image-meta">
+        <span class="tool-image-path">{props.image.name}</span>
+        <Show when={size() !== ''}>
+          <span class="tool-image-size">{size()}</span>
+        </Show>
+        <span class="tool-image-bytes">{String(imageBytes(props.image.data)) + ' B'}</span>
+      </figcaption>
+    </figure>
+  )
+}
+
 const Tool = (props: { tool: TraceTool }) => (
   <details class={'tool-card ' + props.tool.status} open={props.tool.status === 'error'}>
     <summary class="tool-line">
@@ -51,6 +94,7 @@ const Tool = (props: { tool: TraceTool }) => (
     <Show when={props.tool.output !== ''}>
       <pre class="tool-output">{plainText(props.tool.output)}</pre>
     </Show>
+    <For each={props.tool.images}>{(image) => <ToolImage image={image} />}</For>
   </details>
 )
 

@@ -412,6 +412,46 @@ describe('the Solid page', () => {
     expect(card?.open).toBe(false)
   })
 
+  test('a read_image result draws the image, its path, bytes, and loaded size', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const { store } = makeStore({
+      conversation: { ...emptyConversation, blocks: [{ kind: 'user', text: 'show it' }] },
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'step/start', { step: 1 }),
+        at(3, 'tool/call', {
+          callId: 'i1',
+          name: 'read_image',
+          arguments: '{"path":"/tmp/a.png"}',
+          summary: '',
+        }),
+        at(4, 'tool/result', {
+          callId: 'i1',
+          isError: false,
+          summary: '',
+          content: [
+            { type: 'image', mediaType: 'image/png', data: 'iVBORw0KGgo=', name: '/tmp/a.png' },
+          ],
+        }),
+        at(5, 'step/end', { step: 1 }),
+        at(6, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      ]),
+    })
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    const image = container.querySelector('.tool-image img') as HTMLImageElement | null
+    expect(image?.getAttribute('src')).toBe('data:image/png;base64,iVBORw0KGgo=')
+    expect(image?.getAttribute('loading')).toBe('lazy')
+    expect(container.querySelector('.tool-image-meta')?.textContent).toBe('/tmp/a.png8 B')
+
+    Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 40 })
+    Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 20 })
+    image?.dispatchEvent(new Event('load'))
+
+    expect(container.querySelector('.tool-image-size')?.textContent).toBe('40×20px')
+  })
+
   test('an approval answers through the store, from the buttons and from y / n', () => {
     const { store, calls } = makeStore({
       conversation: {
