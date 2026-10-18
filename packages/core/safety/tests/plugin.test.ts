@@ -2,6 +2,7 @@ import { kernelPlugin, loadProfile } from '@jozo-harness/kernel'
 import { systemPromptPlugin } from '@jozo-harness/system-prompt'
 import { Context, Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
+import { SystemPrompt } from '@jozo-harness/system-prompt'
 import { Policy, Sandbox, safetyPlugin, sandboxLayerFor } from '../src/index.ts'
 
 const build = (config: unknown) =>
@@ -29,6 +30,34 @@ const build = (config: unknown) =>
   )
 
 describe('safetyPlugin', () => {
+  test('the permission facts say what they mean for a call', async () => {
+    const text = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const layer = yield* loadProfile({
+            plugins: [kernelPlugin, systemPromptPlugin, safetyPlugin],
+            layers: [
+              [
+                { id: 'kernel', name: '@jozo-harness/kernel', config: {} },
+                { id: 'system-prompt', name: '@jozo-harness/system-prompt', config: {} },
+                {
+                  id: 'safety',
+                  name: '@jozo-harness/safety',
+                  config: { preset: 'workspace-write', sandbox: 'none' },
+                },
+              ],
+            ],
+          })
+          const context = yield* Layer.build(layer)
+          return yield* Context.get(context, SystemPrompt).runtimeContext({ cwd: '/work' })
+        }),
+      ),
+    )
+
+    expect(text).toContain('approval: workspace-write (')
+    expect(text).toContain('sandbox: none (')
+  })
+
   test('the preset names the mode commands run under', async () => {
     const observed = await Effect.runPromise(build({ preset: 'read-only' }))
 

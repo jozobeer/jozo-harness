@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 import { Effect } from 'effect'
 import {
   RUNTIME_CONTEXT_HEADER,
+  RUNTIME_CONTEXT_SUPERSEDES,
   SystemPrompt,
   makeSystemPrompt,
   systemPromptLayer,
@@ -29,7 +30,15 @@ describe('runtimeContext', () => {
       { name: 'blank', order: 4, text: () => Effect.succeed('') },
     ])
 
-    expect(text).toBe(RUNTIME_CONTEXT_HEADER + '\n- a: 1\n- b: 2')
+    expect(text).toBe(
+      RUNTIME_CONTEXT_HEADER + '\n' + RUNTIME_CONTEXT_SUPERSEDES + '\n- a: 1\n- b: 2',
+    )
+  })
+
+  test('the snapshot says it supersedes the earlier ones', async () => {
+    const text = await render([{ name: 'a', order: 1, text: () => Effect.succeed('a: 1') }])
+
+    expect(text).toBe(RUNTIME_CONTEXT_HEADER + '\n' + RUNTIME_CONTEXT_SUPERSEDES + '\n- a: 1')
   })
 
   test('a fact reads the subject of the assembly', async () => {
@@ -82,7 +91,11 @@ describe('built-in runtime facts', () => {
       }).pipe(Effect.provide(systemPromptLayer)),
     )
 
-    expect(text.startsWith(RUNTIME_CONTEXT_HEADER + '\n- cwd: /work\n- time: ')).toBe(true)
+    expect(
+      text.startsWith(
+        RUNTIME_CONTEXT_HEADER + '\n' + RUNTIME_CONTEXT_SUPERSEDES + '\n- cwd: /work\n- time: ',
+      ),
+    ).toBe(true)
     expect(text).toMatch(/- time: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z/)
   })
 

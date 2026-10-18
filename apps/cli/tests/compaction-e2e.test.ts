@@ -456,11 +456,14 @@ describe('compaction through the command', () => {
     })
 
     // The second request carries enough input of its own to cross the line: the
-    // system frame is recorded once and no longer pads every turn.
+    // system frame is recorded once and no longer pads every turn. Measured, the
+    // first request is 169 tokens and the second 206, so a 240-token window puts
+    // the line at 192 between them: the first turn is sent as it is, the second
+    // folds the old span once.
     const { sent, opened } = await runTasks(
       root,
       [first, 'the second thing the model was told '.repeat(4)],
-      'retainTokens: 1\nmaxBytes: 10\ncontextWindow: 120\nheadroomTokens: 0',
+      'retainTokens: 1\nmaxBytes: 10\ncontextWindow: 240\nheadroomTokens: 0',
       summaryLlm,
     )
 
