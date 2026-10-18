@@ -34,3 +34,14 @@ export const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim(
 /** Shortens to `max` code units, marking the cut with an ellipsis. */
 export const truncate = (text: string, max: number): string =>
   text.length <= max ? text : text.slice(0, Math.max(0, max - 1)) + '…'
+
+/**
+ * The part of a recorded summary after the tool name. A presenter writes a
+ * self-contained line, but a view that shows the name in its own column would
+ * repeat it. A line that does not begin with the name is left alone.
+ */
+export const summaryBodyOf = (name: string, summary: string): string => {
+  if (name === '') return summary
+  if (summary === name) return ''
+  return summary.startsWith(name + ' ') ? summary.slice(name.length + 1) : summary
+}

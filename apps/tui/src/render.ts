@@ -1,5 +1,6 @@
 import {
   plainText,
+  summaryBodyOf,
   type Conversation,
   type ConversationBlock,
   type NoticeLevel,
@@ -65,7 +66,7 @@ const toolLines = (
   width: number,
 ): ReadonlyArray<DisplayLine> => {
   const head: DisplayLine = {
-    text: clipText('⏺ ' + block.name + ' ' + block.summary, width),
+    text: clipText('⏺ ' + block.name + ' ' + summaryBodyOf(block.name, block.summary), width),
     tone: block.status === 'error' ? 'error' : 'tool',
   }
   if (block.result === '') return [head]
