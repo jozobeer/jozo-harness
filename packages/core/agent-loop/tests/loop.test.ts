@@ -253,6 +253,50 @@ describe('agent loop', () => {
     expect(reason(events)).toEqual([{ kind: 'completed' }])
   })
 
+  test('hands tools the image capability the route declared', async () => {
+    const seen: Array<string | undefined> = []
+    const probe: ToolDefinition<{}, { readonly carried: boolean }> = {
+      name: 'image_capability',
+      description: 'Probe',
+      parameters: Schema.Struct({}),
+      output: {
+        schema: Schema.Struct({ carried: Schema.Boolean }),
+        render: (_args, value) => [{ type: 'text', text: String(value.carried) }],
+      },
+      execute: (_args, context) => {
+        seen.push(context.images)
+        return Effect.succeed({ carried: context.images === 'base64' })
+      },
+    }
+    const events = await scenario(
+      [
+        chunks([
+          {
+            type: 'block-end',
+            index: 0,
+            block: { type: 'tool-call', id: 'c1', name: 'image_capability', arguments: '{}' },
+          },
+          { type: 'finish', kind: 'tool-calls' },
+        ]),
+        chunks(textTurn('done')),
+      ],
+      (ctx) =>
+        Effect.gen(function* () {
+          yield* ctx.tools.register(probe)
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+    )
+
+    expect(seen).toEqual(['none'])
+    const results = events.session
+      .events()
+      .flatMap((event) => (event.type === 'tool/result' ? [event.data.content] : []))
+    expect(results).toEqual([[{ type: 'text', text: 'false' }]])
+  })
+
   test('input queued while a tool runs joins the next step', async () => {
     const note = crypto.randomUUID()
     const events = await scenario(

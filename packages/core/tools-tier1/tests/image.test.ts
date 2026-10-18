@@ -22,17 +22,18 @@ const call = (
   tool: ToolDefinition<any, any>,
   args: unknown,
   cwd: string,
+  context: { readonly images?: 'base64' | 'none' } = {},
 ): Effect.Effect<ToolExecutionResult | undefined, ToolError, never> =>
   Effect.scoped(
     Effect.gen(function* () {
-      const context = yield* Layer.build(Layer.provideMerge(toolsLayer, HooksLive))
-      const tools = Context.get(context, Tools)
+      const layerContext = yield* Layer.build(Layer.provideMerge(toolsLayer, HooksLive))
+      const tools = Context.get(layerContext, Tools)
       yield* tools.register(tool)
       return yield* tools.call({
         callId: 'c1',
         tool: tool.name,
         arguments: JSON.stringify(args),
-        context: { sessionId: 's1', cwd, callId: 'c1' },
+        context: { sessionId: 's1', cwd, callId: 'c1', ...context },
       })
     }),
   )
@@ -51,6 +52,20 @@ describe('read_image tool', () => {
     expect(block?.type === 'image' ? block.mediaType : '').toBe('image/png')
     expect(block?.type === 'image' ? block.data.length : 0).toBeGreaterThan(0)
     expect(result?.value).toMatchObject({ mediaType: 'image/png', bytes: 8 })
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('refuses when the route cannot carry images', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-image-'))
+    const bytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
+    await writeFileDeep(join(dir, 'tiny.png'), bytes)
+
+    const result = await Effect.runPromise(
+      call(readImageTool, { path: 'tiny.png' }, dir, { images: 'none' }),
+    )
+
+    expect(result?.isError).toBe(true)
+    expect(JSON.stringify(result?.content)).toContain('cannot carry images')
     await rm(dir, { recursive: true, force: true })
   })
 
