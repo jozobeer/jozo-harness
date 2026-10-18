@@ -534,6 +534,31 @@ const opensNothingByItself = async (client: Cdp): Promise<void> => {
 }
 
 /**
+ * The composer's two actions are icon squares. A word button's padding once won
+ * over the square's and squeezed the glyph to no width at all.
+ */
+const checksTheComposerIcons = async (client: Cdp): Promise<void> => {
+  const measured = await client.evaluate(
+    "(() => ['send', 'cancel'].map((id) => { const button = document.getElementById(id); const glyph = button === null ? null : button.querySelector('svg'); if (button === null || glyph === null) return id + ' missing'; const box = button.getBoundingClientRect(); const icon = glyph.getBoundingClientRect(); return [id, Math.round(box.width), Math.round(box.height), Math.round(icon.width), Math.round(icon.height)].join(' ') }).join(', '))()",
+  )
+  for (const row of String(measured).split(', ')) {
+    const [id, ...sizes] = row.split(' ')
+    const [buttonWidth, buttonHeight, glyphWidth, glyphHeight] = sizes.map(Number)
+    if (buttonWidth !== 28 || buttonHeight !== 28) {
+      throw new Error('the ' + String(id) + ' action is not a square: ' + row)
+    }
+    if (
+      glyphWidth === undefined ||
+      glyphHeight === undefined ||
+      glyphWidth < 12 ||
+      glyphHeight < 12
+    ) {
+      throw new Error('an icon has no room inside its square: ' + row)
+    }
+  }
+}
+
+/**
  * Chooses another effort from the composer's seat and checks the provider was
  * sent it: the seat is where the reader changes it, the wire is where it lands,
  * and the model keeps the chip it had.
@@ -856,6 +881,7 @@ const driveBrowser = async (url: string, profileDir: string): Promise<BrowserOut
       throw new Error('the page never reported ready: ' + shown.slice(0, 400))
     }
     await opensNothingByItself(client)
+    await checksTheComposerIcons(client)
     const answer = await answersTheApproval(client, read)
     await keepsTheSocketWhileQuiet(client)
     await readsTheRun(read)

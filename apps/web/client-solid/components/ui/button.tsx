@@ -33,9 +33,11 @@ export const Button = (props: ButtonProps) => {
     <button
       {...rest}
       class={[
-        'inline-flex cursor-pointer items-center gap-2 rounded-[6px] border px-[14px] py-[7px] text-[13px] leading-none font-medium transition-colors',
+        'inline-flex cursor-pointer items-center gap-2 rounded-[6px] border text-[13px] leading-none font-medium transition-colors',
         VARIANTS[local.variant ?? 'default'],
-        local.size === 'icon' ? 'btn-icon' : '',
+        // The sheet gives an icon square its padding; a padding utility would win
+        // over that rule and leave no room for the glyph.
+        local.size === 'icon' ? 'btn-icon' : 'px-[14px] py-[7px]',
         local.class ?? '',
       ].join(' ')}
     />

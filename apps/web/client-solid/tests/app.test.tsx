@@ -522,6 +522,21 @@ describe('the Solid page', () => {
     expect(running.calls).toContainEqual({ kind: 'command', command: { kind: 'cancel' } })
   })
 
+  test('the composer keeps the word padding off its icon squares', () => {
+    const { store } = makeStore()
+
+    const { container } = render(() => <Composer store={store} />)
+
+    for (const id of ['send', 'cancel']) {
+      const button = container.querySelector('#' + id) as HTMLButtonElement
+      expect(button.className).toContain('btn-icon')
+      // The word button's padding is 28px wide together; inside a 28px square it
+      // leaves no room for the glyph, so the icon size must not carry it.
+      expect(button.className).not.toContain('px-[14px]')
+      expect(button.className).not.toContain('py-[7px]')
+    }
+  })
+
   test('the send action gives up primary while a card waits on the reader', () => {
     const plain = makeStore()
     const idle = render(() => <Composer store={plain.store} />)
