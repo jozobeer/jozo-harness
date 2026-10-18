@@ -155,6 +155,42 @@ describe('call pipeline', () => {
     expect(executed).toBe(0)
   })
 
+  test('an argument error names the parameter that is missing', async () => {
+    const tools = makeTools(makeHooks())
+
+    const outcome = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* tools.register(echo)
+          return yield* tools.call(request(JSON.stringify({ txt: 'hi' })))
+        }),
+      ),
+    )
+
+    const text = (outcome.content[0] as { readonly text: string }).text
+    expect(outcome.isError).toBe(true)
+    expect(text).toContain('received arguments that do not match its parameters')
+    expect(text).toContain('"text"')
+  })
+
+  test('an argument error names the parameter whose type is wrong', async () => {
+    const tools = makeTools(makeHooks())
+
+    const outcome = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* tools.register(echo)
+          return yield* tools.call(request(JSON.stringify({ text: 42 })))
+        }),
+      ),
+    )
+
+    const text = (outcome.content[0] as { readonly text: string }).text
+    expect(outcome.isError).toBe(true)
+    expect(text).toContain('"text"')
+    expect(text).toContain('Expected string')
+  })
+
   test('a defect in execute becomes an error outcome', async () => {
     const tools = makeTools(makeHooks())
     const broken: EchoTool = {

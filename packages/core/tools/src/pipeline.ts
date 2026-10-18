@@ -1,5 +1,5 @@
 import type { HookRegistry } from '@jozo-harness/kernel'
-import { Cause, Effect, Option, Schema, Duration } from 'effect'
+import { Cause, Effect, Option, Schema, SchemaIssue, Duration } from 'effect'
 import {
   ToolError,
   type PreExecuteDecision,
@@ -23,11 +23,26 @@ const describeCause = (cause: Cause.Cause<unknown>): string => {
   return first?.message ?? 'tool execution failed'
 }
 
+const formatViolations = SchemaIssue.makeFormatterStandardSchemaV1()
+
+/** Names each parameter that failed, so a model can correct the call in one step. */
+const describeViolations = (issue: SchemaIssue.Issue): string =>
+  formatViolations(issue)
+    .issues.map((violation) =>
+      violation.path === undefined || violation.path.length === 0
+        ? violation.message
+        : `${violation.message} at ${JSON.stringify(violation.path)}`,
+    )
+    .join('; ')
+
 /** Decodes raw argument JSON without running an Effect, for views and concurrency checks. */
-const invalidArguments = (tool: AnyTool): ToolError =>
+const invalidArguments = (tool: AnyTool, detail?: string): ToolError =>
   new ToolError({
     code: 'invalid-arguments',
-    message: `${tool.name} received arguments that do not match its parameters`,
+    message:
+      detail === undefined
+        ? `${tool.name} received arguments that do not match its parameters`
+        : `${tool.name} received arguments that do not match its parameters: ${detail}`,
   })
 
 const parseArguments = (tool: AnyTool, raw: string): Effect.Effect<unknown, ToolError> =>
@@ -37,7 +52,9 @@ const parseArguments = (tool: AnyTool, raw: string): Effect.Effect<unknown, Tool
       catch: () => invalidArguments(tool),
     })
     return yield* Schema.decodeUnknownEffect(tool.parameters)(input).pipe(
-      Effect.mapError(() => invalidArguments(tool)),
+      Effect.mapError((error: Schema.SchemaError) =>
+        invalidArguments(tool, describeViolations(error.issue)),
+      ),
     ) as Effect.Effect<unknown, ToolError, never>
   })
 
