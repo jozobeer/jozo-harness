@@ -795,8 +795,9 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
     // An active goal keeps going by itself: at the end of a turn of this agent, the
     // next round is queued before the turn closes, so the run cannot go idle in between.
     if (hasRow(wiring.rows, '@jozo-harness/tools-tier1')) {
+      const agents = Context.get(wiring.context, Agents)
       yield* wiring.hooks.on('agent/turn-stopping', (ending: Agent) =>
-        ending === wiring.agent ? startGoalRound(ending) : Effect.void,
+        ending === wiring.agent ? startGoalRound(ending, agents) : Effect.void,
       )
       // Standing schedules keep their own clock; one that came due while the
       // session was away fires as soon as this run starts.
