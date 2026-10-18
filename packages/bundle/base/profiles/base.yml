@@ -29,6 +29,8 @@ plugins:
     config:
       baseUrl: https://ollama.com/v1
       apiKeyEnv: OLLAMA_API_KEY
+      # The effort words this endpoint takes; the UI offers them as the choices.
+      reasoningEfforts: [low, medium, high, xhigh, max]
   - id: agent
     name: '@jozo-harness/agent'
   - id: agent-loop

@@ -114,10 +114,12 @@ import {
   pageIsThere,
   serveWeb,
   type JobDetailView,
+  type OpenSession,
   type RunStateView,
   type SessionFactory,
   type SettingsPort,
 } from '@jozo-harness/web'
+import { Llm } from '@jozo-harness/llm'
 import { Cause, Context, Effect, Layer, Scope, Stream } from 'effect'
 import {
   EFFORT_KEY,
@@ -720,18 +722,39 @@ const ownsTheScreen = (work: Work): boolean => work.kind === 'tui' || work.kind 
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
 
+/**
+ * What the sessions this run opens from now on start with. A page picks the
+ * model for them; the log of a session already open keeps the model it began
+ * with, because its route was fixed when its agent was built.
+ */
+interface RunChoice {
+  route: string
+}
+
+/** What a page reads about the run behind it, which is known before any session is. */
+interface RunFacts {
+  readonly rows: ReadonlyArray<PluginRow>
+  /** The effort a session this run opens starts from. */
+  readonly effort: string
+}
+
 /** What a page may read and change about this run: the settings file, and the provider's list. */
-const settingsPortOf = (options: CommandOptions, runtime: SessionRuntime): SettingsPort => ({
+const settingsPortOf = (
+  options: CommandOptions,
+  facts: RunFacts,
+  choice: RunChoice,
+): SettingsPort => ({
   read: () =>
     Effect.succeed({
-      model: runtime.route,
-      effort: runtime.effort,
+      // The model a session opened now would ask, which is the choice a page made.
+      model: choice.route,
+      effort: facts.effort,
       settingsPath: options.settingsPath ?? '',
       cwd: options.cwd,
-      sessionRoot: sessionRootOf(runtime.rows),
+      sessionRoot: sessionRootOf(facts.rows),
     }),
   models: () => {
-    const endpoint = modelEndpointOf(runtime.rows)
+    const endpoint = modelEndpointOf(facts.rows)
     return endpoint === undefined
       ? Effect.fail(new WebError({ message: 'this profile has no model list to ask for' }))
       : listModels(endpoint, process.env).pipe(
@@ -739,29 +762,42 @@ const settingsPortOf = (options: CommandOptions, runtime: SessionRuntime): Setti
         )
   },
   // The writer is the one `jzh config set` uses, so both paths write the same file the same way.
-  setModel: (model) =>
-    Effect.tryPromise({
-      try: async () => {
-        let said = ''
-        const code = await runConfig(['set', 'model', model], {
-          stdout: () => undefined,
-          stderr: (text) => {
-            said += text
+  setModel: (model, remember) =>
+    (remember
+      ? Effect.tryPromise({
+          try: async () => {
+            let said = ''
+            const code = await runConfig(['set', 'model', model], {
+              stdout: () => undefined,
+              stderr: (text) => {
+                said += text
+              },
+            })
+            if (code !== 0) {
+              throw new Error(
+                said.trim() === '' ? 'the settings file refused the model' : said.trim(),
+              )
+            }
           },
+          catch: (cause) => new WebError({ message: messageOf(cause) }),
         })
-        if (code !== 0) {
-          throw new Error(said.trim() === '' ? 'the settings file refused the model' : said.trim())
-        }
-      },
-      catch: (cause) => new WebError({ message: messageOf(cause) }),
-    }),
+      : Effect.void
+    ).pipe(
+      // Remembered either way, so the sessions this run opens from now on start from
+      // it; written only when the page asked, so the runs after this one do too.
+      Effect.tap(() =>
+        Effect.sync(() => {
+          choice.route = model
+        }),
+      ),
+    ),
 })
 
 /** Opens one more session for a UI that outlives its first: the same wiring, a new scope. */
 const sessionFactoryOf = (
   options: CommandOptions,
   rows: ReadonlyArray<PluginRow>,
-  route: string,
+  choice: RunChoice,
   effort: string,
   spillBytes: number | undefined,
   layer: Layer.Layer<any, PluginError, never>,
@@ -771,7 +807,17 @@ const sessionFactoryOf = (
     listSessions().pipe(Effect.mapError((error) => new WebError({ message: messageOf(error) }))),
   open: (id) =>
     Effect.gen(function* () {
-      const built = yield* buildSession(options, rows, route, effort, spillBytes, layer, true, id)
+      // The choice is read per open: a page may have picked another model since.
+      const built = yield* buildSession(
+        options,
+        rows,
+        choice.route,
+        effort,
+        spillBytes,
+        layer,
+        true,
+        id,
+      )
       if (built.kind === 'refused') {
         return yield* Effect.fail(new WebError({ message: built.message }))
       }
@@ -784,7 +830,7 @@ const sessionFactoryOf = (
       return {
         summary: summaryOf(agent),
         host: ui,
-        runState: () => runStateOf(agent, built.runtime.jobs),
+        runState: () => runStateOf(agent, built.runtime.jobs, built.runtime.efforts),
         jobOutput: (jobId: string) => jobDetailOf(built.runtime.jobs, jobId),
         stopJob: (jobId: string) => stopJobOf(built.runtime.jobs, jobId),
       }
@@ -798,45 +844,74 @@ const sessionFactoryOf = (
 /** Where the built browser app sits: this tree's client bundle, beside the CLI. */
 const defaultStaticRoot = fileURLToPath(new URL('../../web/dist/', import.meta.url))
 
-/** Starts the browser UI; it runs until interrupted. */
+/**
+ * The store a page's rail lists from, read without opening a session: the
+ * profile's own session store, which the layer provides.
+ */
+const sessionListerOf = (
+  layer: Layer.Layer<any, PluginError, never>,
+): Effect.Effect<SessionRuntime['listSessions'], PluginError, Scope.Scope> =>
+  Effect.gen(function* () {
+    const context = yield* Layer.build(layer)
+    const sessions = Context.get(context, Sessions)
+    return () => sessions.list()
+  })
+
+/**
+ * Starts the browser UI; it runs until interrupted. A plain run opens no
+ * session: looking at the page is not a request for one, so the first is built
+ * when the human starts working (`open` with no id). `--resume` does ask for
+ * one, and that session is the one the page opens.
+ */
 const serveWebUi = (
   options: CommandOptions,
-  ui: UiHost,
-  runtime: SessionRuntime,
+  rows: ReadonlyArray<PluginRow>,
+  route: string,
+  effort: string,
+  spillBytes: number | undefined,
+  layer: Layer.Layer<any, PluginError, never>,
   work: Extract<Work, { kind: 'web' }>,
-): Effect.Effect<number> =>
+  /** The session the page opens first, when the command named one to resume. */
+  initial: OpenSession | undefined,
+): Effect.Effect<number, PluginError> =>
   Effect.gen(function* () {
     const staticRoot = work.staticRoot ?? defaultStaticRoot
     if (!(yield* Effect.promise(() => pageIsThere(staticRoot)))) {
       options.stderr('jzh web: the browser app is not built: run pnpm run build:web\n')
       return 1
     }
-    return yield* serveWeb({
-      initial: {
-        summary: summaryOf(runtime.agent),
-        host: ui,
-        runState: () => runStateOf(runtime.agent, runtime.jobs),
-        jobOutput: (jobId: string) => jobDetailOf(runtime.jobs, jobId),
-        stopJob: (jobId: string) => stopJobOf(runtime.jobs, jobId),
-      },
-      factory: sessionFactoryOf(
-        options,
-        runtime.rows,
-        runtime.route,
-        runtime.effort,
-        runtime.spillBytes,
-        runtime.layer,
-        runtime.listSessions,
-      ),
-      settings: settingsPortOf(options, runtime),
-      port: work.port,
-      staticRoot,
-      onReady: (url) => {
-        options.stderr('jzh web: ' + url + '\n')
-      },
-      ...(options.interrupt === undefined ? {} : { interrupt: options.interrupt }),
-    })
+    const choice: RunChoice = { route }
+    // The store the rail lists from lives as long as the server it serves.
+    return yield* Effect.scoped(
+      Effect.gen(function* () {
+        const listSessions = yield* sessionListerOf(layer)
+        return yield* serveWeb({
+          ...(initial === undefined ? {} : { initial }),
+          factory: sessionFactoryOf(options, rows, choice, effort, spillBytes, layer, listSessions),
+          settings: settingsPortOf(options, { rows, effort }, choice),
+          port: work.port,
+          staticRoot,
+          onReady: (url) => {
+            options.stderr('jzh web: ' + url + '\n')
+          },
+          ...(options.interrupt === undefined ? {} : { interrupt: options.interrupt }),
+        })
+      }),
+    )
   })
+
+/** One built session as the page sees it; undefined when it was built without a UI. */
+const openSessionOf = (runtime: SessionRuntime): OpenSession | undefined => {
+  const { agent, ui, jobs, efforts } = runtime
+  if (ui === undefined) return undefined
+  return {
+    summary: summaryOf(agent),
+    host: ui,
+    runState: () => runStateOf(agent, jobs, efforts),
+    jobOutput: (jobId: string) => jobDetailOf(jobs, jobId),
+    stopJob: (jobId: string) => stopJobOf(jobs, jobId),
+  }
+}
 
 /** The UI a work kind asks for, when the caller supplied one. */
 const serveUi = (
@@ -852,7 +927,6 @@ const serveUi = (
       ...(options.interrupt === undefined ? {} : { interrupt: options.interrupt }),
     })
   }
-  if (work.kind === 'web') return serveWebUi(options, ui, runtime, work)
   return undefined
 }
 
@@ -877,6 +951,8 @@ interface SessionRuntime {
   readonly rows: ReadonlyArray<PluginRow>
   readonly route: string
   readonly effort: string
+  /** The effort words the provider takes, as a page offers them; empty declares none. */
+  readonly efforts: ReadonlyArray<string>
   readonly spillBytes: number | undefined
   readonly layer: Layer.Layer<any, PluginError, never>
 }
@@ -903,10 +979,20 @@ const stopJobOf = (jobs: JobsShape, id: string): Effect.Effect<void, WebError> =
   jobs.kill(id).pipe(Effect.mapError((error) => new WebError({ message: messageOf(error) })))
 
 /** What the session can say about itself right now: its goal, its schedules, its background work. */
-const runStateOf = (agent: Agent, jobs: JobsShape): RunStateView => {
+const runStateOf = (
+  agent: Agent,
+  jobs: JobsShape,
+  /** The effort words the provider takes, which a page offers as the choices. */
+  efforts: ReadonlyArray<string>,
+): RunStateView => {
   const events = agent.session.events()
   const goal = currentGoal(events)
   return {
+    // A page may switch the model or the effort while the session runs, so this
+    // is what the agent holds now rather than what the run resolved when it started.
+    model: agent.options.route,
+    effort: agent.options.reasoningEffort ?? '',
+    efforts,
     queued: projectInbox(events)
       .nextTurn.filter((message) => message.source === 'user')
       .map((message) => message.text),
@@ -976,6 +1062,8 @@ const buildSession = (
       effort,
       resume,
     )
+    // What the provider takes for an effort is the adapter's to say; a page only offers it.
+    const efforts = Context.get(context, Llm).capabilities.reasoningEffort ?? []
     // What a human can type at this session is not the model's business; both the
     // REPL and a UI run it through the same registry and the log keeps the record.
     const commands = makeCommands()
@@ -1041,10 +1129,45 @@ const buildSession = (
         rows,
         route,
         effort,
+        efforts,
         spillBytes,
         layer,
       },
     } satisfies BuiltSession
+  })
+
+/**
+ * Serves the browser UI. A page asks for its sessions one by one, so a plain run
+ * opens none up front; `--resume` named one, and that is what the page starts on.
+ */
+const serveWebWork = (
+  options: CommandOptions,
+  rows: ReadonlyArray<PluginRow>,
+  route: string,
+  effort: string,
+  spillBytes: number | undefined,
+  layer: Layer.Layer<any, PluginError, never>,
+  work: Extract<Work, { kind: 'web' }>,
+) =>
+  Effect.gen(function* () {
+    const resumed =
+      options.resume === undefined
+        ? undefined
+        : yield* buildSession(options, rows, route, effort, spillBytes, layer, true, options.resume)
+    if (resumed !== undefined && resumed.kind === 'refused') {
+      options.stderr('jzh: ' + resumed.message + '\n')
+      return 1
+    }
+    return yield* serveWebUi(
+      options,
+      rows,
+      route,
+      effort,
+      spillBytes,
+      layer,
+      work,
+      resumed?.kind === 'ready' ? openSessionOf(resumed.runtime) : undefined,
+    )
   })
 
 /** The scoped body that owns the built layer and serves one run. */
@@ -1058,6 +1181,9 @@ const runSession = (
   work: Work,
 ) =>
   Effect.gen(function* () {
+    if (work.kind === 'web') {
+      return yield* serveWebWork(options, rows, route, effort, spillBytes, layer, work)
+    }
     const built = yield* buildSession(
       options,
       rows,
