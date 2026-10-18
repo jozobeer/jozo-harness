@@ -26,6 +26,7 @@ describe('what the end of a turn means for the goal', () => {
     expect(decision).toMatchObject({ kind: 'round', round: 3 })
     expect(decision.kind === 'round' ? decision.text : '').toContain('Objective: ship it')
     expect(decision.kind === 'round' ? decision.text : '').toContain('Round: 3/256')
+    expect(decision.kind === 'round' ? decision.text : '').toContain('action read')
   })
 
   test('a goal at its limit asks to be stopped instead', () => {
