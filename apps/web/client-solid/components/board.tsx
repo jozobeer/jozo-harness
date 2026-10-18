@@ -15,6 +15,7 @@ import {
   RECENT_PAGE,
   boardOf,
   recentGroupsOf,
+  visibleSessions,
   type BoardEntry,
   type RecentGroup,
   type Waiting,
@@ -464,11 +465,26 @@ const RecentFolder = (props: {
 export const Board = (props: { store: SessionStore }) => {
   const [query, setQuery] = createSignal('')
   const [showArchived, setShowArchived] = createSignal(false)
+  const [showEmpty, setShowEmpty] = createSignal(false)
   const archivedCount = createMemo(
     () => props.store.state().sessions.filter((session) => session.archived === true).length,
   )
+  const opened = createMemo(() => props.store.state().opened)
+  const emptyCount = createMemo(
+    () =>
+      props.store
+        .state()
+        .sessions.filter(
+          (session) =>
+            session.empty === true && session.archived !== true && !opened().includes(session.id),
+        ).length,
+  )
   const visible = createMemo(() =>
-    props.store.state().sessions.filter((session) => showArchived() || session.archived !== true),
+    visibleSessions(props.store.state().sessions, {
+      showArchived: showArchived(),
+      showEmpty: showEmpty(),
+      opened: opened(),
+    }),
   )
   const board = createMemo(() => boardOf(matching(visible(), query()), props.store.watched()))
   const noMatch = (): boolean =>
@@ -518,6 +534,17 @@ export const Board = (props: { store: SessionStore }) => {
           onClick={() => setShowArchived(!showArchived())}
         >
           {showArchived() ? 'Hide archived' : 'Show archived (' + String(archivedCount()) + ')'}
+        </button>
+      </Show>
+      <Show when={emptyCount() > 0}>
+        <button
+          id="show-empty"
+          class="show-archived"
+          type="button"
+          aria-pressed={showEmpty()}
+          onClick={() => setShowEmpty(!showEmpty())}
+        >
+          {showEmpty() ? 'Hide empty' : 'Show empty (' + String(emptyCount()) + ')'}
         </button>
       </Show>
       <nav id="session-list" aria-label="Sessions">

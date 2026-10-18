@@ -54,6 +54,7 @@ jzh --resume <sessionId> [task]
 jzh sessions                    list the sessions on disk
 jzh sessions <sessionId>        read one session back
 jzh sessions --search <text>    find sessions by what they say
+jzh sessions --all              list the sessions nobody said anything in too
 jzh --allow-preset-change         continue a session under a changed composition
 jzh --subagents                  let the model run and steer child agents
 jzh --json "task"
@@ -147,6 +148,7 @@ const printSessions = (
   io: MainIo,
   id: string | undefined,
   search: string | undefined,
+  all: boolean,
 ): Effect.Effect<number> =>
   Effect.gen(function* () {
     const rows = yield* profileRows({
@@ -168,7 +170,7 @@ const printSessions = (
       return 0
     }
     if (id === undefined) {
-      io.stdout(renderSessionList(yield* sessions.list()))
+      io.stdout(renderSessionList(yield* sessions.list(), { showEmpty: all }))
       return 0
     }
     // The browse reads through the query's observation, so the cut it shows is
@@ -286,7 +288,7 @@ export function main(argv: ReadonlyArray<string>, io: MainIo): Effect.Effect<num
     const inputs = yield* loadInputs(parsed, io)
     if (parsed.models) return yield* printModels(inputs, io)
     if (parsed.sessions) {
-      return yield* printSessions(inputs, io, parsed.sessionId, parsed.search)
+      return yield* printSessions(inputs, io, parsed.sessionId, parsed.search, parsed.all)
     }
     return yield* runCommand(commandOptions(parsed, io, inputs))
   }).pipe(

@@ -150,9 +150,15 @@ export function jsonlSessions(options: JsonlSessionsOptions): SessionPersistence
       return { id, events: [first], sink }
     })
 
-  const mtimeOf = (id: SessionId): Effect.Effect<number, SessionError> =>
+  /** The file's time and size: what a listing needs to tell an empty log from one with events. */
+  const fileInfoOf = (
+    id: SessionId,
+  ): Effect.Effect<{ mtimeMs: number; size: number }, SessionError> =>
     Effect.tryPromise({
-      try: async () => (await statFile(fileOf(id))).mtimeMs,
+      try: async () => {
+        const info = await statFile(fileOf(id))
+        return { mtimeMs: info.mtimeMs, size: info.size }
+      },
       catch: (cause) =>
         isMissing(cause) ? notFound(id) : persistenceError(`cannot look at session ${id}`, cause),
     })
@@ -181,7 +187,7 @@ export function jsonlSessions(options: JsonlSessionsOptions): SessionPersistence
 
   const open = (id: SessionId): Effect.Effect<OpenedSession, SessionError> =>
     Effect.gen(function* () {
-      const mtimeMs = yield* mtimeOf(id)
+      const { mtimeMs } = yield* fileInfoOf(id)
       const split = splitTornTail(yield* readText(id))
       if (split.keep === '' && split.tornBytes > 0) {
         return yield* Effect.fail(
@@ -206,18 +212,24 @@ export function jsonlSessions(options: JsonlSessionsOptions): SessionPersistence
 
   const stat = (id: SessionId): Effect.Effect<SessionSummary, SessionError> =>
     Effect.gen(function* () {
-      const mtimeMs = yield* mtimeOf(id)
+      const { mtimeMs, size } = yield* fileInfoOf(id)
       // Listing reads the first line only and never repairs, so a look at the
       // sessions leaves them alone however long the log behind the header is.
-      const header = yield* upgradeFirstLine(
-        id,
-        yield* readFirstLine(fileOf(id)),
-        mtimeMs,
-        options.schemas,
-      )
+      const firstLine = yield* readFirstLine(fileOf(id))
+      const header = yield* upgradeFirstLine(id, firstLine, mtimeMs, options.schemas)
       // The name is read from the head of the same file, under the same budget.
       const title = yield* readTitle(fileOf(id))
-      return { id, cwd: header.cwd, createdAt: header.createdAt, updatedAt: mtimeMs, title }
+      // The header line and its newline are the whole file exactly when nothing
+      // was ever said: a repair note or any event makes the log longer than that.
+      const empty = size <= Buffer.byteLength(firstLine) + 1
+      return {
+        id,
+        cwd: header.cwd,
+        createdAt: header.createdAt,
+        updatedAt: mtimeMs,
+        title,
+        empty,
+      }
     })
 
   const list = (): Effect.Effect<ReadonlyArray<SessionSummary>, SessionError> =>
