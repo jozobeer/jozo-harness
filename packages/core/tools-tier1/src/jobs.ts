@@ -116,7 +116,7 @@ export const makeJobs = (): Effect.Effect<JobsShape> =>
         Effect.sync(() =>
           register(
             command,
-            spawn(['bash', '-lc', command], { cwd, stdout: 'pipe', stderr: 'pipe' }),
+            spawn(['bash', '-c', command], { cwd, stdout: 'pipe', stderr: 'pipe' }),
           ),
         ),
       promote: (command, child) => Effect.sync(() => register(command, child)),

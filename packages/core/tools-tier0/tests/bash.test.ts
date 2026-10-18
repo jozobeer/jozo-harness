@@ -48,6 +48,32 @@ describe('bash tool', () => {
     expect(textOf(result)).toBe('hi\n')
   })
 
+  test('runs the command in a non-login shell', async () => {
+    let seen: ReadonlyArray<string> = []
+    const wrapping: SandboxShape = {
+      name: 'test',
+      confines: true,
+      mode: 'workspace-write',
+      wrap: (command) => {
+        seen = command.argv
+        return Effect.succeed({
+          argv: ['bash', '-c', 'echo wrapped'],
+          cwd: command.cwd,
+          mode: command.mode ?? 'workspace-write',
+          denialSignatures: [],
+        })
+      },
+    }
+
+    const result = await Effect.runPromise(
+      call(makeBashTool(wrapping), { command: 'echo raw' }, '/tmp'),
+    )
+
+    // A login shell reads ~/.profile, which is outside what the workspace holds.
+    expect(seen).toEqual(['bash', '-c', 'echo raw'])
+    expect(result?.value).toMatchObject({ exitCode: 0, stdout: 'wrapped\n' })
+  })
+
   test('runs the command the sandbox wrapped', async () => {
     const wrapping: SandboxShape = {
       name: 'test',

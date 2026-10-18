@@ -6,36 +6,31 @@ import { Effect } from 'effect'
 import { seatbeltProfile, seatbeltSandbox } from '../src/index.ts'
 
 describe('seatbeltProfile', () => {
-  test('denies by default and allows the configured roots', () => {
-    const profile = seatbeltProfile({ writableRoots: ['/work'], readableRoots: ['/usr'] })
-
-    expect(profile).toContain('(version 1)')
-    expect(profile).toContain('(deny default)')
-    expect(profile).toContain('(subpath "/work")')
-    expect(profile).toContain('(subpath "/usr")')
-    expect(profile).not.toContain('network')
-  })
-
-  test('a profile with no readable roots still lets the system be read', () => {
+  test('opens reads by default and closes writes', () => {
     const profile = seatbeltProfile({ writableRoots: ['/work'] })
 
-    expect(profile).toContain('(subpath "/usr")')
-    expect(profile).toContain('(subpath "/private/etc")')
+    expect(profile).toContain('(version 1)')
+    expect(profile).toContain('(allow default)')
+    expect(profile).toContain('(deny file-write*)')
+    expect(profile).not.toContain('(deny default)')
+    expect(profile).not.toContain('file-read')
+    expect(profile).toContain('(subpath "/work")')
   })
 
-  test('the root itself is readable, which a subpath rule cannot say', () => {
-    const profile = seatbeltProfile({ writableRoots: ['/work'], readableRoots: ['/usr'] })
-    const reads = profile.split('(allow file-read*')[1] ?? ''
-
-    expect(reads).toContain('(literal "/")')
-    expect(profile.split('(allow file-write*')[1] ?? '').not.toContain('(literal "/")')
-  })
-
-  test('a root nothing may write to grants no write at all', () => {
+  test('a profile with no writable roots can still write to /dev/null', () => {
     const profile = seatbeltProfile({ writableRoots: [] })
 
-    // An empty `(allow file-write*)` would grant every path: the clause has to go.
-    expect(profile).not.toContain('file-write')
+    expect(profile).toContain('(deny file-write*)')
+    expect(profile).toContain('(literal "/dev/null")')
+    expect(profile.split('(deny file-write*)')[1] ?? '').not.toContain('(subpath')
+  })
+
+  test('the device sinks a command needs are allowed explicitly', () => {
+    const profile = seatbeltProfile({ writableRoots: ['/work'] })
+    const writes = profile.split('(deny file-write*)')[1] ?? ''
+
+    expect(writes).toContain('(allow file-write*')
+    expect(writes).toContain('(literal "/dev/null")')
   })
 
   test('a symlinked root is named where it points as well', () => {
@@ -43,7 +38,7 @@ describe('seatbeltProfile', () => {
     const link = real + '-link'
     symlinkSync(real, link)
     try {
-      const writes = seatbeltProfile({ writableRoots: [link] }).split('(allow file-write*')[1] ?? ''
+      const writes = seatbeltProfile({ writableRoots: [link] }).split('(deny file-write*)')[1] ?? ''
 
       expect(writes).toContain('(subpath "' + link + '")')
       expect(writes).toContain('(subpath "' + realpathSync(link) + '")')
@@ -53,11 +48,13 @@ describe('seatbeltProfile', () => {
     }
   })
 
-  test('quotes roots and adds network only on request', () => {
-    const profile = seatbeltProfile({ writableRoots: ['/a "b"'], allowNetwork: true })
+  test('quotes roots and leaves the network alone', () => {
+    const profile = seatbeltProfile({ writableRoots: ['/a "b"'] })
 
     expect(profile).toContain('(subpath "/a \\"b\\"")')
-    expect(profile).toContain('(allow network*)')
+    // Reads and network are open because the profile allows everything by default;
+    // naming the network would be a second, narrower rule to keep in sync.
+    expect(profile).not.toContain('network')
   })
 })
 
@@ -65,35 +62,35 @@ describe('seatbeltSandbox', () => {
   test('workspace-write lets a command write where it runs and in the temp dir', async () => {
     const sandbox = seatbeltSandbox({ mode: 'workspace-write', writableRoots: [] })
     const wrapped = await Effect.runPromise(
-      sandbox.wrap({ argv: ['bash', '-lc', 'echo hi'], cwd: '/work/project' }),
+      sandbox.wrap({ argv: ['bash', '-c', 'echo hi'], cwd: '/work/project' }),
     )
-    const writes = (wrapped.argv[2] ?? '').split('(allow file-write*')[1] ?? ''
+    const writes = (wrapped.argv[2] ?? '').split('(deny file-write*)')[1] ?? ''
 
     expect(sandbox.mode).toBe('workspace-write')
     expect(writes).toContain('(subpath "/work/project")')
     expect(writes).toContain('(subpath "' + tmpdir() + '")')
+    expect(writes).toContain('(literal "/dev/null")')
   })
 
   test('read-only writes nowhere the command happens to run', async () => {
     const sandbox = seatbeltSandbox({ mode: 'read-only', writableRoots: [] })
     const wrapped = await Effect.runPromise(
-      sandbox.wrap({ argv: ['bash', '-lc', 'echo hi'], cwd: '/work/project' }),
+      sandbox.wrap({ argv: ['bash', '-c', 'echo hi'], cwd: '/work/project' }),
     )
     const profile = wrapped.argv[2] ?? ''
-    // The temp dir is still readable (it is a system root); it is not writable.
-    const writes = profile.split('(allow file-write*')[1] ?? ''
+    const writes = profile.split('(deny file-write*)')[1] ?? ''
 
     expect(sandbox.mode).toBe('read-only')
-    expect(writes).toBe('')
-    expect(profile).not.toContain('file-write')
+    expect(writes).toContain('(literal "/dev/null")')
+    expect(writes).not.toContain('(subpath "/work/project")')
   })
 
   test('read-only still honours a root the profile named as writable', async () => {
     const sandbox = seatbeltSandbox({ mode: 'read-only', writableRoots: ['/work/out'] })
     const wrapped = await Effect.runPromise(
-      sandbox.wrap({ argv: ['bash', '-lc', 'echo hi'], cwd: '/work/project' }),
+      sandbox.wrap({ argv: ['bash', '-c', 'echo hi'], cwd: '/work/project' }),
     )
-    const writes = (wrapped.argv[2] ?? '').split('(allow file-write*')[1] ?? ''
+    const writes = (wrapped.argv[2] ?? '').split('(deny file-write*)')[1] ?? ''
 
     expect(writes).toContain('(subpath "/work/out")')
     expect(writes).not.toContain('(subpath "/work/project")')
@@ -125,7 +122,7 @@ describe('seatbeltSandbox', () => {
     const wrapped = await Effect.runPromise(
       sandbox.wrap({ argv: ['echo', 'hi'], cwd: '/work/project', mode: 'workspace-write' }),
     )
-    const writes = (wrapped.argv[2] ?? '').split('(allow file-write*')[1] ?? ''
+    const writes = (wrapped.argv[2] ?? '').split('(deny file-write*)')[1] ?? ''
 
     expect(writes).toContain('(subpath "/work/project")')
     expect(writes).toContain('(subpath "' + tmpdir() + '")')
@@ -137,7 +134,8 @@ describe('seatbeltSandbox', () => {
 
     expect(wrapped.argv.slice(0, 4)).toEqual(['sandbox-exec', '-p', wrapped.argv[2] ?? '', '--'])
     expect(wrapped.argv.slice(4)).toEqual(['echo', 'hi'])
-    expect(wrapped.argv[2]).toContain('(deny default)')
+    expect(wrapped.argv[2]).toContain('(allow default)')
+    expect(wrapped.argv[2]).toContain('(deny file-write*)')
     expect(wrapped.cwd).toBe('/work')
     expect(sandbox.name).toBe('seatbelt')
   })

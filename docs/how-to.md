@@ -187,7 +187,7 @@ jzh --patch sessions.yml "…"
 
 ## コマンドを sandbox の外で走らせる
 
-`@jozo-harness/safety` の `sandbox` は既定で `seatbelt`（macOS の `sandbox-exec`）である。コマンドは自分が走るディレクトリと一時ディレクトリにだけ書ける。それ以外の場所に書こうとすると `Operation not permitted` になる。
+`@jozo-harness/safety` の `sandbox` は既定で `seatbelt`（macOS の `sandbox-exec`）である。コマンドは自分が走るディレクトリと一時ディレクトリにだけ書ける。それ以外の場所に書こうとすると `Operation not permitted` になる。読み取りは制限せず、`/dev/null` への書き込みは許可する。
 
 ```yaml
   - id: safety

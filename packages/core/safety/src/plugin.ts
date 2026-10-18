@@ -40,7 +40,6 @@ export const sandboxLayerFor = (
           seatbeltSandbox({
             mode: modeOf(config.preset),
             writableRoots: config.writableRoots ?? [],
-            allowNetwork: true,
           }),
         )
       : Layer.effect(
