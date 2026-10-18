@@ -129,6 +129,83 @@ describe('the schedule tool', () => {
     expect(textOf(listed)).toBe('sched-1 daily at 08:30 -> stand up')
   })
 
+  test('create records a short title, and the list shows the title', async () => {
+    const { log, events } = fakeLog()
+
+    const created = await Effect.runPromise(
+      call(makeScheduleTool(log), {
+        action: 'create',
+        every: 60,
+        prompt: 'run pnpm run check and report the failing jobs',
+        title: 'check the build',
+      }),
+    )
+    const listed = await Effect.runPromise(call(makeScheduleTool(log), { action: 'list' }))
+
+    expect(events[0]?.type).toBe('schedule/created')
+    expect(created?.value).toMatchObject({ schedules: [{ title: 'check the build' }] })
+    expect(textOf(created)).toBe('scheduled sched-1 every 60s -> check the build')
+    expect(textOf(listed)).toBe('sched-1 every 60s -> check the build')
+  })
+
+  test('a title longer than 120 characters is refused', async () => {
+    const { log, events } = fakeLog()
+
+    const result = await Effect.runPromise(
+      call(makeScheduleTool(log), {
+        action: 'create',
+        every: 60,
+        prompt: 'x',
+        title: 'a'.repeat(121),
+      }),
+    )
+
+    expect(result?.isError).toBe(true)
+    expect(textOf(result)).toContain('120')
+    expect(events).toHaveLength(0)
+  })
+
+  test('update changes the title', async () => {
+    const { log } = fakeLog()
+    await Effect.runPromise(
+      call(makeScheduleTool(log), {
+        action: 'create',
+        every: 600,
+        prompt: 'old words',
+        title: 'old title',
+      }),
+    )
+
+    const updated = await Effect.runPromise(
+      call(makeScheduleTool(log), { action: 'update', id: 'sched-1', title: 'new title' }),
+    )
+    const listed = await Effect.runPromise(call(makeScheduleTool(log), { action: 'list' }))
+
+    expect(updated?.value).toMatchObject({ schedules: [{ title: 'new title' }] })
+    expect(textOf(listed)).toBe('sched-1 every 600s -> new title')
+  })
+
+  test('an older schedule without a title shows the first line of its prompt', async () => {
+    const legacy = {
+      seq: 1,
+      time: 1,
+      type: 'schedule/created',
+      data: {
+        schedule: {
+          id: 'old',
+          rule: { kind: 'every', seconds: 60 },
+          prompt: 'first line\nsecond line',
+          createdAt: 1,
+        },
+      },
+    } as unknown as SessionEvent
+    const { log } = fakeLog([legacy])
+
+    const listed = await Effect.runPromise(call(makeScheduleTool(log), { action: 'list' }))
+
+    expect(textOf(listed)).toBe('old every 60s -> first line')
+  })
+
   test('update changes the rule or the words, delete removes it', async () => {
     const { log, events } = fakeLog()
     await Effect.runPromise(

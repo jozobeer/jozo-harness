@@ -153,6 +153,8 @@ export const GoalViewSchema = Schema.Struct({
 export const ScheduleViewSchema = Schema.Struct({
   id: Schema.String,
   when: Schema.String,
+  /** The short title; an older schedule without one shows the prompt's first line. */
+  title: Schema.String,
   prompt: Schema.String,
   /** When it last fired; 0 while it never has. */
   lastFiredAt: Schema.Number,

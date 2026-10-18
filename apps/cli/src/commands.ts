@@ -16,6 +16,7 @@ import {
   goalText,
   ruleText,
   runGoal,
+  scheduleTitle,
   type GoalArgs,
   type GoalLog,
 } from '@jozo-harness/tools-tier1'
@@ -51,7 +52,10 @@ const scheduleLines = (session: Session): ReadonlyArray<string> => {
   if (schedules.length === 0) return ['schedules: none']
   return [
     'schedules: ' + String(schedules.length),
-    ...schedules.map((schedule) => '  ' + schedule.id + ' ' + ruleText(schedule.rule)),
+    ...schedules.map(
+      (schedule) =>
+        '  ' + schedule.id + ' ' + ruleText(schedule.rule) + ' ' + scheduleTitle(schedule),
+    ),
   ]
 }
 

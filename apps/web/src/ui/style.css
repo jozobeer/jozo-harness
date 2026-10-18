@@ -606,15 +606,39 @@ body {
   overflow: hidden;
 }
 
+.run-schedule {
+  min-width: 0;
+}
+
+.run-schedule summary {
+  display: flex;
+  gap: var(--s2);
+  align-items: baseline;
+  color: var(--dim);
+  cursor: pointer;
+  list-style: none;
+}
+
+.run-schedule summary::-webkit-details-marker {
+  display: none;
+}
+
 .run-when {
   white-space: nowrap;
 }
 
-.run-prompt {
+.run-title {
   overflow: hidden;
   color: var(--text);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.run-schedules .run-prompt {
+  margin: 2px 0 0 var(--s2);
+  color: var(--dim);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .run-job {
