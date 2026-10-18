@@ -12,6 +12,7 @@ import {
   compactAssistantStream,
   encodeLlmFailure,
   type ContentBlock,
+  type FinishKind,
   type RequestMessage,
   type StreamChunk,
   type TimedStreamChunk,
@@ -56,7 +57,12 @@ export class AgentLoop extends Context.Service<AgentLoop, AgentRunner>()(
 type ToolCall = Extract<ContentBlock, { type: 'tool-call' }>
 
 type StepOutcome =
-  | { readonly ok: true; readonly content: ReadonlyArray<ContentBlock> }
+  | {
+      readonly ok: true
+      readonly content: ReadonlyArray<ContentBlock>
+      /** Why the provider stopped; `length` means the output cap cut the answer. */
+      readonly finish: FinishKind | undefined
+    }
   | { readonly ok: false; readonly failure: LlmFailure }
 
 /** The prompt as the system-prompt service hands it to one step. */
@@ -199,7 +205,7 @@ const agentLoopEffect = (
                   ...(assembled.usage === undefined ? {} : { usage: assembled.usage }),
                   stream: compactAssistantStream(stream),
                 })
-                return { ok: true as const, content: assembled.content }
+                return { ok: true as const, content: assembled.content, finish: assembled.finish }
               }),
           }),
         )
@@ -525,6 +531,13 @@ const agentLoopEffect = (
             return false
           }
           const calls = outcome.content.filter(isToolCall)
+          // A cut-off answer is not a completed one: no tool call is run from it,
+          // and the turn closes with the reason the cap gives it.
+          if (outcome.finish === 'length') {
+            yield* append(agent, 'step/end', { step })
+            yield* append(agent, 'turn/end', { turn, reason: { kind: 'max-tokens' } })
+            return false
+          }
           if (calls.length === 0) {
             yield* append(agent, 'step/end', { step })
             if (agent.inbox.nextStep.length === 0) return true

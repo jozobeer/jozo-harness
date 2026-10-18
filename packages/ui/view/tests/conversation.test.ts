@@ -165,6 +165,16 @@ describe('conversation', () => {
     expect(state.blocks).toEqual([{ kind: 'notice', level: 'error', text: 'PROVIDER: it broke' }])
   })
 
+  test('a turn cut off by the token cap leaves a warning notice', () => {
+    const state = fold([
+      session('turn/start', { turn: 1 }),
+      session('turn/end', { turn: 1, reason: { kind: 'max-tokens' } }),
+    ])
+    expect(state.blocks).toEqual([
+      { kind: 'notice', level: 'warn', text: 'the answer reached the token cap' },
+    ])
+  })
+
   test('injected and runtime context messages are not shown as user input', () => {
     const state = fold([
       session('user/message', { text: 'hidden', source: 'inject' }),

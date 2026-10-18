@@ -177,6 +177,41 @@ describe('agent loop', () => {
     expect(assistant).toEqual([[{ type: 'text', text }]])
   })
 
+  test('a step cut off by the token cap ends the turn as max-tokens', async () => {
+    const text = 'half an ans'
+    let stopping = 0
+    const events = await scenario(
+      [
+        chunks([
+          { type: 'text-delta', index: 0, text },
+          { type: 'block-end', index: 0, block: { type: 'text', text } },
+          { type: 'finish', kind: 'length' },
+        ]),
+      ],
+      (ctx) =>
+        Effect.gen(function* () {
+          yield* ctx.hooks.on('agent/turn-stopping', () =>
+            Effect.sync(() => {
+              stopping += 1
+            }),
+          )
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+    )
+
+    // The answer is still history, but the turn says why it stopped.
+    const assistant = events.session
+      .events()
+      .flatMap((event) => (event.type === 'assistant/message' ? [event.data.content] : []))
+    expect(assistant).toEqual([[{ type: 'text', text }]])
+    expect(reason(events)).toEqual([{ kind: 'max-tokens' }])
+    // A truncated turn is not one that may queue another goal round.
+    expect(stopping).toBe(0)
+  })
+
   test('executes a tool call and runs a second step with its result', async () => {
     const echo: ToolDefinition<{ readonly text: string }, { readonly text: string }> = {
       name: 'echo',

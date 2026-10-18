@@ -103,6 +103,9 @@ const applyTurn = (state: Conversation, event: StepEvent): Conversation => {
       if (reason.kind === 'error') {
         return notice(ended, 'error', reason.failure.code + ': ' + reason.failure.message)
       }
+      if (reason.kind === 'max-tokens') {
+        return notice(ended, 'warn', 'the answer reached the token cap')
+      }
       return reason.kind === 'cancelled' ? notice(ended, 'info', 'cancelled') : ended
     }
     case 'step/start':
