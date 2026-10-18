@@ -165,4 +165,34 @@ describe('the composition a session was started with', () => {
 
     await rm(root, { recursive: true, force: true })
   })
+
+  test('a tool this build added continues the session and is recorded', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-preset-added-'))
+    // One profile name, two compositions: only the tool set differs, as when a
+    // build adds a tool to the same profile.
+    const small = profile(root, 'same', false)
+    const full = profile(root, 'same', true)
+
+    const first = await run({ profile: small, tier1: false, task: 'first' })
+    expect(first.code).toBe(0)
+    const id = (await Effect.runPromise(jsonlSessions({ root }).list()))[0]?.id ?? ''
+
+    // The larger composition only adds tools: no refusal, and the addition joins
+    // the composition the session records.
+    const grown = await run({ profile: full, tier1: true, resume: id, task: 'second' })
+    const after = await sessionOf(root, id)
+
+    expect(grown.code).toBe(0)
+    expect(grown.stderr).toBe('')
+    expect(after.filter((event) => event.type === 'turn/start')).toHaveLength(2)
+    const records = after.flatMap((event) => (event.type === 'preset/selected' ? [event.data] : []))
+    expect(records).toHaveLength(2)
+    expect(records[0]?.profiles).toEqual(['same'])
+    expect(records[0]?.tools).not.toContain('todo_write')
+    expect(records[1]?.profiles).toEqual(['same'])
+    expect(records[1]?.tools).toContain('todo_write')
+    expect(records[1]?.tools.length).toBeGreaterThan(records[0]?.tools.length ?? 0)
+
+    await rm(root, { recursive: true, force: true })
+  })
 })

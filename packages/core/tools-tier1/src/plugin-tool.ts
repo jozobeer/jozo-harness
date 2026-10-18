@@ -141,8 +141,8 @@ const changed = (action: string, rows: ReadonlyArray<PluginRowSummary>): PluginV
   changed: true,
   rows,
   note:
-    '(the settings changed; every row is wired when jozo-harness starts again, and a session whose tools ' +
-    'then differ from the ones it recorded needs --allow-preset-change to resume)',
+    '(the settings changed; every row is wired when jozo-harness starts again, and a session that ' +
+    'then loses a tool needs --allow-preset-change to resume)',
 })
 
 /**

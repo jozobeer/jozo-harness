@@ -55,7 +55,7 @@ jzh sessions                    list the sessions on disk
 jzh sessions <sessionId>        read one session back
 jzh sessions --search <text>    find sessions by what they say
 jzh sessions --all              list the sessions nobody said anything in too
-jzh --allow-preset-change         continue a session under a changed composition
+jzh --allow-preset-change         continue a session that lost a tool or changed profile
 jzh --subagents                  let the model run and steer child agents
 jzh --json "task"
 jzh --tui                       terminal UI even through a pipe

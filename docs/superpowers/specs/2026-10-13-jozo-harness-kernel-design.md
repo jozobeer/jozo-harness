@@ -125,7 +125,7 @@ interface Plugin<C, P, R> {
 
 plugin は提供する service と要求する service を、`layer` の型と、`provides` / `requires` の実行時メタデータの両方で宣言する。YAML による組み立ては実行時に行われ、型情報が残らないので、loader は実行時メタデータで依存を解決する。`layer` の型引数と `provides` / `requires` の要素型が一致しない plugin はコンパイルできない。
 
-**セッションは始めた構成を覚える（2026-10-14 追記）**: 起動時に「どの profile 文書から来たか（name）」と「登録された tool の一覧」を `preset/selected`（log-only）としてセッションに書く。これは制限（plan mode など）をかける**前**に取る。すでに記録があるセッションを再開するとき、いまの構成が記録と違えば **turn を始める前に拒否**し、違う点（profile と、消えた/増えた tool）を stderr に出す。人間が意図して変えるときは `--allow-preset-change` を渡し、そのときは新しい構成を記録し直す。dsh のように agent ごとに構成を mount し直す registry は持たない（jozo-harness の構成はプロセスの profile と patch が決めるので、記録と固定だけを行う）。
+**セッションは始めた構成を覚える（2026-10-14 追記）**: 起動時に「どの profile 文書から来たか（name）」と「登録された tool の一覧」を `preset/selected`（log-only）としてセッションに書く。これは制限（plan mode など）をかける**前**に取る。すでに記録があるセッションを再開するとき、tool が増えただけなら新しい構成を記録してそのまま続ける（既定の tool が増えても過去のセッションが開けなくならないように）。tool が消えた場合と profile が変わった場合は **turn を始める前に拒否**し、違う点を stderr に出す。人間が意図して変えるときは `--allow-preset-change` を渡し、そのときは新しい構成を記録し直す。dsh のように agent ごとに構成を mount し直す registry は持たない（jozo-harness の構成はプロセスの profile と patch が決めるので、記録と固定だけを行う）。
 
 loader は dsh と同じ行形式 `{ id, name, config, disabled }` の YAML を、bundle、profile patch、home patch、`--patch` の順に id 単位で重ねる。次に `provides` と `requires` から依存をトポロジカルソートし、`Layer.provide` でつないだ一つの Layer を作る。循環や存在しない service があれば起動を失敗させる。Layer の構築が途中で失敗すると、構築済みの部分は Layer の Scope が逆順に解放する。`--dump-config` は最終的なツリーを表示する。
 

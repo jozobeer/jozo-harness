@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'vitest'
-import { currentPreset, describePreset, presetProblem, type SessionEvent } from '../src/index.ts'
+import {
+  currentPreset,
+  describePreset,
+  presetChange,
+  presetProblem,
+  presetResumable,
+  type SessionEvent,
+} from '../src/index.ts'
 
 const event = (seq: number, type: string, data: unknown): SessionEvent =>
   ({ seq, time: seq, type, data }) as unknown as SessionEvent
@@ -55,6 +62,30 @@ describe('the composition a session was started with', () => {
 
     expect(missing).toContain('gone: bash, edit, write')
     expect(added).toContain('new: write')
+  })
+
+  test('a tool this build added is picked up without asking', () => {
+    const change = presetChange(
+      { profiles: ['headless'], tools: ['read'] },
+      { profiles: ['headless'], tools: ['read', 'write'] },
+    )
+
+    expect(change).toEqual({ profilesChanged: false, gone: [], added: ['write'] })
+    expect(change !== undefined && presetResumable(change)).toBe(true)
+  })
+
+  test('a lost tool or a different profile still stops the run', () => {
+    expect(presetResumable({ profilesChanged: false, gone: ['write'], added: [] })).toBe(false)
+    expect(presetResumable({ profilesChanged: true, gone: [], added: ['write'] })).toBe(false)
+  })
+
+  test('the same composition is no change at all', () => {
+    expect(
+      presetChange(
+        { profiles: ['headless'], tools: CODE },
+        { profiles: ['headless'], tools: [...CODE] },
+      ),
+    ).toBeUndefined()
   })
 
   test('a composition reads like something a human would say', () => {

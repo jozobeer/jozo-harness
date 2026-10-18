@@ -91,7 +91,7 @@ tool が宣言する能力（`exec` や `network`）では承認を求めない�
 | `--patch <file.yml>` | 層4の行。複数回で複数ファイル |
 | `--config <file.yml>` | 設定ファイルのパス |
 | `--resume <sessionId>` | 過去のセッションを開く |
-| `--allow-preset-change` | 記録と違う構成でも再開する（C6） |
+| `--allow-preset-change` | tool の減少や profile の変更があっても再開する（C6） |
 | `--port <N>` | `jzh web` のポート。0 は空きポート |
 | `--json` | セッションイベントを JSON 行で出す |
 | `--tui` | パイプ越しでも端末 UI を開く |

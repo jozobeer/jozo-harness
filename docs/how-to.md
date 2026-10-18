@@ -228,15 +228,18 @@ plugin add id=mcp name=@jozo-harness/mcp
 plugin set id=mcp disabled=true
 ```
 
-行が増えると構成が変わるので、そのセッションを続けるには `--allow-preset-change` が要る（[構成を変えてセッションを再開する](#構成を変えてセッションを再開する)）。
+行が増えて tool が増えても、そのセッションはそのまま続けられる（新しい構成が記録される）。tool が減る変更や profile を変えるときだけ `--allow-preset-change` が要る（[構成を変えてセッションを再開する](#構成を変えてセッションを再開する)）。
 
 ## 構成を変えてセッションを再開する
 
-セッションは、始めたときの profile 名と tool の一覧を覚えている。違う構成で再開すると、turn を始める前に拒否され、違う点が stderr に出る。
+セッションは、始めたときの profile 名と tool の一覧を覚えている。
+
+- tool が増えただけなら、そのまま続く。増えた分は新しい構成として記録される。
+- tool が減ったとき、profile が変わったときは、turn を始める前に拒否され、違う点が stderr に出る。
 
 ```sh
 jzh --resume <sessionId> "続き"                          # 同じ構成なら続く
-jzh --resume <sessionId> --allow-preset-change "続き"     # 意図して変える（新しい構成を記録する）
+jzh --resume <sessionId> --allow-preset-change "続き"     # 減った tool や profile の変更を受け入れる（新しい構成を記録する）
 ```
 
 ## セッションに話しかけずに尋ねる（コマンド）

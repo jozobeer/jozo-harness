@@ -54,19 +54,46 @@ const difference = (
 ): ReadonlyArray<string> => sorted(left.filter((value) => !right.includes(value)))
 
 /**
+ * How this run's composition differs from the one a session recorded. A profile
+ * change alters what the session is; a tool that went missing removes what its
+ * history used; a tool that arrived is one more capability.
+ */
+export interface PresetChange {
+  readonly profilesChanged: boolean
+  readonly gone: ReadonlyArray<string>
+  readonly added: ReadonlyArray<string>
+}
+
+/** The difference between the recorded composition and this run's, or nothing when they agree. */
+export const presetChange = (recorded: Preset, current: Preset): PresetChange | undefined => {
+  const profilesChanged = names(sorted(recorded.profiles)) !== names(sorted(current.profiles))
+  const gone = difference(recorded.tools, current.tools)
+  const added = difference(current.tools, recorded.tools)
+  if (!profilesChanged && gone.length === 0 && added.length === 0) return undefined
+  return { profilesChanged, gone, added }
+}
+
+/**
+ * Whether this run may pick up the change without asking. A tool the build added
+ * is one more thing the session can do; losing a tool or changing the profile
+ * changes what the session is, and only the human can say that.
+ */
+export const presetResumable = (change: PresetChange): boolean =>
+  !change.profilesChanged && change.gone.length === 0
+
+/**
  * Why running this session under a different composition would be a mistake, in
  * the words a human needs to fix it. Nothing when the two agree.
  */
 export const presetProblem = (recorded: Preset, current: Preset): string | undefined => {
+  const change = presetChange(recorded, current)
+  if (change === undefined) return undefined
   const lines: Array<string> = []
-  if (names(sorted(recorded.profiles)) !== names(sorted(current.profiles))) {
+  if (change.profilesChanged) {
     lines.push('profiles: ' + names(recorded.profiles) + ' -> ' + names(current.profiles))
   }
-  const gone = difference(recorded.tools, current.tools)
-  const added = difference(current.tools, recorded.tools)
-  if (gone.length > 0) lines.push('tools gone: ' + gone.join(', '))
-  if (added.length > 0) lines.push('tools new: ' + added.join(', '))
-  if (lines.length === 0) return undefined
+  if (change.gone.length > 0) lines.push('tools gone: ' + change.gone.join(', '))
+  if (change.added.length > 0) lines.push('tools new: ' + change.added.join(', '))
   return (
     'this session was started with ' +
     describePreset(recorded) +

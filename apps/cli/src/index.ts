@@ -41,7 +41,9 @@ import { Tools, type ToolRegistry } from '@jozo-harness/tools'
 import {
   currentPreset,
   makeCommands,
+  presetChange,
   presetProblem,
+  presetResumable,
   type CommandsShape,
   type Preset,
   type SessionError,
@@ -725,7 +727,9 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
 
 /**
  * Records the composition of a new session, or says why the run may not carry on
- * with one whose composition differs from what it recorded.
+ * with one whose composition differs from what it recorded. A tool this build
+ * added is one more capability, so the session simply keeps the new set; losing a
+ * tool or changing the profile still needs the human to say so.
  */
 const applyPreset = (
   agent: Agent,
@@ -738,12 +742,14 @@ const applyPreset = (
       yield* agent.session.append('preset/selected', composition)
       return undefined
     }
-    const problem = presetProblem(recorded, composition)
-    if (problem === undefined) return undefined
-    if (!allowChange) return problem
-    // The human said so: the new composition becomes the session's own.
-    yield* agent.session.append('preset/selected', composition)
-    return undefined
+    const change = presetChange(recorded, composition)
+    if (change === undefined) return undefined
+    if (allowChange || presetResumable(change)) {
+      // The new composition becomes the session's own.
+      yield* agent.session.append('preset/selected', composition)
+      return undefined
+    }
+    return presetProblem(recorded, composition)
   })
 
 /** A UI runs the session itself instead of streaming into the caller's terminal. */
