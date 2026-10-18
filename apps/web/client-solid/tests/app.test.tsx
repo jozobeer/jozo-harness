@@ -23,7 +23,7 @@ import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY } from '../recent.ts'
 type Call =
   | { readonly kind: 'submit' }
   | { readonly kind: 'draft'; readonly text: string }
-  | { readonly kind: 'moveTo'; readonly id: string | undefined }
+  | { readonly kind: 'moveTo'; readonly id: string | undefined; readonly cwd?: string | undefined }
   | { readonly kind: 'pane'; readonly pane: Pane | undefined }
   | { readonly kind: 'command'; readonly command: UiCommand }
   | { readonly kind: 'sendTo'; readonly sessionId: string; readonly command: UiCommand }
@@ -33,6 +33,8 @@ type Call =
   | { readonly kind: 'askCommands' }
   | { readonly kind: 'askFiles'; readonly query: string }
   | { readonly kind: 'act'; readonly sessionId: string; readonly action: SessionAction }
+  | { readonly kind: 'askWorkspaces' }
+  | { readonly kind: 'addWorkspace'; readonly cwd: string }
 
 /** A store the components can be rendered against: signals in, calls out. */
 const makeStore = (
@@ -56,7 +58,7 @@ const makeStore = (
     },
     submit: () => calls.push({ kind: 'submit' }),
     send: (command) => calls.push({ kind: 'command', command }),
-    moveTo: (id) => calls.push({ kind: 'moveTo', id }),
+    moveTo: (id, cwd) => calls.push({ kind: 'moveTo', id, cwd }),
     chooseTheme: (theme) => update((current) => withTheme(current, theme)),
     showPane: (pane) => calls.push({ kind: 'pane', pane }),
     openJob: () => undefined,
@@ -67,6 +69,8 @@ const makeStore = (
     setModel: (model) => calls.push({ kind: 'model', model }),
     chooseModel: (model) => calls.push({ kind: 'chooseModel', model }),
     act: (sessionId, action) => calls.push({ kind: 'act', sessionId, action }),
+    askWorkspaces: () => calls.push({ kind: 'askWorkspaces' }),
+    addWorkspace: (cwd) => calls.push({ kind: 'addWorkspace', cwd }),
   }
   return { store, calls, setState: update }
 }
@@ -1047,5 +1051,51 @@ describe('the recent workspaces', () => {
 
     expect(groups[1]?.querySelectorAll('button.session')).toHaveLength(1)
     expect(localStorage.getItem(RECENT_FOLDED_KEY)).not.toContain('/work/beta')
+  })
+})
+
+describe('the workspace picker', () => {
+  beforeEach(() => localStorage.clear())
+
+  const listed = (cwd: string, lastUsedAt: number) => ({ cwd, lastUsedAt })
+
+  test('New session starts in the folder picked, last used first', () => {
+    const { store, calls } = makeStore({
+      workspaces: {
+        cwd: '/work/server',
+        items: [listed('/work/beta', 20), listed('/work/alpha', 10)],
+      },
+    })
+
+    const { container } = render(() => <Board store={store} />)
+
+    const select = container.querySelector('#workspace') as HTMLSelectElement
+    expect(select).not.toBeNull()
+    expect([...select.options].map((option) => option.value)).toEqual(['/work/beta', '/work/alpha'])
+    expect(select.value).toBe('/work/beta')
+    expect(calls).toContainEqual({ kind: 'askWorkspaces' })
+
+    fireEvent.click(container.querySelector('#new-session') as Element)
+    expect(calls.at(-1)).toEqual({ kind: 'moveTo', id: undefined, cwd: '/work/beta' })
+
+    fireEvent.change(select, { target: { value: '/work/alpha' } })
+    fireEvent.click(container.querySelector('#new-session') as Element)
+    expect(calls.at(-1)).toEqual({ kind: 'moveTo', id: undefined, cwd: '/work/alpha' })
+  })
+
+  test('Add workspace sends the path and keeps the field empty for the next one', () => {
+    const { store, calls } = makeStore({
+      workspaces: { cwd: '/work/server', items: [listed('/work/beta', 20)] },
+    })
+
+    const { container } = render(() => <Board store={store} />)
+
+    const field = container.querySelector('#workspace-path') as HTMLInputElement
+    expect(field).not.toBeNull()
+    fireEvent.input(field, { target: { value: '/work/new' } })
+    fireEvent.submit(field.closest('form') as HTMLFormElement)
+
+    expect(calls).toContainEqual({ kind: 'addWorkspace', cwd: '/work/new' })
+    expect(field.value).toBe('')
   })
 })

@@ -21,6 +21,7 @@ import {
   withSessions,
   withSettings,
   withTheme,
+  withWorkspaces,
   type Pane,
   type WebState,
 } from '../src/ui/state.ts'
@@ -107,7 +108,12 @@ const sessionToOpen = (current: string, search: string, held: string): string | 
 }
 
 /** What a move in the queue asks of the page: read a session, or stand on a blank one. */
-type Move = { readonly kind: 'open'; readonly id: string | undefined } | { readonly kind: 'blank' }
+type Move =
+  | { readonly kind: 'open'; readonly id: string | undefined; readonly cwd?: string | undefined }
+  | { readonly kind: 'blank' }
+
+/** What the workspace picker asked of the server: the list, or one more folder to join it. */
+type WorkspaceAsk = { readonly kind: 'list' } | { readonly kind: 'add'; readonly cwd: string }
 
 /** What the settings pane asked the server for. */
 type PanelAsk =
@@ -134,8 +140,11 @@ export interface SessionStore {
   readonly send: (command: UiCommand) => void
   /** Sends one command to a session that need not be the one on screen. */
   readonly sendTo: (sessionId: string, command: UiCommand) => void
-  /** Reads a session, or stands on the blank page the first line fills when undefined. */
-  readonly moveTo: (id: string | undefined) => void
+  /**
+   * Reads a session, or stands on the blank page the first line fills when
+   * undefined. A blank page starts its session in `cwd` when one is named.
+   */
+  readonly moveTo: (id: string | undefined, cwd?: string) => void
   readonly chooseTheme: (theme: Theme) => void
   readonly showPane: (pane: Pane | undefined) => void
   readonly openJob: (id: string) => void
@@ -145,6 +154,10 @@ export interface SessionStore {
   readonly askCommands: () => void
   /** Reads the workspace paths an @word names, once the composer has waited for the typing to stop. */
   readonly askFiles: (query: string) => void
+  /** Reads the folders a new session may start in. */
+  readonly askWorkspaces: () => void
+  /** Registers one more folder a new session may start in, and reads the list again. */
+  readonly addWorkspace: (cwd: string) => void
   /**
    * Picks the route for this session and for the sessions opened from now on.
    * Nothing is written down, so the runs after this one keep their own choice.
@@ -283,11 +296,14 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
    * the line back to the composer rather than swallowing it.
    */
   let owed: string | undefined
+  /** The folder the blank page will start its session in; the last one the reader picked. */
+  let blankCwd: string | undefined
   const commands = Effect.runSync(
     Queue.unbounded<{ readonly sessionId: string; readonly command: UiCommand }>(),
   )
   const moves = Effect.runSync(Queue.unbounded<Move>())
   const panelAsks = Effect.runSync(Queue.unbounded<PanelAsk>())
+  const workspaceAsks = Effect.runSync(Queue.unbounded<WorkspaceAsk>())
   let following: Fiber.Fiber<void, unknown> | undefined
   const bridge = makeBridge((message) => update((current) => withProblem(current, message)))
 
@@ -397,9 +413,11 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       )
     }
 
-    const show = (id: string | undefined) =>
+    const show = (id: string | undefined, cwd?: string) =>
       Effect.gen(function* () {
-        const summary = yield* client.open(id === undefined ? {} : { sessionId: id })
+        const summary = yield* client.open(
+          id === undefined ? (cwd === undefined ? {} : { cwd }) : { sessionId: id },
+        )
         if (following !== undefined) yield* Fiber.interrupt(following)
         const running = yield* client.state({ sessionId: summary.id })
         // The session being left keeps its line; the one being opened shows its
@@ -586,6 +604,27 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       ),
     )
 
+    /** Reads the folders a new session may start in, for the picker beside New session. */
+    const readWorkspaces = () =>
+      Effect.gen(function* () {
+        const listed = yield* client.workspaces()
+        yield* Effect.sync(() => update((now) => withWorkspaces(now, listed)))
+      })
+
+    yield* Effect.forkScoped(
+      Stream.runForEach(Stream.fromQueue(workspaceAsks), (asked) =>
+        (asked.kind === 'list'
+          ? readWorkspaces()
+          : // Read the list back, so the picker offers the folder that just joined it.
+            client.addWorkspace({ cwd: asked.cwd }).pipe(Effect.andThen(readWorkspaces()))
+        ).pipe(
+          Effect.catchCause((cause) =>
+            Effect.sync(() => update((now) => withProblem(now, causeText(cause)))),
+          ),
+        ),
+      ),
+    )
+
     const settings = yield* client.settings()
     yield* Effect.sync(() => update((now) => withSettings(now, settings)))
 
@@ -602,7 +641,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     yield* Stream.runForEach(
       Stream.concat(Stream.fromIterable(opening), Stream.fromQueue(moves)),
       (move) =>
-        (move.kind === 'blank' ? standOnBlank() : show(move.id)).pipe(
+        (move.kind === 'blank' ? standOnBlank() : show(move.id, move.cwd)).pipe(
           Effect.catchCause((cause) =>
             unlessInterrupted(
               cause,
@@ -671,7 +710,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
         // The session this line starts is already on its way; keep the line.
         if (owed !== undefined) return
         owed = value
-        Queue.offerUnsafe(moves, { kind: 'open', id: undefined })
+        Queue.offerUnsafe(moves, { kind: 'open', id: undefined, cwd: blankCwd })
         clearDraft(current.sessionId)
         return
       }
@@ -686,8 +725,10 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     },
     send: (command) => sendTo(state().sessionId, command),
     sendTo,
-    moveTo: (id) =>
-      Queue.offerUnsafe(moves, id === undefined ? { kind: 'blank' } : { kind: 'open', id }),
+    moveTo: (id, cwd) => {
+      if (id === undefined) blankCwd = cwd
+      Queue.offerUnsafe(moves, id === undefined ? { kind: 'blank' } : { kind: 'open', id })
+    },
     chooseTheme: (theme) => {
       update((now) => withTheme(now, theme))
       showTheme(theme)
@@ -704,6 +745,8 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       Queue.offerUnsafe(panelAsks, { kind: 'commands', sessionId: state().sessionId }),
     askFiles: (query) =>
       Queue.offerUnsafe(panelAsks, { kind: 'files', sessionId: state().sessionId, query }),
+    askWorkspaces: () => Queue.offerUnsafe(workspaceAsks, { kind: 'list' }),
+    addWorkspace: (cwd) => Queue.offerUnsafe(workspaceAsks, { kind: 'add', cwd }),
     chooseModel: (model) => {
       const current = state()
       // The session on screen switches with the command; the choice is the run's, so
