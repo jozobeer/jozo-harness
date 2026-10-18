@@ -63,7 +63,7 @@ const leadTurn = (step: number, request: LlmRequest): ReadonlyArray<StreamChunk>
   return textTurn('the guide is written')
 }
 
-const stubLlm = (): Plugin<{}, Llm, never> => {
+const stubLlm = (requests: Array<LlmRequest>): Plugin<{}, Llm, never> => {
   let step = 1
   return {
     name: 'stub-llm',
@@ -80,6 +80,7 @@ const stubLlm = (): Plugin<{}, Llm, never> => {
           promptCacheControl: false,
         },
         stream: (request) => {
+          requests.push(request)
           if (isChildTurn(request)) return Stream.fromIterable(textTurn('the guide is written'))
           const script = leadTurn(step, request)
           step += 1
@@ -126,6 +127,7 @@ const profile = (root: string): string =>
 describe('a team through the command', () => {
   test('the lead spawns a teammate, hands out work, and moves the board', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-team-'))
+    const requests: Array<LlmRequest> = []
     const errs: Array<string> = []
     const code = await Effect.runPromise(
       runCommand({
@@ -140,7 +142,7 @@ describe('a team through the command', () => {
           askPlugin,
           tier0Plugin,
           tier1Plugin,
-          stubLlm(),
+          stubLlm(requests),
           agentPlugin,
           agentLoopPlugin,
         ] as ReadonlyArray<Plugin<any, any, any>>,
@@ -184,6 +186,18 @@ describe('a team through the command', () => {
     ).toEqual([{ task: { id: 'task-1', title: 'write the guide', state: 'done', revision: 2 } }])
     // The task reached the teammate as its own turn.
     expect(spoken(child ?? [])).toEqual(['write the guide'])
+    // Every teammate request says who it is; the lead never reads that line.
+    const childRequests = requests.filter(isChildTurn)
+    expect(childRequests).toHaveLength(1)
+    expect(textOf(childRequests[0] as LlmRequest)).toContain(
+      'team: you are teammate "builder" (writes the guide); your Team Lead is session ',
+    )
+    expect(
+      requests
+        .filter((request) => !isChildTurn(request))
+        .map(textOf)
+        .join('\n'),
+    ).not.toContain('team: you are teammate')
 
     await rm(root, { recursive: true, force: true })
   })

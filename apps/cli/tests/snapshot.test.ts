@@ -238,7 +238,9 @@ const SCENARIOS: ReadonlyArray<Scenario> = [
   {
     name: 'compaction',
     task: 'say done',
-    // A window small enough that the first request is already over the line.
+    // A window small enough that the first request is already over the line. The
+    // resumed turn has older messages to condense; the runtime snapshot is not one.
+    resumeTask: 'say done again',
     extraRows: [
       {
         id: 'agent-loop',
@@ -246,8 +248,13 @@ const SCENARIOS: ReadonlyArray<Scenario> = [
         config: { retainTokens: 1, maxBytes: 10, contextWindow: 100, headroomTokens: 0 },
       },
     ],
-    // The first stream answers the auxiliary summary call, the second the turn.
-    streams: [sseOf(textTurn('the earlier span, condensed')), sseOf(textTurn('done'))],
+    // The first stream answers the first turn, the second the summary call that the
+    // resumed turn makes, and the third that turn.
+    streams: [
+      sseOf(textTurn('done')),
+      sseOf(textTurn('the earlier span, condensed')),
+      sseOf(textTurn('done again')),
+    ],
   },
   {
     name: 'resume',

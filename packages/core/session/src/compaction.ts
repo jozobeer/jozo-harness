@@ -8,6 +8,7 @@ import type {
   SessionSeq,
 } from './events.ts'
 import { registerMessageProjection, type MessageProjection } from './projections.ts'
+import { lastRuntimeContextSeq } from './runtime-context.ts'
 import { latestSystemSeq } from './system-message.ts'
 import { messageTokens } from './token-meter.ts'
 
@@ -188,6 +189,8 @@ export function pruneFor(
   const checkpoints = new Set(
     events.filter((event) => event.type === 'compaction/checkpoint').map((event) => event.seq),
   )
+  // The newest runtime snapshot says who is asking now: the request keeps it whole.
+  const runtimeContext = lastRuntimeContextSeq(events)
   const replacements: Array<CompactReplacement> = []
   let shadowedBytes = 0
 
@@ -196,6 +199,7 @@ export function pruneFor(
       index >= boundary ||
       alreadyPruned.has(entry.seq) ||
       entry.seq === frame ||
+      entry.seq === runtimeContext ||
       checkpoints.has(entry.seq)
     ) {
       return
@@ -223,7 +227,8 @@ export function pruneFor(
  * The messages a summary would stand for: everything outside the retention, in
  * order, without the newest system prompt (the request's frame, not history). An
  * older prompt is history and enters the summary. Already checkpointed or pruned
- * messages are gone from the fold and never come back here.
+ * messages are gone from the fold and never come back here. The newest runtime
+ * snapshot stays as well: a summary may condense the past, not change who is asking.
  */
 export function summarizableMessages(
   events: ReadonlyArray<SessionEvent>,
@@ -232,7 +237,10 @@ export function summarizableMessages(
   const derived = deriveMessagesWithSeqs(events)
   const boundary = retainedFrom(derived, options.retainTokens)
   const frame = latestSystemSeq(events)
-  return derived.slice(0, boundary).filter((entry) => entry.seq !== frame)
+  const runtimeContext = lastRuntimeContextSeq(events)
+  return derived
+    .slice(0, boundary)
+    .filter((entry) => entry.seq !== frame && entry.seq !== runtimeContext)
 }
 
 /** The range as the request would carry it: a recorded prune's replacements applied. */
