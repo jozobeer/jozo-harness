@@ -28,6 +28,12 @@ const Parameters = Schema.Struct({
         "Whether the child starts from this conversation's log (fork, the default) or from nothing (fresh).",
     }),
   ),
+  preset: Schema.optionalKey(
+    Schema.String.annotate({
+      description:
+        'The named agent preset the child runs under. It has to be one the profile allows, and leaving it out takes the profile default.',
+    }),
+  ),
 })
 
 /** The route a child runs on: the one asked for, checked, or this agent's own. */
@@ -57,6 +63,31 @@ export interface SubagentValue {
 export interface SubagentHost {
   readonly agents: AgentsShape
   readonly route: string
+  /**
+   * The agent presets this host offers children: `allowed` names what the
+   * model may ask for, and `default` is what it gets when it asks for nothing.
+   * A host without presets refuses the argument, so a profile that names none
+   * changes no child.
+   */
+  readonly presets?: {
+    readonly allowed: ReadonlyArray<string>
+    readonly default?: string
+  }
+}
+
+/** The preset a child runs under: the allowed one it was given, or the host's default. */
+const presetFor = (
+  asked: string | undefined,
+  presets: SubagentHost['presets'],
+): string | undefined | ToolError => {
+  if (asked === undefined) return presets?.default
+  if (presets === undefined || !presets.allowed.includes(asked)) {
+    return new ToolError({
+      code: 'invalid-arguments',
+      message: 'not an allowed agent preset: ' + asked,
+    })
+  }
+  return asked
 }
 
 export const makeSubagentTool = (
@@ -90,10 +121,12 @@ export const makeSubagentTool = (
         if (refused !== undefined) return yield* Effect.fail(refused)
         const route = routeFor(args.model, host.route)
         if (route instanceof ToolError) return yield* Effect.fail(route)
+        const preset = presetFor(args.preset, host.presets)
+        if (preset instanceof ToolError) return yield* Effect.fail(preset)
         const child = yield* agents
           .create({
             cwd: args.cwd ?? context.cwd,
-            options: { route },
+            options: { route, ...(preset === undefined ? {} : { preset }) },
             seed:
               args.context === 'fresh' ? [] : forkSeed(eventsOfAgent(agents, context.sessionId)),
             parent: context.sessionId,

@@ -16,6 +16,8 @@ export interface AgentOptions {
   readonly spillDir?: string
   /** `provider/model` route. */
   readonly route: string
+  /** The named agent preset this session runs under; unset keeps the profile's own. */
+  readonly preset?: string
   readonly reasoningEffort?: string
 }
 

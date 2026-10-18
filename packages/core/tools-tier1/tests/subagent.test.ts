@@ -32,6 +32,7 @@ interface Created {
   readonly cwd: string
   readonly task: string
   readonly route: string | undefined
+  readonly preset: string | undefined
   readonly seed: ReadonlyArray<SessionEvent> | undefined
   readonly parent: string | undefined
 }
@@ -53,7 +54,7 @@ const fakeAgents = (
   return {
     create: (createOptions: {
       cwd: string
-      options?: { readonly route?: string }
+      options?: { readonly route?: string; readonly preset?: string }
       seed?: ReadonlyArray<SessionEvent>
       parent?: string
     }) => {
@@ -61,6 +62,7 @@ const fakeAgents = (
         cwd: createOptions.cwd,
         task: '',
         route: createOptions.options?.route,
+        preset: createOptions.options?.preset,
         seed: createOptions.seed,
         parent: createOptions.parent,
       })
@@ -154,6 +156,56 @@ describe('subagent tool', () => {
 
     expect(seen[0]?.route).toBe('other/cheap-model')
     expect(result?.isError).toBe(false)
+  })
+
+  test('the parent picks the preset the child runs under from the allowed list', async () => {
+    const seen: Array<Created> = []
+    await Effect.runPromise(
+      call(
+        makeSubagentTool({
+          agents: fakeAgents(seen, 'ok'),
+          route: 'stub/model',
+          presets: { allowed: ['explore', 'review'] },
+        }),
+        { task: 'look around', preset: 'explore' },
+      ),
+    )
+
+    expect(seen[0]?.preset).toBe('explore')
+  })
+
+  test('the default preset applies when the parent names none', async () => {
+    const seen: Array<Created> = []
+    await Effect.runPromise(
+      call(
+        makeSubagentTool({
+          agents: fakeAgents(seen, 'ok'),
+          route: 'stub/model',
+          presets: { allowed: ['explore'], default: 'explore' },
+        }),
+        { task: 'look around' },
+      ),
+    )
+
+    expect(seen[0]?.preset).toBe('explore')
+  })
+
+  test('a preset outside the allowed list refuses before a child starts', async () => {
+    const seen: Array<Created> = []
+    const result = await Effect.runPromise(
+      call(
+        makeSubagentTool({
+          agents: fakeAgents(seen, 'ok'),
+          route: 'stub/model',
+          presets: { allowed: ['explore'] },
+        }),
+        { task: 'look around', preset: 'review' },
+      ),
+    )
+
+    expect(result?.isError).toBe(true)
+    expect(JSON.stringify(result?.content)).toContain('not an allowed agent preset')
+    expect(seen).toEqual([])
   })
 
   test('a route has to name a provider and a model', async () => {
