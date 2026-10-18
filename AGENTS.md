@@ -49,7 +49,6 @@ vp test <path>          # 触ったパッケージのテストだけ先に回す
 - Conventional Commits、英語、命令形、scope はパッケージか領域名: `fix(session): ...`, `feat(web): ...`, `fix(tools): ...`。
 - 本文は「何が問題で、なぜこう直したか」を文章で書く。差分の箇条書きを並べない。関連 issue は `Refs #<n>`。
 - 1 コミット 1 目的。fmt だけの変更を機能変更に混ぜない。
-- main へ直接 push しない。ブランチを切り、PR で `check` が緑になってから入れる。
 
 ## やらないこと
 
