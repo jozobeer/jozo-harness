@@ -136,7 +136,6 @@
    * reload picks up the level. Ten minutes to the brim: work here runs for
    * minutes, and the level should still be climbing while it does.
    */
-  .pour.rising::before,
   .pour.rising::after {
     animation: jzh-pour 600s cubic-bezier(0.1, 0.6, 0.3, 1) var(--pour-from, 0s) both;
   }
@@ -786,6 +785,7 @@
     top: calc(100% + 4px);
     right: 0;
     z-index: 30;
+    color: var(--text);
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -992,6 +992,7 @@
   }
 
   .board-card .session-name {
+    color: var(--beer-ink);
     font-size: var(--text-xs);
     font-weight: 650;
   }
@@ -1006,7 +1007,13 @@
     top: 50%;
     right: 2px;
     background: var(--foam);
+    color: var(--beer-dim);
     transform: translateY(-50%);
+  }
+
+  /* The menu stays on foam when the row is hovered, so its ink stays the glass's too. */
+  .board-card .session-menu:hover {
+    color: var(--beer-ink);
   }
 
   .board-card .session.waiting .session-mark {
@@ -1030,6 +1037,7 @@
   .board-card .card-hint {
     margin: 0;
     padding: 0 10px;
+    color: var(--beer-dim);
   }
 
   .board-doing {

@@ -483,7 +483,7 @@ describe('the Solid page', () => {
   test('the send action gives up primary while a card waits on the reader', () => {
     const plain = makeStore()
     const idle = render(() => <Composer store={plain.store} />)
-    expect(idle.container.querySelector('#send')?.className).toContain('bg-accent')
+    expect(idle.container.querySelector('#send')?.className).toContain('bg-accent-fill')
     idle.unmount()
 
     const waiting = makeStore({
@@ -494,7 +494,7 @@ describe('the Solid page', () => {
       },
     })
     const takeover = render(() => <Composer store={waiting.store} />)
-    expect(takeover.container.querySelector('#send')?.className).not.toContain('bg-accent')
+    expect(takeover.container.querySelector('#send')?.className).not.toContain('bg-accent-fill')
   })
 
   test('the goal bar above the composer sends the goal commands the store carries', () => {
