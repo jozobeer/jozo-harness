@@ -752,6 +752,69 @@
     color: var(--text);
   }
 
+  /* Recent, one folder at a time: its header folds it, and Show more opens the rest. */
+  .recent-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .recent-fold {
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+    width: 100%;
+    padding: 4px var(--s2) 2px;
+    border: 0;
+    background: none;
+    color: var(--dim);
+    font: inherit;
+    font-size: var(--text-xs);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .recent-fold:hover {
+    color: var(--text);
+  }
+
+  .recent-fold[aria-disabled='true'] {
+    cursor: default;
+  }
+
+  .recent-caret {
+    flex: none;
+    width: 10px;
+  }
+
+  .recent-name {
+    overflow: hidden;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .recent-count {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .recent-more {
+    align-self: flex-start;
+    margin-left: var(--s2);
+    padding: 2px 0;
+    border: 0;
+    background: none;
+    color: var(--dim);
+    font: inherit;
+    font-size: var(--text-xs);
+    cursor: pointer;
+  }
+
+  .recent-more:hover {
+    color: var(--text);
+  }
+
   .board-card {
     display: flex;
     flex-direction: column;

@@ -11,8 +11,17 @@ import {
 } from 'solid-js'
 import { plainText } from '@jozo-harness/ui-view'
 import type { SessionAction, SessionSummary } from '../../src/shared/rpc.ts'
-import { boardOf, visibleSessions, type BoardEntry, type Waiting } from '../../src/ui/board.ts'
+import {
+  RECENT_PAGE,
+  boardOf,
+  recentGroupsOf,
+  visibleSessions,
+  type BoardEntry,
+  type RecentGroup,
+  type Waiting,
+} from '../../src/ui/board.ts'
 import { basenameOf, whenOf } from '../lib.ts'
+import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY, keepPaths, pathsFrom } from '../recent.ts'
 import type { SessionStore } from '../store.ts'
 import { Button } from './ui/button.tsx'
 
@@ -388,6 +397,67 @@ const runningDetail = (entry: BoardEntry, now: number): string =>
 const restDetail = (entry: BoardEntry, now: number): string => whenOf(entry.since, now)
 
 /**
+ * One workspace of Recent. Its header folds the folder; Show more draws the rows
+ * past the first page. The folder holding the open session stays open, however
+ * the reader left it, so the session on screen never hides behind a fold.
+ */
+const RecentFolder = (props: {
+  group: RecentGroup
+  store: SessionStore
+  folded: ReadonlySet<string>
+  shown: ReadonlySet<string>
+  onFold: (cwd: string) => void
+  onShown: (cwd: string) => void
+  now: number
+}) => {
+  const open = (): boolean =>
+    props.group.entries.some((entry) => entry.summary.id === props.store.state().sessionId)
+  const folded = (): boolean => !open() && props.folded.has(props.group.cwd)
+  const expanded = (): boolean => props.shown.has(props.group.cwd)
+  const all = (): boolean => open() || expanded()
+  const more = (): boolean => props.group.entries.length > RECENT_PAGE
+  const rows = (): ReadonlyArray<BoardEntry> =>
+    all() ? props.group.entries : props.group.entries.slice(0, RECENT_PAGE)
+  return (
+    <section class="recent-group" data-cwd={props.group.cwd}>
+      <button
+        class="recent-fold"
+        type="button"
+        title={props.group.cwd}
+        aria-expanded={!folded()}
+        aria-disabled={open()}
+        onClick={() => {
+          if (!open()) props.onFold(props.group.cwd)
+        }}
+      >
+        <span class="recent-caret" aria-hidden="true">
+          {folded() ? '▸' : '▾'}
+        </span>
+        <span class="recent-name">{basenameOf(props.group.cwd)}</span>
+        <span class="recent-count">{String(props.group.entries.length)}</span>
+      </button>
+      <Show when={!folded()}>
+        <For each={rows()}>
+          {(entry) => (
+            <Row entry={entry} store={props.store} detail={restDetail(entry, props.now)} />
+          )}
+        </For>
+        <Show when={more() && !all()}>
+          <button class="recent-more" type="button" onClick={() => props.onShown(props.group.cwd)}>
+            Show more
+          </button>
+        </Show>
+        <Show when={more() && expanded() && !open()}>
+          <button class="recent-more" type="button" onClick={() => props.onShown(props.group.cwd)}>
+            Show less
+          </button>
+        </Show>
+      </Show>
+    </section>
+  )
+}
+
+/**
  * The cockpit: every session the store holds, sorted by what the reader has to
  * do — answer, watch, or nothing. Sessions the server has open are followed
  * live; the others read as closed until opened.
@@ -420,6 +490,28 @@ export const Board = (props: { store: SessionStore }) => {
   const noMatch = (): boolean =>
     query().trim() !== '' &&
     board().waiting.length + board().running.length + board().rest.length === 0
+  const [foldedFolders, setFoldedFolders] = createSignal(
+    pathsFrom(localStorage.getItem(RECENT_FOLDED_KEY)),
+  )
+  const [shownFolders, setShownFolders] = createSignal(
+    pathsFrom(localStorage.getItem(RECENT_SHOWN_KEY)),
+  )
+  const toggled = (current: ReadonlySet<string>, cwd: string): ReadonlySet<string> => {
+    const next = new Set(current)
+    if (next.has(cwd)) next.delete(cwd)
+    else next.add(cwd)
+    return next
+  }
+  const foldFolder = (cwd: string): void => {
+    const next = toggled(foldedFolders(), cwd)
+    setFoldedFolders(next)
+    keepPaths(RECENT_FOLDED_KEY, next)
+  }
+  const showFolder = (cwd: string): void => {
+    const next = toggled(shownFolders(), cwd)
+    setShownFolders(next)
+    keepPaths(RECENT_SHOWN_KEY, next)
+  }
   const now = createNow()
   return (
     <>
@@ -474,8 +566,18 @@ export const Board = (props: { store: SessionStore }) => {
           </For>
         </Section>
         <Section title="Recent" count={board().rest.length}>
-          <For each={board().rest}>
-            {(entry) => <Row entry={entry} store={props.store} detail={restDetail(entry, now())} />}
+          <For each={recentGroupsOf(board().rest)}>
+            {(group) => (
+              <RecentFolder
+                group={group}
+                store={props.store}
+                folded={foldedFolders()}
+                shown={shownFolders()}
+                onFold={foldFolder}
+                onShown={showFolder}
+                now={now()}
+              />
+            )}
           </For>
         </Section>
         <Show when={noMatch()}>
