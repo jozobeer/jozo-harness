@@ -28,6 +28,7 @@ const agents: AgentsShape = {
   get: () => undefined,
   list: () => [],
   childrenOf: () => [],
+  depthOf: () => 0,
   dispose: () => Effect.void,
   disposeAll: () => Effect.void,
 }
@@ -43,7 +44,7 @@ describe('tier 1 tool schemas', () => {
       makeWebSearchTool({ search: () => Effect.succeed([]) }),
       ...jobTools(jobs),
       makeWorkingDirectoryTool({ root, change: () => Effect.void }),
-      makeSubagentTool({ agents, route: 'stub/model', parentEvents: () => [] }),
+      makeSubagentTool({ agents, route: 'stub/model' }),
       ...agentTools(agents),
       makeScheduleTool({
         events: () => [],
@@ -55,7 +56,6 @@ describe('tier 1 tool schemas', () => {
       makeTeamTool({
         agents,
         route: 'stub/model',
-        parentEvents: () => [],
         log: {
           events: () => [],
           spawnMember: () => Effect.void,
@@ -64,7 +64,7 @@ describe('tier 1 tool schemas', () => {
           nextId: () => 'task-1',
         },
       }),
-      makeWorkflowTool({ agents, route: 'stub/model', parentEvents: () => [] }),
+      makeWorkflowTool({ agents, route: 'stub/model' }),
       makePluginTool({
         rows: () => [],
         known: () => [],

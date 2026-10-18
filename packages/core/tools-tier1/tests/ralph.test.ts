@@ -36,6 +36,7 @@ const fakeAgents = (
   const children: Array<FakeChild> = []
   let counter = 0
   const agents: AgentsShape = {
+    depthOf: () => 0,
     create: (createOptions) =>
       Effect.sync(() => {
         counter += 1

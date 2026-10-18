@@ -34,6 +34,20 @@ export function agentsService(
     const childrenOf = (id: SessionId): ReadonlyArray<Agent> =>
       [...registered.values()].filter((entry) => entry.parent === id).map((entry) => entry.agent)
 
+    const depthOf = (id: SessionId): number => {
+      let depth = 0
+      let current: SessionId | undefined = id
+      // A cycle is not a shape create can build; the set keeps a corrupt registry
+      // from hanging a turn if one ever appears.
+      const seen = new Set<SessionId>()
+      while (current !== undefined && !seen.has(current)) {
+        seen.add(current)
+        current = registered.get(current)?.parent
+        if (current !== undefined) depth += 1
+      }
+      return depth
+    }
+
     const dispose = (id: SessionId): Effect.Effect<void> =>
       Effect.gen(function* () {
         const entry = registered.get(id)
@@ -104,6 +118,8 @@ export function agentsService(
       list: () => [...registered.values()].map((entry) => entry.agent),
 
       childrenOf,
+
+      depthOf,
 
       dispose,
 

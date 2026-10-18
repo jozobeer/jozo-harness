@@ -90,6 +90,8 @@ export interface AgentsShape {
   list(): ReadonlyArray<Agent>
   /** The agents this one started, and only those. */
   childrenOf(id: SessionId): ReadonlyArray<Agent>
+  /** How many delegations separate this agent from a root: 0 for a root, 1 for its child. */
+  depthOf(id: SessionId): number
   dispose(id: SessionId): Effect.Effect<void>
   disposeAll(): Effect.Effect<void>
 }

@@ -28,24 +28,38 @@ const createdTask = (seq: number, task: TeamTask): SessionEvent =>
 const updatedTask = (seq: number, task: TeamTask): SessionEvent =>
   event(seq, 'team/task/updated', { task })
 
+interface FakeTeamOptions {
+  readonly depth?: number
+}
+
 /** A log the tool writes to, with children the Agents seam can look up. */
-const fakeTeam = () => {
-  const events: Array<SessionEvent> = []
+const fakeTeam = (options: FakeTeamOptions = {}) => {
+  const eventsBySession = new Map<string, Array<SessionEvent>>()
+  const writes: Array<{ sessionId: string; type: string }> = []
+  const eventsIn = (sessionId: string): Array<SessionEvent> => {
+    const stored = eventsBySession.get(sessionId)
+    if (stored !== undefined) return stored
+    const created: Array<SessionEvent> = []
+    eventsBySession.set(sessionId, created)
+    return created
+  }
+  const events = eventsIn('s1')
   const children = new Map<string, Agent>()
   const assigned: Array<{ id: string; text: string }> = []
   let seq = 0
   let counter = 0
-  const write = (type: string, data: unknown): Effect.Effect<void> =>
+  const write = (sessionId: string, type: string, data: unknown): Effect.Effect<void> =>
     Effect.sync(() => {
       seq += 1
-      events.push(event(seq, type, data))
+      writes.push({ sessionId, type })
+      eventsIn(sessionId).push(event(seq, type, data))
     })
   const log: TeamLog = {
-    events: () => events,
-    spawnMember: (member) => write('team/spawned', member),
-    createTask: (task) => write('team/task/created', { task }),
-    updateTask: (task) => write('team/task/updated', { task }),
-    nextId: () => {
+    events: (sessionId) => eventsIn(sessionId),
+    spawnMember: (sessionId, member) => write(sessionId, 'team/spawned', member),
+    createTask: (sessionId, task) => write(sessionId, 'team/task/created', { task }),
+    updateTask: (sessionId, task) => write(sessionId, 'team/task/updated', { task }),
+    nextId: (_sessionId) => {
       counter += 1
       return 'task-' + String(counter)
     },
@@ -70,8 +84,9 @@ const fakeTeam = () => {
     get: (id: string) => children.get(id),
     list: () => [...children.values()],
     dispose: () => Effect.void,
+    depthOf: () => options.depth ?? 0,
   } as unknown as AgentsShape
-  return { log, events, agents, children, assigned }
+  return { log, events, writes, agents, children, assigned }
 }
 
 const call = (
@@ -101,7 +116,6 @@ describe('the team roster', () => {
     const tool = makeTeamTool({
       agents: team.agents,
       route: 'stub/model',
-      parentEvents: () => [],
       log: team.log,
     })
 
@@ -121,7 +135,6 @@ describe('the team roster', () => {
     const tool = makeTeamTool({
       agents: team.agents,
       route: 'stub/model',
-      parentEvents: () => [],
       log: team.log,
     })
     await Effect.runPromise(call(tool, { action: 'spawn', name: 'builder' }))
@@ -160,7 +173,6 @@ describe('the team board', () => {
     const tool = makeTeamTool({
       agents: team.agents,
       route: 'stub/model',
-      parentEvents: () => [],
       log: team.log,
     })
 
@@ -179,7 +191,6 @@ describe('the team board', () => {
     const tool = makeTeamTool({
       agents: team.agents,
       route: 'stub/model',
-      parentEvents: () => [],
       log: team.log,
     })
     await Effect.runPromise(call(tool, { action: 'create', title: 'write the guide' }))
@@ -205,7 +216,6 @@ describe('the team board', () => {
     const tool = makeTeamTool({
       agents: team.agents,
       route: 'stub/model',
-      parentEvents: () => [],
       log: team.log,
     })
     await Effect.runPromise(call(tool, { action: 'spawn', name: 'builder' }))
@@ -217,5 +227,34 @@ describe('the team board', () => {
 
     expect(textOf(listed)).toContain('builder (idle)')
     expect(textOf(listed)).toContain('task-1 write the guide — pending, owner builder, revision 1')
+  })
+
+  test('the roster lands in the log of the agent that called team', async () => {
+    const team = fakeTeam()
+    const tool = makeTeamTool({
+      agents: team.agents,
+      route: 'stub/model',
+      log: team.log,
+    })
+
+    await Effect.runPromise(call(tool, { action: 'spawn', name: 'builder' }))
+
+    expect(team.writes).toEqual([{ sessionId: 's1', type: 'team/spawned' }])
+    expect(team.events.map((each) => each.type)).toEqual(['team/spawned'])
+  })
+
+  test('a teammate at the depth limit is refused', async () => {
+    const team = fakeTeam({ depth: 1 })
+    const tool = makeTeamTool({
+      agents: team.agents,
+      route: 'stub/model',
+      log: team.log,
+    })
+
+    const result = await Effect.runPromise(call(tool, { action: 'spawn', name: 'builder' }))
+
+    expect(result?.isError).toBe(true)
+    expect(textOf(result)).toContain('delegation depth')
+    expect(team.children.size).toBe(0)
   })
 })

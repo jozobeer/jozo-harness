@@ -36,20 +36,33 @@ interface Created {
   readonly parent: string | undefined
 }
 
-const fakeAgents = (seen: Array<Created>, text: string): AgentsShape =>
-  ({
-    create: (options: {
+interface FakeAgentsOptions {
+  readonly depth?: number
+  readonly events?: ReadonlyArray<SessionEvent>
+}
+
+const fakeAgents = (
+  seen: Array<Created>,
+  text: string,
+  options: FakeAgentsOptions = {},
+): AgentsShape => {
+  const caller = {
+    id: 'caller-1',
+    session: { events: () => options.events ?? [] },
+  } as unknown as Agent
+  return {
+    create: (createOptions: {
       cwd: string
       options?: { readonly route?: string }
       seed?: ReadonlyArray<SessionEvent>
       parent?: string
     }) => {
       seen.push({
-        cwd: options.cwd,
+        cwd: createOptions.cwd,
         task: '',
-        route: options.options?.route,
-        seed: options.seed,
-        parent: options.parent,
+        route: createOptions.options?.route,
+        seed: createOptions.seed,
+        parent: createOptions.parent,
       })
       const agent = {
         id: 'child-1',
@@ -63,7 +76,10 @@ const fakeAgents = (seen: Array<Created>, text: string): AgentsShape =>
       } as unknown as Agent
       return Effect.succeed(agent)
     },
-  }) as unknown as AgentsShape
+    get: (id: string) => (id === 's1' ? caller : undefined),
+    depthOf: () => options.depth ?? 0,
+  } as unknown as AgentsShape
+}
 
 const call = (
   tool: ToolDefinition<any, any>,
@@ -91,7 +107,6 @@ describe('subagent tool', () => {
         makeSubagentTool({
           agents: fakeAgents(seen, 'child says hi'),
           route: 'stub/model',
-          parentEvents: () => [],
         }),
         {
           task: 'look around',
@@ -114,7 +129,6 @@ describe('subagent tool', () => {
         makeSubagentTool({
           agents: fakeAgents(seen, 'ok'),
           route: 'stub/model',
-          parentEvents: () => [],
         }),
         {
           task: 'go',
@@ -133,7 +147,6 @@ describe('subagent tool', () => {
         makeSubagentTool({
           agents: fakeAgents(seen, 'child says hi'),
           route: 'stub/model',
-          parentEvents: () => [],
         }),
         { task: 'look around', model: 'other/cheap-model' },
       ),
@@ -150,7 +163,6 @@ describe('subagent tool', () => {
         makeSubagentTool({
           agents: fakeAgents(seen, 'ok'),
           route: 'stub/model',
-          parentEvents: () => [],
         }),
         { task: 'look around', model: 'cheap-model' },
       ),
@@ -164,20 +176,11 @@ describe('subagent tool', () => {
 
   test('a child can be left idle, and start from nothing', async () => {
     const seen: Array<Created> = []
-    const parent = [
-      {
-        seq: 1,
-        time: 1,
-        type: 'user/message',
-        data: { text: 'earlier', source: 'user' },
-      } as unknown as SessionEvent,
-    ]
     const result = await Effect.runPromise(
       call(
         makeSubagentTool({
           agents: fakeAgents(seen, ''),
           route: 'stub/model',
-          parentEvents: () => parent,
         }),
         { context: 'fresh' },
       ),
@@ -186,5 +189,52 @@ describe('subagent tool', () => {
     expect(seen).toEqual([{ cwd: '/work', task: '', route: 'stub/model', seed: [], parent: 's1' }])
     expect(result?.value).toEqual({ sessionId: 'child-1', text: '' })
     expect(JSON.stringify(result?.content)).toContain('send_message')
+  })
+
+  test('a child at the depth limit refuses to delegate', async () => {
+    const seen: Array<Created> = []
+    const result = await Effect.runPromise(
+      call(
+        makeSubagentTool({
+          agents: fakeAgents(seen, 'unused', { depth: 1 }),
+          route: 'stub/model',
+        }),
+        { task: 'delegate deeper' },
+      ),
+    )
+
+    expect(result?.isError).toBe(true)
+    expect(JSON.stringify(result?.content)).toContain('delegation depth')
+    expect(seen).toEqual([])
+  })
+
+  test('a forked child starts from the log of the agent that called it', async () => {
+    const seen: Array<Created> = []
+    const earlier = [
+      {
+        seq: 1,
+        time: 1,
+        type: 'assistant/message',
+        data: { content: [{ type: 'text', text: 'what this agent did' }] },
+      } as unknown as SessionEvent,
+      {
+        seq: 2,
+        time: 2,
+        type: 'user/message',
+        data: { text: 'the instruction in flight', source: 'user' },
+      } as unknown as SessionEvent,
+    ]
+    await Effect.runPromise(
+      call(
+        makeSubagentTool({
+          agents: fakeAgents(seen, 'ok', { events: earlier }),
+          route: 'stub/model',
+        }),
+        { task: 'carry on' },
+      ),
+    )
+
+    // forkSeed drops the trailing instruction and keeps what the caller had done.
+    expect(seen[0]?.seed?.map((event) => event.type)).toEqual(['assistant/message'])
   })
 })

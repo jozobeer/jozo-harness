@@ -23,6 +23,8 @@ export interface AssembleContext {
 /** What a runtime context provider may read when the loop renders a snapshot. */
 export interface RuntimeContextSubject {
   readonly cwd: string
+  /** The agent whose step is being assembled, when the loop knows it. */
+  readonly agentId?: string
 }
 
 /**
