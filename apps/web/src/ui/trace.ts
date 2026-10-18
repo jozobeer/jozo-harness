@@ -2,6 +2,15 @@ import type { UiSessionEvent } from '@jozo-harness/ui-protocol'
 
 export type TraceToolStatus = 'running' | 'done' | 'error'
 
+/** One image a tool result carried, kept so the card can draw it. */
+export interface TraceImage {
+  readonly mediaType: string
+  /** Base64 of the image bytes. */
+  readonly data: string
+  /** The path the tool read; '' when the block named none. */
+  readonly name: string
+}
+
 /** One tool call: what was asked, when, and what came back. */
 export interface TraceTool {
   readonly callId: string
@@ -15,6 +24,8 @@ export interface TraceTool {
   /** The result's one-line summary; '' until it arrives. */
   readonly result: string
   readonly output: string
+  /** The images the result carried; empty for a text-only result. */
+  readonly images: ReadonlyArray<TraceImage>
 }
 
 /** One model call and the tools it asked for. */
@@ -63,6 +74,19 @@ const numberOf = (data: unknown, key: string): number => {
   const value = fieldOf(data, key)
   return typeof value === 'number' ? value : 0
 }
+
+/** The image parts of a content list, with only those that carry bytes. */
+const imagesOf = (content: unknown): ReadonlyArray<TraceImage> =>
+  Array.isArray(content)
+    ? content
+        .filter((part) => fieldOf(part, 'type') === 'image')
+        .map((part) => ({
+          mediaType: textOf(part, 'mediaType'),
+          data: textOf(part, 'data'),
+          name: textOf(part, 'name'),
+        }))
+        .filter((image) => image.data !== '')
+    : []
 
 /** The text parts of a content list joined, for one part type. */
 const partsOf = (content: unknown, type: string): string =>
@@ -181,6 +205,7 @@ const callTool = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => {
     status: 'running',
     result: '',
     output: '',
+    images: [],
   }
   const path = writtenPath(tool.name, tool.args)
   const called = inLastStep(turns, (step) => ({ ...step, tools: [...step.tools, tool] }))
@@ -197,6 +222,7 @@ const settleTool = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => {
     status: fieldOf(event.data, 'isError') === true ? 'error' : 'done',
     result: textOf(event.data, 'summary'),
     output: partsOf(fieldOf(event.data, 'content'), 'text'),
+    images: imagesOf(fieldOf(event.data, 'content')),
   })
   return inLastStep(turns, (step) => ({
     ...step,
