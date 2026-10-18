@@ -74,7 +74,12 @@ export function makeSystemPrompt(): SystemPromptShape {
   const registered = new Map<string, PromptSection>()
   const contexts = new Map<string, RuntimeContextEntry>()
 
-  const render = (context: AssembleContext): Effect.Effect<string, PromptError> =>
+  const assemble = (
+    context: AssembleContext,
+  ): Effect.Effect<
+    { readonly text: string; readonly sections: ReadonlyArray<string> },
+    PromptError
+  > =>
     Effect.gen(function* () {
       const complete = [...registered.values()].filter((section) => section.complete === true)
       if (complete.length > 1) {
@@ -88,14 +93,20 @@ export function makeSystemPrompt(): SystemPromptShape {
       const chosen =
         complete[0] !== undefined ? complete : [...registered.values()].sort(compareEntries)
       const texts: Array<string> = []
+      const sections: Array<string> = []
       for (const section of chosen) {
         const raw = typeof section.text === 'function' ? section.text(context) : section.text
         // A section may render nothing: the tool guidance does when no visible tool has any.
         const text = yield* interpolate(raw, context)
-        if (text !== '') texts.push(text)
+        if (text === '') continue
+        texts.push(text)
+        sections.push(section.name)
       }
-      return texts.join('\n\n')
+      return { text: texts.join('\n\n'), sections }
     })
+
+  const render = (context: AssembleContext): Effect.Effect<string, PromptError> =>
+    Effect.map(assemble(context), (built) => built.text)
 
   return {
     section: (section) =>
@@ -156,7 +167,8 @@ export function makeSystemPrompt(): SystemPromptShape {
       Effect.gen(function* () {
         const tools = yield* Tools
         const schemas = tools.schemas()
-        return { system: yield* render({ ...context, tools: schemas }), tools: schemas }
+        const built = yield* assemble({ ...context, tools: schemas })
+        return { system: built.text, sections: built.sections, tools: schemas }
       }),
   }
 }

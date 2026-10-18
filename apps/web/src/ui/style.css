@@ -499,6 +499,79 @@ body {
   font-size: var(--text-sm);
 }
 
+.run-section {
+  display: flex;
+  gap: var(--s2);
+  align-items: baseline;
+  justify-content: space-between;
+  margin-top: var(--s4);
+}
+
+.run-section-title {
+  display: block;
+  margin-top: var(--s4);
+  color: var(--dim);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.run-section .run-section-title {
+  margin-top: 0;
+}
+
+.run-todo-counts {
+  color: var(--dim);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.run-todos,
+.run-skills,
+.run-prompt-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--s2) 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+
+.run-todo {
+  display: flex;
+  gap: var(--s2);
+  align-items: baseline;
+  color: var(--dim);
+}
+
+.run-todo.in_progress {
+  color: var(--tool);
+  font-weight: 600;
+}
+
+.run-todo.completed .run-todo-content {
+  text-decoration: line-through;
+}
+
+.run-todo-mark {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+
+.run-todo-content {
+  overflow-wrap: anywhere;
+}
+
+.run-skill,
+.run-prompt-section {
+  padding: 0 var(--s2);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+
 .run-schedules,
 .run-jobs,
 .run-children {

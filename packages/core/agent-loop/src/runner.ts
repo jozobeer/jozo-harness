@@ -300,14 +300,17 @@ const agentLoopEffect = (
      */
     const recordInput = (
       agent: Agent,
-      build: { readonly system: string },
+      build: { readonly system: string; readonly sections: ReadonlyArray<string> },
       input: ReadonlyArray<UserMessage>,
       cwd: string,
       opening: boolean,
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
         if (opening && build.system !== lastSystemPrompt(agent.session.events())) {
-          yield* append(agent, 'system/message', { text: build.system })
+          yield* append(agent, 'system/message', {
+            text: build.system,
+            sections: build.sections,
+          })
         }
         yield* recordRuntimeContext(agent, cwd)
         for (const message of input) {
