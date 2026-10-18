@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { defineConfig } from 'vite-plus'
 
 // What .oxlintrc.json and .oxfmtrc.json said, in the place Vite+ reads it. The
@@ -17,6 +19,10 @@ export default defineConfig({
     },
   },
   test: {
+    // The command reads the settings file of whoever runs it, and tests that
+    // assert the default state would otherwise pass on CI and fail on a machine
+    // with a config. Point the config home at one no test writes.
+    env: { XDG_CONFIG_HOME: join(tmpdir(), 'jzh-test-config') },
     // The workspace's own tests, wherever a package keeps them. The built
     // browser app and scratch trees hold none.
     include: [
