@@ -91,8 +91,16 @@ interface FakeHost {
   readonly stopSubagent: (id: string) => Effect.Effect<void, WebError>
   /** The children the run state reports now, as a turn that started one would. */
   readonly setSubagents: (subagents: RunStateView['subagents']) => void
+  /** The jobs the run state reports now, as a running command would. */
+  readonly setJobs: (jobs: RunStateView['jobs']) => void
+  /** What one job detail read returns now, while its output grows. */
+  readonly setJobDetail: (detail: JobDetailView) => void
+  /** How many times a client read a job detail. */
+  readonly jobReads: () => number
   /** The children a page stopped, in the order it asked. */
   readonly stopped: Array<string>
+  /** The jobs a page stopped, in the order it asked. */
+  readonly stoppedJobs: Array<string>
   readonly commands: ReadonlyArray<UiCommand>
   /** Appends to the log and feeds whoever follows it now. */
   readonly said: (event: UiEvent) => void
@@ -121,11 +129,15 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
   const subscribers = new Set<Queue.Queue<UiEvent>>()
   const commands: Array<UiCommand> = []
   const stopped: Array<string> = []
+  const stoppedJobs: Array<string> = []
   let follows = 0
   let states = 0
   let effort = ''
   let model = 'stub/model'
   let subagents: RunStateView['subagents'] = []
+  let jobs: RunStateView['jobs'] = []
+  let jobDetail: JobDetailView | undefined
+  let jobReads = 0
   const host: FakeHost = {
     summary: { id, cwd, createdAt: 1, updatedAt: 1, title: '' },
     runState: () => {
@@ -133,7 +145,7 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
       return {
         goal: null,
         schedules: [],
-        jobs: [],
+        jobs,
         subagents,
         todos: [],
         todoCounts: { pending: 0, inProgress: 0, completed: 0 },
@@ -145,8 +157,16 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
         efforts: ['low', 'high'],
       }
     },
-    jobOutput: () => Effect.fail(new WebError({ message: 'no such job' })),
-    stopJob: () => Effect.void,
+    jobOutput: (jobId) => {
+      jobReads += 1
+      return jobDetail === undefined || jobDetail.id !== jobId
+        ? Effect.fail(new WebError({ message: 'no such job' }))
+        : Effect.succeed(jobDetail)
+    },
+    stopJob: (jobId) =>
+      Effect.sync(() => {
+        stoppedJobs.push(jobId)
+      }),
     stopSubagent: (childId) =>
       Effect.sync(() => {
         stopped.push(childId)
@@ -154,7 +174,15 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
     setSubagents: (next) => {
       subagents = next
     },
+    setJobs: (next) => {
+      jobs = next
+    },
+    setJobDetail: (next) => {
+      jobDetail = next
+    },
+    jobReads: () => jobReads,
     stopped,
+    stoppedJobs,
     commands,
     accepting: true,
     refusing: false,
@@ -489,6 +517,88 @@ describe('the page store', () => {
 
           yield* until(() => host.stopped.includes('child-1'), 'asked to stop the subagent')
           yield* until(() => host.states() > before, 'read the run state after the stop')
+        }),
+      ),
+    )
+  }, 15_000)
+
+  test('a running job keeps the run state fresh after no turn is running', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    const job = {
+      id: 'job-1',
+      command: 'sleep 30',
+      running: true,
+      startedAt: Date.now() - 2_000,
+      tail: 'working',
+    }
+    host.setJobs([job])
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          const before = host.states()
+          yield* until(() => host.states() > before, 'read the run state while the job runs')
+          expect(store.state().run?.jobs).toEqual([job])
+        }),
+      ),
+    )
+  }, 15_000)
+
+  test('an open running job reads its output again, so the pane keeps growing', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    host.setJobs([
+      {
+        id: 'job-1',
+        command: 'echo one',
+        running: true,
+        startedAt: Date.now(),
+        tail: 'one',
+      },
+    ])
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          host.setJobDetail({ id: 'job-1', command: 'echo one', running: true, output: 'one' })
+          store.openJob('job-1')
+          yield* until(() => host.jobReads() >= 1, 'read the job when it opened')
+          expect(store.state().pane).toMatchObject({
+            kind: 'job',
+            id: 'job-1',
+            detail: { output: 'one' },
+          })
+
+          host.setJobDetail({
+            id: 'job-1',
+            command: 'echo one',
+            running: true,
+            output: 'one\ntwo',
+          })
+          yield* until(() => host.jobReads() >= 2, 'read the open job again while it runs')
+          const output = (): string | undefined => {
+            const pane = store.state().pane
+            return pane?.kind === 'job' ? pane.detail?.output : undefined
+          }
+          yield* until(() => output() === 'one\ntwo', 'showed the output that arrived')
+        }),
+      ),
+    )
+  }, 15_000)
+
+  test('stopping a job from the run list reads the state again and leaves the pane shut', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    host.setJobDetail({ id: 'job-1', command: 'sleep 30', running: true, output: 'working' })
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          const before = host.states()
+          store.stopJob('job-1')
+
+          yield* until(() => host.stoppedJobs.includes('job-1'), 'asked to stop the job')
+          yield* until(() => host.states() > before, 'read the run state after the stop')
+          // The list is not a request to open the job: the pane the reader had stays.
+          expect(store.state().pane).toEqual({ kind: 'run' })
         }),
       ),
     )

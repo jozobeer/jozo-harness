@@ -5,6 +5,7 @@ import { spawn, type Child } from '@jozo-harness/process'
 export interface Job {
   readonly id: string
   readonly command: string
+  readonly startedAt: number
   running: boolean
   output: string
 }
@@ -31,6 +32,8 @@ export interface JobsShape {
   readonly promote: (command: string, child: Child) => Effect.Effect<Job, ToolError>
   /** Reads what the job produced since the previous read, waiting up to `waitMs` for more. */
   readonly read: (id: string, options?: JobReadOptions) => Effect.Effect<JobRead, ToolError>
+  /** Reads all the output the job kept so far, leaving it for the next read. */
+  readonly snapshot: (id: string) => Effect.Effect<JobRead, ToolError>
   readonly kill: (id: string) => Effect.Effect<void, ToolError>
   readonly list: () => ReadonlyArray<Job>
 }
@@ -81,7 +84,7 @@ export const makeJobs = (): Effect.Effect<JobsShape> =>
     const register = (command: string, child: Child): Job => {
       counter += 1
       const id = 'job-' + String(counter)
-      const job: Job = { id, command, running: true, output: '' }
+      const job: Job = { id, command, startedAt: Date.now(), running: true, output: '' }
       const entry: Entry = { job, process: child, produced: 0, seen: 0, wake: [] }
       collect(entry, child.stdout)
       collect(entry, child.stderr)
@@ -111,6 +114,14 @@ export const makeJobs = (): Effect.Effect<JobsShape> =>
         entry.wake.push(done)
       })
 
+    /** The entry of one job, or the refusal a read of an unknown id gets. */
+    const entryOf = (id: string): Effect.Effect<Entry, ToolError> => {
+      const entry = jobs.get(id)
+      return entry === undefined
+        ? Effect.fail(new ToolError({ code: 'execution', message: 'unknown job: ' + id }))
+        : Effect.succeed(entry)
+    }
+
     return {
       start: (command, cwd) =>
         Effect.sync(() =>
@@ -122,12 +133,7 @@ export const makeJobs = (): Effect.Effect<JobsShape> =>
       promote: (command, child) => Effect.sync(() => register(command, child)),
       read: (id, options) =>
         Effect.gen(function* () {
-          const entry = jobs.get(id)
-          if (entry === undefined) {
-            return yield* Effect.fail(
-              new ToolError({ code: 'execution', message: 'unknown job: ' + id }),
-            )
-          }
+          const entry = yield* entryOf(id)
           const waitMs = Math.max(options?.waitMs ?? 0, 0)
           if (waitMs > 0) yield* Effect.promise(() => waitForChange(entry, waitMs))
           const buffered = entry.job.output.length
@@ -142,14 +148,21 @@ export const makeJobs = (): Effect.Effect<JobsShape> =>
             truncated: unseen > buffered,
           }
         }),
+      snapshot: (id) =>
+        Effect.gen(function* () {
+          const entry = yield* entryOf(id)
+          return {
+            id: entry.job.id,
+            command: entry.job.command,
+            running: entry.job.running,
+            output: entry.job.output,
+            // Part of what the job produced may have fallen out of the kept buffer.
+            truncated: entry.produced > entry.job.output.length,
+          }
+        }),
       kill: (id) =>
         Effect.gen(function* () {
-          const entry = jobs.get(id)
-          if (entry === undefined) {
-            return yield* Effect.fail(
-              new ToolError({ code: 'execution', message: 'unknown job: ' + id }),
-            )
-          }
+          const entry = yield* entryOf(id)
           entry.process.kill()
           entry.job.running = false
         }),

@@ -136,6 +136,43 @@ const LiveSubagents = (props: { store: SessionStore; subagents: RunStateView['su
   </ul>
 )
 
+/** The background jobs the session started, with what each still does and its newest line. */
+const Jobs = (props: { store: SessionStore; jobs: RunStateView['jobs'] }) => (
+  <ul class="run-jobs">
+    <For each={props.jobs}>
+      {(job) => (
+        <li class={'run-job-row ' + (job.running ? 'running' : 'done')} data-job-id={job.id}>
+          <button
+            class={'run-job ' + (job.running ? 'running' : 'done')}
+            type="button"
+            onClick={() => props.store.openJob(job.id)}
+          >
+            <span class="run-job-state">{job.running ? 'running' : 'done'}</span>
+            <span class="run-job-id">{job.id}</span>
+            <span class="run-job-command">{job.command}</span>
+            <Show when={job.running}>
+              <span class="run-job-elapsed">{elapsedOf(job.startedAt, Date.now())}</span>
+            </Show>
+          </button>
+          <Show when={job.tail !== ''}>
+            <span class="run-job-tail">{job.tail}</span>
+          </Show>
+          <Show when={job.running}>
+            <button
+              class="run-job-stop"
+              type="button"
+              data-stop-job={job.id}
+              onClick={() => props.store.stopJob(job.id)}
+            >
+              stop
+            </button>
+          </Show>
+        </li>
+      )}
+    </For>
+  </ul>
+)
+
 const Run = (props: { store: SessionStore }) => {
   const run = () => props.store.state().run
   return (
@@ -161,23 +198,7 @@ const Run = (props: { store: SessionStore }) => {
               </ul>
             </Show>
             <Show when={state().jobs.length > 0}>
-              <ul class="run-jobs">
-                <For each={state().jobs}>
-                  {(job) => (
-                    <li>
-                      <button
-                        class={'run-job ' + (job.running ? 'running' : 'done')}
-                        type="button"
-                        data-job-id={job.id}
-                        onClick={() => props.store.openJob(job.id)}
-                      >
-                        <span class="run-job-state">{job.running ? 'running' : 'done'}</span>
-                        <span class="run-job-command">{job.command}</span>
-                      </button>
-                    </li>
-                  )}
-                </For>
-              </ul>
+              <Jobs store={props.store} jobs={state().jobs} />
             </Show>
             <Show
               when={state().subagents.length > 0}

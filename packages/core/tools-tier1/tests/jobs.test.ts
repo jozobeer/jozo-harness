@@ -73,6 +73,35 @@ describe('jobs', () => {
     expect(observed.waited).toContain('late')
   })
 
+  test('a job records when it started and a snapshot reads all it kept', async () => {
+    const observed = await Effect.runPromise(
+      Effect.gen(function* () {
+        const jobs = yield* makeJobs()
+        const before = Date.now()
+        const running = yield* jobs.start('echo held', '/tmp')
+        yield* Effect.sleep('250 millis')
+        const snapshot = yield* jobs.snapshot(running.id)
+        const read = yield* jobs.read(running.id)
+        const again = yield* jobs.snapshot(running.id)
+        yield* jobs.kill(running.id)
+        return {
+          startedAt: running.startedAt,
+          before,
+          snapshot: snapshot.output,
+          read: read.output,
+          again: again.output,
+        }
+      }),
+    )
+
+    expect(observed.startedAt).toBeGreaterThanOrEqual(observed.before)
+    expect(observed.snapshot).toContain('held')
+    expect(observed.read).toContain('held')
+    // A snapshot reads what the job kept without consuming it, so the Run pane
+    // can read the same output again a second later.
+    expect(observed.again).toContain('held')
+  })
+
   test('an unknown job is an error', async () => {
     const failed = await Effect.runPromise(
       Effect.gen(function* () {

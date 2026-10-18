@@ -636,6 +636,62 @@ body {
   white-space: nowrap;
 }
 
+.run-job-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s1) var(--s2);
+  padding-right: var(--s2);
+}
+
+.run-job-row .run-job {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+}
+
+.run-job-id {
+  flex: none;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+
+.run-job-elapsed {
+  flex: none;
+  margin-left: auto;
+  color: var(--dim);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.run-job-tail {
+  flex: 1 1 100%;
+  padding: 0 var(--s2);
+  overflow: hidden;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-job-stop {
+  flex: none;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--dim);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.run-job-stop:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .run-child {
   width: 100%;
   padding: 6px var(--s2);

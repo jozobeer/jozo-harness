@@ -46,6 +46,8 @@ type Call =
   | { readonly kind: 'addWorkspace'; readonly cwd: string }
   | { readonly kind: 'browseDirectories'; readonly path: string }
   | { readonly kind: 'stopSubagent'; readonly id: string }
+  | { readonly kind: 'openJob'; readonly id: string }
+  | { readonly kind: 'stopJob'; readonly id: string }
 
 /** What the Add workspace dialog heard about one folder. */
 type BrowseAnswer =
@@ -79,8 +81,8 @@ const makeStore = (
     moveTo: (id, cwd) => calls.push({ kind: 'moveTo', id, cwd }),
     chooseTheme: (theme) => update((current) => withTheme(current, theme)),
     showPane: (pane) => calls.push({ kind: 'pane', pane }),
-    openJob: () => undefined,
-    stopJob: () => undefined,
+    openJob: (id) => calls.push({ kind: 'openJob', id }),
+    stopJob: (id) => calls.push({ kind: 'stopJob', id }),
     stopSubagent: (id) => calls.push({ kind: 'stopSubagent', id }),
     askModels: () => calls.push({ kind: 'askModels' }),
     askCommands: () => calls.push({ kind: 'askCommands' }),
@@ -936,6 +938,63 @@ describe('the Solid page', () => {
 
     fireEvent.click(running.querySelector('.run-child-stop') as Element)
     expect(calls).toContainEqual({ kind: 'stopSubagent', id: 'child-12345678' })
+  })
+
+  test('the run pane lists a running job with its elapsed time, tail, and a stop', () => {
+    const startedAt = Date.now() - 3_000
+    const { store, calls } = makeStore({
+      pane: { kind: 'run' },
+      run: {
+        goal: null,
+        schedules: [],
+        jobs: [
+          {
+            id: 'job-1a2b3c4d',
+            command: 'pnpm vitest --watch',
+            running: true,
+            startedAt,
+            tail: 'RUN v4.0.3',
+          },
+          {
+            id: 'job-9f8e7d6c',
+            command: 'pnpm build',
+            running: false,
+            startedAt: startedAt - 60_000,
+            tail: 'built in 2s',
+          },
+        ],
+        subagents: [],
+        todos: [],
+        todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+        skills: [],
+        promptSections: [],
+        queued: [],
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+      },
+    })
+
+    const { container } = render(() => <ContextPane store={store} />)
+
+    const running = container.querySelector('[data-job-id="job-1a2b3c4d"]') as Element
+    const done = container.querySelector('[data-job-id="job-9f8e7d6c"]') as Element
+    expect(container.querySelectorAll('.run-job-row')).toHaveLength(2)
+    expect(running.querySelector('.run-job-state')?.textContent).toBe('running')
+    expect(running.querySelector('.run-job-command')?.textContent).toBe('pnpm vitest --watch')
+    expect(running.querySelector('.run-job-elapsed')?.textContent).toBe('3s')
+    expect(running.querySelector('.run-job-tail')?.textContent).toBe('RUN v4.0.3')
+    // Only a job that still runs offers a stop; a finished one has nothing to stop.
+    expect(running.querySelector('.run-job-stop')).not.toBeNull()
+    expect(done.querySelector('.run-job-elapsed')).toBeNull()
+    expect(done.querySelector('.run-job-stop')).toBeNull()
+    expect(done.querySelector('.run-job-tail')?.textContent).toBe('built in 2s')
+
+    fireEvent.click(running.querySelector('.run-job') as Element)
+    expect(calls).toContainEqual({ kind: 'openJob', id: 'job-1a2b3c4d' })
+
+    fireEvent.click(running.querySelector('.run-job-stop') as Element)
+    expect(calls).toContainEqual({ kind: 'stopJob', id: 'job-1a2b3c4d' })
   })
 
   test('a session with no live child keeps the links its finished subagents left', () => {
