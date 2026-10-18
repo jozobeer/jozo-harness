@@ -138,6 +138,24 @@ const catalog = new Map<string, Schema.Schema<unknown>>([
       summary: Schema.optionalKey(Schema.String),
     }),
   ],
+  [
+    'job/started',
+    Schema.Struct({
+      id: Schema.String,
+      command: Schema.String,
+      startedAt: Schema.Number,
+      cwd: Schema.optionalKey(Schema.String),
+    }),
+  ],
+  [
+    'job/ended',
+    Schema.Struct({
+      id: Schema.String,
+      endedAt: Schema.Number,
+      status: Schema.Literals(['exited', 'killed']),
+      exitCode: Schema.optionalKey(Schema.Int),
+    }),
+  ],
 ])
 
 // The core events that never become history. A type missing from this list, the
@@ -154,6 +172,8 @@ registerLogOnlySessionEvents([
   'assistant/attempt',
   'llm/retry',
   'tool/call',
+  'job/started',
+  'job/ended',
 ])
 
 /** The catalog every decoder starts from. */

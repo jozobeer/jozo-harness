@@ -26,6 +26,7 @@ export interface TimeoutJobs {
   readonly promote: (
     command: string,
     child: Child,
+    cwd?: string,
   ) => Effect.Effect<{ readonly id: string }, ToolError>
 }
 
@@ -155,7 +156,7 @@ const runToPromote = async (
     return { exitCode: await child.exited, ...(await outputOf(child)), timedOut: false, timeoutMs }
   }
   try {
-    const job = await Effect.runPromise(jobs.promote(command, child))
+    const job = await Effect.runPromise(jobs.promote(command, child, wrapped.cwd))
     return { exitCode: 0, stdout: '', stderr: '', timedOut: true, timeoutMs, jobId: job.id }
   } catch {
     const exitCode = await killWrapped(child)

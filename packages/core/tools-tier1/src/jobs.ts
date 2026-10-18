@@ -25,11 +25,35 @@ export interface JobReadOptions {
   readonly waitMs?: number
 }
 
+/** One lifecycle moment of a job, for the caller to record outside the registry. */
+export type JobRecord =
+  | {
+      readonly type: 'started'
+      readonly id: string
+      readonly command: string
+      readonly cwd?: string
+      readonly startedAt: number
+    }
+  | {
+      readonly type: 'ended'
+      readonly id: string
+      readonly endedAt: number
+      /** Whether the command exited on its own or a caller stopped it. */
+      readonly status: 'exited' | 'killed'
+      /** The exit code of a command that exited; a killed one has none. */
+      readonly exitCode?: number
+    }
+
+export interface JobsOptions {
+  /** Called once when a job starts and once when it settles, so the caller can log it. */
+  readonly record?: (record: JobRecord) => void
+}
+
 export interface JobsShape {
   /** Starts a command in the background and returns its handle. */
   readonly start: (command: string, cwd: string) => Effect.Effect<Job, ToolError>
   /** Takes over a child a timed-out call already spawned, so its work is not lost. */
-  readonly promote: (command: string, child: Child) => Effect.Effect<Job, ToolError>
+  readonly promote: (command: string, child: Child, cwd?: string) => Effect.Effect<Job, ToolError>
   /** Reads what the job produced since the previous read, waiting up to `waitMs` for more. */
   readonly read: (id: string, options?: JobReadOptions) => Effect.Effect<JobRead, ToolError>
   /** Reads all the output the job kept so far, leaving it for the next read. */
@@ -42,10 +66,17 @@ export interface JobsShape {
 export const JOB_OUTPUT_LIMIT = 64_000
 
 /**
+ * A job id that a later run of the same session cannot hand out again. The log
+ * keeps the ids of jobs this process started, so a resumed run reading one gets
+ * "unknown job" instead of another command's output.
+ */
+export const newJobId = (): string => 'job-' + crypto.randomUUID().replaceAll('-', '').slice(0, 8)
+
+/**
  * Background commands. Output is kept in memory up to a limit and the process
  * is killed explicitly; jobs do not survive the command that started them.
  */
-export const makeJobs = (): Effect.Effect<JobsShape> =>
+export const makeJobs = (options: JobsOptions = {}): Effect.Effect<JobsShape> =>
   Effect.sync(() => {
     interface Entry {
       readonly job: Job
@@ -54,11 +85,12 @@ export const makeJobs = (): Effect.Effect<JobsShape> =>
       produced: number
       /** How many of them a read has already returned. */
       seen: number
+      /** Whether the end of this job is already recorded. */
+      settled: boolean
       /** Called when the job produces output or stops, so a waiting read can return. */
       readonly wake: Array<() => void>
     }
     const jobs = new Map<string, Entry>()
-    let counter = 0
 
     const notify = (entry: Entry): void => {
       for (const resolve of entry.wake.splice(0, entry.wake.length)) resolve()
@@ -80,16 +112,37 @@ export const makeJobs = (): Effect.Effect<JobsShape> =>
       })()
     }
 
+    /** Records that a job settled, once, so a kill followed by the exit reports one end. */
+    const settle = (entry: Entry, status: 'exited' | 'killed', exitCode?: number): void => {
+      if (entry.settled) return
+      entry.settled = true
+      options.record?.({
+        type: 'ended',
+        id: entry.job.id,
+        endedAt: Date.now(),
+        status,
+        ...(exitCode === undefined ? {} : { exitCode }),
+      })
+    }
+
     /** Registers a child under a fresh job id; the caller owns how the child was spawned. */
-    const register = (command: string, child: Child): Job => {
-      counter += 1
-      const id = 'job-' + String(counter)
-      const job: Job = { id, command, startedAt: Date.now(), running: true, output: '' }
-      const entry: Entry = { job, process: child, produced: 0, seen: 0, wake: [] }
+    const register = (command: string, cwd: string | undefined, child: Child): Job => {
+      const id = newJobId()
+      const startedAt = Date.now()
+      const job: Job = { id, command, startedAt, running: true, output: '' }
+      const entry: Entry = { job, process: child, produced: 0, seen: 0, settled: false, wake: [] }
+      options.record?.({
+        type: 'started',
+        id,
+        command,
+        ...(cwd === undefined ? {} : { cwd }),
+        startedAt,
+      })
       collect(entry, child.stdout)
       collect(entry, child.stderr)
-      void child.exited.then(() => {
+      void child.exited.then((exitCode) => {
         job.running = false
+        settle(entry, 'exited', exitCode)
         notify(entry)
       })
       jobs.set(id, entry)
@@ -127,10 +180,11 @@ export const makeJobs = (): Effect.Effect<JobsShape> =>
         Effect.sync(() =>
           register(
             command,
+            cwd,
             spawn(['bash', '-c', command], { cwd, stdout: 'pipe', stderr: 'pipe' }),
           ),
         ),
-      promote: (command, child) => Effect.sync(() => register(command, child)),
+      promote: (command, child, cwd) => Effect.sync(() => register(command, cwd, child)),
       read: (id, options) =>
         Effect.gen(function* () {
           const entry = yield* entryOf(id)
@@ -165,6 +219,7 @@ export const makeJobs = (): Effect.Effect<JobsShape> =>
           const entry = yield* entryOf(id)
           entry.process.kill()
           entry.job.running = false
+          settle(entry, 'killed')
         }),
       list: () => [...jobs.values()].map((entry) => entry.job),
     }

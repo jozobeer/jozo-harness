@@ -77,10 +77,15 @@ describe('background jobs through the command', () => {
             images: 'none',
             promptCacheControl: false,
           },
-          stream: () => {
+          stream: (request) => {
+            // The start result is the only place the id is written; a later step
+            // reads it back from the history rather than guessing the counter.
+            const startedId = /started (job-[0-9a-f]{8})/.exec(
+              JSON.stringify(request.messages),
+            )?.[1]
             const scripts: ReadonlyArray<ReadonlyArray<StreamChunk>> = [
               [call(0, 'job_start', { command: 'echo from the job; sleep 0.4' })],
-              [call(0, 'job_output', { id: 'job-1' })],
+              [call(0, 'job_output', { id: startedId ?? 'job-missing' })],
               textTurn('done'),
             ]
             const script = scripts[step] ?? []
@@ -121,10 +126,18 @@ describe('background jobs through the command', () => {
     const results = opened.events.filter((event) => event.type === 'tool/result')
 
     expect(results).toHaveLength(2)
-    expect(JSON.stringify(results[0]?.data)).toContain('started job-1')
+    const startedId = /started (job-[0-9a-f]{8})/.exec(JSON.stringify(results[0]?.data))?.[1]
+    expect(startedId).toBeDefined()
     // The job has been started and read back; its output may still be arriving.
     expect(results[1]?.data.isError).toBe(false)
     expect(JSON.stringify(results[1]?.data)).toContain('job')
+    // The start is in the session log, so a resumed run can tell it from what it starts.
+    const startedEvents = opened.events.filter((event) => event.type === 'job/started')
+    expect(startedEvents).toHaveLength(1)
+    expect(startedEvents[0]?.data).toMatchObject({
+      id: startedId,
+      command: 'echo from the job; sleep 0.4',
+    })
     await rm(root, { recursive: true, force: true })
   })
 })

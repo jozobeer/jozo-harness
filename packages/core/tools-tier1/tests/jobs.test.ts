@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { Effect } from 'effect'
-import { makeJobs } from '../src/index.ts'
+import { makeJobs, type JobRecord } from '../src/index.ts'
 
 describe('jobs', () => {
   test('starts a command, reads its output, and stops it', async () => {
@@ -19,7 +19,8 @@ describe('jobs', () => {
     )
 
     expect(observed.output).toContain('hello')
-    expect(observed.listed).toEqual(['job-1'])
+    expect(observed.listed).toHaveLength(1)
+    expect(observed.listed[0]).toMatch(/^job-[0-9a-f]{8}$/)
     expect(observed.running).toBe(false)
   })
 
@@ -100,6 +101,71 @@ describe('jobs', () => {
     // A snapshot reads what the job kept without consuming it, so the Run pane
     // can read the same output again a second later.
     expect(observed.again).toContain('held')
+  })
+
+  test('job ids differ across runs, so a reopened run refuses an old id', async () => {
+    const observed = await Effect.runPromise(
+      Effect.gen(function* () {
+        const first = yield* makeJobs()
+        const old = yield* first.start('echo old && sleep 5', '/tmp')
+        const second = yield* makeJobs()
+        const refused = yield* Effect.match(second.read(old.id), {
+          onFailure: (error) => error.message,
+          onSuccess: () => 'ok',
+        })
+        const newer = yield* second.start('echo new && sleep 5', '/tmp')
+        yield* first.kill(old.id)
+        yield* second.kill(newer.id)
+        return { old: old.id, newer: newer.id, refused }
+      }),
+    )
+
+    expect(observed.old).toMatch(/^job-[0-9a-f]{8}$/)
+    expect(observed.newer).not.toBe(observed.old)
+    expect(observed.refused).toContain('unknown job: ' + observed.old)
+  })
+
+  test('a job records its start and the exit that ended it', async () => {
+    const records: Array<JobRecord> = []
+    const observed = await Effect.runPromise(
+      Effect.gen(function* () {
+        const jobs = yield* makeJobs({ record: (record) => records.push(record) })
+        const running = yield* jobs.start('true', '/tmp')
+        const read = yield* jobs.read(running.id, { waitMs: 5_000 })
+        return { id: running.id, running: read.running }
+      }),
+    )
+
+    expect(observed.running).toBe(false)
+    expect(records[0]).toMatchObject({
+      type: 'started',
+      id: observed.id,
+      command: 'true',
+      cwd: '/tmp',
+    })
+    expect(records.at(-1)).toMatchObject({
+      type: 'ended',
+      id: observed.id,
+      status: 'exited',
+      exitCode: 0,
+    })
+  })
+
+  test('a killed job records one end, marked as the kill', async () => {
+    const records: Array<JobRecord> = []
+    const observed = await Effect.runPromise(
+      Effect.gen(function* () {
+        const jobs = yield* makeJobs({ record: (record) => records.push(record) })
+        const running = yield* jobs.start('sleep 5', '/tmp')
+        yield* jobs.kill(running.id)
+        yield* Effect.sleep('100 millis')
+        return running.id
+      }),
+    )
+
+    const ended = records.filter((record) => record.type === 'ended')
+    expect(ended).toHaveLength(1)
+    expect(ended[0]).toMatchObject({ type: 'ended', id: observed, status: 'killed' })
   })
 
   test('an unknown job is an error', async () => {
