@@ -163,6 +163,8 @@ declare module '@jozo-harness/kernel/hook' {
 /** The working directory moved. The newest one wins. */
 export interface CwdChanged {
   readonly cwd: string
+  /** The workspace root this move also establishes, when it moved to another tree. */
+  readonly root?: string
 }
 
 /** Why a request header was written instead of reusing the one before it. */

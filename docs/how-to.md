@@ -158,6 +158,16 @@ bash: /etc/hosts: Operation not permitted
 
 モデルは同じ呼び出しを `sandbox_permissions`（より広いモード）と `justification`（1文の理由）付きでやり直せる。端末 UI と Web UI はそこで y/n を尋ね、`y` のときだけその1回が広いモードで走る。拒否されれば呼び出しは拒否されたままで、`safety/approval/requested` と `answered` がセッションログに残る。`write` / `edit` も同じ引数を持ち、ワークスペースの外を指すパスで同じ往復になる。
 
+## worktree に移って続ける
+
+モデルが `create_worktree` を呼ぶと、今の HEAD（か `base` で指名した commit）から新しい branch の worktree を作り、session の cwd とワークスペースの根をそこへ移す。以後の `bash` / `write` / `edit` はその中で走り、元の checkout は branch も commit も変えない。
+
+- 置き場所の既定はリポジトリの兄弟 `../<repo>-<branch>`。`path` で変えられる。
+- branch 名を省くと `worktree-<UTC timestamp>` になる。
+- 部分 clone でも作成時に fetch しない（`GIT_NO_LAZY_FETCH=1`）。
+- ワークスペースの外へ書くため、`workspace-write` では `sandbox_permissions: danger-full-access` と `justification` を付けた再試行で承認を求める。
+- `working_directory` は新しい根の内側で動く。元の checkout へ戻る操作はまだ無い。
+
 ## MCP サーバを繋ぐ
 
 行を足し、`command` に起動コマンドを配列で渡す。

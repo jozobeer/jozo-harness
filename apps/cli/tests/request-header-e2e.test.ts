@@ -143,6 +143,7 @@ describe('the request header through the command', () => {
       'glob',
       'grep',
       'bash',
+      'create_worktree',
     ])
     // The log alone is enough: the newest header is the one those requests used.
     expect(lastRequestHeader(opened.events)?.tools).toEqual(header.tools)

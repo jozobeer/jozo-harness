@@ -43,7 +43,7 @@ describe('tier 1 tool schemas', () => {
       ...tier1Tools(ask, [root]),
       makeWebSearchTool({ search: () => Effect.succeed([]) }),
       ...jobTools(jobs),
-      makeWorkingDirectoryTool({ root, change: () => Effect.void }),
+      makeWorkingDirectoryTool({ root: () => root, change: () => Effect.void }),
       makeSubagentTool({ agents, route: 'stub/model' }),
       ...agentTools(agents),
       makeScheduleTool({
