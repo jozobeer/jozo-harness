@@ -464,11 +464,9 @@ const agentLoopEffect = (
       agent: Agent,
       pending: ReadonlyMap<string, ToolCall>,
     ): Effect.Effect<void> =>
-      Effect.forEach(
-        [...pending.values()],
-        (call) => didNotFinish(agent, call.id, call.name),
-        { discard: true },
-      )
+      Effect.forEach([...pending.values()], (call) => didNotFinish(agent, call.id, call.name), {
+        discard: true,
+      })
 
     /**
      * The log a run resumes from can hold a call with no result: a process killed

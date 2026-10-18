@@ -1,8 +1,8 @@
 import { Cause, Effect, Fiber, Queue, Stream } from 'effect'
 import { RpcClient, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
-import type { UiCommand } from '@jozo-harness/ui-protocol'
-import { createSignal, type Accessor } from 'solid-js'
+import type { UiCommand, UiEvent } from '@jozo-harness/ui-protocol'
+import { batch, createSignal, type Accessor } from 'solid-js'
 import { UiRpcs, withoutServices } from '../src/shared/rpc.ts'
 import {
   applyUiEvent,
@@ -21,7 +21,15 @@ import {
   type WebState,
 } from '../src/ui/state.ts'
 import type { Theme } from '../src/ui/theme.ts'
-import { addressSession, keptTheme, keepTheme, pageSearch, pageSocket, showTheme } from './dom.ts'
+import {
+  addressSession,
+  keptTheme,
+  keepTheme,
+  onNextFrame,
+  pageSearch,
+  pageSocket,
+  showTheme,
+} from './dom.ts'
 import { emptyWatched, watchedAfter, type Watched } from '../src/ui/board.ts'
 import { makeBridge } from './bridge.ts'
 
@@ -81,9 +89,18 @@ const sessionInUrl = (search: string): string | undefined => {
   return value === null || value === '' ? undefined : value
 }
 
+/** The session a page opens on its own: what the address names, or the one the server holds. */
+const sessionToOpen = (current: string, search: string, held: string): string | undefined => {
+  if (current !== '') return current
+  const named = sessionInUrl(search)
+  if (named !== undefined) return named
+  return held === '' ? undefined : held
+}
+
 /** What the settings pane asked the server for. */
 type PanelAsk =
   | { readonly kind: 'models' }
+  | { readonly kind: 'chooseModel'; readonly model: string }
   | { readonly kind: 'setModel'; readonly model: string }
   | { readonly kind: 'job'; readonly id: string }
   | { readonly kind: 'stopJob'; readonly id: string }
@@ -108,6 +125,12 @@ export interface SessionStore {
   readonly openJob: (id: string) => void
   readonly stopJob: (id: string) => void
   readonly askModels: () => void
+  /**
+   * Picks the route for this session and for the sessions opened from now on.
+   * Nothing is written down, so the runs after this one keep their own choice.
+   */
+  readonly chooseModel: (model: string) => void
+  /** Picks the route the settings file keeps for the runs after this one. */
   readonly setModel: (model: string) => void
 }
 
@@ -127,6 +150,83 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
   }
 
   const [watched, setWatched] = createSignal<ReadonlyMap<string, Watched>>(new Map())
+
+  /**
+   * What has arrived but is not yet what the view reads. One session's history
+   * arrives as hundreds of events at once, and a signal written per event draws
+   * the whole conversation again for each of them: seconds of blocked main thread
+   * for a log the fold itself reads in milliseconds. Everything that arrived is
+   * folded once instead, before the page is painted next.
+   */
+  const arrived: Array<{
+    readonly sessionId: string
+    readonly event: UiEvent
+    /** The line the feed had put in the strip when this event arrived, which this event answers for. */
+    readonly clears: string
+  }> = []
+  const watchedArrived: Array<{ readonly id: string; readonly event: UiEvent }> = []
+
+  /**
+   * How many events the page folds without waiting for a frame. A page nothing
+   * paints asks for no frame, so this keeps what it holds from growing without
+   * bound while it is not being looked at.
+   */
+  const FOLD_AT_ONCE = 512
+
+  let waiting = false
+
+  /** Folds everything that arrived into one write per signal, in the order it arrived. */
+  const fold = (): void => {
+    waiting = false
+    const events = arrived.splice(0, arrived.length)
+    const seen = watchedArrived.splice(0, watchedArrived.length)
+    // One write to each signal, in one pass: the page is drawn once for the batch.
+    batch(() => {
+      if (events.length > 0) {
+        setState((now) =>
+          events
+            // A feed that follows a session again replays the log it follows, so an
+            // event of a session the page has since left has nowhere to land.
+            .filter((one) => one.sessionId === now.sessionId)
+            .reduce((current, one) => {
+              // A feed that reached the page again is working: it takes its own line
+              // back, and leaves anything else the reader was told.
+              const cleared =
+                one.clears !== '' && current.problem === one.clears
+                  ? withProblem(current, '')
+                  : current
+              return applyUiEvent(cleared, one.event)
+            }, now),
+        )
+      }
+      if (seen.length > 0) {
+        setWatched((now) => {
+          const next = new Map(now)
+          for (const one of seen) {
+            next.set(one.id, watchedAfter(next.get(one.id) ?? emptyWatched, one.event))
+          }
+          return next
+        })
+      }
+    })
+  }
+
+  /** Folds now when the page is far behind, and otherwise once before the next paint. */
+  const scheduleFold = (): void => {
+    if (arrived.length + watchedArrived.length >= FOLD_AT_ONCE) {
+      fold()
+      return
+    }
+    if (waiting) return
+    waiting = true
+    onNextFrame(fold)
+  }
+  /**
+   * The message typed before any session existed. The session it starts is
+   * opened for it, and it is sent there; a session that cannot be opened gives
+   * the line back to the composer rather than swallowing it.
+   */
+  let owed: string | undefined
   const commands = Effect.runSync(
     Queue.unbounded<{ readonly sessionId: string; readonly command: UiCommand }>(),
   )
@@ -147,11 +247,10 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
         return Effect.forkScoped(
           client.events({ sessionId: id }).pipe(
             Stream.runForEach((event) =>
-              Effect.sync(() =>
-                setWatched((now) =>
-                  new Map(now).set(id, watchedAfter(now.get(id) ?? emptyWatched, event)),
-                ),
-              ),
+              Effect.sync(() => {
+                watchedArrived.push({ id, event })
+                scheduleFold()
+              }),
             ),
             // A row that stops moving is not worth the reader's attention: the
             // board follows the session again without saying anything about it.
@@ -222,13 +321,10 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
           Stream.runForEach((event) =>
             Effect.gen(function* () {
               yield* Effect.sync(() => {
-                update((now) => {
-                  // A feed that reached the page again is working: it takes its
-                  // own line back, and leaves anything else the reader was told.
-                  const cleared =
-                    reported !== '' && now.problem === reported ? withProblem(now, '') : now
-                  return applyUiEvent(cleared, event)
-                })
+                // The event waits for the frame with everything else that arrived,
+                // so the log costs one drawing instead of one per event.
+                arrived.push({ sessionId: id, event, clears: reported })
+                scheduleFold()
               })
               // Handed over rather than awaited: the feed has to keep draining.
               if (event.kind === 'session' && needsRefresh(event.event.type)) {
@@ -255,6 +351,17 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
         })
         following = yield* Effect.forkScoped(follow(summary.id))
         yield* watch(summary.id)
+        // The line that asked for this session is the first thing it hears.
+        const first = owed
+        if (first !== undefined) {
+          owed = undefined
+          yield* Effect.asVoid(
+            Queue.offer(commands, {
+              sessionId: summary.id,
+              command: { kind: 'submit', text: first },
+            }),
+          )
+        }
       })
     /* jscpd:ignore-end */
 
@@ -279,6 +386,17 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
         })
       })
 
+    /**
+     * What one command that landed changes here. A model or an effort the page
+     * switched is the core's to hold now, so the run state is read again and the
+     * seat shows what the next request asks for; everything else says itself in
+     * the log.
+     */
+    const landed = (addressed: { readonly command: UiCommand }): Effect.Effect<void> =>
+      addressed.command.kind === 'effort' || addressed.command.kind === 'model'
+        ? Effect.asVoid(Queue.offer(refreshes, undefined))
+        : Effect.void
+
     yield* Effect.forkScoped(
       Stream.runForEach(Stream.fromQueue(commands), (addressed) =>
         client.command(addressed).pipe(
@@ -286,7 +404,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
           // page opens it again, and the next command lands somewhere real.
           Effect.tap((accepted) =>
             accepted
-              ? Effect.void
+              ? landed(addressed)
               : Effect.andThen(
                   notTaken(addressed, 'the core did not take the ' + addressed.command.kind),
                   Effect.sync(() => Queue.offerUnsafe(moves, addressed.sessionId)),
@@ -326,8 +444,13 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
             yield* showJob(asked.id)
             return
           }
-          yield* client.setModel({ model: asked.model })
-          // Read it back, so the pane shows what the file now holds.
+          // Only the sheet asks for the settings file to keep the pick; the seat's
+          // pick is the choice of this run alone.
+          yield* client.setModel({
+            model: asked.model,
+            remember: asked.kind === 'setModel',
+          })
+          // Read it back, so the pane shows what the sessions to come start from.
           const settings = yield* client.settings()
           yield* Effect.sync(() => update((now) => withSettings(now, settings)))
         }).pipe(
@@ -345,18 +468,29 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     yield* Effect.sync(() => update((now) => withSessions(now, listed.items)))
     yield* Effect.forEach(listed.opened, watch)
 
-    // The session the page opens, then one more for every move: a click, or a new session.
-    const current = state()
-    const wanted =
-      current.sessionId !== '' ? current.sessionId : (sessionInUrl(search) ?? listed.initial)
+    // The session the page opens, then one more for every move: a click, a new
+    // session, or the first message. A page the server holds none for opens
+    // none: looking at the UI is not a request for a session.
+    const wanted = sessionToOpen(state().sessionId, search, listed.initial)
     yield* Stream.runForEach(
-      Stream.concat(Stream.fromIterable([wanted]), Stream.fromQueue(moves)),
+      Stream.concat(
+        wanted === undefined ? Stream.empty : Stream.fromIterable([wanted]),
+        Stream.fromQueue(moves),
+      ),
       (id) =>
         show(id).pipe(
           Effect.catchCause((cause) =>
             unlessInterrupted(
               cause,
-              Effect.sync(() => update((now) => withProblem(now, causeText(cause)))),
+              Effect.sync(() => {
+                // A line that never reached a session comes back to the reader.
+                if (owed !== undefined) {
+                  const text = owed
+                  owed = undefined
+                  update((now) => withDraft(now, text))
+                }
+                update((now) => withProblem(now, causeText(cause)))
+              }),
             ),
           ),
         ),
@@ -395,6 +529,14 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       const current = state()
       const value = current.draft.trim()
       if (value === '') return
+      if (current.sessionId === '') {
+        // The session this line starts is already on its way; keep the line.
+        if (owed !== undefined) return
+        owed = value
+        Queue.offerUnsafe(moves, undefined)
+        update((now) => withDraft(now, ''))
+        return
+      }
       const ask = current.conversation.ask
       sendTo(
         current.sessionId,
@@ -419,6 +561,13 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     },
     stopJob: (id) => Queue.offerUnsafe(panelAsks, { kind: 'stopJob', id }),
     askModels: () => Queue.offerUnsafe(panelAsks, { kind: 'models' }),
+    chooseModel: (model) => {
+      const current = state()
+      // The session on screen switches with the command; the choice is the run's, so
+      // the sessions opened from now on start from it as well.
+      if (current.sessionId !== '') sendTo(current.sessionId, { kind: 'model', model })
+      Queue.offerUnsafe(panelAsks, { kind: 'chooseModel', model })
+    },
     setModel: (model) => Queue.offerUnsafe(panelAsks, { kind: 'setModel', model }),
   }
 }

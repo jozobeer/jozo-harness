@@ -25,10 +25,12 @@ import { createSessionStore, type SessionStore } from '../client-solid/store.ts'
 interface StubbedBrowser {
   readonly kept: () => string | undefined
   readonly attribute: () => string | undefined
+  /** Paints the frame the page is waiting on, if it is waiting on one. */
+  readonly paint: () => void
 }
 
 /** The little of the browser the store touches, for a run outside one. */
-const stubTheBrowser = (): StubbedBrowser => {
+const stubTheBrowser = (options: { readonly frames?: boolean } = {}): StubbedBrowser => {
   const globals = globalThis as unknown as Record<string, unknown>
   let kept: string | undefined
   const dataset: Record<string, string | undefined> = {}
@@ -41,7 +43,24 @@ const stubTheBrowser = (): StubbedBrowser => {
   globals.document = { documentElement: { dataset } }
   globals.history = { replaceState: () => undefined }
   globals.window = { location: { protocol: 'http:', host: '127.0.0.1:8080', search: '?session=a' } }
-  return { kept: () => kept, attribute: () => dataset.theme }
+  // The page folds what arrived once per frame. A run that watches that hands the
+  // page a clock of its own and paints when it means to; every other run has no
+  // frame to wait for and folds on the next turn of the event loop.
+  const waiting: Array<() => void> = []
+  globals.requestAnimationFrame =
+    options.frames === true
+      ? (run: () => void) => {
+          waiting.push(run)
+          return waiting.length
+        }
+      : undefined
+  return {
+    kept: () => kept,
+    attribute: () => dataset.theme,
+    paint: () => {
+      for (const run of waiting.splice(0, waiting.length)) run()
+    },
+  }
 }
 
 interface FakeHost {
@@ -61,6 +80,8 @@ interface FakeHost {
   readonly states: () => number
   /** False makes `submit` die, as a core that fell over does. */
   accepting: boolean
+  /** True makes opening a session fail, as a refused preset does. */
+  refusing: boolean
 }
 
 const event = (seq: number, type: string, data: unknown): UiEvent => ({
@@ -77,16 +98,27 @@ const makeHost = (id: string): FakeHost => {
   const commands: Array<UiCommand> = []
   let follows = 0
   let states = 0
+  let effort = ''
+  let model = 'stub/model'
   const host: FakeHost = {
     summary: { id, cwd: '/work', createdAt: 1, title: '' },
     runState: () => {
       states += 1
-      return { goal: null, schedules: [], jobs: [], queued: [] }
+      return {
+        goal: null,
+        schedules: [],
+        jobs: [],
+        queued: [],
+        model,
+        effort,
+        efforts: ['low', 'high'],
+      }
     },
     jobOutput: () => Effect.fail(new WebError({ message: 'no such job' })),
     stopJob: () => Effect.void,
     commands,
     accepting: true,
+    refusing: false,
     said: (one) => {
       log.push(one)
       for (const queue of subscribers.values().toArray()) Queue.offerUnsafe(queue, one)
@@ -135,6 +167,18 @@ const makeHost = (id: string): FakeHost => {
         Effect.sync(() => {
           commands.push({ kind: 'cancel' })
         }),
+      // The session's effort is the host's to hold, as the core holds it.
+      setEffort: (next) =>
+        Effect.sync(() => {
+          commands.push({ kind: 'effort', effort: next })
+          effort = next
+        }),
+      // The session's route is the host's to hold too; the log records what is sent.
+      setModel: (next) =>
+        Effect.sync(() => {
+          commands.push({ kind: 'model', model: next })
+          model = next
+        }),
       answerApproval: () => Effect.succeed(true),
       answerAsk: () => Effect.succeed(''),
     },
@@ -150,22 +194,41 @@ const openOf = (host: FakeHost): OpenSession => ({
   stopJob: host.stopJob,
 })
 
-const settings: SettingsPort = {
-  read: () =>
-    Effect.succeed({
-      model: 'stub/model',
-      effort: '',
-      settingsPath: '/work/settings.yml',
-      cwd: '/work',
-      sessionRoot: '/work/sessions',
-    }),
-  models: () => Effect.succeed(['stub/model']),
-  setModel: () => Effect.void,
+interface FakeSettings {
+  /** Every route a page chose for the run, with whether it asked to keep it. */
+  readonly chosen: Array<{ readonly model: string; readonly remember: boolean }>
+  readonly port: SettingsPort
+}
+
+const makeSettings = (): FakeSettings => {
+  const chosen: Array<{ readonly model: string; readonly remember: boolean }> = []
+  let route = 'stub/model'
+  return {
+    chosen,
+    port: {
+      read: () =>
+        Effect.succeed({
+          model: route,
+          effort: '',
+          settingsPath: '/work/settings.yml',
+          cwd: '/work',
+          sessionRoot: '/work/sessions',
+        }),
+      models: () => Effect.succeed(['stub/model']),
+      setModel: (model, remember) =>
+        Effect.sync(() => {
+          chosen.push({ model, remember })
+          route = model
+        }),
+    },
+  }
 }
 
 /** Serves one fake host until the test's scope closes. */
 const serve = (
   host: FakeHost,
+  /** False serves a server that holds no session yet, as one just started does. */
+  options: { readonly held?: boolean; readonly settings?: FakeSettings } = {},
 ): Effect.Effect<
   { readonly wsUrl: string; readonly stop: Deferred.Deferred<void>; readonly root: string },
   never,
@@ -176,14 +239,17 @@ const serve = (
     const stop = yield* Deferred.make<void>()
     const factory: SessionFactory = {
       list: () => Effect.succeed([host.summary]),
-      open: () => Effect.succeed(openOf(host)),
+      open: () =>
+        host.refusing
+          ? Effect.fail(new WebError({ message: 'the session was refused' }))
+          : Effect.succeed(openOf(host)),
     }
     const root = yield* Effect.promise(() => mkdtemp(join(tmpdir(), 'jzh-store-test-')))
     yield* Effect.forkScoped(
       serveWeb({
-        initial: openOf(host),
+        ...(options.held === false ? {} : { initial: openOf(host) }),
         factory,
-        settings,
+        settings: (options.settings ?? makeSettings()).port,
         port: 0,
         staticRoot: root,
         onReady: (url) => {
@@ -213,13 +279,19 @@ const saidTexts = (store: SessionStore): ReadonlyArray<string> =>
 const withStore = (
   host: FakeHost,
   body: (store: SessionStore) => Effect.Effect<void>,
+  options: { readonly held?: boolean; readonly settings?: FakeSettings } = {},
 ): Effect.Effect<void> =>
   Effect.scoped(
     Effect.gen(function* () {
-      const { wsUrl, stop, root } = yield* serve(host)
+      const { wsUrl, stop, root } = yield* serve(host, options)
       const store = createSessionStore({ url: wsUrl, search: '' })
       store.start()
-      yield* until(() => store.state().sessionId === 'a', 'opened the session')
+      // A server that holds nothing leaves the page with nothing open: the
+      // connection is what says the page is ready, not a session.
+      yield* until(() => store.state().connected, 'connected to the server')
+      if (options.held !== false) {
+        yield* until(() => store.state().sessionId === 'a', 'opened the session')
+      }
       yield* body(store)
       store.stop()
       yield* Deferred.succeed(stop, undefined)
@@ -247,6 +319,37 @@ describe('the page store', () => {
           yield* until(() => saidTexts(store).includes('line 40'), 'showed the whole log')
           // The read again happened too, on the page's own fiber.
           yield* until(() => host.states() >= 2, 'read the run state again')
+        }),
+      ),
+    )
+  }, 15_000)
+
+  test('a log that arrives at once is drawn once, when the frame comes', async () => {
+    const browser = stubTheBrowser({ frames: true })
+    const host = makeHost('a')
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          yield* until(() => host.followed() >= 1, 'followed the session')
+          // A whole log arriving at once. Folding it is milliseconds; drawing the
+          // conversation again per event is what makes a long session open in
+          // seconds, so the page holds the batch and lets one frame draw it all.
+          const lines = 200
+          for (let index = 0; index < lines; index += 1) {
+            host.said(turn(index + 1, 'line ' + String(index + 1)))
+          }
+          // Time enough for every event to reach the page, with no frame given yet.
+          yield* Effect.sleep('250 millis')
+          expect(saidTexts(store)).not.toContain('line ' + String(lines))
+
+          // The frame draws the whole batch, and none of it was lost on the way.
+          for (let attempt = 0; attempt < 200; attempt += 1) {
+            if (saidTexts(store).includes('line ' + String(lines))) break
+            browser.paint()
+            yield* Effect.sleep('25 millis')
+          }
+          expect(saidTexts(store)).toContain('line ' + String(lines))
+          expect(saidTexts(store)).toHaveLength(lines)
         }),
       ),
     )
@@ -321,4 +424,166 @@ describe('the page store', () => {
     expect(browser.kept()).toBe('dark')
     expect(browser.attribute()).toBe('dark')
   })
+
+  test('a page the server holds no session for opens one for the first line', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    await Effect.runPromise(
+      withStore(
+        host,
+        (store) =>
+          Effect.gen(function* () {
+            // Looking at the page asks for nothing: give it time to ask, then check.
+            yield* Effect.sleep('250 millis')
+            expect(store.state().sessionId).toBe('')
+            expect(host.followed()).toBe(0)
+
+            store.setDraft('the first line')
+            store.submit()
+
+            // The line starts the session it is sent to, and reaches it.
+            yield* until(() => store.state().sessionId === 'a', 'opened a session for the line')
+            yield* until(
+              () => host.commands.some((command) => command.kind === 'submit'),
+              'sent the line',
+            )
+            expect(host.commands).toContainEqual({ kind: 'submit', text: 'the first line' })
+            expect(store.state().draft).toBe('')
+          }),
+        { held: false },
+      ),
+    )
+  }, 15_000)
+
+  test('a line is given back when no session can be opened for it', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    await Effect.runPromise(
+      withStore(
+        host,
+        (store) =>
+          Effect.gen(function* () {
+            host.refusing = true
+            store.setDraft('into the void')
+            store.submit()
+
+            // Nothing took it, so the reader gets the line back rather than silence.
+            yield* until(() => store.state().draft === 'into the void', 'gave the line back')
+            expect(store.state().problem).toContain('refused')
+          }),
+        { held: false },
+      ),
+    )
+  }, 15_000)
+
+  test('the effort a page switches a session to is read back', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          // Nothing named an effort, so the provider chooses.
+          expect(store.state().run?.effort).toBe('')
+
+          store.send({ kind: 'effort', effort: 'high' })
+
+          // The switch is the core's to make, and what the core now holds is what
+          // the page shows: the seat says what the next request will ask for.
+          yield* until(() => store.state().run?.effort === 'high', 'showed the switched effort')
+          expect(host.commands).toContainEqual({ kind: 'effort', effort: 'high' })
+        }),
+      ),
+    )
+  }, 15_000)
+
+  test('the model a page picks is read back from the session it picked it for', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          // The session started on the route the run resolved.
+          expect(store.state().run?.model).toBe('stub/model')
+
+          store.send({ kind: 'model', model: 'stub/other' })
+
+          // The route is the session's own from now on, and the seat reads it from
+          // the run state rather than from the log, which has not seen a request yet.
+          yield* until(() => store.state().run?.model === 'stub/other', 'showed the picked model')
+          expect(host.commands).toContainEqual({ kind: 'model', model: 'stub/other' })
+        }),
+      ),
+    )
+  }, 15_000)
+
+  test('a pick switches the session on screen and the sessions opened after it', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    const settings = makeSettings()
+    await Effect.runPromise(
+      withStore(
+        host,
+        (store) =>
+          Effect.gen(function* () {
+            store.chooseModel('stub/other')
+
+            // The session on screen switches, and the choice is the run's as well, so
+            // the sessions opened from now on start from it.
+            yield* until(() => store.state().run?.model === 'stub/other', 'showed the picked model')
+            expect(host.commands).toContainEqual({ kind: 'model', model: 'stub/other' })
+            yield* until(() => settings.chosen.length > 0, 'chose the route for the run')
+            expect(settings.chosen).toEqual([{ model: 'stub/other', remember: false }])
+            // The sheet reads back what the next session will start from.
+            yield* until(
+              () => store.state().settings?.model === 'stub/other',
+              'read the choice back',
+            )
+          }),
+        { settings },
+      ),
+    )
+  }, 15_000)
+
+  test('a pick before any session is open is the route the next one starts from', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    const settings = makeSettings()
+    await Effect.runPromise(
+      withStore(
+        host,
+        (store) =>
+          Effect.gen(function* () {
+            // Looking at the page opens nothing, so there is no session to address.
+            expect(store.state().sessionId).toBe('')
+            store.chooseModel('stub/other')
+
+            yield* until(() => settings.chosen.length > 0, 'chose the route for the run')
+            expect(settings.chosen).toEqual([{ model: 'stub/other', remember: false }])
+            expect(host.commands).toEqual([])
+          }),
+        { held: false, settings },
+      ),
+    )
+  }, 15_000)
+
+  test('the sheet writes the pick the runs after this one read', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    const settings = makeSettings()
+    await Effect.runPromise(
+      withStore(
+        host,
+        (store) =>
+          Effect.gen(function* () {
+            store.setModel('stub/kept')
+
+            yield* until(() => settings.chosen.length > 0, 'wrote the model down')
+            expect(settings.chosen).toEqual([{ model: 'stub/kept', remember: true }])
+            // The session on screen is not the sheet's to switch.
+            expect(host.commands).toEqual([])
+          }),
+        { settings },
+      ),
+    )
+  }, 15_000)
 })

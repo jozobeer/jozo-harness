@@ -1271,6 +1271,84 @@ footer {
   color: var(--text);
 }
 
+/* The model switch hangs off the chip it belongs to, above the composer. */
+.seat-model {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+  vertical-align: bottom;
+}
+
+.model-list {
+  position: absolute;
+  bottom: calc(100% + var(--s2));
+  left: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 22rem;
+  max-width: min(40rem, 90vw);
+  max-height: 22rem;
+  overflow-y: auto;
+  padding: var(--s2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 35%);
+}
+
+.model-list .card-hint {
+  margin-top: 0;
+  padding: var(--s2) var(--s2) 2px;
+  font-size: var(--text-sm);
+}
+
+.model-option {
+  padding: 7px 10px;
+  overflow: hidden;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--text-base);
+  line-height: 1.45;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.model-option:hover,
+.model-option:focus-visible {
+  background: var(--bg-hover);
+}
+
+.model-option[aria-current='true'] {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* The effort switch reads as a caption beside the model chip until it is used. */
+.seat-effort {
+  max-width: 7rem;
+  margin-left: 2px;
+  padding: 2px 4px 2px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.seat-effort:hover {
+  border-color: var(--line);
+  color: var(--text);
+}
+
 #queue:empty {
   display: none;
 }
