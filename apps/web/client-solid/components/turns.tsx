@@ -36,6 +36,39 @@ const Tool = (props: { tool: TraceTool }) => (
   </details>
 )
 
+/** The skill a call loaded, from the arguments the forced load wrote. */
+const skillNameOf = (args: string): string => {
+  try {
+    const parsed = JSON.parse(args) as { readonly name?: unknown }
+    return typeof parsed.name === 'string' ? parsed.name : ''
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * A skill load reads as its own card: the name, where it was read from, and what
+ * it is for stay on the folded line; the instructions wait inside.
+ */
+const Skill = (props: { tool: TraceTool }) => (
+  <details class={'tool-card skill-card ' + props.tool.status} open={props.tool.status === 'error'}>
+    <summary class="tool-line">
+      <span class="skill-label">skill</span>
+      <span class="skill-what">
+        <span class="skill-name">{skillNameOf(props.tool.args)}</span>
+        <span class="skill-source">{props.tool.summary}</span>
+      </span>
+      <span class="skill-description">{props.tool.result}</span>
+      <span class="tool-took">
+        {props.tool.endedAt === undefined ? '…' : spanOf(props.tool.endedAt - props.tool.startedAt)}
+      </span>
+    </summary>
+    <Show when={props.tool.output !== ''}>
+      <pre class="tool-output">{plainText(props.tool.output)}</pre>
+    </Show>
+  </details>
+)
+
 /** One step of the process: a line of what the model thought, what it said, and its calls. */
 const Step = (props: { step: TraceStep; last: boolean }) => (
   <li class="step">
@@ -45,7 +78,13 @@ const Step = (props: { step: TraceStep; last: boolean }) => (
     <Show when={props.step.text !== '' && !props.last}>
       <Markdown text={props.step.text} class="step-said" />
     </Show>
-    <Index each={props.step.tools}>{(tool) => <Tool tool={tool()} />}</Index>
+    <Index each={props.step.tools}>
+      {(tool) => (
+        <Show when={tool().name === 'skill'} fallback={<Tool tool={tool()} />}>
+          <Skill tool={tool()} />
+        </Show>
+      )}
+    </Index>
   </li>
 )
 

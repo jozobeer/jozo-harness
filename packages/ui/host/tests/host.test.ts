@@ -196,12 +196,13 @@ describe('ui host', () => {
           const calls = input.session
             .events()
             .filter((event) => event.type === 'tool/call')
-            .map((event) => event.data as { name?: string; arguments?: string })
+            .map((event) => event.data as { name?: string; arguments?: string; summary?: string })
+          // The summary is the source a skill card shows, not just its name.
           expect(calls).toEqual([
             {
               name: 'skill',
               arguments: '{"name":"review"}',
-              summary: expect.any(String),
+              summary: join(root, 'review', 'SKILL.md'),
               callId: expect.any(String),
             },
           ])

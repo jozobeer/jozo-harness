@@ -134,7 +134,8 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
           callId,
           name: 'skill',
           arguments: args,
-          summary: 'skill ' + loaded.skill.name,
+          // The path is where the card says the skill came from; the name stays in the args.
+          summary: loaded.skill.path,
         })
         yield* options.session.append('tool/result', {
           callId,

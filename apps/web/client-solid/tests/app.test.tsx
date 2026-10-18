@@ -340,6 +340,42 @@ describe('the Solid page', () => {
     expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'changes', path: 'a.ts' } })
   })
 
+  test('a skill load is a card naming what it loaded, from where, and folds the body', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const path = '/home/me/.jzh/skills/review/SKILL.md'
+    const { store } = makeStore({
+      conversation: { ...emptyConversation, blocks: [{ kind: 'user', text: '/review' }] },
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'agent/inbox/claimed', { message: { text: '/review', source: 'user' } }),
+        at(3, 'step/start', { step: 1 }),
+        at(4, 'tool/call', {
+          callId: 's1',
+          name: 'skill',
+          arguments: '{"name":"review"}',
+          summary: path,
+        }),
+        at(5, 'tool/result', {
+          callId: 's1',
+          isError: false,
+          summary: 'review does things',
+          content: [{ type: 'text', text: '# review\ncheck the diff' }],
+        }),
+        at(6, 'step/end', { step: 1 }),
+        at(7, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      ]),
+    })
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    const card = container.querySelector('.tool-card.skill-card') as HTMLDetailsElement | null
+    expect(card?.querySelector('.skill-name')?.textContent).toBe('review')
+    expect(card?.querySelector('.skill-source')?.textContent).toBe(path)
+    expect(card?.querySelector('.skill-description')?.textContent).toBe('review does things')
+    expect(card?.querySelector('.tool-output')?.textContent).toBe('# review\ncheck the diff')
+    expect(card?.open).toBe(false)
+  })
+
   test('an approval answers through the store, from the buttons and from y / n', () => {
     const { store, calls } = makeStore({
       conversation: {
