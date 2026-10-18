@@ -85,6 +85,12 @@ export interface LlmCapabilities {
    * configured default.
    */
   readonly contextWindow?: number
+  /**
+   * What one image block costs the routed model, when the adapter knows it. The
+   * meter prices an image as a reference of this size rather than by the base64
+   * the log carries; absent leaves the meter's own reference.
+   */
+  readonly imageTokens?: number
 }
 
 /** A tool declaration as it reaches the provider. */
