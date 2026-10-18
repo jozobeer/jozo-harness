@@ -27,6 +27,20 @@ const grow = (node: HTMLTextAreaElement): void => {
   node.style.height = Math.min(node.scrollHeight, 220) + 'px'
 }
 
+/** The up arrow that sends, drawn here so the page carries no icon package. */
+const SendIcon = () => (
+  <svg class="action-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+    <path d="M8 2.5 13 7.5 9.2 7.5 9.2 13.5 6.8 13.5 6.8 7.5 3 7.5Z" fill="currentColor" />
+  </svg>
+)
+
+/** The square that stops the run, drawn the same way. */
+const StopIcon = () => (
+  <svg class="action-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+    <rect x="3.5" y="3.5" width="9" height="9" rx="2" fill="currentColor" />
+  </svg>
+)
+
 /** What the human typed while a turn was running waits above the composer. */
 const Queue = (props: { store: SessionStore }) => (
   <For each={props.store.state().run?.queued ?? []}>
@@ -708,6 +722,9 @@ export const Composer = (props: { store: SessionStore }) => {
     props.store.state().conversation.approval !== undefined ||
     props.store.state().conversation.ask !== undefined
 
+  /** Whether the open session has a turn to stop; idle makes Stop a disabled square. */
+  const running = (): boolean => props.store.state().conversation.running
+
   return (
     <footer data-takeover={takeover() ? 'true' : 'false'}>
       <GoalBar store={props.store} onEdit={editGoal} />
@@ -788,11 +805,26 @@ export const Composer = (props: { store: SessionStore }) => {
             <Effort store={props.store} />
           </div>
           {/* While something waits on the reader, the card's button is the one in amber. */}
-          <Button id="send" variant={takeover() ? 'default' : 'primary'} type="submit">
-            Send
+          <Button
+            id="send"
+            size="icon"
+            variant={takeover() ? 'default' : 'primary'}
+            type="submit"
+            aria-label="Send the message"
+            title="Send the message (Enter)"
+          >
+            <SendIcon />
           </Button>
-          <Button id="cancel" type="button" onClick={() => props.store.send({ kind: 'cancel' })}>
-            Stop
+          <Button
+            id="cancel"
+            size="icon"
+            type="button"
+            aria-label="Stop the run"
+            title="Stop the run"
+            disabled={!running()}
+            onClick={() => props.store.send({ kind: 'cancel' })}
+          >
+            <StopIcon />
           </Button>
         </div>
       </form>

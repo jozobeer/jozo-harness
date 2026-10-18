@@ -3,6 +3,8 @@ import { splitProps, type JSX } from 'solid-js'
 export interface ButtonProps extends JSX.ButtonHTMLAttributes<HTMLButtonElement> {
   /** The three weights the page needs; primary is the human's move, so it wears amber. */
   readonly variant?: 'default' | 'primary' | 'quiet'
+  /** How much room it takes: a word's width, or one square for an icon alone. */
+  readonly size?: 'default' | 'icon'
 }
 
 /**
@@ -11,7 +13,7 @@ export interface ButtonProps extends JSX.ButtonHTMLAttributes<HTMLButtonElement>
  * copy-in the port decided on.
  */
 export const Button = (props: ButtonProps) => {
-  const [local, rest] = splitProps(props, ['variant', 'class'])
+  const [local, rest] = splitProps(props, ['variant', 'size', 'class'])
   return (
     <button
       {...rest}
@@ -22,6 +24,7 @@ export const Button = (props: ButtonProps) => {
           : local.variant === 'quiet'
             ? 'border-transparent bg-transparent text-dim hover:border-transparent hover:bg-bg-hover hover:text-text'
             : 'border-line bg-bg-hover text-text hover:border-dim',
+        local.size === 'icon' ? 'btn-icon' : '',
         local.class ?? '',
       ].join(' ')}
     />

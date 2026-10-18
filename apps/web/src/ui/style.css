@@ -1688,6 +1688,25 @@ footer {
   min-width: 0;
 }
 
+/* An icon alone is one square; a disabled one keeps its room and dims. */
+.actions .btn-icon {
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+.actions .btn-icon:disabled {
+  border-color: var(--line);
+  background: var(--bg-hover);
+  color: var(--dim);
+  cursor: not-allowed;
+}
+
+.actions .btn-icon:disabled:hover {
+  border-color: var(--line);
+}
+
 button {
   padding: 7px 14px;
   border: 1px solid var(--line);
