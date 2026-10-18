@@ -70,6 +70,24 @@ describe('reading the sessions back', () => {
     expect(renderSessionList([])).toBe('no sessions yet\n')
   })
 
+  test('a session nobody spoke in stays out of the list until asked for', () => {
+    const empty = {
+      id: 'quiet',
+      cwd: '/work',
+      createdAt: Date.UTC(2026, 0, 2, 3, 4, 5),
+      updatedAt: Date.UTC(2026, 0, 2, 3, 4, 5),
+      title: '',
+      empty: true,
+    }
+
+    expect(renderSessionList([empty], { showEmpty: false })).toBe(
+      'no sessions yet\n1 empty session hidden; --all shows them\n',
+    )
+    expect(renderSessionList([empty], { showEmpty: true })).toBe(
+      'quiet  2026-01-02 03:04:05  /work\n',
+    )
+  })
+
   test('the list follows the last change, not the moment it started', () => {
     const text = renderSessionList([
       {

@@ -13,6 +13,8 @@ export interface ParsedArgs {
   readonly sessionId?: string | undefined
   /** `jzh sessions --search <text>`: find sessions by what they say. */
   readonly search?: string | undefined
+  /** `jzh sessions --all`: list the sessions nobody said anything in too. */
+  readonly all: boolean
   /** Port for `jzh web`; 0 asks the system for a free one. */
   readonly port: number
   readonly resume: string | undefined
@@ -54,6 +56,7 @@ const FLAGS: ReadonlyMap<string, FlagSpec> = new Map<string, FlagSpec>([
   ['--port', { kind: 'value' }],
   ['--allow-preset-change', { kind: 'boolean' }],
   ['--subagents', { kind: 'boolean' }],
+  ['--all', { kind: 'boolean' }],
 ])
 
 /** The flags the parser knows, in the order it declares them. */
@@ -159,6 +162,7 @@ export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
     tui: values.has('--tui'),
     config: first(values, '--config'),
     search: first(values, '--search'),
+    all: values.has('--all'),
     help: values.has('--help'),
     errors,
   }

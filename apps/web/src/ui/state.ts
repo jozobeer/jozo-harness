@@ -33,6 +33,8 @@ export interface WebState {
   readonly sessions: ReadonlyArray<SessionSummary>
   /** The session being read; '' until the page has opened one. */
   readonly sessionId: string
+  /** The sessions the server has open, which stay listed even when empty. */
+  readonly opened: ReadonlyArray<string>
   /** Why the last move failed; shown until the page moves again. */
   readonly problem: string
   /** Which of the ways a page may be lit the reader chose. */
@@ -58,6 +60,7 @@ export const initialState: WebState = {
   info: emptyInfo,
   sessions: [],
   sessionId: '',
+  opened: [],
   problem: '',
   theme: DEFAULT_THEME,
   settings: undefined,
@@ -78,6 +81,12 @@ export const withDraft = (state: WebState, draft: string): WebState => ({ ...sta
 export const withSessions = (state: WebState, items: ReadonlyArray<SessionSummary>): WebState => ({
   ...state,
   sessions: items,
+})
+
+/** The sessions the server has open now: the sidebar keeps an empty one of these visible. */
+export const withOpened = (state: WebState, opened: ReadonlyArray<string>): WebState => ({
+  ...state,
+  opened,
 })
 
 export const withProblem = (state: WebState, problem: string): WebState => ({ ...state, problem })

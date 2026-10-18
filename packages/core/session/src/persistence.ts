@@ -23,6 +23,11 @@ export interface SessionSummary {
   readonly updatedAt: number
   /** The first thing the human typed, one short line; '' when the log holds none. */
   readonly title: string
+  /**
+   * Whether the log holds nothing but its header: a session nobody said anything
+   * in. Absent reads as no, for a provider that cannot tell without reading all.
+   */
+  readonly empty?: boolean
 }
 
 /** The persistence seam. S1 provides a JSONL implementation in `@jozo-harness/session-jsonl`. */

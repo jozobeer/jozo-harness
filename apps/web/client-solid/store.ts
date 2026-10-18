@@ -11,6 +11,7 @@ import {
   withConnection,
   withDraft,
   withModels,
+  withOpened,
   withPane,
   withProblem,
   withRun,
@@ -287,6 +288,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
             : yield* client.state({ sessionId: current.sessionId })
         yield* Effect.sync(() => {
           update((now) => withSessions(now, listed.items))
+          update((now) => withOpened(now, listed.opened))
           if (running !== undefined) update((now) => withRun(now, running))
         })
         yield* Effect.forEach(listed.opened, watch)
@@ -501,6 +503,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
 
     const listed = yield* client.sessions()
     yield* Effect.sync(() => update((now) => withSessions(now, listed.items)))
+    yield* Effect.sync(() => update((now) => withOpened(now, listed.opened)))
     yield* Effect.forEach(listed.opened, watch)
 
     // The session the page opens, then one more for every move: a click, a new

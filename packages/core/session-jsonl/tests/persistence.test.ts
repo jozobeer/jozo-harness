@@ -69,6 +69,7 @@ describe('jsonlSessions', () => {
       createdAt: 100,
       updatedAt: expect.any(Number),
       title: '',
+      empty: true,
     })
     const summaries = await Effect.runPromise(persistence.list())
     expect(summaries.map((summary) => summary.id).sort()).toEqual([first.id, second.id].sort())
@@ -96,6 +97,22 @@ describe('jsonlSessions', () => {
     expect(before.updatedAt).toBe(1_000_000)
     expect(after?.updatedAt ?? 0).toBeGreaterThan(before.updatedAt)
     expect(after?.createdAt).toBe(100)
+  })
+
+  test('a session stops being empty once its log holds an event beyond the header', async () => {
+    const { persistence } = isolated()
+    const created = await Effect.runPromise(persistence.create(header()))
+
+    expect((await Effect.runPromise(persistence.stat(created.id))).empty).toBe(true)
+    await Effect.runPromise(
+      created.sink.append({
+        seq: 2,
+        time: 101,
+        type: 'user/message',
+        data: { text: 'hello', source: 'user' },
+      }),
+    )
+    expect((await Effect.runPromise(persistence.list()))[0]?.empty).toBe(false)
   })
 
   test('list is empty before the root exists', async () => {

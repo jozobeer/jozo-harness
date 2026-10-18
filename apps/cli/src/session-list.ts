@@ -17,11 +17,28 @@ export const sessionRootOf = (rows: ReadonlyArray<PluginRow>): string => {
 
 const when = (time: number): string => new Date(time).toISOString().replace('T', ' ').slice(0, 19)
 
-/** One line per session, most recently changed first: the id it resumes by, when it last changed, where it ran, its name. */
-export const renderSessionList = (summaries: ReadonlyArray<SessionSummary>): string => {
-  const ordered = [...summaries].sort((left, right) => right.updatedAt - left.updatedAt)
-  if (ordered.length === 0) return 'no sessions yet\n'
-  return ordered.map(lineOf).join('\n') + '\n'
+/** What the list leaves out: empty logs stay out of the way unless asked for. */
+export interface SessionListOptions {
+  readonly showEmpty?: boolean
+}
+
+/**
+ * One line per session, most recently changed first: the id it resumes by, when
+ * it last changed, where it ran, its name. A session nobody said anything in is
+ * hidden unless `showEmpty` asks for it, and the list says how many it hid.
+ */
+export const renderSessionList = (
+  summaries: ReadonlyArray<SessionSummary>,
+  options?: SessionListOptions,
+): string => {
+  const showEmpty = options?.showEmpty === true
+  const listed = showEmpty ? summaries : summaries.filter((summary) => summary.empty !== true)
+  const hidden = summaries.length - listed.length
+  const ordered = [...listed].sort((left, right) => right.updatedAt - left.updatedAt)
+  const body = ordered.length === 0 ? 'no sessions yet\n' : ordered.map(lineOf).join('\n') + '\n'
+  if (hidden === 0) return body
+  const noun = hidden === 1 ? 'session' : 'sessions'
+  return body + String(hidden) + ' empty ' + noun + ' hidden; --all shows them\n'
 }
 
 const lineOf = (summary: SessionSummary): string => {

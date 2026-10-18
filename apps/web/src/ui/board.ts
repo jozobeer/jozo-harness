@@ -96,6 +96,27 @@ export const entryOf = (summary: SessionSummary, watched: Watched | undefined): 
   }
 }
 
+/** What the sidebar leaves out: archived rows, and empty logs unless asked for. */
+export interface SessionFilter {
+  readonly showArchived?: boolean
+  readonly showEmpty?: boolean
+  /** The sessions the server has open: an empty one still shows while it is read. */
+  readonly opened?: ReadonlyArray<string>
+}
+
+/** The rows a reader sees by default: a session nobody said anything in waits out of sight. */
+export const visibleSessions = (
+  sessions: ReadonlyArray<SessionSummary>,
+  filter: SessionFilter,
+): ReadonlyArray<SessionSummary> => {
+  const opened = new Set(filter.opened ?? [])
+  return sessions.filter(
+    (session) =>
+      (filter.showArchived === true || session.archived !== true) &&
+      (filter.showEmpty === true || session.empty !== true || opened.has(session.id)),
+  )
+}
+
 /** The board in the order a reader acts on it: what waits on them, what runs, the rest. */
 export interface Board {
   readonly waiting: ReadonlyArray<BoardEntry>

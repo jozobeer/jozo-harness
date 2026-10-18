@@ -15,6 +15,8 @@ export const SessionSummarySchema = Schema.Struct({
   pinned: Schema.optionalKey(Schema.Boolean),
   /** Whether the reader put the session away; absent reads as no. */
   archived: Schema.optionalKey(Schema.Boolean),
+  /** Whether the log holds nothing but its header; absent reads as no. */
+  empty: Schema.optionalKey(Schema.Boolean),
 })
 
 /** The wire shape of one session summary; the store's own summary carries these fields. */

@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'vitest'
 import type { UiEvent } from '@jozo-harness/ui-protocol'
-import { boardOf, emptyWatched, entryOf, watchedAfter, type Watched } from '../src/ui/board.ts'
+import {
+  boardOf,
+  emptyWatched,
+  entryOf,
+  visibleSessions,
+  watchedAfter,
+  type Watched,
+} from '../src/ui/board.ts'
 
 const at = (seq: number, type: string, data: unknown): UiEvent => ({
   kind: 'session',
@@ -25,6 +32,27 @@ const working = follow(
 )
 
 describe('the board', () => {
+  test('an empty session is hidden unless the page reads it or the reader asks for empties', () => {
+    const quiet = { ...summary('quiet'), empty: true }
+    const said = summary('said')
+
+    expect(visibleSessions([quiet, said], {}).map((item) => item.id)).toEqual(['said'])
+    expect(visibleSessions([quiet, said], { opened: ['quiet'] }).map((item) => item.id)).toEqual([
+      'quiet',
+      'said',
+    ])
+    expect(visibleSessions([quiet, said], { showEmpty: true }).map((item) => item.id)).toEqual([
+      'quiet',
+      'said',
+    ])
+    expect(visibleSessions([{ ...quiet, archived: true }], {}).map((item) => item.id)).toEqual([])
+    expect(
+      visibleSessions([{ ...quiet, archived: true }], { showEmpty: true, showArchived: true }).map(
+        (item) => item.id,
+      ),
+    ).toEqual(['quiet'])
+  })
+
   test('a running session says what it is doing and since when', () => {
     const entry = entryOf(summary('a'), working)
     expect(entry).toMatchObject({
