@@ -2,7 +2,7 @@ import { agentPlugin } from '@jozo-harness/agent'
 import { agentLoopPlugin } from '@jozo-harness/agent-loop'
 import { kernelPlugin, type Plugin } from '@jozo-harness/kernel'
 import { Llm, type LlmAdapter, type StreamChunk } from '@jozo-harness/llm'
-import { askPlugin, safetyPlugin } from '@jozo-harness/safety'
+import { askPlugin, probeBwrap, safetyPlugin } from '@jozo-harness/safety'
 import { sessionPlugin } from '@jozo-harness/session'
 import { jsonlSessions, sessionJsonlPlugin } from '@jozo-harness/session-jsonl'
 import { systemPromptPlugin } from '@jozo-harness/system-prompt'
@@ -20,6 +20,7 @@ import { runCommand } from '../src/index.ts'
 
 /** A host that cannot apply a sandbox refuses every command it is wrapped in. */
 const sandboxApplies = async (): Promise<boolean> => {
+  if (process.platform === 'linux') return probeBwrap()
   const probe = spawn(['sandbox-exec', '-p', '(version 1)(allow default)', '--', 'true'], {
     stdout: 'ignore',
     stderr: 'ignore',
@@ -199,16 +200,21 @@ describe('the sandbox a profile did not ask for', () => {
     }
   })
 
-  test.skipIf(applies)('reports a sandbox the host refuses as a result, not a crash', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-ws-'))
-    const observed = await runBash('echo hi', workspace)
+  // Only seatbelt is applied per command; on Linux a bwrap that cannot run fails
+  // its probe at load, which the safety plugin's tests cover.
+  test.skipIf(applies || process.platform !== 'darwin')(
+    'reports a sandbox the host refuses as a result, not a crash',
+    async () => {
+      const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-ws-'))
+      const observed = await runBash('echo hi', workspace)
 
-    expect(observed.code).toBe(0)
-    expect(observed.results).toHaveLength(1)
-    // The call itself is not an error: the sandbox's refusal is what the command left behind.
-    expect(observed.results[0]?.isError).toBe(false)
-    expect(observed.results[0]?.text).toContain('sandbox')
+      expect(observed.code).toBe(0)
+      expect(observed.results).toHaveLength(1)
+      // The call itself is not an error: the sandbox's refusal is what the command left behind.
+      expect(observed.results[0]?.isError).toBe(false)
+      expect(observed.results[0]?.text).toContain('sandbox')
 
-    await rm(workspace, { recursive: true, force: true })
-  })
+      await rm(workspace, { recursive: true, force: true })
+    },
+  )
 })

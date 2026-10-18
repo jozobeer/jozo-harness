@@ -26,7 +26,7 @@ const writeFileDeep = async (path: string, text: string | Uint8Array): Promise<v
 /**
  * Acceptance for S8: a real Chrome types a message, answers the approval prompt
  * the page draws, and receives the reply. Only the model is stubbed. Run it
- * with `bun run tests/web-acceptance.ts`.
+ * with `bun run tests/web-acceptance.ts` (set CHROME to the browser binary off macOS).
  */
 
 const textTurn = (text: string): ReadonlyArray<StreamChunk> => [
@@ -119,7 +119,7 @@ const profile = (root: string): string =>
     '    config:',
     '      preset: workspace-write',
     // The page answers an escalation, so the command stands under the preset.
-    '      sandbox: seatbelt',
+    '      sandbox: auto',
     '  - id: tier0',
     "    name: '@jozo-harness/tools-tier0'",
     '  - id: llm',
@@ -144,7 +144,12 @@ const plugins: ReadonlyArray<Plugin<any, any, any>> = [
 ]
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
-const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+// macOS has one place Chrome lives; elsewhere the binary is named by CHROME or found on PATH.
+const chrome =
+  process.env.CHROME ??
+  (process.platform === 'darwin'
+    ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+    : 'google-chrome')
 const evidence = join(repoRoot, '.tmp/web-evidence.png')
 
 interface Cdp {

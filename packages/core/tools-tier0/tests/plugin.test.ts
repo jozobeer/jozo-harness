@@ -21,7 +21,7 @@ describe('tier0Plugin', () => {
                   name: '@jozo-harness/safety',
                   config: {
                     preset: 'workspace-write',
-                    sandbox: 'seatbelt',
+                    sandbox: 'auto',
                     writableRoots: ['/work'],
                   },
                 },

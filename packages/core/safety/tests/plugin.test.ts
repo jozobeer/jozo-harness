@@ -5,6 +5,9 @@ import { describe, expect, test } from 'vitest'
 import { SystemPrompt } from '@jozo-harness/system-prompt'
 import { Policy, Sandbox, safetyPlugin, sandboxLayerFor } from '../src/index.ts'
 
+/** The backend `auto` resolves to where this test runs. */
+const native = process.platform === 'darwin' ? 'seatbelt' : 'bwrap'
+
 const build = (config: unknown) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -65,18 +68,18 @@ describe('safetyPlugin', () => {
     expect(observed.mode).toBe('read-only')
     // No sandbox key at all: the provider this platform has is what runs, and it
     // runs commands under the mode the preset names.
-    expect(observed.sandbox).toBe('seatbelt')
+    expect(observed.sandbox).toBe(native)
     expect(observed.sandboxMode).toBe('read-only')
   })
 
   test('a confined workspace-write stays confined', async () => {
     const observed = await Effect.runPromise(
-      build({ preset: 'workspace-write', sandbox: 'seatbelt', writableRoots: ['/work'] }),
+      build({ preset: 'workspace-write', sandbox: native, writableRoots: ['/work'] }),
     )
 
     expect(observed.preset).toBe('workspace-write')
     expect(observed.mode).toBe('workspace-write')
-    expect(observed.sandbox).toBe('seatbelt')
+    expect(observed.sandbox).toBe(native)
     expect(observed.sandboxMode).toBe('workspace-write')
   })
 
