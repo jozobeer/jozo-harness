@@ -1,4 +1,5 @@
 import { HooksLive } from '@jozo-harness/kernel'
+import { type Child } from '@jozo-harness/process'
 import type { SandboxShape } from '@jozo-harness/safety'
 import {
   Tools,
@@ -103,6 +104,37 @@ describe('bash tool', () => {
     expect(result?.isError).toBe(false)
     expect(textOf(result)).toContain('[timed out after 300ms]')
     expect(elapsed).toBeLessThan(10_000)
+  })
+
+  test('a timed-out command is handed to the job registry instead of killed', async () => {
+    const promoted: Array<{ command: string; child: Child }> = []
+    const jobs = {
+      promote: (command: string, child: Child) =>
+        Effect.sync(() => {
+          promoted.push({ command, child })
+          return { id: 'job-1' }
+        }),
+    }
+
+    const result = await Effect.runPromise(
+      call(
+        makeBashTool(undefined, undefined, jobs),
+        { command: 'sleep 30', timeoutMs: 300 },
+        '/tmp',
+      ),
+    )
+
+    expect(result?.isError).toBe(false)
+    expect(textOf(result)).toContain('[timed out after 300ms; still running as job job-1]')
+    expect(promoted).toHaveLength(1)
+    expect(promoted[0]?.command).toBe('sleep 30')
+    const child = promoted[0]?.child
+    const alive = await Promise.race([
+      child?.exited.then(() => false),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 200)),
+    ])
+    expect(alive).toBe(true)
+    child?.kill()
   })
 
   test('the timeout is clamped to what the tool allows', () => {

@@ -2,6 +2,7 @@ import type { Plugin } from '@jozo-harness/kernel'
 import { Sandbox, type ApprovalShape } from '@jozo-harness/safety'
 import { Context, Effect, Layer, Schema } from 'effect'
 import type { ToolDefinition } from '@jozo-harness/tools'
+import type { TimeoutJobs } from './bash.ts'
 import { tier0Tools } from './index.ts'
 
 /**
@@ -11,6 +12,7 @@ import { tier0Tools } from './index.ts'
  */
 export type Tier0ToolBuilder = (
   approval: ApprovalShape | undefined,
+  jobs?: TimeoutJobs,
 ) => ReadonlyArray<ToolDefinition<any, any>>
 
 /** The Tier 0 tool list, ready for whoever registers tools into the registry. */
@@ -27,6 +29,9 @@ export const tier0Plugin: Plugin<{}, Tier0Tools, Sandbox> = {
   layer: () =>
     Layer.effect(
       Tier0Tools,
-      Effect.map(Sandbox, (sandbox) => (approval) => tier0Tools(sandbox, undefined, approval)),
+      Effect.map(
+        Sandbox,
+        (sandbox) => (approval, jobs) => tier0Tools(sandbox, undefined, approval, jobs),
+      ),
     ),
 }

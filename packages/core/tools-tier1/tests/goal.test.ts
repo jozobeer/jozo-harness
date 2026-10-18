@@ -196,4 +196,45 @@ describe('the goal tool', () => {
     expect(resumed?.value).toMatchObject({ phase: 'active' })
     expect(resumed?.value).not.toHaveProperty('blockedReason')
   })
+
+  test('read reports the goal, its rounds, and its blocker without writing', async () => {
+    const { log, events } = fakeLog([
+      event(1, 'goal/updated', {
+        objective: 'aim',
+        phase: 'blocked',
+        maxGoalRounds: 10,
+        blockedReason: 'the key is gone',
+      }),
+      goalRound(2),
+      goalRound(3),
+    ])
+
+    const result = await Effect.runPromise(call(makeGoalTool(log), { action: 'read' }))
+
+    expect(result?.isError).toBe(false)
+    expect(result?.value).toMatchObject({
+      action: 'read',
+      objective: 'aim',
+      phase: 'blocked',
+      rounds: 2,
+      maxGoalRounds: 10,
+      blockedReason: 'the key is gone',
+    })
+    expect(textOf(result)).toContain('aim')
+    expect(events).toHaveLength(3)
+  })
+
+  test('create refuses to replace a goal that already exists', async () => {
+    const { log, events } = fakeLog([created(1)])
+
+    const result = await Effect.runPromise(
+      call(makeGoalTool(log), { action: 'create', objective: 'another aim' }),
+    )
+
+    expect(result?.isError).toBe(true)
+    expect(textOf(result)).toContain('already exists')
+    expect(textOf(result)).toContain('edit')
+    expect(events).toHaveLength(1)
+    expect(events[0]?.data).toMatchObject({ objective: 'aim' })
+  })
 })

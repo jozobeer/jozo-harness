@@ -25,13 +25,18 @@ export interface AgentRequest {
   readonly tools: ReadonlyArray<ToolSchema>
 }
 
-export type RequestErrorDecision = { readonly kind: 'retry' } | { readonly kind: 'fail' }
+/** What a listener wants after a failed attempt. A retry may say how long to wait. */
+export type RequestErrorDecision =
+  | { readonly kind: 'retry'; readonly delayMs?: number }
+  | { readonly kind: 'fail' }
 
 declare module '@jozo-harness/kernel/hook' {
   interface HookMap {
     'agent/pre-step': Waterfall<(input: PreStepInput) => Effect.Effect<PreStepDecision>>
     'agent/request': Waterfall<(request: AgentRequest) => Effect.Effect<AgentRequest>>
-    'agent/request-error': Waterfall<(failure: LlmFailure) => Effect.Effect<RequestErrorDecision>>
+    'agent/request-error': Waterfall<
+      (agent: Agent, failure: LlmFailure, attempt: number) => Effect.Effect<RequestErrorDecision>
+    >
     'agent/assistant-stream': Emit<(chunk: TimedStreamChunk, agent: Agent) => void>
     'agent/turn-stopping': Serial<(agent: Agent) => Effect.Effect<void>>
   }

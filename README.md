@@ -21,7 +21,7 @@
 | `packages/test-support/stub` | テストが向ける HTTP スタブ（node:http の上で、ハンドラは web の Request / Response） |
 | `scripts/` | `pnpm run check` の中身（doc / duplication / coverage の gate）と dsh との A/B |
 
-`tools-tier1` が既定でモデルに渡すのは todo、`ask_user`、skill、`web_fetch`、`read_image`、job、goal、schedule、`working_directory`、`plugin` 行の編集である（MCP のツールは `@jozo-harness/mcp` の行があるとき、`web_search` は検索プロバイダを設定したときだけ加わる）。subagent と team は `subagents` を有効にした構成でのみ加わり、いまの CLI にはそれを有効にする指定が無い。TUI と Web は同じ `@jozo-harness/ui-view` を通してログを読むので、片方で書かれたログをもう片方でも同じ形で描ける。
+`tools-tier1` が既定でモデルに渡すのは todo、`ask_user`、skill、`web_fetch`、`read_image`、job、goal、schedule、`working_directory`、`plugin` 行の編集である（MCP のツールは `@jozo-harness/mcp` の行があるとき、`web_search` は検索プロバイダを設定したときだけ加わる）。subagent と team は `--subagents` を付けた run でだけ加わる（6 つの tool schema で約 7.2 KB 増えるので、既定では配らない）。TUI と Web は同じ `@jozo-harness/ui-view` を通してログを読むので、片方で書かれたログをもう片方でも同じ形で描ける。
 
 ## はじめかた
 

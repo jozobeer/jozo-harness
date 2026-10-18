@@ -17,7 +17,7 @@ import { makeWriteTool } from './write.ts'
 import { makeEditTool } from './edit.ts'
 import { globTool } from './glob.ts'
 import { grepTool } from './grep.ts'
-import { makeBashTool } from './bash.ts'
+import { makeBashTool, type TimeoutJobs } from './bash.ts'
 import { makeObservedFiles, type ObservedFiles } from './observed-files.ts'
 
 /**
@@ -28,12 +28,14 @@ export const tier0Tools = (
   sandbox: SandboxShape = noneSandbox,
   observed: ObservedFiles = makeObservedFiles(),
   approval?: ApprovalShape,
+  /** Present when the run has background jobs; a timed-out bash call is promoted to one. */
+  jobs?: TimeoutJobs,
 ): ReadonlyArray<ToolDefinition<any, any>> => [
   makeReadTool(observed),
   makeWriteTool(observed, sandbox, approval),
   makeEditTool(observed, sandbox, approval),
   globTool,
   grepTool,
-  makeBashTool(sandbox, approval),
+  makeBashTool(sandbox, approval, jobs),
 ]
 export * from './plugin.ts'
