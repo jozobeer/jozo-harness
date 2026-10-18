@@ -1,4 +1,4 @@
-import { isAbsolute, relative, resolve } from 'node:path'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { Schema, Effect } from 'effect'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
 
@@ -36,8 +36,10 @@ export const makeWorkingDirectoryTool = (
   execute: (args) =>
     Effect.gen(function* () {
       const target = isAbsolute(args.path) ? resolve(args.path) : resolve(host.root, args.path)
+      // relative() returns '' when target is the root itself, which is inside the workspace.
       const inside = relative(resolve(host.root), target)
-      if (inside === '' || inside.startsWith('..') || isAbsolute(inside)) {
+      const escapes = isAbsolute(inside) || inside === '..' || inside.startsWith('..' + sep)
+      if (escapes) {
         return yield* Effect.fail(
           new ToolError({ code: 'denied', message: 'path escapes the workspace: ' + args.path }),
         )
