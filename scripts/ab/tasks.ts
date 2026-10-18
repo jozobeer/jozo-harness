@@ -8,7 +8,20 @@ import { readFile } from 'node:fs/promises'
 import { findDisagreement } from './find-task.ts'
 import { longPrompt } from './prompt-task.ts'
 import { readReport } from './read-task.ts'
+import { recoverAmbiguousEdit } from './recover-task.ts'
 import { fixRules } from './rules-task.ts'
+
+/**
+ * Where a harness difference would show for a task, and what a tie then means. Both halves
+ * are required: a task whose counters tie tells the reader nothing unless the task says so
+ * in advance, and a difference is only readable against the counters metrics.ts keeps.
+ */
+export interface AbRegime {
+  /** Where the two harnesses would part, named on this task's own counters. */
+  readonly difference: string
+  /** What an equal result means: what this task then fails to tell apart. */
+  readonly flat: string
+}
 
 export interface AbTask {
   readonly name: string
@@ -18,6 +31,7 @@ export interface AbTask {
   readonly files: Readonly<Record<string, string>>
   /** How long one run may take; the run script's default when absent. */
   readonly timeoutMs?: number
+  readonly regime: AbRegime
   /** Whether the work landed, read from the workspace. */
   readonly done: (workspace: string) => Promise<boolean>
 }
@@ -34,6 +48,11 @@ export const TASKS: ReadonlyArray<AbTask> = [
         'export const add = (a: number, b: number): number => a - b\n' +
         'export const multiply = (a: number, b: number): number => a * b\n',
     },
+    regime: {
+      difference:
+        'failedEdits or reReads above zero, or a toolCalls count above the single read and edit a correct fix needs, means one harness spent an attempt on a fix with one right line; equal counters mean both land it the same way.',
+      flat: 'A tie says only that both harnesses fix a one-line arithmetic bug the same way, which is the floor both already clear; no quality difference can be read from this task alone.',
+    },
     done: async (workspace) => {
       const text = await textOf(workspace + '/src/math.ts')
       return text.includes('a + b') && text.includes('a * b') && !text.includes('a - b')
@@ -44,6 +63,11 @@ export const TASKS: ReadonlyArray<AbTask> = [
     prompt:
       'Create a file notes.md in the working directory. It must contain a level-1 heading with the text Notes, then a line that reads exactly: status: ready',
     files: {},
+    regime: {
+      difference:
+        'turns or toolCalls above the one write the task needs, or failedEdits from attempting the note before reading what is already there, means a harness made extra steps of a one-file task; equal counters mean both write it in one call.',
+      flat: 'A tie means both can create a short file from scratch, so the task separates neither harness and should not be read as evidence either way.',
+    },
     done: async (workspace) => {
       const text = await textOf(workspace + '/notes.md')
       return text.includes('# Notes') && text.includes('status: ready')
@@ -57,6 +81,11 @@ export const TASKS: ReadonlyArray<AbTask> = [
       'src/util.ts': 'export const fetchValue = (): number => 1\n',
       'src/use.ts':
         "import { fetchValue } from './util'\n\nexport const use = (): number => fetchValue()\n",
+    },
+    regime: {
+      difference:
+        'reReads or failedEdits above zero, or toolCalls above the four reads and edits the rename needs across two files, means a harness re-read or retried a rename it did not carry through in one pass; equal counters mean both rename both files the same way.',
+      flat: 'A tie means both track an identifier across a two-file rename, so the task says nothing about how each harness would hold a rename across a larger tree.',
     },
     done: async (workspace) => {
       const util = await textOf(workspace + '/src/util.ts')
@@ -73,4 +102,5 @@ export const TASKS: ReadonlyArray<AbTask> = [
   readReport,
   longPrompt,
   findDisagreement,
+  recoverAmbiguousEdit,
 ]

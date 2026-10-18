@@ -17,6 +17,18 @@ export interface AbMetrics {
   readonly tools: Readonly<Record<string, number>>
 }
 
+/**
+ * The counters both harnesses share, named so a task's regime can be checked against what the
+ * A/B actually keeps: a difference that names none of these cannot be read off a run.
+ */
+export const METRIC_NAMES = [
+  'toolCalls',
+  'failedEdits',
+  'reReads',
+  'turns',
+  'compactions',
+] as const satisfies ReadonlyArray<keyof AbMetrics>
+
 /** One line of either log; both fields are read defensively. */
 export interface AbEvent {
   readonly type?: unknown

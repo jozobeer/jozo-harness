@@ -282,6 +282,13 @@ export const ruleFiles = (fixed: ReadonlySet<string> = new Set()): Record<string
 export const fixRules: AbTask = {
   name: 'fix-rules',
   prompt: `Every file in src/rules/ exports one rule function (rule01 to rule${RULE_COUNT}) whose header comment says exactly what it returns. Some rule functions do not do what their comment says. Find every rule function that disagrees with its comment and fix it so it does what the comment says. Do not change the helper functions or the rules that are already right.`,
+  regime: {
+    difference:
+      'reReads or failedEdits above zero means a harness went back over a rule it had already ' +
+      'seen or retried an edit, and a toolCalls count below the reads the twelve hidden faults ' +
+      'force means it answered without covering every file.',
+    flat: 'A tie means both read enough of the forty-eight files to find the twelve faults, so the task cannot separate how each harness decided which files to open.',
+  },
   files: ruleFiles(),
   timeoutMs: 1_200_000,
   done: async (workspace) => wrongRules(workspace).length === 0,
