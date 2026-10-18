@@ -109,3 +109,70 @@ describe('safetyPlugin', () => {
     }
   })
 })
+describe('sandbox selection', () => {
+  test('auto takes the backend this platform has', async () => {
+    const context = await Effect.runPromise(
+      Effect.scoped(
+        Layer.build(
+          sandboxLayerFor({ preset: 'workspace-write', sandbox: 'auto' }, 'linux', () => true),
+        ),
+      ),
+    )
+    const sandbox = Context.get(context, Sandbox)
+
+    expect(sandbox.name).toBe('bwrap')
+    expect(sandbox.mode).toBe('workspace-write')
+    expect(sandbox.enforcement).toBe('full')
+  })
+
+  test('auto without a usable bwrap stops instead of running loose', async () => {
+    const failed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.result(
+          Layer.build(
+            sandboxLayerFor({ preset: 'workspace-write', sandbox: 'auto' }, 'linux', () => false),
+          ),
+        ),
+      ),
+    )
+
+    expect(failed._tag).toBe('Failure')
+    if (failed._tag === 'Failure') {
+      const message = String(failed.failure)
+      expect(message).toContain('bwrap')
+      expect(message).toContain('landlock')
+      expect(message).toContain('sandbox: none')
+    }
+  })
+
+  test('an explicit bwrap where it cannot run is refused instead of ignored', async () => {
+    const failed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.result(
+          Layer.build(sandboxLayerFor({ preset: 'full', sandbox: 'bwrap' }, 'darwin', () => true)),
+        ),
+      ),
+    )
+
+    expect(failed._tag).toBe('Failure')
+    if (failed._tag === 'Failure') {
+      expect(String(failed.failure)).toContain('Linux only')
+    }
+  })
+
+  test('auto on a platform with no backend stops instead of running loose', async () => {
+    const failed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.result(
+          Layer.build(sandboxLayerFor({ preset: 'full', sandbox: 'auto' }, 'win32', () => false)),
+        ),
+      ),
+    )
+
+    expect(failed._tag).toBe('Failure')
+    if (failed._tag === 'Failure') {
+      expect(String(failed.failure)).toContain('win32')
+      expect(String(failed.failure)).toContain('sandbox: none')
+    }
+  })
+})

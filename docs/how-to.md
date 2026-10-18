@@ -143,7 +143,7 @@ jzh --patch full.yml "…"
 jzh --dump-config --patch full.yml   # 効いた行を確かめる
 ```
 
-`sandbox` 自体を外す（`sandbox: none`）と、preset に関わらず封じ込めは無くなる。`seatbelt` が使えない platform で `seatbelt` を指定した場合は、無制限に落ちずに起動が失敗する。
+`sandbox` 自体を外す（`sandbox: none`）と、preset に関わらず封じ込めは無くなる。`auto` で使える backend が無い場合や、明示した backend（`seatbelt` / `bwrap`）がその platform で動かない場合は、無制限に落ちずに起動が失敗する。
 
 ## 拒否された呼び出しを1回だけ通す
 
@@ -197,7 +197,7 @@ jzh --patch sessions.yml "…"
 
 ## コマンドを sandbox の外で走らせる
 
-`@jozo-harness/safety` の `sandbox` は既定で `seatbelt`（macOS の `sandbox-exec`）である。コマンドは自分が走るディレクトリと一時ディレクトリにだけ書ける。それ以外の場所に書こうとすると `Operation not permitted` になる。読み取りは制限せず、`/dev/null` への書き込みは許可する。
+`@jozo-harness/safety` の `sandbox` は既定で `auto` である。macOS では `seatbelt`（`sandbox-exec`）、Linux では `bwrap`（bubblewrap）が走る。コマンドは自分が走るディレクトリと一時ディレクトリにだけ書ける。それ以外の場所に書こうとすると macOS では `Operation not permitted`、Linux では `Read-only file system` になる。読み取りは制限せず、`/dev/null` への書き込みは許可する。
 
 ```yaml
   - id: safety
@@ -209,7 +209,7 @@ jzh --patch sessions.yml "…"
         - ~/work/shared
 ```
 
-`seatbelt` を指定した platform で sandbox が使えないときは、無制限に切り替えず起動が失敗する。
+`auto` で sandbox が使えないとき、または明示した backend がその platform で動かないときは、無制限に切り替えず起動が失敗する。Linux では `bwrap` の probe が通らない（未導入、user namespace を作れない）場合も起動が失敗する。
 
 ## チームで分担させる
 
