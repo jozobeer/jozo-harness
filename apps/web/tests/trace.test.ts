@@ -108,6 +108,36 @@ describe('the trace', () => {
     expect(turn?.answer).toBe('')
   })
 
+  test('a tool result keeps the image blocks it carried, and no broken one', () => {
+    const [turn] = traceOf([
+      event('turn/start', { turn: 1 }, 10),
+      event('step/start', { step: 1 }, 11),
+      event(
+        'tool/call',
+        { callId: 'c1', name: 'read_image', arguments: '{"path":"a.png"}', summary: '' },
+        12,
+      ),
+      event(
+        'tool/result',
+        {
+          callId: 'c1',
+          isError: false,
+          summary: '',
+          content: [
+            { type: 'image', mediaType: 'image/png', data: 'iVBORw0KGgo=', name: '/tmp/a.png' },
+            { type: 'image', mediaType: 'image/png', data: '' },
+          ],
+        },
+        13,
+      ),
+    ])
+    const tool = turn === undefined ? undefined : toolsOf(turn)[0]
+    expect(tool?.output).toBe('')
+    expect(tool?.images).toEqual([
+      { mediaType: 'image/png', data: 'iVBORw0KGgo=', name: '/tmp/a.png' },
+    ])
+  })
+
   test('only an edit or a write with a readable path names a file', () => {
     expect(writtenPath('edit', '{"path":"x.ts"}')).toBe('x.ts')
     expect(writtenPath('read', '{"path":"x.ts"}')).toBeUndefined()
