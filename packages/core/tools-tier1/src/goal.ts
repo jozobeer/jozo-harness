@@ -172,7 +172,7 @@ const setPhase = (action: string, phase: GoalPhase, current: GoalState, log: Goa
   )
 
 /** The line the model reads back: the phase, the objective, and any note or blocker. */
-const goalLine = (value: GoalValue): string =>
+export const goalText = (value: GoalValue): string =>
   'goal ' +
   value.phase +
   ' ' +
@@ -183,6 +183,23 @@ const goalLine = (value: GoalValue): string =>
   value.objective +
   (value.note === undefined ? '' : '\n' + value.note) +
   (value.blockedReason === undefined ? '' : '\nblocked: ' + value.blockedReason)
+
+/**
+ * Runs one goal action against one log. The tool and the human's command share
+ * this, so both write the same state and both refuse for the same reasons.
+ */
+export const runGoal = (args: GoalArgs, log: GoalLog): Effect.Effect<GoalValue, ToolError> =>
+  Effect.gen(function* () {
+    if (args.action === 'read') return yield* readGoal(log)
+    if (args.action === 'create') return yield* createGoal(args, log)
+    const current = currentGoal(log.events())
+    if (current === undefined) {
+      return yield* Effect.fail(refuse('there is no goal to ' + args.action))
+    }
+    if (args.action === 'edit') return yield* editGoal(args, current, log)
+    if (args.action === 'blocked') return yield* blockGoal(args, current, log)
+    return yield* movePhase(args, current, log)
+  })
 
 /**
  * Records and moves the goal the session works toward. Each call writes one state
@@ -203,18 +220,7 @@ export const makeGoalTool = (log: GoalLog): ToolDefinition<GoalArgs, GoalValue> 
       note: Schema.optionalKey(Schema.String),
       blockedReason: Schema.optionalKey(Schema.String),
     }),
-    render: (_args, value) => [{ type: 'text', text: goalLine(value) }],
+    render: (_args, value) => [{ type: 'text', text: goalText(value) }],
   },
-  execute: (args) =>
-    Effect.gen(function* () {
-      if (args.action === 'read') return yield* readGoal(log)
-      if (args.action === 'create') return yield* createGoal(args, log)
-      const current = currentGoal(log.events())
-      if (current === undefined) {
-        return yield* Effect.fail(refuse('there is no goal to ' + args.action))
-      }
-      if (args.action === 'edit') return yield* editGoal(args, current, log)
-      if (args.action === 'blocked') return yield* blockGoal(args, current, log)
-      return yield* movePhase(args, current, log)
-    }),
+  execute: (args) => runGoal(args, log),
 })

@@ -79,9 +79,13 @@ export const turnHasSource = (
 ): boolean =>
   openTurn(events).some((event) => event.type === 'user/message' && event.data.source === source)
 
-/** Whether the open turn began with a person typing: the only authority for pause and resume. */
+/**
+ * Whether the open turn began with a person typing: the only authority for pause
+ * and resume. A command the person ran is their word too, even when no turn has
+ * started yet.
+ */
 export const inHumanTurn = (events: ReadonlyArray<SessionEvent>): boolean =>
-  turnHasSource(events, 'user')
+  turnHasSource(events, 'user') || openTurn(events).some((event) => event.type === 'command/run')
 
 /** Whether the open turn is one the goal driver started, rather than a person. */
 export const inGoalRound = (events: ReadonlyArray<SessionEvent>): boolean =>

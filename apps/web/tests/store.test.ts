@@ -368,6 +368,27 @@ describe('the page store', () => {
     )
   }, 15_000)
 
+  test('a goal written to the log makes the page read its run state again', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          const before = host.states()
+          host.said(
+            event(1, 'goal/updated', {
+              objective: 'ship it',
+              phase: 'active',
+              maxGoalRounds: 8,
+            }),
+          )
+          yield* until(() => host.states() > before, 'read the run state after the goal changed')
+          expect(store.state().run).toBeDefined()
+        }),
+      ),
+    )
+  }, 15_000)
+
   test('a log that arrives at once is drawn once, when the frame comes', async () => {
     const browser = stubTheBrowser({ frames: true })
     const host = makeHost('a')

@@ -376,6 +376,70 @@ describe('the Solid page', () => {
     expect(calls).toContainEqual({ kind: 'command', command: { kind: 'cancel' } })
   })
 
+  test('the goal bar above the composer sends the goal commands the store carries', () => {
+    const run = (phase: 'active' | 'paused') => ({
+      goal: { objective: 'ship it', phase, rounds: 2, maxRounds: 8 },
+      schedules: [],
+      jobs: [],
+      todos: [],
+      todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+      skills: [],
+      promptSections: [],
+      queued: [],
+      model: 'stub/model',
+      effort: '',
+      efforts: [],
+    })
+    const { store, calls } = makeStore({ sessionId: 'a', run: run('active') })
+    const { container } = render(() => <Composer store={store} />)
+
+    const bar = container.querySelector('#goal-bar')
+    expect(bar?.textContent).toContain('ship it')
+    expect(bar?.textContent).toContain('active')
+    expect(bar?.textContent).toContain('2/8')
+
+    // The rules stay in the command: a button only says what the human typed.
+    fireEvent.click(container.querySelector('[data-goal-action="pause"]') as Element)
+    expect(calls).toContainEqual({
+      kind: 'command',
+      command: { kind: 'submit', text: '/goal pause' },
+    })
+    fireEvent.click(container.querySelector('[data-goal-action="done"]') as Element)
+    expect(calls).toContainEqual({
+      kind: 'command',
+      command: { kind: 'submit', text: '/goal done' },
+    })
+
+    // Edit puts the command in the draft, so the objective is changed where it is read.
+    fireEvent.click(container.querySelector('[data-goal-action="edit"]') as Element)
+    expect(calls).toContainEqual({ kind: 'draft', text: '/goal edit ship it' })
+  })
+
+  test('a paused goal offers resume instead of pause', () => {
+    const run = {
+      goal: { objective: 'ship it', phase: 'paused' as const, rounds: 2, maxRounds: 8 },
+      schedules: [],
+      jobs: [],
+      todos: [],
+      todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+      skills: [],
+      promptSections: [],
+      queued: [],
+      model: 'stub/model',
+      effort: '',
+      efforts: [],
+    }
+    const { store, calls } = makeStore({ sessionId: 'a', run })
+    const { container } = render(() => <Composer store={store} />)
+
+    expect(container.querySelector('[data-goal-action="pause"]')).toBeNull()
+    fireEvent.click(container.querySelector('[data-goal-action="resume"]') as Element)
+    expect(calls).toContainEqual({
+      kind: 'command',
+      command: { kind: 'submit', text: '/goal resume' },
+    })
+  })
+
   test('a slash on the first word offers the commands, and Enter inserts the picked one', () => {
     const { store, calls } = makeStore({
       sessionId: 'a',

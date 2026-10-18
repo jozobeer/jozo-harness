@@ -116,6 +116,37 @@ describe('commands in the REPL', () => {
     expect(observed.events.filter((event) => event.type === 'turn/start')).toHaveLength(1)
   })
 
+  test('a goal command records the goal the tool would and moves its phase', async () => {
+    const observed = await runLines([
+      '/goal ship it',
+      '/goal pause',
+      '/status',
+      '/goal resume',
+      '/goal edit better',
+      '/goal done',
+      '/status',
+      '/goal',
+    ])
+    const goals = observed.events.flatMap((event) =>
+      event.type === 'goal/updated' ? [event.data] : [],
+    )
+
+    expect(observed.code).toBe(0)
+    // The command writes exactly the state the goal tool writes: one shape, one fold.
+    expect(goals).toEqual([
+      { objective: 'ship it', phase: 'active', maxGoalRounds: 256 },
+      { objective: 'ship it', phase: 'paused', maxGoalRounds: 256 },
+      { objective: 'ship it', phase: 'active', maxGoalRounds: 256 },
+      { objective: 'better', phase: 'active', maxGoalRounds: 256 },
+      { objective: 'better', phase: 'complete', maxGoalRounds: 256 },
+    ])
+    expect(observed.printed).toContain('goal active 0/256: ship it')
+    expect(observed.printed).toContain('goal: paused 0/256 — ship it')
+    expect(observed.printed).toContain('goal: complete 0/256 — better')
+    // A command is not a turn: the model was never woken.
+    expect(observed.events.filter((event) => event.type === 'turn/start')).toHaveLength(0)
+  })
+
   test('help lists what can be typed, and an unknown command says so', async () => {
     const observed = await runLines(['/help', '/nope', 'and a message'])
 

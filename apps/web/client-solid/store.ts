@@ -90,7 +90,7 @@ const KEEP_ALIVE = { pingInterval: '20 seconds', pingTimeout: '1 minute' } as co
 
 /** What one session's log told the page to read again. */
 const needsRefresh = (type: string): boolean =>
-  type === 'turn/end' || type.startsWith('agent/inbox/')
+  type === 'turn/end' || type === 'goal/updated' || type.startsWith('agent/inbox/')
 
 const sessionInUrl = (search: string): string | undefined => {
   const value = new URLSearchParams(search).get('session')
