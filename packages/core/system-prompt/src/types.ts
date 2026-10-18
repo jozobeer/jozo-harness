@@ -50,5 +50,7 @@ export interface PromptSection {
 /** One assembled request preamble: the system prompt and the tools the model may call. */
 export interface PromptBuild {
   readonly system: string
+  /** The names of the sections that rendered into this prompt, in assembly order. */
+  readonly sections: ReadonlyArray<string>
   readonly tools: ReadonlyArray<ToolSchema>
 }

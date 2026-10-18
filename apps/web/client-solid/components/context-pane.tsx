@@ -21,6 +21,58 @@ const Goal = (props: { goal: RunStateView['goal'] }) => (
   </Show>
 )
 
+const todoMarks: Readonly<Record<string, string>> = {
+  pending: '[ ]',
+  in_progress: '[~]',
+  completed: '[x]',
+}
+
+const Todos = (props: { todos: RunStateView['todos']; counts: RunStateView['todoCounts'] }) => (
+  <Show when={props.todos.length > 0}>
+    <div class="run-section">
+      <span class="run-section-title">todo</span>
+      <span class="run-todo-counts">
+        {String(props.counts.completed) + '/' + String(props.todos.length) + ' complete'}
+      </span>
+    </div>
+    <ul class="run-todos">
+      <For each={props.todos}>
+        {(todo) => (
+          <li class={'run-todo ' + todo.status}>
+            <span class="run-todo-mark">{todoMarks[todo.status] ?? '[ ]'}</span>
+            <span class="run-todo-content">{todo.content}</span>
+          </li>
+        )}
+      </For>
+    </ul>
+  </Show>
+)
+
+const Skills = (props: { skills: RunStateView['skills'] }) => (
+  <Show when={props.skills.length > 0}>
+    <span class="run-section-title">skills</span>
+    <ul class="run-skills">
+      <For each={props.skills}>{(skill) => <li class="run-skill">{skill}</li>}</For>
+    </ul>
+  </Show>
+)
+
+const PromptSections = (props: { sections: RunStateView['promptSections'] }) => (
+  <>
+    <span class="run-section-title">prompt</span>
+    <Show
+      when={props.sections.length > 0}
+      fallback={<div class="run-empty">no sections recorded</div>}
+    >
+      <ul class="run-prompt-sections">
+        <For each={props.sections}>
+          {(section) => <li class="run-prompt-section">{section}</li>}
+        </For>
+      </ul>
+    </Show>
+  </>
+)
+
 const Run = (props: { store: SessionStore }) => {
   const run = () => props.store.state().run
   return (
@@ -30,6 +82,9 @@ const Run = (props: { store: SessionStore }) => {
         {(state) => (
           <>
             <Goal goal={state().goal} />
+            <Todos todos={state().todos} counts={state().todoCounts} />
+            <Skills skills={state().skills} />
+            <PromptSections sections={state().promptSections} />
             <Show when={state().schedules.length > 0}>
               <ul class="run-schedules">
                 <For each={state().schedules}>

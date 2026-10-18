@@ -58,6 +58,7 @@ import {
   ruleText,
 } from '@jozo-harness/tools-tier1'
 import { runConfig } from './config-command.ts'
+import { runContextOf } from './run-state.ts'
 import { sessionRootOf } from './session-list.ts'
 import { credentialSource, type SettingsSurface } from './settings.ts'
 import { configPaths } from './config.ts'
@@ -1000,12 +1001,17 @@ const runStateOf = (
 ): RunStateView => {
   const events = agent.session.events()
   const goal = currentGoal(events)
+  const context = runContextOf(events)
   return {
     // A page may switch the model or the effort while the session runs, so this
     // is what the agent holds now rather than what the run resolved when it started.
     model: agent.options.route,
     effort: agent.options.reasoningEffort ?? '',
     efforts,
+    todos: context.todos,
+    todoCounts: context.todoCounts,
+    skills: context.skills,
+    promptSections: context.promptSections,
     queued: projectInbox(events)
       .nextTurn.filter((message) => message.source === 'user')
       .map((message) => message.text),

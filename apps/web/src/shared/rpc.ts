@@ -70,11 +70,28 @@ export const JobViewSchema = Schema.Struct({
   running: Schema.Boolean,
 })
 
+/** One step of the plan the session recorded with todo_write. */
+export const TodoViewSchema = Schema.Struct({
+  content: Schema.String,
+  status: Schema.Literals(['pending', 'in_progress', 'completed']),
+})
+
 /** What one session can say about itself right now, folded from its own log and its live work. */
 export const RunStateViewSchema = Schema.Struct({
   goal: Schema.Union([GoalViewSchema, Schema.Null]),
   schedules: Schema.Array(ScheduleViewSchema),
   jobs: Schema.Array(JobViewSchema),
+  /** The newest plan, in the order todo_write recorded it. */
+  todos: Schema.Array(TodoViewSchema),
+  todoCounts: Schema.Struct({
+    pending: Schema.Int,
+    inProgress: Schema.Int,
+    completed: Schema.Int,
+  }),
+  /** The skills whose instructions loaded successfully, in load order, without repeats. */
+  skills: Schema.Array(Schema.String),
+  /** The prompt sections of the newest system prompt; empty when the log recorded none. */
+  promptSections: Schema.Array(Schema.String),
   /** What the human typed while a turn was running; it becomes the next turn. */
   queued: Schema.Array(Schema.String),
   /** The route this session asks now, `provider/model`, as the next request will. */

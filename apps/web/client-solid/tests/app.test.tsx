@@ -198,6 +198,10 @@ describe('the Solid page', () => {
         goal: null,
         schedules: [],
         jobs: [],
+        todos: [],
+        todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+        skills: [],
+        promptSections: [],
         queued: [],
         model: 'stub/model',
         effort: 'low',
@@ -228,6 +232,10 @@ describe('the Solid page', () => {
         goal: null,
         schedules: [],
         jobs: [],
+        todos: [],
+        todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+        skills: [],
+        promptSections: [],
         queued: [],
         model: 'stub/model',
         effort: 'max',
@@ -250,6 +258,10 @@ describe('the Solid page', () => {
         goal: null,
         schedules: [],
         jobs: [],
+        todos: [],
+        todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+        skills: [],
+        promptSections: [],
         queued: [],
         model: 'stub/model',
         effort: '',
@@ -352,6 +364,13 @@ describe('the Solid page', () => {
         goal: { objective: 'ship the port', phase: 'active', rounds: 1, maxRounds: 8 },
         schedules: [],
         jobs: [],
+        todos: [
+          { content: 'write the test', status: 'completed' },
+          { content: 'fix the code', status: 'in_progress' },
+        ],
+        todoCounts: { pending: 0, inProgress: 1, completed: 1 },
+        skills: ['code-complete'],
+        promptSections: ['identity', 'agents-md:1'],
         queued: [],
         model: 'stub/model',
         effort: '',
@@ -363,6 +382,13 @@ describe('the Solid page', () => {
 
     expect(container.querySelector('.run-objective')?.textContent).toBe('ship the port')
     expect(container.querySelector('.run-phase')?.textContent).toBe('active')
+    expect(container.querySelector('.run-todo.in_progress .run-todo-content')?.textContent).toBe(
+      'fix the code',
+    )
+    expect(container.querySelector('.run-todo-counts')?.textContent).toBe('1/2 complete')
+    expect(container.querySelector('.run-skill')?.textContent).toBe('code-complete')
+    expect(container.querySelectorAll('.run-prompt-section')).toHaveLength(2)
+    expect(container.querySelector('.run-prompt-section')?.textContent).toBe('identity')
 
     const turns = [...container.querySelectorAll('button.tab')].find(
       (tab) => tab.textContent === 'turns',

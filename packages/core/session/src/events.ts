@@ -98,7 +98,8 @@ export interface SessionEventMap {
   'step/start': { readonly step: number }
   'step/end': { readonly step: number }
   'request/header': RequestHeaderData
-  'system/message': { readonly text: string }
+  /** The settled system prompt; sections names the parts that rendered into it. */
+  'system/message': { readonly text: string; readonly sections?: ReadonlyArray<string> }
   'user/message': { readonly text: string; readonly source: UserMessageSource }
   'assistant/message': AssistantMessageData
   'assistant/attempt': AssistantAttemptData
