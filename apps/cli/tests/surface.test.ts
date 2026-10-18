@@ -30,12 +30,16 @@ describe('the notes the dump prints', () => {
     const text = renderSurface('/tmp/jzh/config.yaml', {
       model: 'my-cloud/some-model',
       profile: 'repl',
+      search: 'deepseek',
+      deepseekToolsBaseUrl: 'https://api.deepseek.com/v1/tools',
       skills: ['/tmp/skills'],
       plugins: [{ id: 'safety', name: '@jozo-harness/safety' }],
     })
 
     expect(text).toContain('  - model: my-cloud/some-model ')
     expect(text).toContain('  - profile: repl ')
+    expect(text).toContain('  - search: deepseek ')
+    expect(text).toContain('  - deepseekToolsBaseUrl: https://api.deepseek.com/v1/tools ')
     expect(text).toContain('  - skills: 1 directory ')
     expect(text).toContain('  - plugins: 1 row ')
   })
