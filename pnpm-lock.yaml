@@ -572,6 +572,9 @@ importers:
       '@jozo-harness/session':
         specifier: workspace:*
         version: link:../../core/session
+      '@jozo-harness/tools-tier1':
+        specifier: workspace:*
+        version: link:../../core/tools-tier1
       '@jozo-harness/ui-protocol':
         specifier: workspace:*
         version: link:../protocol

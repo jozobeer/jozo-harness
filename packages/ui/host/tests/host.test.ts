@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, test } from 'vitest'
 import type { Agent } from '@jozo-harness/agent'
 import { makeHooks } from '@jozo-harness/kernel'
@@ -140,7 +143,110 @@ const withCommands = <A, E>(
     ),
   )
 
+/** One skill root holding a single SKILL.md, so a slash can name it. */
+const skillRoot = async (name: string, body = 'the steps'): Promise<string> => {
+  const root = await mkdtemp(join(tmpdir(), 'jozo-harness-host-skill-'))
+  await mkdir(join(root, name), { recursive: true })
+  await writeFile(
+    join(root, name, 'SKILL.md'),
+    '---\nname: ' + name + '\ndescription: ' + name + ' does things\n---\n\n' + body + '\n',
+  )
+  return root
+}
+
+/**
+ * A host whose catalog holds the given roots and whose registry holds 'echo'. The
+ * skill 'review' is in the catalog only, so 'echo' is the one name both sides claim.
+ */
+const withSkills = <A, E>(
+  input: FakeInput,
+  roots: ReadonlyArray<string>,
+  run: (host: UiHost) => Effect.Effect<A, E, Scope.Scope>,
+) =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const commands = makeCommands()
+        yield* commands.register({
+          name: 'echo',
+          summary: 'says what it is told',
+          run: (text) => Effect.succeed({ ok: true, text: 'echo: ' + text }),
+        })
+        const host = yield* makeUiHost({
+          session: input.session,
+          agent: input.agent,
+          hooks: input.hooks,
+          commands,
+          skills: roots,
+        })
+        return yield* run(host)
+      }),
+    ),
+  )
+
 describe('ui host', () => {
+  test('a slash naming a skill loads it and sends its arguments as the turn', async () => {
+    const input = makeInput()
+    const root = await skillRoot('review', '# review\ncheck the diff')
+    try {
+      await withSkills(input, [root], (host) =>
+        Effect.gen(function* () {
+          yield* host.submit('/review the last commit')
+
+          const calls = input.session
+            .events()
+            .filter((event) => event.type === 'tool/call')
+            .map((event) => event.data as { name?: string; arguments?: string })
+          expect(calls).toEqual([
+            {
+              name: 'skill',
+              arguments: '{"name":"review"}',
+              summary: expect.any(String),
+              callId: expect.any(String),
+            },
+          ])
+
+          const results = input.session
+            .events()
+            .filter((event) => event.type === 'tool/result')
+            .map((event) => event.data as { isError?: boolean; content?: unknown })
+          expect(results).toHaveLength(1)
+          expect(results[0]?.isError).toBe(false)
+          expect(JSON.stringify(results[0]?.content)).toContain('check the diff')
+
+          // The arguments, not the slash line, are the human's turn.
+          expect(input.submitted).toEqual(['the last commit'])
+          // The card is the log's record, not a command answer.
+          expect(input.session.events().some((event) => event.type === 'command/done')).toBe(false)
+        }),
+      )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('a registered command wins the name a skill also holds', async () => {
+    const input = makeInput()
+    const root = await skillRoot('echo', 'skill body that must not load')
+    try {
+      await withSkills(input, [root], (host) =>
+        Effect.gen(function* () {
+          yield* host.submit('/echo hi')
+
+          expect(input.submitted).toEqual([])
+          expect(input.session.events().some((event) => event.type === 'tool/call')).toBe(false)
+          const answered = input.session
+            .events()
+            .filter((event) => event.type === 'command/done')
+            .map((event) => event.data as { text?: string })
+          expect(answered.map((one) => one.text)).toEqual(['echo: hi'])
+        }),
+      )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('a command is answered without waking the model', async () => {
     const input = makeInput()
     await withCommands(input, (host) =>

@@ -1,6 +1,12 @@
 import type { Agent } from '@jozo-harness/agent'
 import type { HookRegistry } from '@jozo-harness/kernel'
-import type { CommandsShape, Session } from '@jozo-harness/session'
+import {
+  parseCommand,
+  type CommandsShape,
+  type Session,
+  type SessionError,
+} from '@jozo-harness/session'
+import { loadSkill, type LoadedSkill } from '@jozo-harness/tools-tier1'
 import type { UiEvent, UiHost } from '@jozo-harness/ui-protocol'
 import { Deferred, Effect, Queue, Stream, type Scope } from 'effect'
 
@@ -12,6 +18,11 @@ export interface MakeUiHostOptions {
   readonly hooks: HookRegistry
   /** What the human can type besides a message; absent means every line is a message. */
   readonly commands?: CommandsShape
+  /**
+   * The roots the skill catalog reads. A slash naming a skill the registry does not
+   * answer loads that skill for this turn; absent means only messages and commands.
+   */
+  readonly skills?: ReadonlyArray<string>
 }
 
 /**
@@ -80,6 +91,62 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
         return pending === undefined ? missing : yield* Deferred.await(pending)
       })
 
+    /** Whether the registry answers this name; a command keeps a name a skill also has. */
+    const commandAnswers = (name: string): boolean =>
+      options.commands?.list().some((command) => command.name === name) ?? false
+
+    /**
+     * The skill a slash line forces, or nothing: the name must not be a command, and
+     * the catalog is searched again on every line, as the skill tool searches it.
+     */
+    const forcedSkillOf = (line: string) =>
+      Effect.gen(function* () {
+        const roots = options.skills
+        if (roots === undefined || roots.length === 0) return undefined
+        const invocation = parseCommand(line)
+        if (invocation === undefined || commandAnswers(invocation.name)) return undefined
+        const skill = yield* loadSkill(roots, invocation.name)
+        // A name no root lists is left to the registry, whose answer names commands.
+        return skill === undefined ? undefined : { skill, input: invocation.input }
+      })
+
+    /**
+     * Writes a forced load the way a model's own call would write it: the assistant
+     * turn that names the call, the call, and its result. The history stays one
+     * shape, and the Run pane folds the load out of the same records.
+     */
+    const recordSkillLoad = (loaded: {
+      readonly skill: LoadedSkill
+      readonly input: string
+    }): Effect.Effect<void, SessionError> =>
+      Effect.gen(function* () {
+        const callId = 'skill-' + String(options.session.events().length + 1)
+        const args = JSON.stringify({ name: loaded.skill.name })
+        const route = options.agent.options?.route ?? ''
+        const slash = route.indexOf('/')
+        yield* options.session.append('assistant/message', {
+          provider: slash < 0 ? 'jzh' : route.slice(0, slash),
+          model: slash < 0 ? 'skill' : route.slice(slash + 1),
+          content: [{ type: 'tool-call', id: callId, name: 'skill', arguments: args }],
+          stream: [],
+        })
+        yield* options.session.append('tool/call', {
+          callId,
+          name: 'skill',
+          arguments: args,
+          summary: 'skill ' + loaded.skill.name,
+        })
+        yield* options.session.append('tool/result', {
+          callId,
+          isError: false,
+          content: [{ type: 'text', text: loaded.skill.body }],
+          summary: loaded.skill.description,
+        })
+        // No arguments is a load without a turn: the human asked to read it.
+        if (loaded.input !== '')
+          yield* options.agent.followup({ text: loaded.input, source: 'user' })
+      })
+
     return {
       events: Stream.scoped(
         Stream.unwrap(
@@ -102,6 +169,13 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
       // through the session events, so a reconnecting client sees it too.
       submit: (text) =>
         Effect.gen(function* () {
+          // A slash the registry does not answer may still name a skill; the loaded
+          // skill becomes the turn's input, and its arguments become the message.
+          const loaded = yield* forcedSkillOf(text)
+          if (loaded !== undefined) {
+            yield* recordSkillLoad(loaded)
+            return
+          }
           if (options.commands !== undefined) {
             const outcome = yield* options.commands.run(text, options.session)
             if (outcome !== undefined) return

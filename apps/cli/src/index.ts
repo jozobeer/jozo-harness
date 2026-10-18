@@ -91,6 +91,7 @@ import {
   renderSkillCatalog,
   skillRoots,
   tier1Tools,
+  type SkillSummary,
 } from '@jozo-harness/tools-tier1'
 import {
   Approval,
@@ -852,7 +853,7 @@ const sessionFactoryOf = (
       return {
         summary: summaryOf(agent),
         host: ui,
-        commands: () => commandViewsOf(built.runtime.commands),
+        commands: () => commandViewsOf(built.runtime.commands, built.runtime.skillCatalog),
         runState: () => runStateOf(agent, built.runtime.jobs, built.runtime.efforts),
         jobOutput: (jobId: string) => jobDetailOf(built.runtime.jobs, jobId),
         stopJob: (jobId: string) => stopJobOf(built.runtime.jobs, jobId),
@@ -975,7 +976,9 @@ const serveWebUi = (
     // for itself: the very first line typed completes against the built-ins.
     const runCommands = makeCommands()
     yield* installBuiltinCommands(runCommands)
-    const defaultCommands = commandViewsOf(runCommands)
+    // A page opened before any session exists still lists the skills this run's
+    // roots would offer, so the first slash is not blind.
+    const defaultCommands = commandViewsOf(runCommands, yield* discoverSkills(skillsOf(options)))
     // The store the rail lists from lives as long as the server it serves.
     return yield* Effect.scoped(
       Effect.gen(function* () {
@@ -1004,7 +1007,7 @@ const openSessionOf = (runtime: SessionRuntime): OpenSession | undefined => {
   return {
     summary: summaryOf(agent),
     host: ui,
-    commands: () => commandViewsOf(runtime.commands),
+    commands: () => commandViewsOf(runtime.commands, runtime.skillCatalog),
     runState: () => runStateOf(agent, jobs, efforts),
     jobOutput: (jobId: string) => jobDetailOf(jobs, jobId),
     stopJob: (jobId: string) => stopJobOf(jobs, jobId),
@@ -1051,6 +1054,8 @@ interface SessionRuntime {
   readonly effort: string
   /** The effort words the provider takes, as a page offers them; empty declares none. */
   readonly efforts: ReadonlyArray<string>
+  /** The skills the catalog lists now, as the composer offers them beside commands. */
+  readonly skillCatalog: ReadonlyArray<SkillSummary>
   readonly spillBytes: number | undefined
   readonly layer: Layer.Layer<any, PluginError, never>
 }
@@ -1060,13 +1065,32 @@ type BuiltSession =
   | { readonly kind: 'ready'; readonly runtime: SessionRuntime }
   | { readonly kind: 'refused'; readonly message: string }
 
-/** What the human can type at one session, as a page's composer offers it. Skills wait for their own catalog issue; these are the commands the registry holds. */
-const commandViewsOf = (commands: CommandsShape): ReadonlyArray<CommandView> =>
-  commands.list().map((command) => ({
-    name: command.name,
-    summary: command.summary,
-    kind: 'command' as const,
-  }))
+/**
+ * What the human can type at one session, as a page's composer offers it: the
+ * registry's commands first, then the skills its catalog lists. A name both sides
+ * hold stays a command, because that is the one the slash actually runs.
+ */
+const commandViewsOf = (
+  commands: CommandsShape,
+  skills: ReadonlyArray<SkillSummary> = [],
+): ReadonlyArray<CommandView> => {
+  const registered = commands.list()
+  const named = new Set(registered.map((command) => command.name))
+  return [
+    ...registered.map((command) => ({
+      name: command.name,
+      summary: command.summary,
+      kind: 'command' as const,
+    })),
+    ...skills
+      .filter((skill) => !named.has(skill.name))
+      .map((skill) => ({
+        name: skill.name,
+        summary: skill.description,
+        kind: 'skill' as const,
+      })),
+  ]
+}
 
 /** What one background command has kept as output. */
 const jobDetailOf = (jobs: JobsShape, id: string): Effect.Effect<JobDetailView, WebError> =>
@@ -1189,10 +1213,14 @@ const buildSession = (
     // REPL and a UI run it through the same registry and the log keeps the record.
     const commands = makeCommands()
     yield* installBuiltinCommands(commands)
+    // The catalog is read once for the page's completion list and again by the tool
+    // and the host, who read the roots themselves so a changed file is never stale.
+    const skills = skillsOf(sessionOptions)
+    const skillCatalog = yield* discoverSkills(skills)
     // The background commands of this session: the tier 1 tools start them, a UI lists them.
     const jobs = yield* makeJobs()
     const ui = wantsUi
-      ? yield* makeUiHost({ session: agent.session, agent, hooks, commands })
+      ? yield* makeUiHost({ session: agent.session, agent, hooks, commands, skills })
       : undefined
 
     // An escalation asks whoever answers for this run: a UI, a caller's hook, or
@@ -1209,7 +1237,6 @@ const buildSession = (
     })
 
     // A catalog this agent has not read yet opens its turn, before the input it claimed.
-    const skills = skillsOf(sessionOptions)
     yield* hooks.on('agent/pre-step', (input, next) =>
       Effect.gen(function* () {
         const decision = yield* next()
@@ -1251,6 +1278,7 @@ const buildSession = (
         route,
         effort,
         efforts,
+        skillCatalog,
         spillBytes,
         layer,
       },
