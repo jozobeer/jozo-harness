@@ -577,6 +577,54 @@ const switchesTheEffort = async (client: Cdp, read: () => Promise<unknown>): Pro
   if (kept !== 'stub/model') throw new Error('the model chip left the seat: ' + String(kept))
 }
 
+/**
+ * Folding the rail gives the middle column the room the rail had. The hidden
+ * sidebar stops being a grid item, so the grid's declared columns and the items
+ * that fill them have to agree; otherwise the page lands in the zero-width
+ * first column and the conversation disappears.
+ */
+const measuresTheFoldedShell = async (client: Cdp): Promise<void> => {
+  const resize = (width: number): Promise<unknown> =>
+    client.send('Emulation.setDeviceMetricsOverride', {
+      width,
+      height: 900,
+      deviceScaleFactor: 1,
+      mobile: false,
+    })
+  const mainWidth = 'Math.round(document.getElementById("main").getBoundingClientRect().width)'
+  const fold = "document.getElementById('rail-fold').click()"
+  const widthAt = async (width: number): Promise<number> => {
+    await resize(width)
+    await sleep(50)
+    return Number(await client.evaluate(mainWidth))
+  }
+
+  const open = await widthAt(1440)
+  await client.evaluate(fold)
+  await sleep(50)
+  const folded = Number(await client.evaluate(mainWidth))
+  // The page keeps every pixel the rail gave up, so folding can only widen it.
+  if (!(folded > open)) {
+    throw new Error('folding the rail did not widen the page at 1440: ' + folded + ' <= ' + open)
+  }
+  const narrow = await widthAt(1000)
+  if (narrow < 900) {
+    throw new Error('the folded page lost the middle column at 1000: ' + narrow)
+  }
+  // Below 720 the rail is a drawer and leaves the grid: the page is the one column.
+  const drawer = await widthAt(700)
+  if (drawer < 690) {
+    throw new Error('the page did not keep the single column below 720: ' + drawer)
+  }
+  await resize(1440)
+  await client.evaluate(fold)
+  await sleep(50)
+  const unfolded = Number(await client.evaluate(mainWidth))
+  if (unfolded !== open) {
+    throw new Error('unfolding the rail did not return the page: ' + unfolded + ' !== ' + open)
+  }
+}
+
 /** The text inside one element, or '' when the page does not have it. */
 const textIn = (client: Cdp, selector: string): Promise<unknown> =>
   client.evaluate("document.querySelector('" + selector + "')?.textContent ?? ''")
@@ -713,6 +761,7 @@ const driveBrowser = async (url: string, profileDir: string): Promise<BrowserOut
     await checksTheAnimations(client, read)
     await switchesTheEffort(client, read)
     await asksForTheModels(client, read)
+    await measuresTheFoldedShell(client)
     await measuresTheRail(client)
     await saveScreenshot(client)
     return { passed: true, answer }

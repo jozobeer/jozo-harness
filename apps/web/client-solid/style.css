@@ -1226,6 +1226,11 @@
       visibility: hidden;
     }
 
+    /* The rail is out of flow here, so the page is the only column left. */
+    #main {
+      grid-column: 1;
+    }
+
     body[data-drawer] #sidebar {
       transform: none;
       visibility: visible;
