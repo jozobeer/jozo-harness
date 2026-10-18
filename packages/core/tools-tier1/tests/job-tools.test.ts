@@ -3,6 +3,7 @@ import { Tools, toolsLayer } from '@jozo-harness/tools'
 import { Context, Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
 import { jobTools, makeJobs } from '../src/index.ts'
+import { makeBashTool } from '../../tools-tier0/src/bash.ts'
 
 describe('job tools', () => {
   test('start, read, and stop a background command', async () => {
@@ -34,6 +35,50 @@ describe('job tools', () => {
     expect(observed.started).toEqual({ id: 'job-1', command: 'echo from a job' })
     expect(JSON.stringify(observed.read)).toContain('from a job')
     expect(observed.killed?.isError).toBe(false)
+  })
+
+  test('a bash call that times out is promoted to a job that job_output reads', async () => {
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const jobs = yield* makeJobs()
+          const context = yield* Layer.build(Layer.provideMerge(toolsLayer, HooksLive))
+          const tools = Context.get(context, Tools)
+          for (const tool of [...jobTools(jobs), makeBashTool(undefined, undefined, jobs)]) {
+            yield* tools.register(tool)
+          }
+
+          const call = (name: string, args: unknown) =>
+            tools.call({
+              callId: 'c-' + name,
+              tool: name,
+              arguments: JSON.stringify(args),
+              context: { sessionId: 's1', cwd: '/tmp', callId: 'c-' + name },
+            })
+
+          const timedOut = yield* call('bash', {
+            command: 'sleep 0.6; echo survived',
+            timeoutMs: 200,
+          })
+          const value = timedOut?.value as { jobId?: string } | undefined
+          const read =
+            value?.jobId === undefined
+              ? undefined
+              : yield* call('job_output', { id: value.jobId, wait: true, timeoutMs: 5_000 })
+          // The output arrives before the exit, so one more read sees it stop.
+          const stopped =
+            value?.jobId === undefined
+              ? undefined
+              : yield* call('job_output', { id: value.jobId, wait: true, timeoutMs: 5_000 })
+          return { id: value?.jobId, timedOut, read, stopped }
+        }),
+      ),
+    )
+
+    expect(observed.id).toBe('job-1')
+    expect(JSON.stringify(observed.timedOut?.content)).toContain('still running as job job-1')
+    expect(JSON.stringify(observed.read?.value)).toContain('survived')
+    expect(JSON.stringify(observed.stopped?.content)).toContain('[finished]')
   })
 
   test('one waited read returns only what the job produced since the last read', async () => {

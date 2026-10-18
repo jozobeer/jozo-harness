@@ -3,6 +3,7 @@ import { Schema, Effect } from 'effect'
 import { ToolError, writeSpill, type ToolDefinition } from '@jozo-harness/tools'
 import { takePage } from './page.ts'
 import { isBinary, walkFiles } from './walk.ts'
+import { resolveSearchStart } from './workspace.ts'
 
 /** A search stops collecting here; a broader pattern is reached by narrowing it. */
 export const GREP_MAX_MATCHES = 20_000
@@ -17,6 +18,12 @@ const Parameters = Schema.Struct({
   pattern: Schema.String.annotate({
     description: 'A JavaScript regular expression to search for in each line.',
   }),
+  path: Schema.optionalKey(
+    Schema.String.annotate({
+      description:
+        'The directory to start the search in, absolute or relative to the workspace. Defaults to the workspace root.',
+    }),
+  ),
   include: Schema.optionalKey(
     Schema.String.annotate({
       description: "A glob that limits which files are read, for example 'src/**/*.ts'.",
@@ -113,7 +120,7 @@ export const grepTool: ToolDefinition<GrepArgs, GrepValue> = {
   name: 'grep',
   presentCall: (args) => ({ summary: 'grep ' + args.pattern }),
   description:
-    'Searches workspace files for a regular expression and returns file, line, and text for each match. Use it instead of shelling out to grep or rg. node_modules, .git, hidden paths, and binary files are skipped. A result too long to show is stored whole; read that file with offset and limit.',
+    'Searches workspace files for a regular expression and returns file, line, and text for each match. Use it instead of shelling out to grep or rg. Dot-entries such as .github are searched; only node_modules, .git, and binary files are skipped. A result too long to show is stored whole; read that file with offset and limit.',
   parameters: Parameters,
   output: {
     schema: Schema.Struct({
@@ -153,9 +160,11 @@ export const grepTool: ToolDefinition<GrepArgs, GrepValue> = {
           new ToolError({ code: 'invalid-arguments', message: 'limit starts at 1' }),
         )
       }
+      const start = yield* resolveSearchStart(context.cwd, args.path)
       const files = yield* walkFiles({
         cwd: context.cwd,
         limit: GREP_MAX_FILES,
+        start,
         ...(args.include === undefined ? {} : { pattern: args.include }),
       })
       const found = yield* Effect.promise(() =>

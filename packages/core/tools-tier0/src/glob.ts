@@ -2,6 +2,7 @@ import { Schema, Effect } from 'effect'
 import { ToolError, writeSpill, type ToolDefinition } from '@jozo-harness/tools'
 import { takePage } from './page.ts'
 import { walkFiles } from './walk.ts'
+import { resolveSearchStart } from './workspace.ts'
 
 /** A glob stops collecting here; the walk is bounded so a broad pattern cannot run forever. */
 export const GLOB_MAX_PATHS = 20_000
@@ -12,6 +13,12 @@ const Parameters = Schema.Struct({
   pattern: Schema.String.annotate({
     description: "The glob to match against workspace paths, for example '**/*.ts'.",
   }),
+  path: Schema.optionalKey(
+    Schema.String.annotate({
+      description:
+        'The directory to start the walk in, absolute or relative to the workspace. Defaults to the workspace root.',
+    }),
+  ),
   limit: Schema.optionalKey(
     Schema.Int.annotate({ description: 'The most paths to show. Defaults to 100.' }),
   ),
@@ -57,12 +64,12 @@ const renderGlob = (
   ]
 }
 
-/** Lists workspace files whose relative path matches a glob, newest modification last. Ignored and hidden paths are not walked. */
+/** Lists workspace files whose relative path matches a glob, newest modification last. Dot-entries are walked; .git and node_modules are not. */
 export const globTool: ToolDefinition<GlobArgs, GlobValue> = {
   name: 'glob',
   presentCall: (args) => ({ summary: 'glob ' + args.pattern }),
   description:
-    'Lists workspace files matching a glob pattern, in modification-time order (oldest first). Use it to find files by name; use grep to search inside them. node_modules and .git are never walked. A list too long to show is stored whole; read that file with offset and limit.',
+    'Lists workspace files matching a glob pattern, in modification-time order (oldest first). Use it to find files by name; use grep to search inside them. Dot-entries such as .github are walked; only node_modules and .git are never walked. A list too long to show is stored whole; read that file with offset and limit.',
   parameters: Parameters,
   output: {
     schema: Schema.Struct({
@@ -81,12 +88,14 @@ export const globTool: ToolDefinition<GlobArgs, GlobValue> = {
           new ToolError({ code: 'invalid-arguments', message: 'limit starts at 1' }),
         )
       }
+      const start = yield* resolveSearchStart(context.cwd, args.path)
       // One path past the collection cap is enough to know the walk was stopped.
       const found = yield* walkFiles({
         cwd: context.cwd,
         limit: GLOB_MAX_PATHS + 1,
         pattern: args.pattern,
         order: 'modified',
+        start,
       })
       const complete = found.slice(0, GLOB_MAX_PATHS)
       const shown = takePage(complete, page, (path) => path)

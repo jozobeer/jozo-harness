@@ -36,7 +36,7 @@ const mediaTypeOf = (path: string): string | undefined => {
 export const readImageTool: ToolDefinition<ReadImageArgs, ReadImageValue> = {
   name: 'read_image',
   description:
-    'Reads a png, jpeg, webp, or gif file and shows it to the model. Use it instead of read for images: read returns bytes as text.',
+    'Reads a png, jpeg, webp, or gif file and shows it to the model when the current route carries images; otherwise it fails and says why. Use it instead of read for images: read returns bytes as text.',
   parameters: Parameters,
   output: {
     schema: Schema.Struct({
@@ -51,6 +51,15 @@ export const readImageTool: ToolDefinition<ReadImageArgs, ReadImageValue> = {
   },
   execute: (args, context) =>
     Effect.gen(function* () {
+      if (context.images === 'none') {
+        return yield* Effect.fail(
+          new ToolError({
+            code: 'execution',
+            message:
+              'read_image is unavailable: the current route cannot carry images; switch to an image-capable route to show one',
+          }),
+        )
+      }
       const mediaType = mediaTypeOf(args.path)
       if (mediaType === undefined) {
         return yield* Effect.fail(

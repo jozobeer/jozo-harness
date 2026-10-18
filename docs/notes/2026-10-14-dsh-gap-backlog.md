@@ -112,9 +112,10 @@
     - 時間切れを足した。`timeoutMs`（既定 120000、上限 600000、`clampTimeout`）で、時間切れになったらまず SIGTERM、5 秒後（`BASH_HARD_KILL_GRACE_MS`）に SIGKILL を送る。SIGTERM を無視するコマンドでも呼び出しが返る。
     - 失敗の読み方を dsh に合わせた。非ゼロ終了は **エラー結果ではなく**、出力に `[exit code: N]` を付けた結果として返す（コマンドが失敗したことと呼び出しが失敗したことを混ぜない）。stderr は `[stderr]` 見出しの節にし、無出力なら `(no output)`、時間切れなら `[timed out after Nms]` を exit マーカーの前に置く。sandbox がコマンドを拒否した場合だけエラー結果のまま（インフラの失敗）。
     - `renderOutput` を `bodyOf` / `markersOf` に割った（認知 9 → 3 以下）。
+    - 時間切れは kill ではなく job への昇格にした（issue #43）。run が job registry を持つとき、`bash` は timeout で生きた子を registry に渡し、`[timed out after Nms; still running as job <id>]` を返す。registry が無い構成だけ従来どおり SIGTERM → SIGKILL に落ちる。
   - 検証: `bash.test.ts` 7 本（通常実行／sandbox が包んだ argv を実行／非ゼロ終了は `[exit code: 3]` 付きの結果で isError false／`[stderr]` 節／`(no output)`／`sleep 30` を `timeoutMs: 300` で殺し 303ms で返り `[timed out after 300ms]` を出す／`clampTimeout` の既定・上限・下限）。e2e `apps/cli/tests/bash-result-e2e.test.ts`（実 CLI 経路で、失敗したコマンドの結果がエラーではなく `[exit code: 3]` 付きでモデルに届き、2000 行の出力は spill されて通知に退避先が出て、次の呼び出しでその退避先の末尾を読める）。`bun run check` 593 pass / 0 fail。
   - 学び: 「失敗が失敗として読める」は、エラー結果にすることではなく、失敗を出力に書くことでも満たせる。むしろツール呼び出しの失敗とコマンドの失敗を分けた方が、エージェントループの再試行判断を汚さない。
-  - 未確認: 時間切れの kill は直接の子（ラッパーや bash）にしか届かない。コマンドが SIGTERM を無視して孫プロセスを残す場合の後始末は sandbox 側の領分で、このチェックアウトでは確認していない。背景実行は tier1 の job_start/job_output/job_kill が担う（`bash` 自身の昇格は持たない）。
+  - 未確認: 時間切れの kill は直接の子（ラッパーや bash）にしか届かない。コマンドが SIGTERM を無視して孫プロセスを残す場合の後始末は sandbox 側の領分で、このチェックアウトでは確認していない。背景実行は tier1 の job_start/job_output/job_kill が担う。`bash` の昇格は registry の `promote` に子を渡す経路で、kill に落ちるのは registry の無い構成だけ。dsh の timeout は打ち切りではなく昇格である。
 - [x] **B6 欠けているツール**。
   - 実装（2026-10-14、採用のうち 1 群目）: `job_list`。`JobsShape.list` をそのまま使い、id・実行中か・コマンドを返す。空なら `(no background jobs)`。モデルに見える宣言の一覧（e2e）も更新した。
   - 検証: `packages/core/tools-tier1/tests/job-tools.test.ts` に 1 本（2 つ起動し、1 つは走ったまま 1 つは終了 → 一覧と状態、そして空の一覧の文言）。`bun run check` 594 pass / 0 fail。
