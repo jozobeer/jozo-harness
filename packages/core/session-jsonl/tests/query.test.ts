@@ -72,7 +72,7 @@ describe('listing a long log', () => {
     const elapsed = performance.now() - started
 
     expect(listed).toEqual([
-      { id, cwd: '/work', createdAt: 1, updatedAt: expect.any(Number), title: '' },
+      { id, cwd: '/work', createdAt: 1, updatedAt: expect.any(Number), title: '', empty: false },
     ])
     expect(elapsed).toBeLessThan(1000)
     await rm(root, { recursive: true, force: true })
@@ -97,6 +97,7 @@ describe('listing a long log', () => {
         createdAt: 1,
         updatedAt: expect.any(Number),
         title: 'event number 2',
+        empty: false,
       },
     ])
     expect(elapsed).toBeLessThan(1000)
