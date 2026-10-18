@@ -105,11 +105,13 @@ import {
   renderSkillCatalog,
   skillRoots,
   tier1Tools,
+  type RunCodeHost,
   type SkillSummary,
 } from '@jozo-harness/tools-tier1'
 import {
   Approval,
   Ask,
+  Sandbox,
   approvalServiceLayer,
   askServiceLayer,
   installAsk,
@@ -121,6 +123,7 @@ import {
   type AskRequested,
   type AskShape,
   type PlanModeShape,
+  type SandboxShape,
 } from '@jozo-harness/safety'
 import { isAbsolute, dirname, join, relative } from 'node:path'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
@@ -334,6 +337,8 @@ const installTier1 = (
   rows: ReadonlyArray<PluginRow>,
   /** The background commands of this session; the session also reports them to a UI. */
   jobs: JobsShape,
+  /** The boundary the run's commands are confined to; run_code's child uses it too. */
+  sandbox: SandboxShape | undefined,
 ) =>
   Effect.gen(function* () {
     // A run with nobody to answer leaves the seam unserved, so a question fails
@@ -356,6 +361,17 @@ const installTier1 = (
       skills,
       planMode,
       pluginHost,
+      {
+        tools: () => tools.schemas(),
+        call: (name, argumentsJson, nested) =>
+          tools.call({
+            callId: nested.callId,
+            tool: name,
+            arguments: argumentsJson,
+            context: nested,
+          }),
+        ...(sandbox === undefined ? {} : { sandbox }),
+      },
     )) {
       yield* tools.register(tool)
     }
@@ -371,8 +387,9 @@ const tier1ToolList = (
   skills: ReadonlyArray<string>,
   planMode: PlanModeShape | undefined,
   pluginHost: PluginHost,
+  runCode: RunCodeHost,
 ) => {
-  const list = [...tier1Tools(ask, skills)]
+  const list = [...tier1Tools(ask, skills, runCode)]
   list.push(makePluginTool(pluginHost))
   if (options.search !== undefined) list.push(makeWebSearchTool(options.search))
   for (const tool of jobTools(jobs)) list.push(tool)
@@ -742,6 +759,13 @@ const installTeamIdentityContext = (
   })
 
 /** Tiers and guards come from the profile's rows. */
+
+/** The boundary this run's commands are confined to; absent when no tier 0 row asked for one. */
+const sandboxOf = (wiring: ProfileWiring): SandboxShape | undefined =>
+  hasRow(wiring.rows, '@jozo-harness/tools-tier0')
+    ? Context.get(wiring.context, Sandbox)
+    : undefined
+
 /**
  * Installs what the profile's rows ask for and reports the composition the session
  * runs with: the profiles it was launched from and every tool it was given. The
@@ -803,6 +827,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
         planMode,
         wiring.rows,
         wiring.jobs,
+        sandboxOf(wiring),
       )
       // An agent at the delegation limit reads it in the next runtime snapshot;
       // the tool stays visible and refuses the call, as dsh does.
