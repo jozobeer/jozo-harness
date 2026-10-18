@@ -65,6 +65,7 @@ const makeFactory = (): Fake => {
             runState: runStateOf,
             jobOutput,
             stopJob: () => Effect.void,
+            stopSubagent: () => Effect.void,
           }
         }),
     },
@@ -75,6 +76,7 @@ const runStateOf = (): RunStateView => ({
   goal: null,
   schedules: [],
   jobs: [],
+  subagents: [],
   todos: [],
   todoCounts: { pending: 0, inProgress: 0, completed: 0 },
   skills: [],
@@ -95,6 +97,7 @@ const initial = (id: string): OpenSession => ({
   runState: runStateOf,
   jobOutput,
   stopJob: () => Effect.void,
+  stopSubagent: () => Effect.void,
 })
 
 describe('the session registry', () => {

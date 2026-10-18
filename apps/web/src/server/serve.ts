@@ -134,6 +134,15 @@ const handlersOf = (
             Effect.mapError((error) => error.message),
           )
     },
+    stopSubagent: ({ sessionId, id }) => {
+      const session = registry.sessionOf(sessionId)
+      return session === undefined
+        ? Effect.fail('the session is not open')
+        : session.stopSubagent(id).pipe(
+            Effect.as(true),
+            Effect.mapError((error) => error.message),
+          )
+    },
     workspaces: () => workspaces.list().pipe(Effect.mapError((error) => error.message)),
     browseDirectories: ({ path }) =>
       workspaces.browse(path).pipe(Effect.mapError((error) => error.message)),

@@ -88,6 +88,11 @@ interface FakeHost {
   readonly runState: () => RunStateView
   readonly jobOutput: (id: string) => Effect.Effect<JobDetailView, WebError>
   readonly stopJob: (id: string) => Effect.Effect<void, WebError>
+  readonly stopSubagent: (id: string) => Effect.Effect<void, WebError>
+  /** The children the run state reports now, as a turn that started one would. */
+  readonly setSubagents: (subagents: RunStateView['subagents']) => void
+  /** The children a page stopped, in the order it asked. */
+  readonly stopped: Array<string>
   readonly commands: ReadonlyArray<UiCommand>
   /** Appends to the log and feeds whoever follows it now. */
   readonly said: (event: UiEvent) => void
@@ -115,10 +120,12 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
   const log: Array<UiEvent> = []
   const subscribers = new Set<Queue.Queue<UiEvent>>()
   const commands: Array<UiCommand> = []
+  const stopped: Array<string> = []
   let follows = 0
   let states = 0
   let effort = ''
   let model = 'stub/model'
+  let subagents: RunStateView['subagents'] = []
   const host: FakeHost = {
     summary: { id, cwd, createdAt: 1, updatedAt: 1, title: '' },
     runState: () => {
@@ -127,6 +134,7 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
         goal: null,
         schedules: [],
         jobs: [],
+        subagents,
         todos: [],
         todoCounts: { pending: 0, inProgress: 0, completed: 0 },
         skills: [],
@@ -139,6 +147,14 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
     },
     jobOutput: () => Effect.fail(new WebError({ message: 'no such job' })),
     stopJob: () => Effect.void,
+    stopSubagent: (childId) =>
+      Effect.sync(() => {
+        stopped.push(childId)
+      }),
+    setSubagents: (next) => {
+      subagents = next
+    },
+    stopped,
     commands,
     accepting: true,
     refusing: false,
@@ -216,6 +232,7 @@ const openOf = (host: FakeHost): OpenSession => ({
   runState: host.runState,
   jobOutput: host.jobOutput,
   stopJob: host.stopJob,
+  stopSubagent: host.stopSubagent,
 })
 
 interface FakeSettings {
@@ -433,6 +450,45 @@ describe('the page store', () => {
           )
           yield* until(() => host.states() > before, 'read the run state after the goal changed')
           expect(store.state().run).toBeDefined()
+        }),
+      ),
+    )
+  }, 15_000)
+
+  test('a running turn reads the run state again, so a subagent that starts mid-turn appears', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          host.said(event(1, 'turn/start', { turn: 1 }))
+          yield* until(() => store.state().conversation.running, 'saw the turn start')
+          const before = host.states()
+          const child = { id: 'child-1', status: 'running', startedAt: Date.now() }
+          host.setSubagents([child])
+
+          yield* until(() => host.states() > before, 'read the run state during the turn')
+          yield* until(
+            () => store.state().run?.subagents.length === 1,
+            'showed the subagent that started mid-turn',
+          )
+          expect(store.state().run?.subagents).toEqual([child])
+        }),
+      ),
+    )
+  }, 15_000)
+
+  test('stopping a subagent asks the server and reads the run state again', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          const before = host.states()
+          store.stopSubagent('child-1')
+
+          yield* until(() => host.stopped.includes('child-1'), 'asked to stop the subagent')
+          yield* until(() => host.states() > before, 'read the run state after the stop')
         }),
       ),
     )

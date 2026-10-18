@@ -142,6 +142,7 @@ describe('the browser state', () => {
       goal: null,
       schedules: [],
       jobs: [],
+      subagents: [],
       todos: [],
       todoCounts: { pending: 0, inProgress: 0, completed: 0 },
       skills: [],

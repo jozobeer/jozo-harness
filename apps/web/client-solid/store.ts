@@ -96,6 +96,9 @@ const keepsRunning = <A>(
  */
 const KEEP_ALIVE = { pingInterval: '20 seconds', pingTimeout: '1 minute' } as const
 
+/** How often a running turn reads the run state again: jobs and children come and go inside one. */
+const RUN_BEAT = '1 second'
+
 /** What one session's log told the page to read again. */
 const needsRefresh = (type: string): boolean =>
   type === 'turn/end' || type === 'goal/updated' || type.startsWith('agent/inbox/')
@@ -142,6 +145,7 @@ type PanelAsk =
   | { readonly kind: 'setModel'; readonly model: string }
   | { readonly kind: 'job'; readonly id: string }
   | { readonly kind: 'stopJob'; readonly id: string }
+  | { readonly kind: 'stopSubagent'; readonly id: string }
   | { readonly kind: 'sessionAction'; readonly sessionId: string; readonly action: SessionAction }
 
 /** Everything the components may ask of the session. */
@@ -167,6 +171,8 @@ export interface SessionStore {
   readonly showPane: (pane: Pane | undefined) => void
   readonly openJob: (id: string) => void
   readonly stopJob: (id: string) => void
+  /** Stops one child agent the session on screen started. */
+  readonly stopSubagent: (id: string) => void
   readonly askModels: () => void
   /** Reads what the session on screen can be told, the first time the composer offers it. */
   readonly askCommands: () => void
@@ -404,6 +410,30 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     )
 
     /**
+     * A turn is not the only thing that changes the Run pane: a job or a child
+     * agent starts and finishes inside one, and waiting for the turn boundary
+     * would keep it off the page until the whole turn ended. While a turn runs,
+     * the run state is read on a slow beat; outside one, a boundary event is
+     * enough.
+     */
+    yield* Effect.forkScoped(
+      Effect.gen(function* () {
+        yield* Effect.sleep(RUN_BEAT)
+        const current = state()
+        if (current.sessionId === '' || !current.conversation.running) return
+        yield* client.state({ sessionId: current.sessionId }).pipe(
+          Effect.tap((run) =>
+            Effect.sync(() =>
+              update((now) => (now.sessionId === current.sessionId ? withRun(now, run) : now)),
+            ),
+          ),
+          // A failed beat is the next one's problem; the page still has its last view.
+          Effect.catchCause(() => Effect.void),
+        )
+      }).pipe(Effect.forever),
+    )
+
+    /**
      * Everything one session logs, until the page moves on. A dropped
      * subscription follows again: the server opens with the session's history,
      * and the fold keeps only the events past the last one it applied, so the
@@ -622,6 +652,11 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
             yield* showJob(asked.id)
             return
           }
+          if (asked.kind === 'stopSubagent') {
+            yield* client.stopSubagent({ sessionId: state().sessionId, id: asked.id })
+            yield* relist()
+            return
+          }
           // Only the sheet asks for the settings file to keep the pick; the seat's
           // pick is the choice of this run alone.
           yield* client.setModel({
@@ -788,6 +823,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       Queue.offerUnsafe(panelAsks, { kind: 'job', id })
     },
     stopJob: (id) => Queue.offerUnsafe(panelAsks, { kind: 'stopJob', id }),
+    stopSubagent: (id) => Queue.offerUnsafe(panelAsks, { kind: 'stopSubagent', id }),
     askModels: () => Queue.offerUnsafe(panelAsks, { kind: 'models' }),
     askCommands: () =>
       Queue.offerUnsafe(panelAsks, { kind: 'commands', sessionId: state().sessionId }),

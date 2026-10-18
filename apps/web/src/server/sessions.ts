@@ -15,6 +15,8 @@ export interface OpenSession {
   readonly jobOutput: (id: string) => Effect.Effect<JobDetailView, WebError>
   /** Stops one background command. */
   readonly stopJob: (id: string) => Effect.Effect<void, WebError>
+  /** Stops one child agent this session started. */
+  readonly stopSubagent: (id: string) => Effect.Effect<void, WebError>
 }
 
 /** What the app that owns the profiles gives the server: the store's list, and one more session. */

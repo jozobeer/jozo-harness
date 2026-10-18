@@ -59,6 +59,7 @@ import {
 } from '@jozo-harness/tools-tier1'
 import { runConfig } from './config-command.ts'
 import { runContextOf } from './run-state.ts'
+import { stopSubagentOf, subagentsOf } from './subagents.ts'
 import { sessionRootOf } from './session-list.ts'
 import { credentialSource, type SettingsSurface } from './settings.ts'
 import { configPaths } from './config.ts'
@@ -861,9 +862,16 @@ const sessionFactoryOf = (
         summary: summaryOf(agent),
         host: ui,
         commands: () => commandViewsOf(built.runtime.commands, built.runtime.skillCatalog),
-        runState: () => runStateOf(agent, built.runtime.jobs, built.runtime.efforts),
+        runState: () =>
+          runStateOf(
+            agent,
+            built.runtime.jobs,
+            built.runtime.efforts,
+            built.runtime.agents.childrenOf(agent.id),
+          ),
         jobOutput: (jobId: string) => jobDetailOf(built.runtime.jobs, jobId),
         stopJob: (jobId: string) => stopJobOf(built.runtime.jobs, jobId),
+        stopSubagent: (childId: string) => stopSubagentOf(built.runtime.agents, agent.id, childId),
       }
     }).pipe(
       Effect.mapError((error) =>
@@ -1014,15 +1022,16 @@ const serveWebUi = (
 
 /** One built session as the page sees it; undefined when it was built without a UI. */
 const openSessionOf = (runtime: SessionRuntime): OpenSession | undefined => {
-  const { agent, ui, jobs, efforts } = runtime
+  const { agent, ui, jobs, efforts, agents } = runtime
   if (ui === undefined) return undefined
   return {
     summary: summaryOf(agent),
     host: ui,
     commands: () => commandViewsOf(runtime.commands, runtime.skillCatalog),
-    runState: () => runStateOf(agent, jobs, efforts),
+    runState: () => runStateOf(agent, jobs, efforts, agents.childrenOf(agent.id)),
     jobOutput: (jobId: string) => jobDetailOf(jobs, jobId),
     stopJob: (jobId: string) => stopJobOf(jobs, jobId),
+    stopSubagent: (childId: string) => stopSubagentOf(agents, agent.id, childId),
   }
 }
 
@@ -1061,6 +1070,8 @@ interface SessionRuntime {
   readonly listSessions: () => Effect.Effect<ReadonlyArray<SessionSummary>, SessionError>
   /** The background commands of this session; a UI lists them. */
   readonly jobs: JobsShape
+  /** The agent registry this session was built in; its children run here too. */
+  readonly agents: AgentsShape
   readonly rows: ReadonlyArray<PluginRow>
   readonly route: string
   readonly effort: string
@@ -1126,6 +1137,8 @@ const runStateOf = (
   jobs: JobsShape,
   /** The effort words the provider takes, which a page offers as the choices. */
   efforts: ReadonlyArray<string>,
+  /** The child agents this session started, as the registry holds them now. */
+  children: ReadonlyArray<Agent>,
 ): RunStateView => {
   const events = agent.session.events()
   const goal = currentGoal(events)
@@ -1148,6 +1161,7 @@ const runStateOf = (
       command: job.command,
       running: job.running,
     })),
+    subagents: subagentsOf(children),
     goal:
       goal === undefined
         ? null
@@ -1200,21 +1214,14 @@ const buildSession = (
       yield* installMcpServers(Context.get(context, Tools), Context.get(context, McpServers))
     }
 
-    const agent = yield* createAgent(
-      Context.get(context, Agents),
-      options,
-      route,
-      spillBytes,
-      effort,
-      resume,
-      cwd,
-    )
+    const agents = Context.get(context, Agents)
+    const agent = yield* createAgent(agents, options, route, spillBytes, effort, resume, cwd)
     // The workspace belongs to the session, not to the run that serves it: tools,
     // instructions, and skill roots all read the cwd the session header recorded.
     const sessionOptions: CommandOptions = { ...options, cwd: agent.session.header.cwd }
 
     // Workspace instructions join the prompt before the first turn.
-    const agents = yield* registerAgentsMd(
+    const instructions = yield* registerAgentsMd(
       Context.get(context, SystemPrompt),
       sessionOptions.cwd,
       agentsOptionsOf(options),
@@ -1245,7 +1252,7 @@ const buildSession = (
       hooks,
       agent,
       root: sessionOptions.cwd,
-      loaded: loadedAgentsOf(agents),
+      loaded: loadedAgentsOf(instructions),
     })
 
     // A catalog this agent has not read yet opens its turn, before the input it claimed.
@@ -1286,6 +1293,7 @@ const buildSession = (
         commands,
         listSessions: () => Context.get(context, Sessions).list(),
         jobs,
+        agents,
         rows,
         route,
         effort,

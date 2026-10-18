@@ -165,6 +165,15 @@ export const JobViewSchema = Schema.Struct({
   running: Schema.Boolean,
 })
 
+/** One child agent the session started, as the core holds it now. */
+export const SubagentViewSchema = Schema.Struct({
+  id: Schema.String,
+  /** idle | running | cancelling | disposed, as the child reports now. */
+  status: Schema.String,
+  /** When the child session began, in ms; the page reads the elapsed time from it. */
+  startedAt: Schema.Number,
+})
+
 /** One step of the plan the session recorded with todo_write. */
 export const TodoViewSchema = Schema.Struct({
   content: Schema.String,
@@ -176,6 +185,8 @@ export const RunStateViewSchema = Schema.Struct({
   goal: Schema.Union([GoalViewSchema, Schema.Null]),
   schedules: Schema.Array(ScheduleViewSchema),
   jobs: Schema.Array(JobViewSchema),
+  /** The children this session started, as the core holds them right now. */
+  subagents: Schema.Array(SubagentViewSchema),
   /** The newest plan, in the order todo_write recorded it. */
   todos: Schema.Array(TodoViewSchema),
   todoCounts: Schema.Struct({
@@ -230,6 +241,13 @@ export const JobDetailRpc = Rpc.make('jobDetail', {
 
 /** Stops one background command. */
 export const JobStopRpc = Rpc.make('stopJob', {
+  payload: Schema.Struct({ sessionId: Schema.String, id: Schema.String }),
+  success: Schema.Boolean,
+  error: Schema.String,
+})
+
+/** Stops one child agent this session started, without disposing of it. */
+export const SubagentStopRpc = Rpc.make('stopSubagent', {
   payload: Schema.Struct({ sessionId: Schema.String, id: Schema.String }),
   success: Schema.Boolean,
   error: Schema.String,
@@ -299,6 +317,7 @@ export const UiRpcs = RpcGroup.make(
   StateRpc,
   JobDetailRpc,
   JobStopRpc,
+  SubagentStopRpc,
   SettingsRpc,
   ModelsRpc,
   SetModelRpc,
