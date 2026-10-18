@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest'
+import { execFileSync } from 'node:child_process'
 import type { UiCommand, UiEvent, UiHost } from '@jozo-harness/ui-protocol'
 import { Deferred, Effect, Exit, Fiber, Option, Queue, Stream, type Scope } from 'effect'
 import { RpcClient, RpcSerialization } from 'effect/rpc'
@@ -510,6 +511,58 @@ describe('the web transport', () => {
     expect(observed.empty).toEqual([])
     expect(observed.refused).toBe('the session is not open')
     await rm(root, { recursive: true, force: true })
+  })
+
+  test('a page reads the branch its session workspace stands on', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-branch-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-web-branch-work-'))
+    const git = (...args: ReadonlyArray<string>): void => {
+      execFileSync('git', ['-C', workspace, ...args], { stdio: 'ignore' })
+    }
+    git('-c', 'user.name=test', '-c', 'user.email=test@example.com', 'init', '-q')
+    git(
+      '-c',
+      'user.name=test',
+      '-c',
+      'user.email=test@example.com',
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      'first',
+    )
+    git('checkout', '-q', '-b', 'status-bar')
+    const web = makeWeb('a', workspace)
+    const settings = makeSettings()
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const wsUrl = 'ws://' + started.origin.replace(/^http:\/\//, '') + '/ui'
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const branch = yield* client.branch({ sessionId: 'a' })
+            // The blank page has no workspace yet, and an unknown session is refused.
+            const blank = yield* client.branch({ sessionId: '' })
+            const refused = yield* client
+              .branch({ sessionId: 'gone' })
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
+            return { branch, blank, refused }
+          }).pipe(clientLayers(wsUrl))
+          const result = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    expect(observed.branch).toBe('status-bar')
+    expect(observed.blank).toBeNull()
+    expect(observed.refused).toBe('the session is not open')
+    await rm(root, { recursive: true, force: true })
+    await rm(workspace, { recursive: true, force: true })
   })
 
   test('the row menu renames a session, and refuses to delete one that is open', async () => {

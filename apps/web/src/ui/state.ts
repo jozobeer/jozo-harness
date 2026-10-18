@@ -17,6 +17,8 @@ export interface SessionInfo {
   readonly cwd: string
   readonly model: string
   readonly turns: number
+  /** The git branch the workspace stands on; undefined until the page read one. */
+  readonly branch?: string
 }
 
 const emptyInfo: SessionInfo = { cwd: '', model: '', turns: 0 }
@@ -155,6 +157,12 @@ export const withPane = (state: WebState, pane: Pane | undefined): WebState => (
 })
 
 export const withRun = (state: WebState, run: RunStateView): WebState => ({ ...state, run })
+
+/** The branch the workspace stands on, as the server read it when the session opened. */
+export const withBranch = (state: WebState, branch: string): WebState => ({
+  ...state,
+  info: { ...state.info, branch },
+})
 
 /**
  * Reads no session: the blank page New session moves to. The conversation and

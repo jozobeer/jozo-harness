@@ -3,6 +3,7 @@ import type { UiEvent } from '@jozo-harness/ui-protocol'
 import {
   applyUiEvent,
   initialState,
+  withBranch,
   withConnection,
   withDraft,
   withFiles,
@@ -111,6 +112,13 @@ describe('the browser state', () => {
   test('the theme a reader picks is what the page keeps', () => {
     expect(initialState.theme).toBe('system')
     expect(withTheme(initialState, 'dark').theme).toBe('dark')
+  })
+
+  test('the header keeps the branch its workspace stands on beside the path', () => {
+    const branched = withBranch(withSession(initialState, a), 'feature/status-bar')
+    expect(branched.info).toEqual({ cwd: '', model: '', turns: 0, branch: 'feature/status-bar' })
+    // The branch belongs to the session that named it: a move starts the header over.
+    expect(withSession(branched, b).info.branch).toBeUndefined()
   })
 
   test('a problem the page could not act on is shown until the next move', () => {

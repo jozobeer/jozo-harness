@@ -173,6 +173,18 @@ body {
   white-space: nowrap;
 }
 
+/* The branch sits beside the path, quiet enough that the path stays the subject. */
+#status .branch {
+  flex: none;
+  max-width: 18ch;
+  overflow: hidden;
+  color: var(--select);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 #status .model {
   overflow: hidden;
   color: var(--select);

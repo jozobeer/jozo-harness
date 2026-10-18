@@ -56,6 +56,16 @@ export const OpenRpc = Rpc.make('open', {
   error: Schema.String,
 })
 
+/**
+ * The git branch the session's workspace stands on: null when it names none
+ * (not a git workspace, detached HEAD, or no git to ask).
+ */
+export const BranchRpc = Rpc.make('branch', {
+  payload: Schema.Struct({ sessionId: Schema.String }),
+  success: Schema.NullOr(Schema.String),
+  error: Schema.String,
+})
+
 /** One folder a page may start a session in, and when it last held a session. */
 export const WorkspaceViewSchema = Schema.Struct({
   cwd: Schema.String,
@@ -259,6 +269,7 @@ export const SetModelRpc = Rpc.make('setModel', {
 export const UiRpcs = RpcGroup.make(
   SessionsRpc,
   OpenRpc,
+  BranchRpc,
   WorkspacesRpc,
   AddWorkspaceRpc,
   SessionActionRpc,

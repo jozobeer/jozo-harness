@@ -9,6 +9,8 @@ export const Status = (props: { store: SessionStore; drawer: boolean; onDrawer: 
   /** An approval or a question waits on the reader: the one thing the strip should shout. */
   const waiting = (): boolean =>
     state().conversation.approval !== undefined || state().conversation.ask !== undefined
+  /** The branch the workspace stands on; '' until the page read one or when it names none. */
+  const branch = (): string => state().info.branch ?? ''
   /** How the whole fleet stands, so a wait in another session is seen from any of them. */
   const fleet = createMemo(() => boardOf(state().sessions, props.store.watched()))
   const hintClass = (): string =>
@@ -31,6 +33,12 @@ export const Status = (props: { store: SessionStore; drawer: boolean; onDrawer: 
         {/* The strip clips the head of a long path; bdi keeps the path itself left to right. */}
         <span class="where" title={state().info.cwd}>
           <bdi>{state().info.cwd}</bdi>
+        </span>
+      </Show>
+      <Show when={branch() !== ''}>
+        {/* The branch is one word beside the path, so a long name is clipped, not wrapped. */}
+        <span class="branch" title={'git branch ' + branch()}>
+          <bdi>{branch()}</bdi>
         </span>
       </Show>
       <span class={hintClass()}>{hintOf(state())}</span>
