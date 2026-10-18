@@ -70,13 +70,16 @@ describe('spawn', () => {
     const ready = join(directory, 'grandchild-ready')
     const stopped = join(directory, 'grandchild-stopped')
     try {
-      const grandchild = `bash -c 'trap "touch ${stopped}" TERM; touch ${ready}; sleep 30'`
+      // A short loop, not one long sleep: bash runs a trap between commands, so the
+      // marker lands as soon as the signal arrives rather than after a child of the
+      // descendant would have finished.
+      const grandchild = `bash -c 'trap "touch ${stopped}; exit 0" TERM; touch ${ready}; while :; do sleep 0.02; done'`
       const child = spawn(['bash', '-lc', `${grandchild} & wait`])
       // The marker proves the descendant installed its signal handler before the kill.
       expect(await waitForFile(ready)).toBe(true)
       child.kill()
       expect(await child.exited).not.toBe(0)
-      expect(await waitForFile(stopped)).toBe(true)
+      expect(await waitForFile(stopped, 10_000)).toBe(true)
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
