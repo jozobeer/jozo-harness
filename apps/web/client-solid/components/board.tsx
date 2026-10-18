@@ -1,5 +1,16 @@
-import { For, Match, Show, Switch, createMemo, createSignal, onCleanup, type JSX } from 'solid-js'
+import {
+  For,
+  Match,
+  Show,
+  Switch,
+  createMemo,
+  createSignal,
+  onCleanup,
+  onMount,
+  type JSX,
+} from 'solid-js'
 import { plainText } from '@jozo-harness/ui-view'
+import type { SessionSummary } from '../../src/shared/rpc.ts'
 import { boardOf, type BoardEntry, type Waiting } from '../../src/ui/board.ts'
 import { basenameOf, whenOf } from '../lib.ts'
 import type { SessionStore } from '../store.ts'
@@ -23,6 +34,73 @@ const createNow = () => {
 
 const titleOf = (entry: BoardEntry): string =>
   entry.summary.title === '' ? entry.summary.id.slice(0, 8) : entry.summary.title
+
+/** The sessions whose title or folder says what was typed, ignoring case. */
+const matching = (
+  sessions: ReadonlyArray<SessionSummary>,
+  query: string,
+): ReadonlyArray<SessionSummary> => {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return sessions
+  return sessions.filter(
+    (session) =>
+      session.title.toLowerCase().includes(needle) || session.cwd.toLowerCase().includes(needle),
+  )
+}
+
+/** Mod+K opens the field from anywhere, even while another field has the keys. */
+const searchCombo = (event: KeyboardEvent): boolean =>
+  (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k'
+
+/** A bare / opens the field, as long as the page is not already taking the keys. */
+const searchSlash = (event: KeyboardEvent): boolean =>
+  event.key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey
+
+const inField = (target: EventTarget | null): boolean =>
+  target instanceof HTMLElement &&
+  target.closest('input, textarea, select, [contenteditable="true"]') !== null
+
+/** The field that narrows the rail: / or Mod+K opens it, Escape empties it. */
+const Search = (props: { query: string; onQuery: (query: string) => void }) => {
+  let field: HTMLInputElement | undefined
+  const open = (): void => {
+    field?.focus()
+    field?.select()
+  }
+  onMount(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (searchCombo(event)) {
+        event.preventDefault()
+        open()
+        return
+      }
+      if (!searchSlash(event) || inField(event.target)) return
+      event.preventDefault()
+      open()
+    }
+    document.addEventListener('keydown', onKey)
+    onCleanup(() => document.removeEventListener('keydown', onKey))
+  })
+  return (
+    <input
+      id="session-search"
+      class="session-search"
+      type="search"
+      placeholder="Search sessions…"
+      aria-label="Search sessions"
+      value={props.query}
+      ref={(node) => {
+        field = node
+      }}
+      onInput={(event) => props.onQuery(event.currentTarget.value)}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return
+        props.onQuery('')
+        event.currentTarget.blur()
+      }}
+    />
+  )
+}
 
 /** The row that opens a session; every session shows exactly one. */
 const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) => (
@@ -151,7 +229,13 @@ const restDetail = (entry: BoardEntry, now: number): string => whenOf(entry.sinc
  * live; the others read as closed until opened.
  */
 export const Board = (props: { store: SessionStore }) => {
-  const board = createMemo(() => boardOf(props.store.state().sessions, props.store.watched()))
+  const [query, setQuery] = createSignal('')
+  const board = createMemo(() =>
+    boardOf(matching(props.store.state().sessions, query()), props.store.watched()),
+  )
+  const noMatch = (): boolean =>
+    query().trim() !== '' &&
+    board().waiting.length + board().running.length + board().rest.length === 0
   const now = createNow()
   return (
     <>
@@ -164,6 +248,7 @@ export const Board = (props: { store: SessionStore }) => {
       >
         + New session
       </Button>
+      <Search query={query()} onQuery={setQuery} />
       <nav id="session-list" aria-label="Sessions">
         <Section title="Waiting on you" count={board().waiting.length}>
           <For each={board().waiting}>
@@ -187,6 +272,9 @@ export const Board = (props: { store: SessionStore }) => {
             {(entry) => <Row entry={entry} store={props.store} detail={restDetail(entry, now())} />}
           </For>
         </Section>
+        <Show when={noMatch()}>
+          <p class="board-empty">No sessions match “{query().trim()}”.</p>
+        </Show>
       </nav>
     </>
   )
