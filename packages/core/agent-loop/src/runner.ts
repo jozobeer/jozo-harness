@@ -410,6 +410,9 @@ const agentLoopEffect = (
             sessionId: agent.id,
             cwd: cwdOf(agent.session.events(), agent.session.header),
             callId: call.id,
+            // The tool refuses work the route cannot carry; the adapter would
+            // otherwise drop the block and leave the model an empty result.
+            images: llm.capabilities.images,
             // A tool that pages its own result stores the overflow through the
             // same writer the pipeline uses, so both live beside the session.
             ...(spill.spill === undefined ? {} : { spill: spill.spill }),

@@ -131,6 +131,43 @@ describe('openAiAdapter', () => {
     expect(error.code).toBe('TRANSPORT')
   })
 
+  test('refuses an image block when the route declares it carries none', async () => {
+    let fetched = 0
+    const streaming = openAiAdapter({
+      baseUrl: 'https://example.test/v1',
+      apiKey: () => 'key',
+      capabilities: {
+        toolChoice: false,
+        reasoningEffort: null,
+        images: 'none',
+        promptCacheControl: false,
+      },
+      fetch: (() => {
+        fetched += 1
+        return Promise.resolve(new Response(''))
+      }) as unknown as typeof fetch,
+    })
+    const withImage: LlmRequest = {
+      ...request,
+      messages: [
+        {
+          role: 'tool',
+          toolCallId: 'c1',
+          content: [{ type: 'image', mediaType: 'image/png', data: 'AA==' }],
+        },
+      ],
+    }
+
+    const error = await Effect.runPromise(
+      Effect.flip(Stream.runCollect(streaming.stream(withImage))),
+    )
+
+    expect(error).toBeInstanceOf(LlmFailure)
+    expect(error.code).toBe('INVALID_REQUEST')
+    expect(error.message).toContain('cannot carry images')
+    expect(fetched).toBe(0)
+  })
+
   test('a body that cannot be read fails as a transport error', async () => {
     const streaming = openAiAdapter({
       baseUrl: 'https://example.test/v1',

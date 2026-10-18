@@ -25,6 +25,10 @@ const DEFAULT_IDLE_TIMEOUT_MS = 300_000
 const textOf = (content: ReadonlyArray<ContentBlock>): string =>
   content.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('')
 
+/** Whether any message carries an image block the encoder cannot render. */
+const carriesImage = (messages: ReadonlyArray<RequestMessage>): boolean =>
+  messages.some((message) => message.content.some((block) => block.type === 'image'))
+
 const encodeMessage = (message: RequestMessage): Record<string, unknown> => {
   const toolCalls = message.content.flatMap((block) =>
     block.type === 'tool-call'
@@ -82,6 +86,17 @@ export function openAiAdapter(options: OpenAiAdapterOptions): LlmAdapter {
           if (apiKey === undefined || apiKey === '') {
             return yield* Effect.fail(
               new LlmFailure({ code: 'AUTH', message: 'no API key is configured' }),
+            )
+          }
+          // The adapter encodes text only, so an image that reaches it would
+          // vanish. Refuse loudly instead of sending an empty result.
+          if (options.capabilities.images === 'none' && carriesImage(request.messages)) {
+            return yield* Effect.fail(
+              new LlmFailure({
+                code: 'INVALID_REQUEST',
+                message:
+                  'the current route cannot carry images, but the request contains one; answer without it or switch to an image-capable route',
+              }),
             )
           }
           const body = JSON.stringify({
