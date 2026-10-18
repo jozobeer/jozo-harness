@@ -429,10 +429,43 @@ describe('the Solid page', () => {
 
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(calls).toContainEqual({ kind: 'submit' })
+  })
 
-    const stop = container.querySelector('#cancel')
-    fireEvent.click(stop as Element)
-    expect(calls).toContainEqual({ kind: 'command', command: { kind: 'cancel' } })
+  test('the composer names its icon actions, and Stop only cancels a run', () => {
+    const idle = makeStore()
+    const first = render(() => <Composer store={idle.store} />)
+    const send = first.container.querySelector('#send') as HTMLButtonElement
+    const idleStop = first.container.querySelector('#cancel') as HTMLButtonElement
+    expect(send.getAttribute('aria-label')).toBe('Send the message')
+    expect(send.querySelector('svg')).not.toBeNull()
+    expect(idleStop.getAttribute('aria-label')).toBe('Stop the run')
+    expect(idleStop.querySelector('svg')).not.toBeNull()
+    expect(idleStop.disabled).toBe(true)
+    first.unmount()
+
+    const running = makeStore({ conversation: { ...emptyConversation, running: true } })
+    const second = render(() => <Composer store={running.store} />)
+    const stop = second.container.querySelector('#cancel') as HTMLButtonElement
+    expect(stop.disabled).toBe(false)
+    fireEvent.click(stop)
+    expect(running.calls).toContainEqual({ kind: 'command', command: { kind: 'cancel' } })
+  })
+
+  test('the send action gives up primary while a card waits on the reader', () => {
+    const plain = makeStore()
+    const idle = render(() => <Composer store={plain.store} />)
+    expect(idle.container.querySelector('#send')?.className).toContain('bg-accent')
+    idle.unmount()
+
+    const waiting = makeStore({
+      conversation: {
+        ...emptyConversation,
+        running: true,
+        approval: { callId: 'c1', tool: 'bash', reason: 'runs a command' },
+      },
+    })
+    const takeover = render(() => <Composer store={waiting.store} />)
+    expect(takeover.container.querySelector('#send')?.className).not.toContain('bg-accent')
   })
 
   test('the goal bar above the composer sends the goal commands the store carries', () => {
