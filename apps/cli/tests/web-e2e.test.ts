@@ -10,6 +10,7 @@ import { toolsPlugin } from '@jozo-harness/tools'
 import { Deferred, Effect, Layer, Schema, Stream } from 'effect'
 import { RpcClient, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -409,6 +410,132 @@ describe('the browser UI through the command', () => {
     await rm(root, { recursive: true, force: true })
     await rm(serverWorkspace, { recursive: true, force: true })
     await rm(otherWorkspace, { recursive: true, force: true })
+    await rm(home, { recursive: true, force: true })
+  }, 30_000)
+
+  test('a skill added while a turn runs reaches the composer list after the next turn', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-skill-'))
+    const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-web-skill-ws-'))
+    const home = await mkdtemp(join(tmpdir(), 'jozo-harness-web-skill-home-'))
+    const ready = Effect.runSync(Deferred.make<string>())
+    const stop = Effect.runSync(Deferred.make<void>())
+    let calls = 0
+    const addingLlm: Plugin<{}, Llm, never> = {
+      name: 'stub-llm',
+      config: Schema.Struct({}),
+      provides: [Llm],
+      requires: [],
+      layer: () =>
+        Layer.succeed(Llm, {
+          name: 'stub',
+          capabilities: {
+            toolChoice: false,
+            reasoningEffort: null,
+            images: 'none',
+            promptCacheControl: false,
+          },
+          stream: () => {
+            calls += 1
+            // The first answer drops a skill in while the turn is running.
+            if (calls === 1) {
+              const skill = join(workspace, '.jzh', 'skills', 'fresh')
+              mkdirSync(skill, { recursive: true })
+              writeFileSync(
+                join(skill, 'SKILL.md'),
+                '---\nname: fresh\ndescription: Added while the first turn ran\n---\n\nbody\n',
+              )
+            }
+            return Stream.fromIterable(textTurn('done'))
+          },
+        } satisfies LlmAdapter),
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* Effect.forkScoped(
+            runCommand({
+              profiles: [profile(root)],
+              plugins: [
+                kernelPlugin,
+                sessionJsonlPlugin,
+                sessionPlugin,
+                toolsPlugin,
+                systemPromptPlugin,
+                addingLlm,
+                agentPlugin,
+                agentLoopPlugin,
+              ],
+              cwd: workspace,
+              jzhHome: home,
+              route: 'stub/model',
+              web: { port: 0, staticRoot },
+              stdout: () => undefined,
+              stderr: (text) => {
+                const match = /http:\/\/127\.0\.0\.1:\d+\//.exec(text)
+                if (match !== null) void Effect.runSync(Deferred.succeed(ready, match[0]))
+              },
+              interrupt: Deferred.await(stop),
+            }),
+          )
+          const url = (yield* Deferred.await(ready)).replace(/\/$/, '')
+          const wsUrl = 'ws://' + url.replace(/^http:\/\//, '') + '/ui'
+
+          const used = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const opened = yield* client.open({})
+            const before = yield* client.commands({ sessionId: opened.id })
+            const ended = [yield* Deferred.make<void>(), yield* Deferred.make<void>()]
+            yield* Effect.forkScoped(
+              client.events({ sessionId: opened.id }).pipe(
+                Stream.runForEach((event) =>
+                  Effect.gen(function* () {
+                    if (event.kind !== 'session' || event.event.type !== 'turn/end') return
+                    const data = event.event.data
+                    if (typeof data !== 'object' || data === null) return
+                    const turn = (data as { readonly turn?: unknown }).turn
+                    if (typeof turn !== 'number') return
+                    const waiting = ended[turn - 1]
+                    if (waiting !== undefined) yield* Deferred.succeed(waiting, undefined)
+                  }),
+                ),
+              ),
+            )
+            yield* client.command({
+              sessionId: opened.id,
+              command: { kind: 'submit', text: 'first' },
+            })
+            yield* Deferred.await(ended[0]!)
+            yield* client.command({
+              sessionId: opened.id,
+              command: { kind: 'submit', text: 'second' },
+            })
+            yield* Deferred.await(ended[1]!)
+            const after = yield* client.commands({ sessionId: opened.id })
+            return { before, after }
+          })
+
+          const result = yield* withoutServices(used).pipe(
+            Effect.provide(RpcClient.layerProtocolSocket()),
+            Effect.provide(Socket.layerWebSocket(wsUrl)),
+            Effect.provide(Socket.layerWebSocketConstructorGlobal),
+            Effect.provide(RpcSerialization.layerJson),
+          )
+          yield* Deferred.succeed(stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    expect(observed.before.map((view) => view.name)).not.toContain('fresh')
+    expect(observed.after).toContainEqual({
+      name: 'fresh',
+      summary: 'Added while the first turn ran',
+      kind: 'skill',
+    })
+
+    await rm(root, { recursive: true, force: true })
+    await rm(workspace, { recursive: true, force: true })
     await rm(home, { recursive: true, force: true })
   }, 30_000)
 })

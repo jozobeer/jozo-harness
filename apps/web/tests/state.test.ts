@@ -4,6 +4,7 @@ import {
   applyUiEvent,
   initialState,
   withBranch,
+  withCommands,
   withConnection,
   withDraft,
   withFiles,
@@ -128,6 +129,30 @@ describe('the browser state', () => {
     // Reopening the session already on screen is no move: the line stands, so a
     // page that reopens a session it was refused keeps saying why.
     expect(withSession(failed, a).problem).toBe('the session is gone')
+  })
+
+  test('a finished turn leaves the command list to be read again', () => {
+    const listed = withCommands(withSession(initialState, a), [
+      { name: 'help', summary: 'list the commands this session answers', kind: 'command' },
+    ])
+    const ended = applyUiEvent(
+      listed,
+      session('turn/end', { turn: 1, reason: { kind: 'completed' } }),
+    )
+    expect(ended.commands).toBeUndefined()
+  })
+
+  test('a catalog the run just added clears the list, while an ordinary line keeps it', () => {
+    const listed = withCommands(withSession(initialState, a), [
+      { name: 'help', summary: 'list the commands this session answers', kind: 'command' },
+    ])
+    const said = applyUiEvent(listed, session('user/message', { text: 'hello', source: 'user' }))
+    expect(said.commands).toEqual(listed.commands)
+    const catalog = applyUiEvent(
+      listed,
+      session('user/message', { text: 'catalog', source: 'skill-catalog' }),
+    )
+    expect(catalog.commands).toBeUndefined()
   })
 
   test('every move the page makes lands in the field it names', () => {

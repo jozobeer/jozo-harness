@@ -587,10 +587,17 @@ const skillsOf = (options: CommandOptions): ReadonlyArray<string> =>
 const skillCatalogOf = (
   agent: Agent,
   roots: ReadonlyArray<string>,
-): Effect.Effect<string | undefined> =>
+): Effect.Effect<{
+  readonly skills: ReadonlyArray<SkillSummary>
+  readonly text: string | undefined
+}> =>
   Effect.gen(function* () {
-    const text = renderSkillCatalog(yield* discoverSkills(roots))
-    return text === '' || text === lastSkillCatalog(agent.session.events()) ? undefined : text
+    const skills = yield* discoverSkills(roots)
+    const text = renderSkillCatalog(skills)
+    return {
+      skills,
+      text: text === '' || text === lastSkillCatalog(agent.session.events()) ? undefined : text,
+    }
   })
 
 /** Tools whose first argument names the file they touched. */
@@ -869,7 +876,7 @@ const sessionFactoryOf = (
       return {
         summary: summaryOf(agent),
         host: ui,
-        commands: () => commandViewsOf(built.runtime.commands, built.runtime.skillCatalog),
+        commands: () => commandViewsOf(built.runtime.commands, built.runtime.skillCatalog()),
         runState: () =>
           runStateOf(
             agent,
@@ -1035,7 +1042,7 @@ const openSessionOf = (runtime: SessionRuntime): OpenSession | undefined => {
   return {
     summary: summaryOf(agent),
     host: ui,
-    commands: () => commandViewsOf(runtime.commands, runtime.skillCatalog),
+    commands: () => commandViewsOf(runtime.commands, runtime.skillCatalog()),
     runState: () => runStateOf(agent, jobs, efforts, agents.childrenOf(agent.id)),
     jobOutput: (jobId: string) => jobDetailOf(jobs, jobId),
     stopJob: (jobId: string) => stopJobOf(jobs, jobId),
@@ -1086,7 +1093,7 @@ interface SessionRuntime {
   /** The effort words the provider takes, as a page offers them; empty declares none. */
   readonly efforts: ReadonlyArray<string>
   /** The skills the catalog lists now, as the composer offers them beside commands. */
-  readonly skillCatalog: ReadonlyArray<SkillSummary>
+  readonly skillCatalog: () => ReadonlyArray<SkillSummary>
   readonly spillBytes: number | undefined
   readonly layer: Layer.Layer<any, PluginError, never>
 }
@@ -1223,7 +1230,9 @@ const buildSession = (
     // The catalog is read once for the page's completion list and again by the tool
     // and the host, who read the roots themselves so a changed file is never stale.
     const skills = skillsOf(sessionOptions)
-    const skillCatalog = yield* discoverSkills(skills)
+    // What the composer lists follows the discovery the model reads: every step
+    // refreshes it, so a skill added while the session runs reaches both.
+    let skillCatalog = yield* discoverSkills(skills)
     // The background commands of this session: the tier 1 tools start them, a UI lists them.
     const jobs = yield* makeJobs()
     const ui = wantsUi
@@ -1248,11 +1257,15 @@ const buildSession = (
       Effect.gen(function* () {
         const decision = yield* next()
         if (decision?.kind === 'reject') return decision
-        const text = yield* skillCatalogOf(input.agent, skills)
-        if (text === undefined) return decision
+        const catalog = yield* skillCatalogOf(input.agent, skills)
+        skillCatalog = catalog.skills
+        if (catalog.text === undefined) return decision
         return {
           kind: 'enter' as const,
-          messages: [...(decision?.messages ?? []), { text, source: 'skill-catalog' as const }],
+          messages: [
+            ...(decision?.messages ?? []),
+            { text: catalog.text, source: 'skill-catalog' as const },
+          ],
         }
       }),
     )
@@ -1286,7 +1299,7 @@ const buildSession = (
         route,
         effort,
         efforts,
-        skillCatalog,
+        skillCatalog: () => skillCatalog,
         spillBytes,
         layer,
       },
