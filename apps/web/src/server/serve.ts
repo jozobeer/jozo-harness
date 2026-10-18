@@ -1,9 +1,12 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { randomBytes } from 'node:crypto'
+import type { Duplex } from 'node:stream'
 import { WebSocketServer, type RawData, type WebSocket } from 'ws'
 import { Effect, Layer, Stream } from 'effect'
 import { RpcSerialization, RpcServer } from 'effect/rpc'
 import { sendCommand } from '@jozo-harness/ui-protocol'
 import { UiRpcs, type CommandView } from '../shared/rpc.ts'
+import { hostAllowed, originAllowed, tokenFromUrl, tokenMatches } from './auth.ts'
 import { makeWebProtocol, type Connection } from './protocol.ts'
 import { applyMeta, readMeta, sessionActionOf, withMeta } from './session-meta.ts'
 import {
@@ -181,7 +184,14 @@ const respondTo = async (
   request: IncomingMessage,
   response: ServerResponse,
   staticRoot: string,
+  port: number,
 ): Promise<void> => {
+  // A page served under another name could read this one through a rebinding
+  // proxy; the name the request asked for must be one this server answers to.
+  if (!hostAllowed(request.headers.host, port)) {
+    endWith(response, 403, 'forbidden')
+    return
+  }
   const path = pathOf(request)
   if (path === UI_PATH) {
     endWith(response, 426, 'websocket required')
@@ -196,9 +206,24 @@ const respondTo = async (
   response.end(Buffer.from(await answer.arrayBuffer()))
 }
 
+/** Refuses a websocket handshake with a status the client can read. */
+const refuseUpgrade = (socket: Duplex, status: number, message: string): void => {
+  const body = message + '\n'
+  socket.end(
+    'HTTP/1.1 ' +
+      String(status) +
+      (status === 401 ? ' Unauthorized' : ' Forbidden') +
+      '\r\nconnection: close\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: ' +
+      String(Buffer.byteLength(body)) +
+      '\r\n\r\n' +
+      body,
+  )
+}
+
 /**
  * Serves the sessions of one profile: the browser app, the RPC socket, and
- * nothing else. Binds to loopback only; there is no authentication.
+ * nothing else. Binds to loopback, and the socket asks for the token the ready
+ * URL carries; a foreign Host or Origin is refused before the handshake.
  */
 export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
   Effect.scoped(
@@ -209,9 +234,13 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
       })
       const { protocol, attach } = yield* makeWebProtocol
       const connections = new Map<WebSocket, Connection>()
+      // One token per run: it rides in the ready URL and the socket repeats it.
+      const token = randomBytes(32).toString('hex')
+      // The chosen port is known only once the listener is up; requests arrive after.
+      let boundPort = options.port
 
       const server = createServer((request, response) => {
-        void respondTo(request, response, options.staticRoot).catch(() => {
+        void respondTo(request, response, options.staticRoot, boundPort).catch(() => {
           response.destroy()
         })
       })
@@ -219,6 +248,18 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
       server.on('upgrade', (request, socket, head) => {
         if (pathOf(request) !== UI_PATH) {
           socket.destroy()
+          return
+        }
+        if (!hostAllowed(request.headers.host, boundPort)) {
+          refuseUpgrade(socket, 403, 'forbidden host')
+          return
+        }
+        if (!originAllowed(request.headers.origin, boundPort)) {
+          refuseUpgrade(socket, 403, 'forbidden origin')
+          return
+        }
+        if (!tokenMatches(tokenFromUrl(request.url ?? ''), token)) {
+          refuseUpgrade(socket, 401, 'a token is required')
           return
         }
         sockets.handleUpgrade(request, socket, head, (client) => {
@@ -251,6 +292,7 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
             })
           }),
       )
+      boundPort = port
       // Our schemas need no decoding services, but Effect types a stream RPC's
       // service requirement as `unknown`; the layer is pinned to what it is.
       const rpc: Layer.Layer<never> = RpcServer.layer(UiRpcs).pipe(
@@ -258,7 +300,7 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
         Layer.provide(Layer.succeed(RpcServer.Protocol, protocol)),
       ) as unknown as Layer.Layer<never>
       yield* Effect.forkScoped(Layer.launch(rpc))
-      options.onReady('http://127.0.0.1:' + String(port) + '/')
+      options.onReady('http://127.0.0.1:' + String(port) + '/?token=' + token)
       return options.interrupt === undefined
         ? yield* Effect.never
         : yield* options.interrupt.pipe(Effect.as(130))

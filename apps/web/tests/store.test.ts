@@ -346,9 +346,11 @@ const serve = (
         interrupt: Deferred.await(stop),
       }),
     )
-    const origin = (yield* Deferred.await(ready)).replace(/\/$/, '')
+    const page = new URL(yield* Deferred.await(ready))
+    const token = page.searchParams.get('token')
+    if (token === null) throw new Error('the server reported no token')
     return {
-      wsUrl: 'ws://' + origin.replace(/^http:\/\//, '') + '/ui',
+      wsUrl: 'ws://' + page.host + '/ui?token=' + token,
       stop,
       root,
       opens: () => opens,

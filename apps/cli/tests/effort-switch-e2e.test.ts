@@ -150,14 +150,16 @@ const served = <A, E>(
           web: { port: 0, staticRoot: place.staticRoot },
           stdout: () => undefined,
           stderr: (text) => {
-            const match = /http:\/\/127\.0\.0\.1:\d+\//.exec(text)
+            const match = /http:\/\/127\.0\.0\.1:\d+\/\S*/.exec(text)
             if (match !== null) void Effect.runSync(Deferred.succeed(ready, match[0]))
           },
           interrupt: Deferred.await(stop),
         }),
       )
-      const url = (yield* Deferred.await(ready)).replace(/\/$/, '')
-      const result = yield* body('ws://' + url.replace(/^http:\/\//, '') + '/ui')
+      const page = new URL(yield* Deferred.await(ready))
+      const result = yield* body(
+        'ws://' + page.host + '/ui?token=' + (page.searchParams.get('token') ?? ''),
+      )
       yield* Deferred.succeed(stop, undefined)
       return result
     }),

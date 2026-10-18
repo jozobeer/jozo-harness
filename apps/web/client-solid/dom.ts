@@ -26,9 +26,18 @@ declare const localStorage: {
 /** The frame clock, which a page has only where it is painted. */
 declare const requestAnimationFrame: ((run: (time: number) => void) => number) | undefined
 
-/** Where the socket lives, given the protocol the page was served with. */
-export const socketAt = (protocol: string, host: string): string =>
-  (protocol === 'https:' ? 'wss://' : 'ws://') + host + '/ui'
+/** Where the socket lives, given the protocol and host the page was served with. */
+export const socketAt = (protocol: string, host: string, token?: string): string =>
+  (protocol === 'https:' ? 'wss://' : 'ws://') +
+  host +
+  '/ui' +
+  (token === undefined ? '' : '?token=' + encodeURIComponent(token))
+
+/** The token the page was opened with; the ready URL carries it in the query. */
+export const tokenOfSearch = (search: string): string | undefined => {
+  const token = new URLSearchParams(search).get('token')
+  return token === null || token === '' ? undefined : token
+}
 
 /**
  * Runs `run` before the page is painted next, or on the next turn of the event
@@ -44,8 +53,9 @@ export const onNextFrame = (run: () => void): void => {
   setTimeout(run, 0)
 }
 
-/** The socket this page talks to: the host that served it. */
-export const pageSocket = (): string => socketAt(window.location.protocol, window.location.host)
+/** The socket this page talks to: the host that served it, and its token. */
+export const pageSocket = (): string =>
+  socketAt(window.location.protocol, window.location.host, tokenOfSearch(window.location.search))
 
 /** The search string the page was opened with, which may name a session. */
 export const pageSearch = (): string => window.location.search

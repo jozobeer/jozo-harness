@@ -837,7 +837,7 @@ const driveBrowser = async (url: string, profileDir: string): Promise<BrowserOut
       '--disable-gpu',
       '--remote-debugging-port=0',
       '--user-data-dir=' + profileDir,
-      url + '/',
+      url,
     ],
     { stdout: 'ignore', stderr: 'ignore' },
   )
@@ -909,13 +909,13 @@ const main = async (): Promise<number> => {
             web: { port: 0 },
             stdout: () => undefined,
             stderr: (text) => {
-              const match = /http:\/\/127\.0\.0\.1:\d+\//.exec(text)
+              const match = /http:\/\/127\.0\.0\.1:\d+\/\S*/.exec(text)
               if (match !== null) void Effect.runSync(Deferred.succeed(ready, match[0]))
             },
             interrupt: Deferred.await(stop),
           }),
         )
-        const url = (yield* Deferred.await(ready)).replace(/\/$/, '')
+        const url = yield* Deferred.await(ready)
         console.log('server', url)
         const result = yield* Effect.promise(() => driveBrowser(url, profileDir))
         yield* Deferred.succeed(stop, undefined)
