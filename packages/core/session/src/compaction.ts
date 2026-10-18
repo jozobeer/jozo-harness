@@ -8,6 +8,7 @@ import type {
   SessionSeq,
 } from './events.ts'
 import { registerMessageProjection, type MessageProjection } from './projections.ts'
+import { latestSystemSeq } from './system-message.ts'
 import { messageTokens } from './token-meter.ts'
 
 export interface CompactOptions {
@@ -180,10 +181,9 @@ export function pruneFor(
   const derived = deriveMessagesWithSeqs(events)
   const boundary = retainedFrom(derived, options.retainTokens)
   const alreadyPruned = prunedSeqs(events)
-  // The system prompt is the request's frame, not history: a prune never hides it.
-  const frame = new Set(
-    events.filter((event) => event.type === 'system/message').map((event) => event.seq),
-  )
+  // The newest system prompt is the request's frame, not history: a prune never hides
+  // it. An older one was the frame once, so it folds like any other message.
+  const frame = latestSystemSeq(events)
   // A checkpoint is already the condensed form; stubbing it would hide the summary.
   const checkpoints = new Set(
     events.filter((event) => event.type === 'compaction/checkpoint').map((event) => event.seq),
@@ -195,7 +195,7 @@ export function pruneFor(
     if (
       index >= boundary ||
       alreadyPruned.has(entry.seq) ||
-      frame.has(entry.seq) ||
+      entry.seq === frame ||
       checkpoints.has(entry.seq)
     ) {
       return
@@ -221,8 +221,9 @@ export function pruneFor(
 
 /**
  * The messages a summary would stand for: everything outside the retention, in
- * order, without the system prompt (the request's frame, not history). Already
- * checkpointed or pruned messages are gone from the fold and never come back here.
+ * order, without the newest system prompt (the request's frame, not history). An
+ * older prompt is history and enters the summary. Already checkpointed or pruned
+ * messages are gone from the fold and never come back here.
  */
 export function summarizableMessages(
   events: ReadonlyArray<SessionEvent>,
@@ -230,10 +231,8 @@ export function summarizableMessages(
 ): ReadonlyArray<DerivedMessage> {
   const derived = deriveMessagesWithSeqs(events)
   const boundary = retainedFrom(derived, options.retainTokens)
-  const frame = new Set(
-    events.filter((event) => event.type === 'system/message').map((event) => event.seq),
-  )
-  return derived.slice(0, boundary).filter((entry) => !frame.has(entry.seq))
+  const frame = latestSystemSeq(events)
+  return derived.slice(0, boundary).filter((entry) => entry.seq !== frame)
 }
 
 /** The range as the request would carry it: a recorded prune's replacements applied. */

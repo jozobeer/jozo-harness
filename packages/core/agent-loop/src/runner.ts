@@ -26,6 +26,7 @@ import {
   IMAGE_REFERENCE_TOKENS,
   lastRequestHeader,
   lastRuntimeContext,
+  lastSystemPrompt,
   messageBudgetOf,
   messagesWithPrune,
   meterOf,
@@ -217,9 +218,11 @@ const agentLoopEffect = (
       })
 
     /**
-     * Appends the settled system prompt and the input that started the step; the
-     * runtime snapshot follows the prompt and precedes the input, and is recorded
-     * on every step so a mid-turn change reaches the next request.
+     * Appends the settled system prompt when it changed and the input that started
+     * the step; the runtime snapshot follows the prompt and precedes the input, and
+     * is recorded on every step so a mid-turn change reaches the next request. The
+     * log's newest frame is the comparison, so a resumed session holding duplicates
+     * stops growing rather than adding another copy.
      */
     const recordInput = (
       agent: Agent,
@@ -229,7 +232,9 @@ const agentLoopEffect = (
       opening: boolean,
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
-        if (opening) yield* append(agent, 'system/message', { text: build.system })
+        if (opening && build.system !== lastSystemPrompt(agent.session.events())) {
+          yield* append(agent, 'system/message', { text: build.system })
+        }
         yield* recordRuntimeContext(agent, cwd)
         for (const message of input) {
           yield* append(agent, 'user/message', { text: message.text, source: message.source })

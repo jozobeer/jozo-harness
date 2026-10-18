@@ -28,7 +28,7 @@ import {
   type ToolRegistry,
 } from '@jozo-harness/tools'
 import { Effect, Layer, Schema, Scope, Stream } from 'effect'
-import { AgentLoop, agentLoopLayer } from '../src/index.ts'
+import { AgentLoop, agentLoopLayer, type AgentRequest } from '../src/index.ts'
 
 type Script = () => Stream.Stream<StreamChunk, LlmFailure>
 
@@ -461,6 +461,89 @@ describe('agent loop', () => {
     const kinds = types(events)
     expect(kinds.filter((type) => type === 'request/header')).toHaveLength(1)
     expect(kinds.filter((type) => type === 'turn/start')).toHaveLength(2)
+  })
+
+  test('records the system prompt once across turns that keep it the same', async () => {
+    const events = await scenario(
+      [chunks(textTurn('one')), chunks(textTurn('two')), chunks(textTurn('three'))],
+      (ctx) =>
+        Effect.gen(function* () {
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          for (const text of ['first', 'second', 'third']) {
+            yield* agent.followup({ text, source: 'user' })
+            yield* agent.whenIdle
+          }
+          return agent
+        }),
+    )
+
+    const prompts = events.session
+      .events()
+      .flatMap((event) => (event.type === 'system/message' ? [event.data.text] : []))
+
+    expect(types(events).filter((type) => type === 'turn/start')).toHaveLength(3)
+    expect(prompts).toHaveLength(1)
+  })
+
+  test('records a changed system prompt and sends both frames', async () => {
+    let frame = 'first frame'
+    const requests: Array<AgentRequest> = []
+    const events = await scenario([chunks(textTurn('one')), chunks(textTurn('two'))], (ctx) =>
+      Effect.gen(function* () {
+        yield* ctx.prompt
+          .section({ name: 'test-frame', order: 1, text: () => frame })
+          .pipe(Effect.orDie)
+        yield* ctx.hooks.on('agent/request', (request, next) =>
+          Effect.map(next(), (adjusted) => {
+            requests.push(adjusted ?? request)
+            return adjusted
+          }),
+        )
+        const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+        yield* agent.followup({ text: 'first', source: 'user' })
+        yield* agent.whenIdle
+        frame = 'second frame'
+        yield* agent.followup({ text: 'second', source: 'user' })
+        yield* agent.whenIdle
+        return agent
+      }),
+    )
+
+    const prompts = events.session
+      .events()
+      .flatMap((event) => (event.type === 'system/message' ? [event.data.text] : []))
+    const sent = (requests[1]?.messages ?? [])
+      .filter((message) => message.role === 'system')
+      .flatMap((message) =>
+        message.content.flatMap((block) => (block.type === 'text' ? [block.text] : [])),
+      )
+
+    expect(prompts).toEqual(['first frame', 'second frame'])
+    // The changed frame reaches the request without dropping the one it replaces.
+    expect(sent).toEqual(['first frame', 'second frame'])
+  })
+
+  test('a resumed log with duplicate prompts does not append the frame again', async () => {
+    const events = await scenario([chunks(textTurn('done'))], (ctx) =>
+      Effect.gen(function* () {
+        yield* ctx.prompt
+          .section({ name: 'test-frame', order: 1, text: 'the frame' })
+          .pipe(Effect.orDie)
+        const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+        // A session recorded by a run that appended the same prompt every turn.
+        yield* agent.session.append('system/message', { text: 'the frame' })
+        yield* agent.session.append('system/message', { text: 'the frame' })
+        yield* agent.followup({ text: 'go', source: 'user' })
+        yield* agent.whenIdle
+        return agent
+      }),
+    )
+
+    const prompts = events.session
+      .events()
+      .flatMap((event) => (event.type === 'system/message' ? [event.data.text] : []))
+
+    expect(prompts).toEqual(['the frame', 'the frame'])
   })
 
   test('retries a failed attempt without repeating the request header', async () => {
