@@ -24,6 +24,8 @@ export interface ParsedArgs {
   readonly effort: string
   /** The raw --effort, so a settings file can be overridden. */
   readonly effortFlag: string | undefined
+  /** Lets the model run tasks in child agents. */
+  readonly subagents: boolean
   readonly dumpConfig: boolean
   readonly json: boolean
   /** Forces the terminal UI even when stdin is not a terminal. */
@@ -51,6 +53,7 @@ const FLAGS: ReadonlyMap<string, FlagSpec> = new Map<string, FlagSpec>([
   ['--search', { kind: 'value' }],
   ['--port', { kind: 'value' }],
   ['--allow-preset-change', { kind: 'boolean' }],
+  ['--subagents', { kind: 'boolean' }],
 ])
 
 /** The flags the parser knows, in the order it declares them. */
@@ -150,6 +153,7 @@ export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
     modelFlag: first(values, '--model'),
     effort: first(values, '--effort') ?? '',
     effortFlag: first(values, '--effort'),
+    subagents: values.has('--subagents'),
     dumpConfig: values.has('--dump-config'),
     json: values.has('--json'),
     tui: values.has('--tui'),
