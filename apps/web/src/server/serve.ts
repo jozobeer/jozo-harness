@@ -135,6 +135,8 @@ const handlersOf = (
           )
     },
     workspaces: () => workspaces.list().pipe(Effect.mapError((error) => error.message)),
+    browseDirectories: ({ path }) =>
+      workspaces.browse(path).pipe(Effect.mapError((error) => error.message)),
     addWorkspace: ({ cwd }) =>
       workspaces.add(cwd).pipe(
         Effect.as(true),

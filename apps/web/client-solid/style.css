@@ -546,8 +546,7 @@
   }
 
   .session-search,
-  .workspace-select,
-  .workspace-add input {
+  .workspace-select {
     width: 100%;
     padding: 7px 10px;
     border: 1px solid var(--line);
@@ -558,14 +557,12 @@
     font-size: var(--text-sm);
   }
 
-  .session-search::placeholder,
-  .workspace-add input::placeholder {
+  .session-search::placeholder {
     color: var(--dim);
   }
 
   .session-search:focus-visible,
-  .workspace-select:focus-visible,
-  .workspace-add input:focus-visible {
+  .workspace-select:focus-visible {
     border-color: var(--accent);
     outline: none;
   }
@@ -576,26 +573,71 @@
     gap: var(--s2);
   }
 
-  .workspace-add summary {
-    padding: 0 var(--s1);
-    color: var(--dim);
+  .workspace-add-open {
+    align-self: flex-start;
+  }
+
+  .workspace-browse {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+    padding: var(--s2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg-sunken);
+  }
+
+  .workspace-browse-path {
+    margin: 0;
+    overflow-wrap: anywhere;
+    color: var(--text);
+    font-family: var(--mono);
     font-size: var(--text-sm);
+  }
+
+  .workspace-browse-error {
+    margin: 0;
+    color: var(--error);
+    font-size: var(--text-sm);
+  }
+
+  .workspace-browse-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+
+  .workspace-browse-up,
+  .workspace-browse-folder {
+    padding: 4px 6px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--dim);
+    font: inherit;
+    font-size: var(--text-sm);
+    text-align: left;
     cursor: pointer;
   }
 
-  .workspace-add summary:hover {
+  .workspace-browse-up:hover,
+  .workspace-browse-folder:hover {
+    background: var(--bg-hover);
     color: var(--text);
   }
 
-  .workspace-add form {
-    display: flex;
-    gap: var(--s2);
-    margin-top: var(--s2);
+  .workspace-browse-empty {
+    margin: 0;
+    padding: 4px 6px;
+    color: var(--dim);
+    font-size: var(--text-sm);
   }
 
-  .workspace-add form input {
-    flex: 1;
-    min-width: 0;
+  .workspace-browse-actions {
+    display: flex;
+    gap: var(--s2);
   }
 
   .board-empty {

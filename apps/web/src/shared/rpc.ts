@@ -85,6 +85,24 @@ export const WorkspacesRpc = Rpc.make('workspaces', {
   error: Schema.String,
 })
 
+/** One folder as the Add workspace dialog browses it: where it is, and the folders inside it. */
+export const DirectoryViewSchema = Schema.Struct({
+  path: Schema.String,
+  /** The folder above it, or null at the filesystem root. */
+  parent: Schema.NullOr(Schema.String),
+  /** The child folders as full paths, sorted by name. */
+  items: Schema.Array(Schema.String),
+})
+
+export type DirectoryView = typeof DirectoryViewSchema.Type
+
+/** Reads one folder for the Add workspace dialog; '' starts at the run's own folder. */
+export const BrowseDirectoriesRpc = Rpc.make('browseDirectories', {
+  payload: Schema.Struct({ path: Schema.String }),
+  success: DirectoryViewSchema,
+  error: Schema.String,
+})
+
 /** Registers one more folder a page may start a session in. */
 export const AddWorkspaceRpc = Rpc.make('addWorkspace', {
   payload: Schema.Struct({ cwd: Schema.String }),
@@ -271,6 +289,7 @@ export const UiRpcs = RpcGroup.make(
   OpenRpc,
   BranchRpc,
   WorkspacesRpc,
+  BrowseDirectoriesRpc,
   AddWorkspaceRpc,
   SessionActionRpc,
   UiCommandRpc,

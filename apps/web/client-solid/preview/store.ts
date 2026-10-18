@@ -166,7 +166,13 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
     askCommands: () => undefined,
     askFiles: () => undefined,
     askWorkspaces: () => undefined,
-    // The made-up picker grows when the reader adds a folder, so the form answers visibly.
+    // The preview has no disk to read: the dialog opens on the made-up folder alone.
+    browseDirectories: (path, reply) =>
+      reply({
+        kind: 'listed',
+        view: { path: path === '' ? SETTINGS.cwd : path, parent: null, items: [] },
+      }),
+    // The made-up picker grows when the reader adds a folder, so the dialog answers visibly.
     addWorkspace: (cwd) =>
       setState((now) =>
         withWorkspaces(now, {

@@ -16,7 +16,7 @@ import { Waterfall } from '../components/waterfall.tsx'
 import { LensSwitch } from '../components/lens-switch.tsx'
 import { lensFrom, type Lens } from '../lens.ts'
 import type { SessionStore } from '../store.ts'
-import type { SessionAction } from '../../src/shared/rpc.ts'
+import type { DirectoryView, SessionAction } from '../../src/shared/rpc.ts'
 import { traceOf } from '../../src/ui/trace.ts'
 import {
   RAIL_COLLAPSED_KEY,
@@ -43,6 +43,12 @@ type Call =
   | { readonly kind: 'act'; readonly sessionId: string; readonly action: SessionAction }
   | { readonly kind: 'askWorkspaces' }
   | { readonly kind: 'addWorkspace'; readonly cwd: string }
+  | { readonly kind: 'browseDirectories'; readonly path: string }
+
+/** What the Add workspace dialog heard about one folder. */
+type BrowseAnswer =
+  | { readonly kind: 'listed'; readonly view: DirectoryView }
+  | { readonly kind: 'refused'; readonly message: string }
 
 /** A store the components can be rendered against: signals in, calls out. */
 const makeStore = (
@@ -51,6 +57,8 @@ const makeStore = (
 ) => {
   const [state, setState] = createSignal<WebState>({ ...initialState, ...overrides })
   const calls: Array<Call> = []
+  const browses: Array<{ readonly path: string; readonly reply: (answer: BrowseAnswer) => void }> =
+    []
   const update = (next: (current: WebState) => WebState): void => {
     setState((current) => next(current))
   }
@@ -79,8 +87,12 @@ const makeStore = (
     act: (sessionId, action) => calls.push({ kind: 'act', sessionId, action }),
     askWorkspaces: () => calls.push({ kind: 'askWorkspaces' }),
     addWorkspace: (cwd) => calls.push({ kind: 'addWorkspace', cwd }),
+    browseDirectories: (path, reply) => {
+      calls.push({ kind: 'browseDirectories', path })
+      browses.push({ path, reply })
+    },
   }
-  return { store, calls, setState: update }
+  return { store, calls, browses, setState: update }
 }
 
 /** jsdom has no clipboard; lend the page one, then take it back. */
@@ -1479,19 +1491,52 @@ describe('the workspace picker', () => {
     }
   })
 
-  test('Add workspace sends the path and keeps the field empty for the next one', () => {
-    const { store, calls } = makeStore({
+  test('Add workspace picks a folder instead of typing a path', () => {
+    const { store, calls, browses } = makeStore({
       workspaces: { cwd: '/work/server', items: [listed('/work/beta', 20)] },
     })
 
     const { container } = render(() => <Board store={store} />)
 
-    const field = container.querySelector('#workspace-path') as HTMLInputElement
-    expect(field).not.toBeNull()
-    fireEvent.input(field, { target: { value: '/work/new' } })
-    fireEvent.submit(field.closest('form') as HTMLFormElement)
+    fireEvent.click(container.querySelector('.workspace-add-open') as Element)
+    expect(calls).toContainEqual({ kind: 'browseDirectories', path: '' })
+    expect(container.querySelector('.workspace-browse-path')?.textContent).toContain('Reading')
 
-    expect(calls).toContainEqual({ kind: 'addWorkspace', cwd: '/work/new' })
-    expect(field.value).toBe('')
+    browses[0]?.reply({
+      kind: 'listed',
+      view: { path: '/work', parent: '/', items: ['/work/alpha', '/work/beta'] },
+    })
+
+    const folders = [...container.querySelectorAll('.workspace-browse-folder')]
+    expect(folders.map((folder) => folder.textContent)).toEqual(['alpha', 'beta'])
+    expect(container.querySelector('.workspace-browse-path')?.textContent).toContain('/work')
+
+    fireEvent.click(folders[0] as Element)
+    expect(calls.at(-1)).toEqual({ kind: 'browseDirectories', path: '/work/alpha' })
+    browses[1]?.reply({
+      kind: 'listed',
+      view: { path: '/work/alpha', parent: '/work', items: [] },
+    })
+
+    fireEvent.click(container.querySelector('.workspace-browse-use') as Element)
+    expect(calls).toContainEqual({ kind: 'addWorkspace', cwd: '/work/alpha' })
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
+  })
+
+  test('a folder the dialog cannot read says why and adds nothing', () => {
+    const { store, calls, browses } = makeStore({
+      workspaces: { cwd: '/work/server', items: [listed('/work/beta', 20)] },
+    })
+
+    const { container } = render(() => <Board store={store} />)
+
+    fireEvent.click(container.querySelector('.workspace-add-open') as Element)
+    browses[0]?.reply({ kind: 'refused', message: 'cannot read this directory' })
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'cannot read this directory',
+    )
+    expect(container.querySelector('.workspace-browse-use')).toBeNull()
+    expect(calls.filter((call) => call.kind === 'addWorkspace')).toEqual([])
   })
 })

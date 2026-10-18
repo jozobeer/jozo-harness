@@ -10,8 +10,8 @@ import { toolsPlugin } from '@jozo-harness/tools'
 import { Deferred, Effect, Layer, Schema, Stream } from 'effect'
 import { RpcClient, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawn } from '@jozo-harness/process'
 import { runCommand } from '../src/index.ts'
@@ -288,6 +288,7 @@ describe('the browser UI through the command', () => {
     const otherWorkspace = await mkdtemp(join(tmpdir(), 'jozo-harness-web-other-ws-'))
     const home = await mkdtemp(join(tmpdir(), 'jozo-harness-web-home-'))
     await writeFile(join(otherWorkspace, 'AGENTS.md'), 'the other workspace speaks\n')
+    await mkdir(join(serverWorkspace, 'nested'))
     const ready = Effect.runSync(Deferred.make<string>())
     const stop = Effect.runSync(Deferred.make<void>())
 
@@ -326,6 +327,12 @@ describe('the browser UI through the command', () => {
             const relativeRefused = yield* client
               .addWorkspace({ cwd: 'relative/path' })
               .pipe(Effect.catch((message) => Effect.succeed(message)))
+            const browsed = yield* client.browseDirectories({ path: serverWorkspace })
+            // The dialog opening with no path starts at the run's own folder.
+            const started = yield* client.browseDirectories({ path: '' })
+            const browseRefused = yield* client
+              .browseDirectories({ path: join(serverWorkspace, 'missing') })
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
             const seen = yield* Deferred.make<string>()
             yield* Effect.forkScoped(
               client.events({ sessionId: made.id }).pipe(
@@ -342,7 +349,19 @@ describe('the browser UI through the command', () => {
               command: { kind: 'submit', text: 'ping' },
             })
             const answer = yield* Deferred.await(seen)
-            return { made, offered, resumed, added, fileRefused, relativeRefused, accepted, answer }
+            return {
+              made,
+              offered,
+              resumed,
+              added,
+              fileRefused,
+              relativeRefused,
+              browsed,
+              started,
+              browseRefused,
+              accepted,
+              answer,
+            }
           })
 
           const result = yield* withoutServices(used).pipe(
@@ -370,6 +389,11 @@ describe('the browser UI through the command', () => {
     expect(observed.added).toBe(true)
     expect(observed.fileRefused).toBe('a workspace must be a directory')
     expect(observed.relativeRefused).toBe('a workspace path must be absolute')
+    expect(observed.browsed.path).toBe(serverWorkspace)
+    expect(observed.browsed.parent).toBe(dirname(serverWorkspace))
+    expect(observed.browsed.items).toContain(join(serverWorkspace, 'nested'))
+    expect(observed.started.path).toBe(serverWorkspace)
+    expect(observed.browseRefused).toBe('no such directory')
     expect(observed.accepted).toBe(true)
     expect(observed.answer).toContain('hello from jozo-harness')
     // The session header keeps the workspace the page named...

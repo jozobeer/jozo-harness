@@ -3,7 +3,12 @@ import { RpcClient, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
 import type { UiCommand, UiEvent } from '@jozo-harness/ui-protocol'
 import { batch, createSignal, type Accessor } from 'solid-js'
-import { UiRpcs, withoutServices, type SessionAction } from '../src/shared/rpc.ts'
+import {
+  UiRpcs,
+  withoutServices,
+  type DirectoryView,
+  type SessionAction,
+} from '../src/shared/rpc.ts'
 import {
   applyUiEvent,
   initialState,
@@ -113,8 +118,20 @@ type Move =
   | { readonly kind: 'open'; readonly id: string | undefined; readonly cwd?: string | undefined }
   | { readonly kind: 'blank' }
 
-/** What the workspace picker asked of the server: the list, or one more folder to join it. */
-type WorkspaceAsk = { readonly kind: 'list' } | { readonly kind: 'add'; readonly cwd: string }
+/** What the workspace picker asked of the server: the list, a folder to browse, or one to add. */
+type WorkspaceAsk =
+  | { readonly kind: 'list' }
+  | {
+      readonly kind: 'browse'
+      readonly path: string
+      readonly reply: (answer: BrowseAnswer) => void
+    }
+  | { readonly kind: 'add'; readonly cwd: string }
+
+/** What the Add workspace dialog heard about one folder. */
+export type BrowseAnswer =
+  | { readonly kind: 'listed'; readonly view: DirectoryView }
+  | { readonly kind: 'refused'; readonly message: string }
 
 /** What the settings pane asked the server for. */
 type PanelAsk =
@@ -157,6 +174,12 @@ export interface SessionStore {
   readonly askFiles: (query: string) => void
   /** Reads the folders a new session may start in. */
   readonly askWorkspaces: () => void
+  /**
+   * Reads one folder for the Add workspace dialog; the folders inside it, or
+   * why they could not be read, go to `reply`. A blank path starts at the run's
+   * own folder.
+   */
+  readonly browseDirectories: (path: string, reply: (answer: BrowseAnswer) => void) => void
   /** Registers one more folder a new session may start in, and reads the list again. */
   readonly addWorkspace: (cwd: string) => void
   /**
@@ -623,13 +646,26 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
         yield* Effect.sync(() => update((now) => withWorkspaces(now, listed)))
       })
 
-    yield* Effect.forkScoped(
-      Stream.runForEach(Stream.fromQueue(workspaceAsks), (asked) =>
-        (asked.kind === 'list'
+    /** Answers one workspace ask: the list, one folder read for the dialog, or one added. */
+    const answerWorkspaceAsk = (asked: WorkspaceAsk) =>
+      asked.kind === 'browse'
+        ? client.browseDirectories({ path: asked.path }).pipe(
+            Effect.map((view): BrowseAnswer => ({ kind: 'listed', view })),
+            Effect.catchCause((cause) =>
+              Effect.succeed<BrowseAnswer>({ kind: 'refused', message: causeText(cause) }),
+            ),
+            // The dialog may be gone by now; the answer belongs to the page that asked.
+            Effect.tap((answer) => Effect.sync(() => asked.reply(answer))),
+            Effect.asVoid,
+          )
+        : asked.kind === 'list'
           ? readWorkspaces()
           : // Read the list back, so the picker offers the folder that just joined it.
             client.addWorkspace({ cwd: asked.cwd }).pipe(Effect.andThen(readWorkspaces()))
-        ).pipe(
+
+    yield* Effect.forkScoped(
+      Stream.runForEach(Stream.fromQueue(workspaceAsks), (asked) =>
+        answerWorkspaceAsk(asked).pipe(
           Effect.catchCause((cause) =>
             Effect.sync(() => update((now) => withProblem(now, causeText(cause)))),
           ),
@@ -758,6 +794,8 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     askFiles: (query) =>
       Queue.offerUnsafe(panelAsks, { kind: 'files', sessionId: state().sessionId, query }),
     askWorkspaces: () => Queue.offerUnsafe(workspaceAsks, { kind: 'list' }),
+    browseDirectories: (path, reply) =>
+      Queue.offerUnsafe(workspaceAsks, { kind: 'browse', path, reply }),
     addWorkspace: (cwd) => Queue.offerUnsafe(workspaceAsks, { kind: 'add', cwd }),
     chooseModel: (model) => {
       const current = state()

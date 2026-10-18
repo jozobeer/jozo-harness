@@ -10,7 +10,7 @@ import {
   type JSX,
 } from 'solid-js'
 import { plainText } from '@jozo-harness/ui-view'
-import type { SessionAction, SessionSummary } from '../../src/shared/rpc.ts'
+import type { DirectoryView, SessionAction, SessionSummary } from '../../src/shared/rpc.ts'
 import {
   RECENT_PAGE,
   atKey,
@@ -25,7 +25,7 @@ import {
 } from '../../src/ui/board.ts'
 import { basenameOf, whenOf } from '../lib.ts'
 import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY, keepPaths, pathsFrom } from '../recent.ts'
-import type { SessionStore } from '../store.ts'
+import type { BrowseAnswer, SessionStore } from '../store.ts'
 import { Button } from './ui/button.tsx'
 
 /** A span the way the board says it: 38s, 6m, 2h. */
@@ -497,12 +497,16 @@ const RecentFolder = (props: {
 
 /**
  * The folder a new session starts in. The list arrives newest use first, so the
- * first option is the last folder used; Add workspace registers another one by
- * path, and the picker reads the list again when it lands.
+ * first option is the last folder used; Add workspace opens a folder browser,
+ * registers the folder chosen there, and the picker reads the list again.
  */
 const WorkspacePicker = (props: { store: SessionStore }) => {
   const [choice, setChoice] = createSignal('')
-  const [path, setPath] = createSignal('')
+  const [browsing, setBrowsing] = createSignal(false)
+  const [folder, setFolder] = createSignal<DirectoryView | undefined>()
+  const [browseProblem, setBrowseProblem] = createSignal('')
+  // Each click on a folder makes the answer to the one before it stale.
+  let asked = 0
   const listed = () => props.store.state().workspaces
   const folders = () => listed()?.items ?? []
   const value = (): string => {
@@ -511,12 +515,36 @@ const WorkspacePicker = (props: { store: SessionStore }) => {
     if (chosen !== '' && items.some((item) => item.cwd === chosen)) return chosen
     return items[0]?.cwd ?? listed()?.cwd ?? ''
   }
-  const add = (event: SubmitEvent): void => {
-    event.preventDefault()
-    const cwd = path().trim()
-    if (cwd === '') return
+  const heard = (answer: BrowseAnswer): void => {
+    if (answer.kind === 'listed') {
+      setFolder(answer.view)
+      setBrowseProblem('')
+      return
+    }
+    setBrowseProblem(answer.message)
+  }
+  const browse = (path: string): void => {
+    const turn = ++asked
+    props.store.browseDirectories(path, (answer) => {
+      if (turn === asked) heard(answer)
+    })
+  }
+  const openBrowser = (): void => {
+    setBrowsing(true)
+    setBrowseProblem('')
+    setFolder(undefined)
+    browse('')
+  }
+  const closeBrowser = (): void => {
+    setBrowsing(false)
+    setBrowseProblem('')
+    setFolder(undefined)
+  }
+  const addFolder = (): void => {
+    const cwd = folder()?.path
+    if (cwd === undefined) return
     props.store.addWorkspace(cwd)
-    setPath('')
+    closeBrowser()
   }
   onMount(() => props.store.askWorkspaces())
   return (
@@ -547,22 +575,66 @@ const WorkspacePicker = (props: { store: SessionStore }) => {
       >
         + New session
       </Button>
-      <details class="workspace-add">
-        <summary>Add workspace</summary>
-        <form onSubmit={add}>
-          <input
-            id="workspace-path"
-            type="text"
-            aria-label="Workspace path"
-            placeholder="/path/to/folder"
-            value={path()}
-            onInput={(event) => setPath(event.currentTarget.value)}
-          />
-          <Button type="submit" variant="quiet">
-            Add
-          </Button>
-        </form>
-      </details>
+      <Button class="workspace-add-open" variant="quiet" type="button" onClick={openBrowser}>
+        Add workspace
+      </Button>
+      <Show when={browsing()}>
+        <div class="workspace-browse" role="dialog" aria-label="Add workspace">
+          <p class="workspace-browse-path" title={folder()?.path}>
+            {folder()?.path ?? 'Reading folders…'}
+          </p>
+          <Show when={browseProblem() !== ''}>
+            <p class="workspace-browse-error" role="alert">
+              {browseProblem()}
+            </p>
+          </Show>
+          <Show when={folder()}>
+            {(view) => (
+              <>
+                <div class="workspace-browse-list">
+                  <Show when={view().parent !== null}>
+                    <button
+                      class="workspace-browse-up"
+                      type="button"
+                      onClick={() => browse(view().parent ?? '')}
+                    >
+                      ↑ Up
+                    </button>
+                  </Show>
+                  <For each={view().items}>
+                    {(path) => (
+                      <button
+                        class="workspace-browse-folder"
+                        type="button"
+                        title={path}
+                        onClick={() => browse(path)}
+                      >
+                        {basenameOf(path)}
+                      </button>
+                    )}
+                  </For>
+                  <Show when={view().items.length === 0}>
+                    <p class="workspace-browse-empty">No folders here</p>
+                  </Show>
+                </div>
+                <div class="workspace-browse-actions">
+                  <Button
+                    class="workspace-browse-use"
+                    variant="primary"
+                    type="button"
+                    onClick={addFolder}
+                  >
+                    Use this folder
+                  </Button>
+                  <Button variant="quiet" type="button" onClick={closeBrowser}>
+                    Cancel
+                  </Button>
+                </div>
+              </>
+            )}
+          </Show>
+        </div>
+      </Show>
     </div>
   )
 }

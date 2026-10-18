@@ -115,6 +115,7 @@ import { fileURLToPath } from 'node:url'
 import { makeUiHost, type UiHost } from '@jozo-harness/ui-host'
 import {
   WebError,
+  listDirectories,
   pageIsThere,
   serveWeb,
   type CommandView,
@@ -951,6 +952,11 @@ const workspacesPortOf = (
         .sort((a, b) => b.lastUsedAt - a.lastUsedAt || a.cwd.localeCompare(b.cwd))
       return { cwd: options.cwd, items }
     }).pipe(Effect.mapError((error) => new WebError({ message: messageOf(error) }))),
+  browse: (path) =>
+    Effect.tryPromise({
+      try: () => listDirectories(path, options.cwd),
+      catch: (cause) => new WebError({ message: messageOf(cause) }),
+    }),
   add: addWorkspaceOf(options.jzhHome),
 })
 
