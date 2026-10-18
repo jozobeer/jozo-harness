@@ -14,6 +14,8 @@ import {
 } from '../src/server/index.ts'
 import type { JobDetailView, RunStateView, SessionSummary } from '../src/shared/rpc.ts'
 import { createSessionStore, type SessionStore } from '../client-solid/store.ts'
+import { draftKey } from '../src/ui/draft.ts'
+import { THEME_KEY } from '../src/ui/theme.ts'
 
 /**
  * The page's store against the real server, over a real socket. The store is the
@@ -25,6 +27,8 @@ import { createSessionStore, type SessionStore } from '../client-solid/store.ts'
 /** What the page's browser calls did, for a run outside a browser. */
 interface StubbedBrowser {
   readonly kept: () => string | undefined
+  /** What storage holds under one key, as a page opened again would read it. */
+  readonly stored: (key: string) => string | undefined
   readonly attribute: () => string | undefined
   /** The URL the page last put in the address bar. */
   readonly address: () => string | undefined
@@ -35,13 +39,16 @@ interface StubbedBrowser {
 /** The little of the browser the store touches, for a run outside one. */
 const stubTheBrowser = (options: { readonly frames?: boolean } = {}): StubbedBrowser => {
   const globals = globalThis as unknown as Record<string, unknown>
-  let kept: string | undefined
+  const kept = new Map<string, string>()
   let address: string | undefined
   const dataset: Record<string, string | undefined> = {}
   globals.localStorage = {
-    getItem: () => kept ?? null,
-    setItem: (_key: string, value: string) => {
-      kept = value
+    getItem: (key: string) => kept.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      kept.set(key, value)
+    },
+    removeItem: (key: string) => {
+      kept.delete(key)
     },
   }
   globals.document = { documentElement: { dataset } }
@@ -65,7 +72,8 @@ const stubTheBrowser = (options: { readonly frames?: boolean } = {}): StubbedBro
         }
       : undefined
   return {
-    kept: () => kept,
+    kept: () => kept.get(THEME_KEY),
+    stored: (key: string) => kept.get(key),
     attribute: () => dataset.theme,
     address: () => address,
     paint: () => {
@@ -675,6 +683,57 @@ describe('the page store', () => {
             expect(host.commands).toEqual([])
           }),
         { settings },
+      ),
+    )
+  }, 15_000)
+
+  test('a draft belongs to the session it was typed in', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          store.setDraft('half typed for a')
+          store.moveTo(undefined)
+          yield* until(
+            () => store.state().sessionId === '' && store.state().draft === '',
+            'moved to a blank page with an empty composer',
+          )
+
+          store.moveTo('a')
+          yield* until(
+            () => store.state().draft === 'half typed for a',
+            'brought the session its draft back',
+          )
+          expect(store.state().sessionId).toBe('a')
+        }),
+      ),
+    )
+  }, 15_000)
+
+  test('a draft survives a reload, and is forgotten once it is sent', async () => {
+    const browser = stubTheBrowser()
+    const host = makeHost('a')
+    await Effect.runPromise(
+      withStore(host, (store, served) =>
+        Effect.gen(function* () {
+          store.setDraft('kept across a reload')
+          // The page writes on a delay, as it does for every keystroke.
+          yield* Effect.sleep('400 millis')
+
+          // A reload is another page on the same storage, reading the same session.
+          const again = createSessionStore({ url: served.wsUrl, search: '' })
+          again.start()
+          yield* until(() => again.state().sessionId === 'a', 'opened the session again')
+          yield* until(() => again.state().draft === 'kept across a reload', 'read the draft back')
+
+          // Sending it is the end of the draft: the next visit starts empty.
+          again.submit()
+          yield* until(() => again.state().draft === '', 'cleared the composer')
+          yield* Effect.sleep('400 millis')
+          expect(browser.stored(draftKey('a'))).toBeUndefined()
+          again.stop()
+        }),
       ),
     )
   }, 15_000)
