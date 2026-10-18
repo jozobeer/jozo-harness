@@ -89,8 +89,8 @@ export interface ToolRestriction {
  * One tool as packages define it.
  *
  * `output.schema` describes the canonical value for structured consumers (PTC);
- * the model sees `output.render` instead. `timeoutMs` is applied by the S4
- * tool-call-timeout plugin, not by the S1 pipeline.
+ * the model sees `output.render` instead. The pipeline ends a call that
+ * outlives its declared `timeoutMs` as an error result that says it timed out.
  */
 export interface ToolDefinition<A, V> {
   readonly name: string

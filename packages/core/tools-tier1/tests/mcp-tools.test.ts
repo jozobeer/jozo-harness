@@ -36,4 +36,23 @@ describe('mcpTools', () => {
     expect(observed.isError).toBe(false)
     expect(observed.content).toEqual([{ type: 'text', text: 'from mcp' }])
   })
+
+  test('a server tool declares a timeout so a stuck server cannot hold the turn', async () => {
+    const declared = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* startMcpServer({ command: server })
+          const tools = yield* mcpTools(client)
+          yield* client.close()
+          return tools.map((tool) => tool.timeoutMs)
+        }),
+      ),
+    )
+
+    expect(declared.length).toBeGreaterThan(0)
+    for (const ms of declared) {
+      expect(ms).toBeGreaterThan(0)
+      expect(ms).toBeLessThanOrEqual(60_000)
+    }
+  })
 })
