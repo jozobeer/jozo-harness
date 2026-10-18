@@ -1207,6 +1207,7 @@
     }
 
     #status .where,
+    #status .branch,
     #status .fleet {
       display: none;
     }

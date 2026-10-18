@@ -1,5 +1,6 @@
 export * from '../shared/rpc.ts'
 export * from './errors.ts'
+export * from './git-branch.ts'
 export * from './protocol.ts'
 export * from './serve.ts'
 export * from './session-meta.ts'

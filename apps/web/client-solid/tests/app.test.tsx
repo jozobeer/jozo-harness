@@ -9,6 +9,7 @@ import { Composer } from '../components/composer.tsx'
 import { ContextPane } from '../components/context-pane.tsx'
 import { Conversation } from '../components/conversation.tsx'
 import { Board } from '../components/board.tsx'
+import { Status } from '../components/status.tsx'
 import { emptyWatched, watchedAfter, type Watched } from '../../src/ui/board.ts'
 import { Markdown } from '../components/turns.tsx'
 import { Waterfall } from '../components/waterfall.tsx'
@@ -1132,6 +1133,30 @@ describe('the rail', () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+
+  test('the status bar names the branch its workspace stands on beside the path', () => {
+    const { store } = makeStore({
+      info: { cwd: '/work/project', model: '', turns: 0, branch: 'feature/status-bar' },
+    })
+    const { container } = render(() => (
+      <Status store={store} drawer={false} onDrawer={() => undefined} />
+    ))
+
+    expect(container.querySelector('.where')?.textContent).toBe('/work/project')
+    const branch = container.querySelector('.branch')
+    expect(branch?.textContent).toBe('feature/status-bar')
+    expect(branch?.getAttribute('title')).toBe('git branch feature/status-bar')
+  })
+
+  test('the status bar leaves the branch out when the workspace names none', () => {
+    const { store } = makeStore({ info: { cwd: '/work/project', model: '', turns: 0 } })
+    const { container } = render(() => (
+      <Status store={store} drawer={false} onDrawer={() => undefined} />
+    ))
+
+    expect(container.querySelector('.where')?.textContent).toBe('/work/project')
+    expect(container.querySelector('.branch')).toBeNull()
   })
 
   test('the status bar keeps the room the pane strip measured', () => {

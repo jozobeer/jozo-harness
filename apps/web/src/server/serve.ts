@@ -13,6 +13,7 @@ import {
   type SessionRegistry,
 } from './sessions.ts'
 import { searchWorkspaceFiles } from './files.ts'
+import { branchOf } from './git-branch.ts'
 import type { SettingsPort } from './settings.ts'
 import { staticResponse } from './static.ts'
 import type { WorkspacesPort } from './workspaces.ts'
@@ -64,6 +65,14 @@ const handlersOf = (
         const meta = yield* readMeta(view.sessionRoot)
         return withMeta(session.summary, meta[session.summary.id])
       }).pipe(Effect.mapError((error) => error.message)),
+    branch: ({ sessionId }) =>
+      Effect.gen(function* () {
+        // The blank page has no workspace yet; an id nobody opened is a request error.
+        if (sessionId === '') return null
+        const session = registry.sessionOf(sessionId)
+        if (session === undefined) return yield* Effect.fail('the session is not open')
+        return yield* branchOf(session.summary.cwd)
+      }),
     sessionAction: ({ sessionId, action }) =>
       Effect.gen(function* () {
         // A running core owns its log; deleting the directory under it is not a

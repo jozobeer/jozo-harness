@@ -8,6 +8,7 @@ import {
   applyUiEvent,
   initialState,
   withBlank,
+  withBranch,
   withCommands,
   withConnection,
   withDraft,
@@ -419,13 +420,24 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
           id === undefined ? (cwd === undefined ? {} : { cwd }) : { sessionId: id },
         )
         if (following !== undefined) yield* Fiber.interrupt(following)
-        const running = yield* client.state({ sessionId: summary.id })
+        // The branch is a second read of the same workspace; asking for both at
+        // once keeps opening a session as quick as it was without one.
+        const [running, branch] = yield* Effect.all([
+          client.state({ sessionId: summary.id }),
+          // A workspace the server cannot place keeps the strip to the path alone.
+          client.branch({ sessionId: summary.id }).pipe(Effect.catch(() => Effect.succeed(null))),
+        ])
         // The session being left keeps its line; the one being opened shows its
         // own, and a line typed on the blank page belongs to the first it opens.
         const moved = draftOnMove(drafts, state().sessionId, summary.id, draftOf(summary.id))
         drafts = moved.drafts
         yield* Effect.sync(() => {
-          update((now) => withDraft(withRun(withSession(now, summary), running), moved.text))
+          update((now) =>
+            withDraft(
+              withRun(withBranch(withSession(now, summary), branch ?? ''), running),
+              moved.text,
+            ),
+          )
           addressSession(summary.id)
         })
         following = yield* Effect.forkScoped(follow(summary.id))
