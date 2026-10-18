@@ -1,7 +1,7 @@
 import { For, Match, Show, Switch, createEffect, createSignal, onCleanup } from 'solid-js'
 import type { ConversationBlock } from '@jozo-harness/ui-view'
 import type { RunStateView, SettingsView } from '../../src/shared/rpc.ts'
-import type { Pane, TerminalView } from '../../src/ui/state.ts'
+import type { Pane } from '../../src/ui/state.ts'
 import { THEMES, type Theme } from '../../src/ui/theme.ts'
 import type { TurnView } from '../../src/ui/trajectory.ts'
 import { childSessionsOf, elapsedOf } from '../lib.ts'
@@ -361,64 +361,9 @@ const Job = (props: { store: SessionStore; pane: Extract<Pane, { kind: 'job' }> 
   </>
 )
 
-/** The shell the pane opened, its text so far, and the line the reader types at it. */
-const Terminal = (props: { store: SessionStore }) => {
-  const terminal = (): TerminalView | undefined => props.store.state().terminal
-  const blank = (): boolean => props.store.state().sessionId === ''
-  let field: HTMLInputElement | undefined
-  const submit = (event: Event): void => {
-    event.preventDefault()
-    if (field === undefined || field.value.trim() === '') return
-    props.store.sendTerminal(field.value)
-    field.value = ''
-  }
-  return (
-    <>
-      <h2 class="pane-title">Terminal</h2>
-      <Show
-        when={terminal()}
-        fallback={
-          <div class="card-hint">
-            {blank()
-              ? 'open a session to use the terminal'
-              : 'the terminal is closed; open the tab again to start a shell'}
-          </div>
-        }
-      >
-        {(view) => (
-          <>
-            <div class="terminal-meta">
-              <span class={'terminal-state ' + view().status}>{view().status}</span>
-              <span class="terminal-cwd">{props.store.state().info.cwd}</span>
-              <Show when={view().exit !== undefined}>
-                <span class="terminal-exit">{'exit ' + String(view().exit)}</span>
-              </Show>
-            </div>
-            <Show when={view().problem !== ''}>
-              <div class="terminal-problem">{view().problem}</div>
-            </Show>
-            <pre class="terminal-output">{view().text}</pre>
-            <form class="terminal-line" onSubmit={submit}>
-              <input
-                ref={(element) => {
-                  field = element
-                }}
-                aria-label="line for the shell"
-                placeholder="type a line and press Enter"
-                disabled={view().status !== 'running'}
-              />
-            </form>
-          </>
-        )}
-      </Show>
-    </>
-  )
-}
-
 const PANES = [
   { kind: 'changes', label: 'changes' },
   { kind: 'run', label: 'run' },
-  { kind: 'terminal', label: 'terminal' },
   { kind: 'settings', label: 'settings' },
   { kind: 'trajectory', label: 'turns' },
 ] as const
@@ -521,9 +466,6 @@ export const ContextPane = (props: { store: SessionStore }) => {
           </Match>
           <Match when={ofKind(body(), 'job')}>
             {(job) => <Job store={props.store} pane={job()} />}
-          </Match>
-          <Match when={body()?.kind === 'terminal'}>
-            <Terminal store={props.store} />
           </Match>
         </Switch>
       </div>

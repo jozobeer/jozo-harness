@@ -38,7 +38,6 @@ import {
   type AgentsMdOptions,
   type RuntimeContextSubject,
 } from '@jozo-harness/system-prompt'
-import { spawn as spawnProcess } from '@jozo-harness/process'
 import { ToolError, type ToolExecution } from '@jozo-harness/tools'
 import { Tools, type ToolRegistry } from '@jozo-harness/tools'
 import {
@@ -133,7 +132,6 @@ import { makeUiHost, type UiHost } from '@jozo-harness/ui-host'
 import {
   WebError,
   listDirectories,
-  openShell,
   pageIsThere,
   serveWeb,
   type CommandView,
@@ -1158,11 +1156,6 @@ const serveWebUi = (
           commands: () => defaultCommands,
           port: work.port,
           staticRoot,
-          // The pane's shell is the server's port; this app owns the real process.
-          terminal: (cwd, send) =>
-            openShell(cwd, send, {
-              spawn: (command, at) => spawnProcess(command, { cwd: at, stdin: 'pipe' }),
-            }),
           onReady: (url) => {
             options.stderr('jzh web: ' + url + '\n')
           },

@@ -14,8 +14,6 @@ import {
 import {
   applyUiEvent,
   initialState,
-  terminalOutput,
-  updateTerminal,
   withBlank,
   withBranch,
   withCommands,
@@ -30,11 +28,9 @@ import {
   withSession,
   withSessions,
   withSettings,
-  withTerminal,
   withTheme,
   withWorkspaces,
   type Pane,
-  type TerminalView,
   type WebState,
 } from '../src/ui/state.ts'
 import type { Theme } from '../src/ui/theme.ts'
@@ -51,13 +47,6 @@ import {
 } from './dom.ts'
 import { emptyWatched, watchedAfter, type Watched } from '../src/ui/board.ts'
 import { makeBridge } from './bridge.ts'
-import {
-  browserTerminalSocket,
-  frameTextOf,
-  type TerminalSocket,
-  type TerminalSocketFactory,
-} from './terminal.ts'
-import { terminalFrameOf, terminalSocketAt } from '../src/shared/terminal.ts'
 
 /** How one failed call reads in the status strip. */
 const messageOf = (error: unknown): string =>
@@ -242,8 +231,6 @@ export interface SessionStore {
   readonly setModel: (model: string) => void
   /** Renames, pins, archives, or deletes one session through its row menu. */
   readonly act: (sessionId: string, action: SessionAction) => void
-  /** Sends one line to the shell the terminal pane opened; nothing while none runs. */
-  readonly sendTerminal: (line: string) => void
 }
 
 export interface SessionStoreOptions {
@@ -251,8 +238,6 @@ export interface SessionStoreOptions {
   readonly url?: string
   /** The search string the session in the address bar is read from. */
   readonly search?: string
-  /** Opens the terminal socket; the browser's own unless a test hands one in. */
-  readonly terminal?: TerminalSocketFactory
 }
 
 export const createSessionStore = (options: SessionStoreOptions = {}): SessionStore => {
@@ -385,69 +370,6 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
   const workspaceAsks = Effect.runSync(Queue.unbounded<WorkspaceAsk>())
   let following: Fiber.Fiber<void, unknown> | undefined
   const bridge = makeBridge((message) => update((current) => withProblem(current, message)))
-
-  /** The socket of the shell on screen; undefined while the pane holds none. */
-  let terminalSocket: TerminalSocket | undefined
-
-  /** Reports a change to one session's terminal, when that is still the shell on screen. */
-  const patchTerminal = (sessionId: string, change: (view: TerminalView) => TerminalView): void => {
-    update((now) => updateTerminal(now, sessionId, change))
-  }
-
-  /** Stops the shell the pane opened and forgets its text; the process goes with it. */
-  const stopTerminal = (): void => {
-    const socket = terminalSocket
-    terminalSocket = undefined
-    socket?.close()
-    update((now) => withTerminal(now, undefined))
-  }
-
-  /**
-   * Opens one shell for the session on screen. The pane showing the terminal is
-   * what asks for it, and a socket already open is left alone, so switching tabs
-   * back and forth keeps the same process.
-   */
-  const startTerminal = (sessionId: string): void => {
-    if (terminalSocket !== undefined || sessionId === '') return
-    const socket = (options.terminal ?? browserTerminalSocket)(terminalSocketAt(url, sessionId))
-    terminalSocket = socket
-    update((now) =>
-      withTerminal(now, {
-        sessionId,
-        text: '',
-        status: 'connecting',
-        exit: undefined,
-        problem: '',
-      }),
-    )
-    socket.onopen = () => {
-      patchTerminal(sessionId, (view) => ({ ...view, status: 'running' }))
-    }
-    socket.onmessage = (event) => {
-      const frame = terminalFrameOf(frameTextOf(event.data))
-      if (frame === undefined) return
-      if (frame.type === 'output') {
-        patchTerminal(sessionId, (view) => terminalOutput(view, frame.data))
-        return
-      }
-      patchTerminal(sessionId, (view) => ({ ...view, status: 'exited', exit: frame.code }))
-    }
-    socket.onclose = () => {
-      if (terminalSocket === socket) terminalSocket = undefined
-      patchTerminal(sessionId, (view) =>
-        view.status === 'exited'
-          ? view
-          : { ...view, status: 'failed', problem: 'the terminal connection closed' },
-      )
-    }
-    socket.onerror = () => {
-      patchTerminal(sessionId, (view) => ({
-        ...view,
-        status: 'failed',
-        problem: 'the terminal socket failed',
-      }))
-    }
-  }
 
   const program = Effect.gen(function* () {
     const client = yield* RpcClient.make(UiRpcs)
@@ -596,12 +518,9 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
 
     const show = (id: string | undefined, cwd?: string) =>
       Effect.gen(function* () {
-        const previous = state().sessionId
         const summary = yield* client.open(
           id === undefined ? (cwd === undefined ? {} : { cwd }) : { sessionId: id },
         )
-        // A shell belongs to the session that opened it; a move stops it first.
-        if (summary.id !== previous) stopTerminal()
         if (following !== undefined) yield* Fiber.interrupt(following)
         // The branch is a second read of the same workspace; asking for both at
         // once keeps opening a session as quick as it was without one.
@@ -623,9 +542,6 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
           )
           addressSession(summary.id)
         })
-        if (summary.id !== previous && state().pane?.kind === 'terminal') {
-          startTerminal(summary.id)
-        }
         following = yield* Effect.forkScoped(follow(summary.id))
         yield* watch(summary.id)
         yield* sendOwed(summary.id)
@@ -639,7 +555,6 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
      */
     const standOnBlank = () =>
       Effect.gen(function* () {
-        stopTerminal()
         if (following !== undefined) yield* Fiber.interrupt(following)
         following = undefined
         const text = draftOf('')
@@ -911,8 +826,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     watched,
     start,
     stop: () => {
-      // The page is going away: its shell stops, and what is pending is written.
-      stopTerminal()
+      // The page is going away: what is pending is written.
       flushDrafts()
       bridge.stop()
     },
@@ -943,12 +857,6 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     },
     send: (command) => sendTo(state().sessionId, command),
     sendTo,
-    sendTerminal: (line) => {
-      const socket = terminalSocket
-      if (socket === undefined || state().terminal?.status !== 'running') return
-      const data = line.endsWith('\n') ? line : line + '\n'
-      socket.send(JSON.stringify({ type: 'input', data }))
-    },
     moveTo: (id, cwd) => {
       if (id === undefined) blankCwd = cwd
       Queue.offerUnsafe(moves, id === undefined ? { kind: 'blank' } : { kind: 'open', id })
@@ -958,17 +866,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       showTheme(theme)
       keepTheme(theme)
     },
-    showPane: (pane) => {
-      const now = state()
-      if (pane?.kind === 'terminal') {
-        update((current) => withPane(current, pane))
-        startTerminal(now.sessionId)
-        return
-      }
-      // Leaving the terminal is closing it: its shell and children go with it.
-      if (now.pane?.kind === 'terminal') stopTerminal()
-      update((current) => withPane(current, pane))
-    },
+    showPane: (pane) => update((current) => withPane(current, pane)),
     openJob: (id) => {
       update((now) => withPane(now, { kind: 'job', id, detail: undefined }))
       Queue.offerUnsafe(panelAsks, { kind: 'job', id })

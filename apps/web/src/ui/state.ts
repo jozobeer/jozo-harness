@@ -23,7 +23,7 @@ export interface SessionInfo {
 
 const emptyInfo: SessionInfo = { cwd: '', model: '', turns: 0 }
 
-/** What the right pane shows: what the session runs toward, its settings, its turns, one job, or its shell. */
+/** What the right pane shows: what the session runs toward, its settings, or its turns. */
 export type Pane =
   | { readonly kind: 'changes'; readonly path: string | undefined }
   | { readonly kind: 'inspect'; readonly turn: number; readonly callId: string }
@@ -31,22 +31,6 @@ export type Pane =
   | { readonly kind: 'settings' }
   | { readonly kind: 'trajectory' }
   | { readonly kind: 'job'; readonly id: string; readonly detail: JobDetailView | undefined }
-  | { readonly kind: 'terminal' }
-
-/** How much of a shell's output the page keeps: the newest text, not its whole history. */
-export const TERMINAL_KEEP = 64_000
-
-/** What the terminal pane shows: the text so far, and how the shell behind it stands. */
-export interface TerminalView {
-  readonly sessionId: string
-  readonly text: string
-  /** connecting before the socket opens, running after, and then why it stopped. */
-  readonly status: 'connecting' | 'running' | 'exited' | 'failed'
-  /** The shell's exit code, once it has one. */
-  readonly exit: number | undefined
-  /** Why the connection or the shell failed, when it did. */
-  readonly problem: string
-}
 
 /** What the browser shows: the conversation, the socket, the draft, and the sessions. */
 export interface WebState {
@@ -82,8 +66,6 @@ export interface WebState {
   readonly run: RunStateView | undefined
   /** Every turn this session ran, folded one event at a time down to its steps and calls. */
   readonly trace: ReadonlyArray<TraceTurn>
-  /** The shell the terminal pane opened for the session on screen; undefined once it stops. */
-  readonly terminal: TerminalView | undefined
 }
 
 /** The folders a new session may start in, and the one it starts in by default. */
@@ -118,7 +100,6 @@ export const initialState: WebState = {
   turns: [],
   run: undefined,
   trace: [],
-  terminal: undefined,
 }
 
 export const withConnection = (state: WebState, connected: boolean): WebState => ({
@@ -177,29 +158,6 @@ export const withPane = (state: WebState, pane: Pane | undefined): WebState => (
 
 export const withRun = (state: WebState, run: RunStateView): WebState => ({ ...state, run })
 
-/** The shell on screen, or nothing once it stops or the page moves on. */
-export const withTerminal = (state: WebState, terminal: TerminalView | undefined): WebState => ({
-  ...state,
-  terminal,
-})
-
-/** Changes the terminal only when it is still the session the change was read for. */
-export const updateTerminal = (
-  state: WebState,
-  sessionId: string,
-  change: (view: TerminalView) => TerminalView,
-): WebState =>
-  state.terminal?.sessionId === sessionId ? { ...state, terminal: change(state.terminal) } : state
-
-/** Adds what the shell printed, keeping only the newest text the pane can show. */
-export const terminalOutput = (view: TerminalView, data: string): TerminalView => {
-  const text = view.text + data
-  return {
-    ...view,
-    text: text.length > TERMINAL_KEEP ? text.slice(text.length - TERMINAL_KEEP) : text,
-  }
-}
-
 /** The branch the workspace stands on, as the server read it when the session opened. */
 export const withBranch = (state: WebState, branch: string): WebState => ({
   ...state,
@@ -223,7 +181,6 @@ export const withBlank = (state: WebState): WebState => ({
   files: undefined,
   turns: [],
   trace: [],
-  terminal: undefined,
 })
 
 /**
@@ -247,8 +204,6 @@ export const withSession = (state: WebState, summary: SessionSummary): WebState 
     files: state.sessionId === summary.id ? state.files : undefined,
     turns: [],
     trace: [],
-    // A shell belongs to the session that opened it, not the one the page reads now.
-    terminal: state.sessionId === summary.id ? state.terminal : undefined,
   }
 }
 

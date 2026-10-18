@@ -1,11 +1,8 @@
 import { describe, expect, test } from 'vitest'
 import type { UiEvent } from '@jozo-harness/ui-protocol'
 import {
-  TERMINAL_KEEP,
   applyUiEvent,
   initialState,
-  terminalOutput,
-  updateTerminal,
   withBranch,
   withCommands,
   withConnection,
@@ -18,7 +15,6 @@ import {
   withSession,
   withSessions,
   withSettings,
-  withTerminal,
   withTheme,
   withWorkspaces,
 } from '../src/ui/state.ts'
@@ -200,30 +196,5 @@ describe('the browser state', () => {
     // None of the moves names the conversation or the trace, so both stay as they were.
     expect(state.conversation).toBe(initialState.conversation)
     expect(state.trace).toBe(initialState.trace)
-  })
-
-  test('a terminal belongs to its session, keeps the newest text, and leaves on a move', () => {
-    const view = {
-      sessionId: 'a',
-      text: '',
-      status: 'running' as const,
-      exit: undefined,
-      problem: '',
-    }
-    const started = withTerminal(withSession(initialState, a), view)
-    expect(started.terminal).toEqual(view)
-
-    // A frame tagged with another session lands nowhere.
-    const elsewhere = updateTerminal(started, 'b', () => ({ ...view, text: 'wrong' }))
-    expect(elsewhere.terminal).toBe(started.terminal)
-
-    const grown = updateTerminal(started, 'a', (current) => terminalOutput(current, 'hello\n'))
-    expect(grown.terminal?.text).toBe('hello\n')
-
-    // Only the newest text stays, so a chatty shell cannot grow the page without bound.
-    const long = terminalOutput({ ...view, text: 'x'.repeat(TERMINAL_KEEP) }, 'tail')
-    expect(long.text).toBe('x'.repeat(TERMINAL_KEEP - 4) + 'tail')
-
-    expect(withSession(started, b).terminal).toBeUndefined()
   })
 })

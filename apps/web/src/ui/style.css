@@ -952,59 +952,6 @@ body {
   word-break: break-word;
 }
 
-.terminal-meta {
-  display: flex;
-  gap: var(--s2);
-  align-items: baseline;
-  color: var(--dim);
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-}
-
-.terminal-state.running {
-  color: var(--accent);
-}
-
-.terminal-state.failed,
-.terminal-problem {
-  color: var(--warn);
-}
-
-.terminal-cwd {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.terminal-exit {
-  margin-left: auto;
-}
-
-.terminal-output {
-  min-height: 12rem;
-  max-height: 60vh;
-  margin: var(--s3) 0 0;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--code-bg);
-  overflow: auto;
-  font: var(--text-xs) / 1.55 var(--mono);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.terminal-line input {
-  width: 100%;
-  margin-top: var(--s2);
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--code-bg);
-  color: inherit;
-  font: var(--text-xs) var(--mono);
-}
-
 /* The pane hangs over the conversation before the window is wide enough for three. */
 @media (max-width: 1100px) {
   #shell {
