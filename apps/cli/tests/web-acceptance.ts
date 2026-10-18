@@ -573,6 +573,32 @@ const textIn = (client: Cdp, selector: string): Promise<unknown> =>
   client.evaluate("document.querySelector('" + selector + "')?.textContent ?? ''")
 
 /**
+ * A recent session is one line: the mark, the name, and when it last moved,
+ * with the time at the right edge. The height is the proof the row did not
+ * fold onto a second line, which reading many sessions at once needs.
+ */
+const railFaultOf = (row: ReadonlyArray<number>): string => {
+  const [height, lineOffset, rightGap] = row
+  if (height === undefined || height > 30) return 'a session row is too tall to scan'
+  if (lineOffset === undefined || Math.abs(lineOffset) > 2) {
+    return 'a session row did not fit on one line'
+  }
+  return rightGap === undefined || rightGap < 0 || rightGap > 14
+    ? 'the time is not at the right edge of the row'
+    : ''
+}
+
+const measuresTheRail = async (client: Cdp): Promise<void> => {
+  const measured = await client.evaluate(
+    "(() => [...document.querySelectorAll('#session-list button.session')].map((row) => { const box = row.getBoundingClientRect(); const name = row.querySelector('.session-name').getBoundingClientRect(); const detail = row.querySelector('.session-detail').getBoundingClientRect(); return [Math.round(box.height), Math.round(detail.top - name.top), Math.round(box.right - detail.right)] }))()",
+  )
+  const rows = measured as ReadonlyArray<ReadonlyArray<number>>
+  if (rows.length === 0) throw new Error('the rail listed no session to measure')
+  const fault = rows.map(railFaultOf).find((one) => one !== '')
+  if (fault !== undefined) throw new Error(fault + ': ' + JSON.stringify(rows))
+}
+
+/**
  * The list hangs above the chip, and the chip keeps its line beside the efforts:
  * the two boxes are the same row, so their tops differ by no more than a few
  * pixels of alignment, never by the height of a whole control.
@@ -678,6 +704,7 @@ const driveBrowser = async (url: string, profileDir: string): Promise<BrowserOut
     await checksTheAnimations(client, read)
     await switchesTheEffort(client, read)
     await asksForTheModels(client, read)
+    await measuresTheRail(client)
     await saveScreenshot(client)
     return { passed: true, answer }
   } finally {

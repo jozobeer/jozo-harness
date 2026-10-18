@@ -33,12 +33,13 @@ const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) 
       (props.entry.summary.id === props.store.state().sessionId ? ' active' : '')
     }
     type="button"
+    // The folder a row belongs to is on hover until the workspaces group the rail.
+    title={basenameOf(props.entry.summary.cwd)}
     data-session-id={props.entry.summary.id}
     onClick={() => props.store.moveTo(props.entry.summary.id)}
   >
     <span class="session-mark" />
     <span class="session-name">{titleOf(props.entry)}</span>
-    <span class="session-where">{basenameOf(props.entry.summary.cwd)}</span>
     <span class="session-detail">{props.detail}</span>
   </button>
 )
@@ -141,8 +142,8 @@ const Section = (props: { title: string; count: number; children: JSX.Element })
 const runningDetail = (entry: BoardEntry, now: number): string =>
   elapsedOf(now - entry.since) + ' · ' + String(entry.calls) + ' calls'
 
-const restDetail = (entry: BoardEntry, now: number): string =>
-  entry.status === 'closed' ? whenOf(entry.since, now) : 'done ' + whenOf(entry.since, now)
+/** The mark says how a session stands; the same cell says when it last did. */
+const restDetail = (entry: BoardEntry, now: number): string => whenOf(entry.since, now)
 
 /**
  * The cockpit: every session the store holds, sorted by what the reader has to

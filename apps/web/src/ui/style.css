@@ -337,10 +337,11 @@ body {
 
 .session {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 1px 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 8px;
+  align-items: center;
   width: 100%;
-  padding: 7px 10px;
+  padding: 4px 10px;
   border: 0;
   border-left: 2px solid transparent;
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
@@ -369,34 +370,6 @@ body {
   font-size: var(--text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.session-when {
-  grid-column: 2;
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
-}
-
-.session-where {
-  display: flex;
-  gap: var(--s2);
-  grid-column: 1 / -1;
-  overflow: hidden;
-  font-size: var(--text-xs);
-  white-space: nowrap;
-}
-
-/* A long folder name gives way before the id does. */
-.session-where > :first-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.session-where .session-id {
-  flex: none;
-  font-family: var(--mono);
-  opacity: 0.75;
 }
 
 #rail-foot {
