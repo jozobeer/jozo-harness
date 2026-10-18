@@ -12,6 +12,7 @@ import {
   type SessionFactory,
   type SessionRegistry,
 } from './sessions.ts'
+import { searchWorkspaceFiles } from './files.ts'
 import type { SettingsPort } from './settings.ts'
 import { staticResponse } from './static.ts'
 import type { WorkspacesPort } from './workspaces.ts'
@@ -98,6 +99,17 @@ const handlersOf = (
       const list = registry.commandsOf(sessionId)
       return list === undefined ? Effect.fail('the session is not open') : Effect.succeed(list)
     },
+    files: ({ sessionId, query }) =>
+      Effect.gen(function* () {
+        // The session names its own directory; the blank page has none yet, so
+        // the run's own is what the first line completes against.
+        const cwd =
+          sessionId === ''
+            ? (yield* settings.read()).cwd
+            : registry.sessionOf(sessionId)?.summary.cwd
+        if (cwd === undefined) return yield* Effect.fail('the session is not open')
+        return yield* searchWorkspaceFiles(cwd, query)
+      }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
     jobDetail: ({ sessionId, id }) => {
       const session = registry.sessionOf(sessionId)
       return session === undefined
