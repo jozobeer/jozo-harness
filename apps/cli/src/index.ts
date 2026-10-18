@@ -61,7 +61,7 @@ import {
 } from '@jozo-harness/tools-tier1'
 import { runConfig } from './config-command.ts'
 import { runContextOf } from './run-state.ts'
-import { jobDetailOf, jobsOf, stopJobOf } from './jobs.ts'
+import { jobDetailOf, jobRecorderOf, jobsOf, stopJobOf } from './jobs.ts'
 import { stopSubagentOf, subagentsOf } from './subagents.ts'
 import { sessionRootOf } from './session-list.ts'
 import { credentialSource, type SettingsSurface } from './settings.ts'
@@ -1233,8 +1233,9 @@ const buildSession = (
     // What the composer lists follows the discovery the model reads: every step
     // refreshes it, so a skill added while the session runs reaches both.
     let skillCatalog = yield* discoverSkills(skills)
-    // The background commands of this session: the tier 1 tools start them, a UI lists them.
-    const jobs = yield* makeJobs()
+    // The background commands of this session: the tier 1 tools start them, a UI lists
+    // them, and their starts and ends stay in the log for a resumed run to read.
+    const jobs = yield* makeJobs({ record: jobRecorderOf(agent.session) })
     const ui = wantsUi
       ? yield* makeUiHost({ session: agent.session, agent, hooks, commands, skills })
       : undefined

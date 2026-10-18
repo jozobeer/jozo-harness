@@ -2,7 +2,15 @@ import { describe, expect, test } from 'vitest'
 import { ToolError } from '@jozo-harness/tools'
 import type { Job, JobRead, JobsShape } from '@jozo-harness/tools-tier1'
 import { Effect } from 'effect'
-import { JOB_TAIL_LIMIT, jobDetailOf, jobsOf, stopJobOf, tailOf } from '../src/jobs.ts'
+import type { Session } from '@jozo-harness/session'
+import {
+  JOB_TAIL_LIMIT,
+  jobDetailOf,
+  jobRecorderOf,
+  jobsOf,
+  stopJobOf,
+  tailOf,
+} from '../src/jobs.ts'
 
 /** A job as the registry holds one, with only the fields a test cares about named. */
 const job = (overrides: Partial<Job> = {}): Job => ({
@@ -138,5 +146,53 @@ describe('the Run pane job list', () => {
     )
 
     expect(message).toBe('unknown job: job-9')
+  })
+})
+
+/** A session stub that only records what is appended, as the recorder needs. */
+const appendOnly = (
+  append: (type: string, data: unknown) => Effect.Effect<void, unknown>,
+): Pick<Session, 'append'> => ({ append }) as unknown as Pick<Session, 'append'>
+
+describe('recording job lifecycles into the session log', () => {
+  test('two records reach the log in order, one append at a time', async () => {
+    const seen: Array<string> = []
+    let active = 0
+    const recorder = jobRecorderOf(
+      appendOnly((type) =>
+        Effect.promise(async () => {
+          active += 1
+          expect(active).toBe(1)
+          await new Promise((resolve) => setTimeout(resolve, 5))
+          seen.push(type)
+          active -= 1
+        }),
+      ),
+    )
+
+    recorder({ type: 'started', id: 'job-1', command: 'true', startedAt: 1 })
+    recorder({ type: 'ended', id: 'job-1', endedAt: 2, status: 'exited', exitCode: 0 })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    expect(seen).toEqual(['job/started', 'job/ended'])
+  })
+
+  test('a refused append does not stop the record after it', async () => {
+    const seen: Array<string> = []
+    const recorder = jobRecorderOf(
+      appendOnly((type) =>
+        type === 'job/started'
+          ? Effect.fail(new Error('disk full'))
+          : Effect.sync(() => {
+              seen.push(type)
+            }),
+      ),
+    )
+
+    recorder({ type: 'started', id: 'job-1', command: 'true', startedAt: 1 })
+    recorder({ type: 'ended', id: 'job-1', endedAt: 2, status: 'killed' })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(seen).toEqual(['job/ended'])
   })
 })

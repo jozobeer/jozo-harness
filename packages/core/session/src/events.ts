@@ -118,6 +118,27 @@ export interface SessionEventMap {
     /** The one line a UI shows for the result, rendered by the pipeline. */
     readonly summary?: string
   }
+  'job/started': JobStartedData
+  'job/ended': JobEndedData
+}
+
+/** A background job this run registered, recorded when it started. */
+export interface JobStartedData {
+  readonly id: string
+  readonly command: string
+  readonly startedAt: number
+  /** The directory the command runs in; a promoted child keeps the one it was spawned with. */
+  readonly cwd?: string
+}
+
+/** A job that stopped, so a resumed run can tell a finished job from one it never knew. */
+export interface JobEndedData {
+  readonly id: string
+  readonly endedAt: number
+  /** Whether the command exited on its own or a caller stopped it. */
+  readonly status: 'exited' | 'killed'
+  /** The exit code of a command that exited; a killed one has none. */
+  readonly exitCode?: number
 }
 
 export type SessionEventType = keyof SessionEventMap

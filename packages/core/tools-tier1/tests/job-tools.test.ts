@@ -5,6 +5,13 @@ import { describe, expect, test } from 'vitest'
 import { jobTools, makeJobs } from '../src/index.ts'
 import { makeBashTool } from '../../tools-tier0/src/bash.ts'
 
+/** The id a job_start call returned, or the failure the test should not hide. */
+const startedIdOf = (result: { readonly value?: unknown } | undefined): string => {
+  const value = result?.value as { readonly id?: unknown } | undefined
+  if (typeof value?.id !== 'string') throw new Error('job_start returned no id')
+  return value.id
+}
+
 describe('job tools', () => {
   test('start, read, and stop a background command', async () => {
     const observed = await Effect.runPromise(
@@ -24,15 +31,19 @@ describe('job tools', () => {
             })
 
           const started = yield* call('job_start', { command: 'echo from a job' })
+          const id = startedIdOf(started)
           yield* Effect.sleep('200 millis')
-          const read = yield* call('job_output', { id: 'job-1' })
-          const killed = yield* call('job_kill', { id: 'job-1' })
+          const read = yield* call('job_output', { id })
+          const killed = yield* call('job_kill', { id })
           return { started: started?.value, read: read?.value, killed }
         }),
       ),
     )
 
-    expect(observed.started).toEqual({ id: 'job-1', command: 'echo from a job' })
+    expect(observed.started).toEqual({
+      id: expect.stringMatching(/^job-[0-9a-f]{8}$/),
+      command: 'echo from a job',
+    })
     expect(JSON.stringify(observed.read)).toContain('from a job')
     expect(observed.killed?.isError).toBe(false)
   })
@@ -75,8 +86,10 @@ describe('job tools', () => {
       ),
     )
 
-    expect(observed.id).toBe('job-1')
-    expect(JSON.stringify(observed.timedOut?.content)).toContain('still running as job job-1')
+    expect(observed.id).toMatch(/^job-[0-9a-f]{8}$/)
+    expect(JSON.stringify(observed.timedOut?.content)).toContain(
+      'still running as job ' + observed.id,
+    )
     expect(JSON.stringify(observed.read?.value)).toContain('survived')
     expect(JSON.stringify(observed.stopped?.content)).toContain('[finished]')
   })
@@ -98,10 +111,13 @@ describe('job tools', () => {
               context: { sessionId: 's1', cwd: '/tmp', callId: 'c-' + name },
             })
 
-          yield* call('job_start', { command: 'echo first && sleep 0.4 && echo second' })
+          const running = yield* call('job_start', {
+            command: 'echo first && sleep 0.4 && echo second',
+          })
+          const id = startedIdOf(running)
           yield* Effect.sleep('200 millis')
-          const first = yield* call('job_output', { id: 'job-1', wait: false })
-          const waited = yield* call('job_output', { id: 'job-1', wait: true, timeoutMs: 5_000 })
+          const first = yield* call('job_output', { id, wait: false })
+          const waited = yield* call('job_output', { id, wait: true, timeoutMs: 5_000 })
           return {
             first: JSON.stringify(first?.value),
             waited: JSON.stringify(waited?.value),
@@ -137,22 +153,24 @@ describe('job tools', () => {
             })
 
           const empty = yield* call('job_list', {})
-          yield* call('job_start', { command: 'sleep 5' })
-          yield* call('job_start', { command: 'echo done' })
+          const slow = yield* call('job_start', { command: 'sleep 5' })
+          const fast = yield* call('job_start', { command: 'echo done' })
+          const slowId = startedIdOf(slow)
+          const fastId = startedIdOf(fast)
           yield* Effect.sleep('200 millis')
           const listed = yield* call('job_list', {})
-          yield* call('job_kill', { id: 'job-1' })
-          return { empty, listed: listed?.value, content: listed?.content }
+          yield* call('job_kill', { id: slowId })
+          return { empty, listed: listed?.value, content: listed?.content, slowId, fastId }
         }),
       ),
     )
 
     expect(JSON.stringify(observed.empty?.content)).toContain('no background jobs')
     expect(observed.listed).toEqual([
-      { id: 'job-1', command: 'sleep 5', running: true },
-      { id: 'job-2', command: 'echo done', running: false },
+      { id: observed.slowId, command: 'sleep 5', running: true },
+      { id: observed.fastId, command: 'echo done', running: false },
     ])
-    expect(JSON.stringify(observed.content)).toContain('job-1 running: sleep 5')
-    expect(JSON.stringify(observed.content)).toContain('job-2 finished: echo done')
+    expect(JSON.stringify(observed.content)).toContain(observed.slowId + ' running: sleep 5')
+    expect(JSON.stringify(observed.content)).toContain(observed.fastId + ' finished: echo done')
   })
 })

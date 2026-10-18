@@ -1,4 +1,5 @@
-import type { JobsShape } from '@jozo-harness/tools-tier1'
+import type { Session } from '@jozo-harness/session'
+import type { JobRecord, JobsShape } from '@jozo-harness/tools-tier1'
 import type { JobDetailView, RunStateView } from '@jozo-harness/web'
 import { WebError } from '@jozo-harness/web'
 import { Effect } from 'effect'
@@ -41,3 +42,19 @@ export const jobDetailOf = (jobs: JobsShape, id: string): Effect.Effect<JobDetai
 /** Stops one background command; a job that already ended is not an error. */
 export const stopJobOf = (jobs: JobsShape, id: string): Effect.Effect<void, WebError> =>
   jobs.kill(id).pipe(Effect.mapError((error) => new WebError({ message: error.message })))
+
+/**
+ * Records each job's start and end into the session log. The appends are chained
+ * so two records never race for the same seq, and a failed append is dropped
+ * rather than failing the job itself.
+ */
+export const jobRecorderOf = (session: Pick<Session, 'append'>): ((record: JobRecord) => void) => {
+  let pending: Promise<unknown> = Promise.resolve()
+  return (record) => {
+    const append =
+      record.type === 'started'
+        ? session.append('job/started', record)
+        : session.append('job/ended', record)
+    pending = pending.then(() => Effect.runPromise(append)).catch(() => undefined)
+  }
+}
