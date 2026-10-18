@@ -61,6 +61,7 @@ const makeFactory = (): Fake => {
           return {
             summary: summaryOf(made),
             host: hostOf(),
+            commands: () => [],
             runState: runStateOf,
             jobOutput,
             stopJob: () => Effect.void,
@@ -90,6 +91,7 @@ const jobOutput = (): Effect.Effect<JobDetailView, WebError> =>
 const initial = (id: string): OpenSession => ({
   summary: summaryOf(id),
   host: hostOf(),
+  commands: () => [],
   runState: runStateOf,
   jobOutput,
   stopJob: () => Effect.void,

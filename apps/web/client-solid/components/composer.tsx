@@ -1,5 +1,13 @@
 import { For, Match, Show, Switch, createSignal, onCleanup, onMount } from 'solid-js'
 import { plainText } from '@jozo-harness/ui-view'
+import type { CommandView } from '../../src/shared/rpc.ts'
+import {
+  commandCandidates,
+  commandTokenAt,
+  completedCommand,
+  movedCommandIndex,
+  type CommandToken,
+} from '../../src/ui/commands.ts'
 import { renderMarkdown } from '../../src/ui/markdown.ts'
 import type { SessionStore } from '../store.ts'
 import { Button } from './ui/button.tsx'
@@ -245,9 +253,62 @@ const Model = (props: { store: SessionStore }) => {
   )
 }
 
+/** The list of commands a slash word is choosing from, above the input. */
+const Completion = (props: {
+  store: SessionStore
+  token: CommandToken
+  selected: number
+  onSelect: (index: number) => void
+  onAccept: (name: string) => void
+}) => {
+  const candidates = (): ReadonlyArray<CommandView> =>
+    commandCandidates(props.store.state().commands ?? [], props.token)
+
+  return (
+    <div
+      id="command-list"
+      class="command-list"
+      role="listbox"
+      aria-label="the commands this session answers"
+    >
+      <Show
+        when={props.store.state().commands}
+        fallback={<div class="card-hint">reading the commands…</div>}
+      >
+        <Show
+          when={candidates().length > 0}
+          fallback={<div class="card-hint">no command matches</div>}
+        >
+          <For each={candidates()}>
+            {(command, index) => (
+              <button
+                type="button"
+                role="option"
+                class="command-option"
+                data-command={command.name}
+                aria-selected={index() === props.selected}
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => props.onSelect(index())}
+                onClick={() => props.onAccept(command.name)}
+              >
+                <span class="command-name">{'/' + command.name}</span>
+                <span class="command-kind">{command.kind}</span>
+                <span class="command-summary">{command.summary}</span>
+              </button>
+            )}
+          </For>
+        </Show>
+      </Show>
+    </div>
+  )
+}
+
 /** The input, and what sits above it: waiting input and the thing to answer. */
 export const Composer = (props: { store: SessionStore }) => {
   let textarea: HTMLTextAreaElement | undefined
+  /** The slash word the popup belongs to; undefined closes it. */
+  const [token, setToken] = createSignal<CommandToken | undefined>()
+  const [selected, setSelected] = createSignal(0)
 
   onMount(() => {
     // y and n answer a pending approval, as long as the composer does not have the keys.
@@ -266,6 +327,63 @@ export const Composer = (props: { store: SessionStore }) => {
   const send = (): void => {
     props.store.submit()
     if (textarea !== undefined) grow(textarea)
+  }
+
+  const candidates = (): ReadonlyArray<CommandView> => {
+    const found = token()
+    return found === undefined ? [] : commandCandidates(props.store.state().commands ?? [], found)
+  }
+
+  /**
+   * Reads the word under the caret again. The list belongs to the session on
+   * screen, so it is read the first time a slash is typed and dropped when the
+   * page moves to another session.
+   */
+  const refresh = (node: HTMLTextAreaElement): void => {
+    const found = commandTokenAt(node.value, node.selectionStart ?? 0)
+    setToken(found)
+    setSelected(0)
+    if (found !== undefined && props.store.state().commands === undefined) props.store.askCommands()
+  }
+
+  const accept = (name: string): void => {
+    const node = textarea
+    const found = token()
+    if (node === undefined || found === undefined) return
+    const next = completedCommand(node.value, found, name)
+    props.store.setDraft(next.text)
+    node.value = next.text
+    grow(node)
+    setToken(undefined)
+    node.focus()
+    node.setSelectionRange(next.caret, next.caret)
+  }
+
+  /** Moves the selection one row, when the key is an arrow. */
+  const moveSelection = (event: KeyboardEvent): boolean => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return false
+    event.preventDefault()
+    const step = event.key === 'ArrowDown' ? 1 : -1
+    setSelected(movedCommandIndex(selected(), step, candidates().length))
+    return true
+  }
+
+  /** Closes the popup, when the key is Escape. */
+  const dismissCompletion = (event: KeyboardEvent): boolean => {
+    if (event.key !== 'Escape') return false
+    event.preventDefault()
+    setToken(undefined)
+    return true
+  }
+
+  /** Accepts the selected candidate on Tab or Enter; the line is not sent yet. */
+  const acceptCompletion = (event: KeyboardEvent): boolean => {
+    const enter = event.key === 'Enter' && !event.shiftKey
+    if (event.key !== 'Tab' && !enter) return false
+    event.preventDefault()
+    const chosen = candidates()[selected()]
+    if (chosen !== undefined) accept(chosen.name)
+    return true
   }
 
   const takeover = (): boolean =>
@@ -287,6 +405,17 @@ export const Composer = (props: { store: SessionStore }) => {
           send()
         }}
       >
+        <Show when={token()}>
+          {(found) => (
+            <Completion
+              store={props.store}
+              token={found()}
+              selected={selected()}
+              onSelect={setSelected}
+              onAccept={accept}
+            />
+          )}
+        </Show>
         <textarea
           id="input"
           rows="1"
@@ -298,8 +427,20 @@ export const Composer = (props: { store: SessionStore }) => {
           onInput={(event) => {
             props.store.setDraft(event.currentTarget.value)
             grow(event.currentTarget)
+            refresh(event.currentTarget)
           }}
+          onClick={(event) => refresh(event.currentTarget)}
+          onBlur={() => setToken(undefined)}
           onKeyDown={(event) => {
+            // An IME owns the keys while it composes: Enter confirms the conversion,
+            // it does not accept a candidate or send the line.
+            if (event.isComposing) return
+            if (
+              token() !== undefined &&
+              (moveSelection(event) || dismissCompletion(event) || acceptCompletion(event))
+            ) {
+              return
+            }
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault()
               send()

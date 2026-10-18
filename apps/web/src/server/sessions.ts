@@ -1,12 +1,14 @@
 import type { UiHost } from '@jozo-harness/ui-protocol'
 import { Effect, Exit, Scope } from 'effect'
-import type { JobDetailView, RunStateView, SessionSummary } from '../shared/rpc.ts'
+import type { CommandView, JobDetailView, RunStateView, SessionSummary } from '../shared/rpc.ts'
 import type { WebError } from './errors.ts'
 
 /** One session the server can serve: the summary a page lists, and the UI face of its core. */
 export interface OpenSession {
   readonly summary: SessionSummary
   readonly host: UiHost
+  /** What the human can type at it, as the page's composer offers. */
+  readonly commands: () => ReadonlyArray<CommandView>
   /** The goal and the schedules its log holds right now. */
   readonly runState: () => RunStateView
   /** What one background command has kept as output. */
@@ -38,6 +40,8 @@ export interface SessionRegistry {
   readonly hostOf: (id: string) => UiHost | undefined
   /** What an open session says about itself; undefined when nobody opened it. */
   readonly stateOf: (id: string) => RunStateView | undefined
+  /** What an open session can be told; undefined when nobody opened it. */
+  readonly commandsOf: (id: string) => ReadonlyArray<CommandView> | undefined
   /** The open session with this id; undefined when nobody opened it. */
   readonly sessionOf: (id: string) => OpenSession | undefined
   /** Every session open right now, the boot session first. */
@@ -84,6 +88,7 @@ export const makeSessionRegistry = (input: {
       open: openInOwnScope,
       hostOf: (id) => opened.get(id)?.host,
       stateOf: (id) => opened.get(id)?.runState(),
+      commandsOf: (id) => opened.get(id)?.commands(),
       sessionOf: (id) => opened.get(id),
       openedIds: () => [...opened.keys()],
     }

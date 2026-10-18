@@ -16,6 +16,7 @@ import {
   type WorkspacesPort,
 } from '../src/server/index.ts'
 import {
+  type CommandView,
   type JobDetailView,
   type RunStateView,
   type SessionSummary,
@@ -31,6 +32,7 @@ const writeFileDeep = async (path: string, text: string | Uint8Array): Promise<v
 interface FakeHost {
   readonly summary: SessionSummary
   readonly host: UiHost
+  readonly commandList: () => ReadonlyArray<CommandView>
   readonly runState: () => RunStateView
   readonly jobOutput: (id: string) => Effect.Effect<JobDetailView, WebError>
   readonly stopJob: (id: string) => Effect.Effect<void, WebError>
@@ -65,6 +67,10 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
     })
   return {
     summary: { id, cwd, createdAt: 1, updatedAt: 1, title: '' },
+    commandList: () => [
+      { name: 'help', summary: 'list the commands this session answers', kind: 'command' },
+      { name: 'status', summary: 'where this session stands', kind: 'command' },
+    ],
     runState: () => ({
       goal: { objective: 'ship the UI', phase: 'active', rounds: 2, maxRounds: 8 },
       schedules: [{ id: 's-1', when: 'every 60s', prompt: 'check the build', lastFiredAt: 0 }],
@@ -115,6 +121,7 @@ const makeWeb = (initialId: string): FakeWeb => {
     initial: {
       summary: first.summary,
       host: first.host,
+      commands: first.commandList,
       runState: first.runState,
       jobOutput: first.jobOutput,
       stopJob: first.stopJob,
@@ -129,6 +136,7 @@ const makeWeb = (initialId: string): FakeWeb => {
             return {
               summary: known.summary,
               host: known.host,
+              commands: known.commandList,
               runState: known.runState,
               jobOutput: known.jobOutput,
               stopJob: known.stopJob,
@@ -139,6 +147,7 @@ const makeWeb = (initialId: string): FakeWeb => {
           return {
             summary: fresh.summary,
             host: fresh.host,
+            commands: fresh.commandList,
             runState: fresh.runState,
             jobOutput: fresh.jobOutput,
             stopJob: fresh.stopJob,
@@ -228,6 +237,7 @@ const start = (
         factory: web.factory,
         settings: settings.port,
         workspaces: workspaces.port,
+        commands: web.initial.commands,
         port: 0,
         staticRoot,
         onReady: (url) => {
@@ -561,6 +571,42 @@ describe('the web transport', () => {
     })
     expect(observed.stopped).toBe(true)
     expect(observed.unknownJob).toBe('no such job')
+    expect(observed.refused).toBe('the session is not open')
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('the page asks what a session can be told, and the blank page the list the run holds', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-commands-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const settings = makeSettings()
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const wsUrl = 'ws://' + started.origin.replace(/^http:\/\//, '') + '/ui'
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const listed = yield* client.commands({ sessionId: 'a' })
+            const blank = yield* client.commands({ sessionId: '' })
+            const refused = yield* client
+              .commands({ sessionId: 'gone' })
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
+            return { listed, blank, refused }
+          }).pipe(clientLayers(wsUrl))
+          const result = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    expect(observed.listed.map((one) => one.name)).toEqual(['help', 'status'])
+    expect(observed.blank).toEqual([
+      { name: 'help', summary: 'list the commands this session answers', kind: 'command' },
+      { name: 'status', summary: 'where this session stands', kind: 'command' },
+    ])
     expect(observed.refused).toBe('the session is not open')
     await rm(root, { recursive: true, force: true })
   })

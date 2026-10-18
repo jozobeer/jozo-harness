@@ -103,6 +103,16 @@ export const UiEventsRpc = Rpc.make('events', {
   stream: true,
 })
 
+/** One thing the human can type at a session, ready for the composer's popup. */
+export const CommandViewSchema = Schema.Struct({
+  name: Schema.String,
+  summary: Schema.String,
+  /** A built-in command, or a skill the catalog offers under the same slash. */
+  kind: Schema.Literals(['command', 'skill']),
+})
+
+export type CommandView = typeof CommandViewSchema.Type
+
 /** The goal one session works toward, as its log last recorded it. */
 export const GoalViewSchema = Schema.Struct({
   objective: Schema.String,
@@ -197,6 +207,16 @@ export const JobStopRpc = Rpc.make('stopJob', {
   error: Schema.String,
 })
 
+/**
+ * What one session can be told. The empty id asks the run itself, so the first
+ * line typed on a blank page completes before any session exists.
+ */
+export const CommandsRpc = Rpc.make('commands', {
+  payload: Schema.Struct({ sessionId: Schema.String }),
+  success: Schema.Array(CommandViewSchema),
+  error: Schema.String,
+})
+
 /** The goal and the schedules of one session, as of now. */
 export const StateRpc = Rpc.make('state', {
   payload: Schema.Struct({ sessionId: Schema.String }),
@@ -233,6 +253,7 @@ export const UiRpcs = RpcGroup.make(
   SessionActionRpc,
   UiCommandRpc,
   UiEventsRpc,
+  CommandsRpc,
   StateRpc,
   JobDetailRpc,
   JobStopRpc,

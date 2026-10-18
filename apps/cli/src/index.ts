@@ -116,6 +116,7 @@ import {
   WebError,
   pageIsThere,
   serveWeb,
+  type CommandView,
   type JobDetailView,
   type OpenSession,
   type RunStateView,
@@ -851,6 +852,7 @@ const sessionFactoryOf = (
       return {
         summary: summaryOf(agent),
         host: ui,
+        commands: () => commandViewsOf(built.runtime.commands),
         runState: () => runStateOf(agent, built.runtime.jobs, built.runtime.efforts),
         jobOutput: (jobId: string) => jobDetailOf(built.runtime.jobs, jobId),
         stopJob: (jobId: string) => stopJobOf(built.runtime.jobs, jobId),
@@ -969,6 +971,11 @@ const serveWebUi = (
       return 1
     }
     const choice: RunChoice = { route }
+    // The blank page has no session to ask yet, so the run keeps one registry
+    // for itself: the very first line typed completes against the built-ins.
+    const runCommands = makeCommands()
+    yield* installBuiltinCommands(runCommands)
+    const defaultCommands = commandViewsOf(runCommands)
     // The store the rail lists from lives as long as the server it serves.
     return yield* Effect.scoped(
       Effect.gen(function* () {
@@ -978,6 +985,7 @@ const serveWebUi = (
           factory: sessionFactoryOf(options, rows, choice, effort, spillBytes, layer, listSessions),
           settings: settingsPortOf(options, { rows, effort }, choice),
           workspaces: workspacesPortOf(options, listSessions),
+          commands: () => defaultCommands,
           port: work.port,
           staticRoot,
           onReady: (url) => {
@@ -996,6 +1004,7 @@ const openSessionOf = (runtime: SessionRuntime): OpenSession | undefined => {
   return {
     summary: summaryOf(agent),
     host: ui,
+    commands: () => commandViewsOf(runtime.commands),
     runState: () => runStateOf(agent, jobs, efforts),
     jobOutput: (jobId: string) => jobDetailOf(jobs, jobId),
     stopJob: (jobId: string) => stopJobOf(jobs, jobId),
@@ -1050,6 +1059,14 @@ interface SessionRuntime {
 type BuiltSession =
   | { readonly kind: 'ready'; readonly runtime: SessionRuntime }
   | { readonly kind: 'refused'; readonly message: string }
+
+/** What the human can type at one session, as a page's composer offers it. Skills wait for their own catalog issue; these are the commands the registry holds. */
+const commandViewsOf = (commands: CommandsShape): ReadonlyArray<CommandView> =>
+  commands.list().map((command) => ({
+    name: command.name,
+    summary: command.summary,
+    kind: 'command' as const,
+  }))
 
 /** What one background command has kept as output. */
 const jobDetailOf = (jobs: JobsShape, id: string): Effect.Effect<JobDetailView, WebError> =>

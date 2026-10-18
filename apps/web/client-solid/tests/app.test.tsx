@@ -30,6 +30,7 @@ type Call =
   | { readonly kind: 'model'; readonly model: string }
   | { readonly kind: 'chooseModel'; readonly model: string }
   | { readonly kind: 'askModels' }
+  | { readonly kind: 'askCommands' }
   | { readonly kind: 'act'; readonly sessionId: string; readonly action: SessionAction }
 
 /** A store the components can be rendered against: signals in, calls out. */
@@ -60,6 +61,7 @@ const makeStore = (
     openJob: () => undefined,
     stopJob: () => undefined,
     askModels: () => calls.push({ kind: 'askModels' }),
+    askCommands: () => calls.push({ kind: 'askCommands' }),
     setModel: (model) => calls.push({ kind: 'model', model }),
     chooseModel: (model) => calls.push({ kind: 'chooseModel', model }),
     act: (sessionId, action) => calls.push({ kind: 'act', sessionId, action }),
@@ -372,6 +374,51 @@ describe('the Solid page', () => {
     const stop = container.querySelector('#cancel')
     fireEvent.click(stop as Element)
     expect(calls).toContainEqual({ kind: 'command', command: { kind: 'cancel' } })
+  })
+
+  test('a slash on the first word offers the commands, and Enter inserts the picked one', () => {
+    const { store, calls } = makeStore({
+      sessionId: 'a',
+      commands: [
+        { name: 'help', summary: 'list the commands this session answers', kind: 'command' },
+        { name: 'status', summary: 'where this session stands', kind: 'command' },
+      ],
+    })
+
+    const { container } = render(() => <Composer store={store} />)
+
+    const input = container.querySelector('#input') as HTMLTextAreaElement
+    fireEvent.input(input, { target: { value: '/st' } })
+
+    const options = [...container.querySelectorAll('#command-list button')]
+    expect(options.map((option) => option.getAttribute('data-command'))).toEqual(['status'])
+    expect(container.querySelector('#command-list')?.textContent).toContain(
+      'where this session stands',
+    )
+
+    // Enter accepts the candidate; it does not send a half-typed command.
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(calls).toContainEqual({ kind: 'draft', text: '/status ' })
+    expect(calls).not.toContainEqual({ kind: 'submit' })
+    expect(input.value).toBe('/status ')
+    expect(container.querySelector('#command-list')).toBeNull()
+
+    // The word is complete now, so the next Enter sends it.
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(calls).toContainEqual({ kind: 'submit' })
+  })
+
+  test('a slash before the list is read asks for it, and a non-command line stays quiet', () => {
+    const { store, calls } = makeStore({ sessionId: 'a' })
+    const { container } = render(() => <Composer store={store} />)
+
+    const input = container.querySelector('#input') as HTMLTextAreaElement
+    fireEvent.input(input, { target: { value: '/he' } })
+    expect(calls).toContainEqual({ kind: 'askCommands' })
+    expect(container.querySelector('#command-list')?.textContent).toContain('reading the commands')
+
+    fireEvent.input(input, { target: { value: 'hello /he' } })
+    expect(container.querySelector('#command-list')).toBeNull()
   })
 
   test('the seat offers the effort words the endpoint takes, beside the model chip', () => {

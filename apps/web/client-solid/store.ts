@@ -8,6 +8,7 @@ import {
   applyUiEvent,
   initialState,
   withBlank,
+  withCommands,
   withConnection,
   withDraft,
   withModels,
@@ -105,6 +106,7 @@ type Move = { readonly kind: 'open'; readonly id: string | undefined } | { reado
 /** What the settings pane asked the server for. */
 type PanelAsk =
   | { readonly kind: 'models' }
+  | { readonly kind: 'commands'; readonly sessionId: string }
   | { readonly kind: 'chooseModel'; readonly model: string }
   | { readonly kind: 'setModel'; readonly model: string }
   | { readonly kind: 'job'; readonly id: string }
@@ -132,6 +134,8 @@ export interface SessionStore {
   readonly openJob: (id: string) => void
   readonly stopJob: (id: string) => void
   readonly askModels: () => void
+  /** Reads what the session on screen can be told, the first time the composer offers it. */
+  readonly askCommands: () => void
   /**
    * Picks the route for this session and for the sessions opened from now on.
    * Nothing is written down, so the runs after this one keep their own choice.
@@ -452,6 +456,21 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
         yield* Effect.sync(() => update((now) => withPane(now, { kind: 'job', id, detail })))
       })
 
+    /** Renames, pins, archives, or deletes one session, and leaves a deleted one behind. */
+    const applySessionAction = (asked: {
+      readonly sessionId: string
+      readonly action: SessionAction
+    }) =>
+      Effect.gen(function* () {
+        yield* client.sessionAction({ sessionId: asked.sessionId, action: asked.action })
+        yield* relist()
+        // A deleted session cannot stay on screen; the page stands on a blank one
+        // the way it does when the reader asks for a new session.
+        if (asked.action.kind === 'delete' && state().sessionId === asked.sessionId) {
+          yield* Queue.offer(moves, { kind: 'blank' })
+        }
+      })
+
     yield* Effect.forkScoped(
       Stream.runForEach(Stream.fromQueue(panelAsks), (ask) =>
         Effect.gen(function* () {
@@ -461,14 +480,19 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
             yield* Effect.sync(() => update((now) => withModels(now, models)))
             return
           }
+          if (asked.kind === 'commands') {
+            const commands = yield* client.commands({ sessionId: asked.sessionId })
+            // A session switched while the list was on its way keeps its own list:
+            // the answer belongs to the page that asked.
+            yield* Effect.sync(() =>
+              update((now) =>
+                now.sessionId === asked.sessionId ? withCommands(now, commands) : now,
+              ),
+            )
+            return
+          }
           if (asked.kind === 'sessionAction') {
-            yield* client.sessionAction({ sessionId: asked.sessionId, action: asked.action })
-            yield* relist()
-            // A deleted session cannot stay on screen; the page stands on a blank one
-            // the way it does when the reader asks for a new session.
-            if (asked.action.kind === 'delete' && state().sessionId === asked.sessionId) {
-              yield* Queue.offer(moves, { kind: 'blank' })
-            }
+            yield* applySessionAction(asked)
             return
           }
           if (asked.kind === 'job') {
@@ -598,6 +622,8 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     },
     stopJob: (id) => Queue.offerUnsafe(panelAsks, { kind: 'stopJob', id }),
     askModels: () => Queue.offerUnsafe(panelAsks, { kind: 'models' }),
+    askCommands: () =>
+      Queue.offerUnsafe(panelAsks, { kind: 'commands', sessionId: state().sessionId }),
     chooseModel: (model) => {
       const current = state()
       // The session on screen switches with the command; the choice is the run's, so
