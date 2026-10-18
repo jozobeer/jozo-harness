@@ -425,7 +425,82 @@
  */
 @layer client {
   :root {
-    --rail-w: 340px;
+    --rail-w: 280px;
+  }
+
+  /* The rail is a column the reader sizes; the boundary between it and the page is a handle. */
+  #shell {
+    position: relative;
+  }
+
+  .rail-fold {
+    flex: none;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--dim);
+    font: inherit;
+    font-size: var(--text-sm);
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .rail-fold:hover {
+    border-color: var(--select);
+    color: var(--text);
+  }
+
+  #rail-resize {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: var(--rail-w);
+    z-index: 6;
+    width: 7px;
+    transform: translateX(-3px);
+    cursor: col-resize;
+    touch-action: none;
+  }
+
+  #rail-resize::after {
+    position: absolute;
+    inset: 0 auto 0 3px;
+    width: 1px;
+    background: transparent;
+    content: '';
+  }
+
+  #rail-resize:hover::after,
+  #rail-resize:focus-visible::after {
+    width: 2px;
+    background: var(--select);
+  }
+
+  #rail-resize:focus-visible {
+    outline: none;
+  }
+
+  body[data-rail-drag] {
+    cursor: col-resize;
+    user-select: none;
+  }
+
+  /* Folded, the rail gives the whole row to the page; the strip keeps the way back. */
+  @media (min-width: 721px) {
+    #shell[data-rail='collapsed'] {
+      grid-template-columns: 0 minmax(0, 1fr) auto;
+    }
+
+    #shell[data-rail='collapsed'] #sidebar {
+      display: none;
+    }
+  }
+
+  #shell[data-rail='collapsed'] #rail-resize {
+    display: none;
   }
 
   #session-list {
@@ -843,6 +918,12 @@
   @media (max-width: 720px) {
     .drawer-toggle {
       display: block;
+    }
+
+    /* The rail slides over the page here, so its boundary and fold have nothing to act on. */
+    .rail-fold,
+    #rail-resize {
+      display: none;
     }
 
     .drawer-toggle.waiting {
