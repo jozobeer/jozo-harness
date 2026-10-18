@@ -139,31 +139,28 @@ describe('Agents', () => {
     expect(events.status).toBe('idle')
   })
 
-  test('steer waits for a wake and is claimed with the next turn', async () => {
+  test('steer wakes the runner and its input opens a turn', async () => {
     const steered = crypto.randomUUID()
-    const turn = crypto.randomUUID()
     const seen = await withAgents(turnRunner(), () =>
       Effect.gen(function* () {
         const agents = yield* Agents
         const agent = yield* agents.create({ cwd: '/work', options: { route: 'r' } })
         yield* agent.steer(message(steered))
-        yield* Effect.yieldNow
-        const beforeWake = agent.session
-          .events()
-          .filter((event) => event.type === 'turn/start').length
-        yield* agent.followup(message(turn))
-        yield* agent.whenIdle
+        // Only the steer is queued: if it did not wake the runner, the wait times out.
+        yield* agent.whenIdle.pipe(Effect.timeout('1 second'), Effect.orDie)
         return {
-          beforeWake,
+          turns: agent.session.events().filter((event) => event.type === 'turn/start').length,
           users: agent.session
             .events()
             .flatMap((event) => (event.type === 'user/message' ? [event.data.text] : [])),
+          status: agent.status,
         }
       }),
     )
 
-    expect(seen.beforeWake).toBe(0)
-    expect(seen.users).toEqual([steered, turn])
+    expect(seen.turns).toBe(1)
+    expect(seen.users).toEqual([steered])
+    expect(seen.status).toBe('idle')
   })
 
   test('cancel interrupts a running turn and returns the agent to idle', async () => {

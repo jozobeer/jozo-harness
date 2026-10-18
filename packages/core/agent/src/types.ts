@@ -31,7 +31,7 @@ export interface AgentDriver {
   setStatus(status: AgentStatus): Effect.Effect<void>
   /** Cause of the latest `cancel`, read by the turn finalizer when it records `turn/end`. */
   readonly cancelCause: AgentCancelCause | undefined
-  /** Completes once per `followup`. A runner takes from it before starting a turn. */
+  /** Completes once per queued input. A runner takes from it before starting a turn. */
   readonly wake: Queue.Queue<void>
 }
 
@@ -58,9 +58,9 @@ export interface Agent {
   setRoute(route: string): Effect.Effect<void>
   /** Queues input for a new turn and wakes the runner. */
   followup(message: UserMessage): Effect.Effect<void, SessionError>
-  /** Queues input for the next step boundary without waking an idle agent. */
+  /** Queues input for the next step boundary and wakes the runner, so an idle agent starts a turn with it. */
   steer(message: UserMessage): Effect.Effect<void, SessionError>
-  /** Queues input for the next request without waking an idle agent. */
+  /** Queues input for the next request and wakes the runner, so an idle agent starts a turn with it. */
   inject(message: UserMessage): Effect.Effect<void, SessionError>
   cancel(cause: AgentCancelCause): Effect.Effect<void>
   readonly whenIdle: Effect.Effect<void>

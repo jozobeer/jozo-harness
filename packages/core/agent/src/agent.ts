@@ -89,6 +89,11 @@ export function makeAgent(input: MakeAgentOptions): Effect.Effect<Agent> {
       }),
     )
 
+    /**
+     * Queued input always wakes the runner: a steer or inject that lands as a turn
+     * closes has no step left to be claimed at, and nothing else would open the
+     * turn it waits for. A wake the running turn already answered costs one loop.
+     */
     const queue = (
       target: 'next-turn' | 'next-step',
       message: UserMessage,
@@ -96,6 +101,7 @@ export function makeAgent(input: MakeAgentOptions): Effect.Effect<Agent> {
       Effect.gen(function* () {
         yield* inbox.queue(target, message)
         yield* notify()
+        yield* Queue.offer(wake, void 0)
       })
 
     // A human may switch the effort or the model while the session runs, so the
@@ -123,11 +129,7 @@ export function makeAgent(input: MakeAgentOptions): Effect.Effect<Agent> {
         Effect.sync(() => {
           current = withRoute(current, next)
         }),
-      followup: (message) =>
-        Effect.gen(function* () {
-          yield* queue('next-turn', message)
-          yield* Queue.offer(wake, void 0)
-        }),
+      followup: (message) => queue('next-turn', message),
       steer: (message) => queue('next-step', message),
       inject: (message) => queue('next-step', message),
       cancel: (cause) =>
