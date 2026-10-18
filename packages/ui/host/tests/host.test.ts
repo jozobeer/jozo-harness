@@ -158,6 +158,22 @@ describe('ui host', () => {
     )
   })
 
+  test('an unknown command is answered through the log, not the model', async () => {
+    const input = makeInput()
+    await withCommands(input, (host) =>
+      Effect.gen(function* () {
+        yield* host.submit('/nope')
+        expect(input.submitted).toEqual([])
+        const events = input.session.events().filter((event) => event.type === 'command/done')
+        expect(events).toHaveLength(1)
+        const answer = (events[0]?.data ?? {}) as { name?: string; ok?: boolean; text?: string }
+        expect(answer).toMatchObject({ name: 'nope', ok: false })
+        expect(answer.text).toContain('unknown command: nope')
+        expect(answer.text).toContain('/echo')
+      }),
+    )
+  })
+
   test('a subscriber receives the log as history in order', async () => {
     const input = makeInput()
     await withHost(input, (host) =>
