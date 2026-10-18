@@ -55,6 +55,7 @@ jzh sessions                    list the sessions on disk
 jzh sessions <sessionId>        read one session back
 jzh sessions --search <text>    find sessions by what they say
 jzh --allow-preset-change         continue a session under a changed composition
+jzh --subagents                  let the model run and steer child agents
 jzh --json "task"
 jzh --tui                       terminal UI even through a pipe
 `
@@ -237,6 +238,7 @@ const commandOptions = (parsed: ParsedArgs, io: MainIo, inputs: CommandInputs): 
   ...workSelection(parsed, io),
   ...optional('resume', parsed.resume),
   ...(parsed.allowPresetChange ? { allowPresetChange: true } : {}),
+  ...(parsed.subagents ? { subagents: true } : {}),
   ...(inputs.patches.length === 0 ? {} : { patches: inputs.patches }),
   surface: inputs.surface,
   ...(parsed.dumpConfig ? { dumpConfig: true } : {}),

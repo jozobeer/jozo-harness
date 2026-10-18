@@ -203,7 +203,7 @@ jzh --patch sessions.yml "…"
 
 ## チームで分担させる
 
-`--subagents` を付けると、モデルは `team` ツールで名前つきの子（teammate）と共有の板（board）を持てる。teammate は `subagent` と同じ子 agent で、仕事を渡すのは既存の `send_message`、待つのは `wait_agent` である。
+`--subagents` を付けると、`subagent` / `workflow` / 子を操る 4 つ（`list_agents` / `send_message` / `interrupt_agent` / `wait_agent`）と `team` がモデルに渡る。モデルは `team` ツールで名前つきの子（teammate）と共有の板（board）を持てる。teammate は `subagent` と同じ子 agent で、仕事を渡すのは既存の `send_message`、待つのは `wait_agent` である。
 
 ```
 team spawn name=builder role="writes the guide"
