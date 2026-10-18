@@ -183,6 +183,16 @@ export function loadAgentsFiles(
   })
 }
 
+/**
+ * The preamble that ranks the instruction files against each other and against the
+ * prompt's own orders. It rides its own section so the byte budget of the files
+ * below stays what it was.
+ */
+export const AGENTS_MD_PRECEDENCE = [
+  'More specific instructions take precedence over broader ones.',
+  'They do not override system, developer, or direct user instructions.',
+].join('\n')
+
 /** Section text of one instruction file. */
 export const agentsMdSectionText = (file: AgentsFile): string =>
   'Instructions from ' + file.path + ':\n' + file.text.trimEnd()
@@ -235,6 +245,10 @@ export function agentsMdSections(
   const truncated: Array<TruncatedAgentsFile> = []
   let spent = 0
   let full = true
+
+  if (load.files.length > 0) {
+    sections.push({ name: 'agents-md:precedence', order, text: AGENTS_MD_PRECEDENCE })
+  }
 
   load.files.forEach((file, index) => {
     const text = agentsMdSectionText(file)

@@ -3,6 +3,7 @@ import {
   type ContentBlock,
   type LlmAdapter,
   type LlmCapabilities,
+  type LlmFailureCode,
   type LlmRequest,
   type RequestMessage,
   type StreamChunk,
@@ -54,9 +55,27 @@ const encodeMessage = (message: RequestMessage): Record<string, unknown> => {
   return { role: message.role, content: textOf(message.content) }
 }
 
+/**
+ * The wording OpenAI-compatible providers use when the input itself is too long.
+ * The status alone cannot tell this from any other rejected request, so the body
+ * is the only signal; an endpoint that words it differently stays PROVIDER.
+ */
+const CONTEXT_OVERFLOW =
+  /context[ _-]?(?:length|window)|too many tokens|input is too long|prompt is too long|reduce the length/i
+
+const codeForStatus = (status: number): LlmFailureCode => {
+  if (status === 401 || status === 403) return 'AUTH'
+  if (status === 429) return 'RATE_LIMIT'
+  if (status >= 500) return 'SERVER'
+  return 'PROVIDER'
+}
+
+/** A rejected request says whether the input itself was too long. */
+const rejectedAsTooLong = (status: number, detail: string): boolean =>
+  (status === 400 || status === 413) && CONTEXT_OVERFLOW.test(detail)
+
 const failureForStatus = (status: number, detail: string): LlmFailure => {
-  const code =
-    status === 401 || status === 403 ? 'AUTH' : status === 429 ? 'RATE_LIMIT' : 'PROVIDER'
+  const code = rejectedAsTooLong(status, detail) ? 'CONTEXT_WINDOW_EXCEEDED' : codeForStatus(status)
   return new LlmFailure({
     code,
     message: `provider returned HTTP ${status}: ${detail.slice(0, 200)}`,

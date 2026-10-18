@@ -13,7 +13,7 @@ const writeFileDeep = async (path: string, text: string | Uint8Array): Promise<v
 }
 
 /** A provider that lists `ids`, records every path it saw, and every model a chat named. */
-const serveProvider = async (ids: ReadonlyArray<string>) => {
+const serveProvider = async (ids: ReadonlyArray<string>, refusal = 500) => {
   const requested: Array<string> = []
   const seen: Array<string> = []
   const server = await startStubServer(async (request) => {
@@ -24,7 +24,7 @@ const serveProvider = async (ids: ReadonlyArray<string>) => {
       const body = (await request.json()) as { model: string }
       requested.push(body.model)
     }
-    return new Response('stub', { status: 500 })
+    return new Response('stub', { status: refusal })
   })
   return { server, requested, seen, baseUrl: server.origin + '/v1' }
 }
@@ -135,7 +135,8 @@ describe('jzh models failures', () => {
 
 describe('the model a run uses', () => {
   test('without a flag the settings file default is used', async () => {
-    const { server, requested, seen, baseUrl } = await serveProvider([])
+    // A 400 is refused without a retry, so the run ends at the provider once.
+    const { server, requested, seen, baseUrl } = await serveProvider([], 400)
     const model = 'm-' + crypto.randomUUID().slice(0, 8)
     const { tearDown, flags } = await setUp(baseUrl, 'model: x/' + model + '\n')
     const { io, err } = collect()
@@ -144,18 +145,18 @@ describe('the model a run uses', () => {
 
     await server.stop()
     await tearDown()
-    // The stub answers 500, so the run ends at the provider. Asserting what the stub saw,
+    // The stub refuses, so the run ends at the provider. Asserting what the stub saw,
     // and the reason it failed, is what says whether the run got there at all.
     expect({ code, err, seen }).toEqual({
       code: 1,
-      err: ['jzh: the turn failed: PROVIDER: provider returned HTTP 500: stub\n'],
+      err: ['jzh: the turn failed: PROVIDER: provider returned HTTP 400: stub\n'],
       seen: ['POST /v1/chat/completions'],
     })
     expect(requested).toEqual([model])
   })
 
   test('the flag wins over the settings file', async () => {
-    const { server, requested, seen, baseUrl } = await serveProvider([])
+    const { server, requested, seen, baseUrl } = await serveProvider([], 400)
     const { tearDown, flags } = await setUp(baseUrl, 'model: x/settings-model\n')
     const { io, err } = collect()
 
@@ -165,7 +166,7 @@ describe('the model a run uses', () => {
     await tearDown()
     expect({ code, err, seen }).toEqual({
       code: 1,
-      err: ['jzh: the turn failed: PROVIDER: provider returned HTTP 500: stub\n'],
+      err: ['jzh: the turn failed: PROVIDER: provider returned HTTP 400: stub\n'],
       seen: ['POST /v1/chat/completions'],
     })
     expect(requested).toEqual(['flag-model'])
