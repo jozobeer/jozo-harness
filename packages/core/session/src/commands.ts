@@ -91,8 +91,8 @@ export interface CommandsShape {
   readonly parse: (line: string) => CommandInvocation | undefined
   /**
    * Runs one line against a session. Nothing at all when the line is not a command;
-   * a registered command writes `command/run` before it works and `command/done`
-   * with its answer, so a UI can replay what the human asked for.
+   * a command writes `command/run` before it works and `command/done` with its
+   * answer, an unknown name included, so a UI can replay what the human asked for.
    */
   readonly run: (
     line: string,
@@ -131,6 +131,12 @@ const failed = (error: unknown): CommandOutcome => ({
   text: error instanceof Error ? error.message : String(error),
 })
 
+/** The answer an unregistered name gets, naming what there is to type instead. */
+const unknownCommand = (name: string, commands: ReadonlyArray<Command>): CommandOutcome => ({
+  ok: false,
+  text: 'unknown command: ' + name + '\n' + commandHelp(commands),
+})
+
 /** The command registry one session's UIs share. */
 export const makeCommands = (): CommandsShape => {
   const byName = new Map<string, Command>()
@@ -158,23 +164,19 @@ export const makeCommands = (): CommandsShape => {
       Effect.gen(function* () {
         const invocation = parseCommand(line)
         if (invocation === undefined) return undefined
-        const command = byName.get(invocation.name)
-        if (command === undefined) {
-          return {
-            ok: false,
-            text: 'unknown command: ' + invocation.name + '\n' + commandHelp([...byName.values()]),
-          }
-        }
         const commandId = 'cmd-' + String(countOf(session, 'command/run') + 1)
-        const context: CommandContext = { session, commandId, sessionId: session.id }
         yield* session.append('command/run', {
           commandId,
           name: invocation.name,
           input: invocation.input,
         })
-        const outcome = yield* command
-          .run(invocation.input, context)
-          .pipe(Effect.catchCause((cause) => Effect.succeed(failed(Cause.squash(cause)))))
+        const command = byName.get(invocation.name)
+        const context: CommandContext = { session, commandId, sessionId: session.id }
+        const outcome = yield* command === undefined
+          ? Effect.succeed(unknownCommand(invocation.name, [...byName.values()]))
+          : command
+              .run(invocation.input, context)
+              .pipe(Effect.catchCause((cause) => Effect.succeed(failed(Cause.squash(cause)))))
         yield* session.append('command/done', {
           commandId,
           name: invocation.name,

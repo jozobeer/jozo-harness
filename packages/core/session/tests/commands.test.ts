@@ -62,7 +62,7 @@ describe('the command registry', () => {
     expect(events[1]?.data).toMatchObject({ commandId: 'cmd-1', ok: true, text: 'echo: hi' })
   })
 
-  test('an unknown command answers with what there is, and records nothing', async () => {
+  test('an unknown command answers with what there is, and the refusal reaches the log', async () => {
     const { session, commands } = await Effect.runPromise(build())
 
     const outcome = await Effect.runPromise(commands.run('/nope', session))
@@ -70,7 +70,16 @@ describe('the command registry', () => {
     expect(outcome?.ok).toBe(false)
     expect(outcome?.text).toContain('unknown command: nope')
     expect(outcome?.text).toContain('/echo')
-    expect(session.events().filter((event) => event.type.startsWith('command/'))).toEqual([])
+    // A page only hears answers through the log, so the refusal is written there.
+    const events = session.events().filter((event) => event.type.startsWith('command/'))
+    expect(events.map((event) => event.type)).toEqual(['command/run', 'command/done'])
+    expect(events[0]?.data).toMatchObject({ commandId: 'cmd-1', name: 'nope', input: '' })
+    expect(events[1]?.data).toMatchObject({
+      commandId: 'cmd-1',
+      name: 'nope',
+      ok: false,
+      text: outcome?.text,
+    })
     expect(await Effect.runPromise(commands.run('not a command', session))).toBeUndefined()
   })
 
