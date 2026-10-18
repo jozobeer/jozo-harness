@@ -69,6 +69,9 @@ const makeHost = (id: string): FakeHost => {
       schedules: [{ id: 's-1', when: 'every 60s', prompt: 'check the build', lastFiredAt: 0 }],
       jobs: [{ id: 'j-1', command: 'sleep 5', running: true }],
       queued: ['one more thing'],
+      model: 'stub/model',
+      effort: 'high',
+      efforts: ['low', 'high'],
     }),
     jobOutput: (jobId) =>
       jobId === 'j-1'
@@ -84,6 +87,8 @@ const makeHost = (id: string): FakeHost => {
       approve: (callId, approved) => record({ kind: 'approve', callId, approved }),
       answer: (id2, answer) => record({ kind: 'answer', id: id2, answer }),
       cancel: () => record({ kind: 'cancel' }),
+      setEffort: (effort) => record({ kind: 'effort', effort }),
+      setModel: (model) => record({ kind: 'model', model }),
       answerApproval: () => Effect.succeed(true),
       answerAsk: () => Effect.succeed(''),
     },
@@ -169,11 +174,12 @@ const makeSettings = (): { readonly port: SettingsPort; readonly wrote: Array<st
     port: {
       read: () => Effect.succeed(settingsView),
       models: () => Effect.succeed(['stub/model', 'stub/other']),
-      setModel: (model) =>
+      setModel: (model, remember) =>
         model === ''
           ? Effect.fail(new WebError({ message: 'a model route cannot be empty' }))
           : Effect.sync(() => {
-              wrote.push(model)
+              // What the settings file keeps is the write the page asked for.
+              if (remember) wrote.push(model)
             }),
     },
   }
@@ -435,11 +441,14 @@ describe('the web transport', () => {
             const client = yield* RpcClient.make(UiRpcs)
             const view = yield* client.settings()
             const models = yield* client.models()
-            const written = yield* client.setModel({ model: 'stub/other' })
+            // The sheet's pick is the one the file keeps for the runs after this one.
+            const written = yield* client.setModel({ model: 'stub/other', remember: true })
+            // The seat's pick is the choice of this run alone, so nothing is written.
+            const chosen = yield* client.setModel({ model: 'stub/third', remember: false })
             const refused = yield* client
-              .setModel({ model: '' })
+              .setModel({ model: '', remember: true })
               .pipe(Effect.catch((message) => Effect.succeed(message)))
-            return { view, models, written, refused }
+            return { view, models, written, chosen, refused }
           }).pipe(clientLayers(wsUrl))
           const result = yield* withoutServices(useClient)
           yield* Deferred.succeed(started.stop, undefined)
@@ -451,6 +460,8 @@ describe('the web transport', () => {
     expect(observed.view).toEqual(settingsView)
     expect(observed.models).toEqual(['stub/model', 'stub/other'])
     expect(observed.written).toBe(true)
+    expect(observed.chosen).toBe(true)
+    // The route the page asked to keep is the one the file holds.
     expect(settings.wrote).toEqual(['stub/other'])
     expect(observed.refused).toBe('a model route cannot be empty')
     await rm(root, { recursive: true, force: true })

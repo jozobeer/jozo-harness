@@ -17,8 +17,8 @@ import { staticResponse } from './static.ts'
 export const UI_PATH = '/ui'
 
 export interface ServeWebOptions {
-  /** The session a page opens when it names none. */
-  readonly initial: OpenSession
+  /** The session a page opens when it names none; absent while the server holds none. */
+  readonly initial?: OpenSession
   /** Opens the rest: a page may ask for any session the store holds. */
   readonly factory: SessionFactory
   /** What the page may read and change about the run behind it. */
@@ -78,8 +78,8 @@ const handlersOf = (registry: SessionRegistry, settings: SettingsPort) =>
     },
     settings: () => settings.read().pipe(Effect.mapError((error) => error.message)),
     models: () => settings.models().pipe(Effect.mapError((error) => error.message)),
-    setModel: ({ model }) =>
-      settings.setModel(model).pipe(
+    setModel: ({ model, remember }) =>
+      settings.setModel(model, remember).pipe(
         Effect.as(true),
         Effect.mapError((error) => error.message),
       ),
@@ -129,7 +129,7 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
   Effect.scoped(
     Effect.gen(function* () {
       const registry = yield* makeSessionRegistry({
-        initial: options.initial,
+        ...(options.initial === undefined ? {} : { initial: options.initial }),
         factory: options.factory,
       })
       const { protocol, attach } = yield* makeWebProtocol

@@ -124,6 +124,8 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
           yield* options.agent.followup({ text: answer, source: 'user' })
         }),
       cancel: () => options.agent.cancel('user'),
+      setEffort: (effort) => options.agent.setEffort(effort),
+      setModel: (model) => options.agent.setRoute(model),
       // Without a request there is nothing to allow: deny rather than hang.
       answerApproval: (request) => waitFor(approvals, request.callId, false),
       answerAsk: (request) => waitFor(asks, request.id, ''),

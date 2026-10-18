@@ -18,6 +18,8 @@ const hostOf = (): UiHost => ({
   approve: () => Effect.succeed(undefined),
   answer: () => Effect.succeed(undefined),
   cancel: () => Effect.succeed(undefined),
+  setEffort: () => Effect.succeed(undefined),
+  setModel: () => Effect.succeed(undefined),
   answerApproval: () => Effect.succeed(true),
   answerAsk: () => Effect.succeed(''),
 })
@@ -57,7 +59,15 @@ const makeFactory = (): Fake => {
   }
 }
 
-const runStateOf = (): RunStateView => ({ goal: null, schedules: [], jobs: [], queued: [] })
+const runStateOf = (): RunStateView => ({
+  goal: null,
+  schedules: [],
+  jobs: [],
+  queued: [],
+  model: 'stub/model',
+  effort: '',
+  efforts: [],
+})
 
 const jobOutput = (): Effect.Effect<JobDetailView, WebError> =>
   Effect.fail(new WebError({ message: 'no such job' }))
@@ -99,6 +109,31 @@ describe('the session registry', () => {
       asked: 0,
       known: true,
     })
+  })
+
+  test('a server that started with no session serves none until one is asked for', async () => {
+    const fake = makeFactory()
+    const seen = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* makeSessionRegistry({ factory: fake.factory })
+          const before = registry.openedIds()
+          // A page names no session, so this is the ask that starts one.
+          const created = yield* registry.open(undefined)
+          return {
+            initial: registry.initial,
+            before: before.length,
+            asked: fake.asked,
+            created: created.summary.id,
+            opened: registry.openedIds(),
+          }
+        }),
+      ),
+    )
+    expect(seen.initial).toBe('')
+    expect(seen.before).toBe(0)
+    // Nothing was opened on the server's behalf; the page's ask was the first.
+    expect(seen.asked).toEqual([undefined])
   })
 
   test('a session asked for twice is opened once', async () => {

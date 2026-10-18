@@ -24,7 +24,7 @@ export interface SessionFactory {
 
 /** The sessions one server serves: the one it started with, plus any the page asks for later. */
 export interface SessionRegistry {
-  /** The session a page opens when it names none. */
+  /** The session a page opens when it names none; '' while the server holds none. */
   readonly initial: string
   readonly list: () => Effect.Effect<ReadonlyArray<SessionSummary>, WebError>
   readonly open: (id: string | undefined) => Effect.Effect<OpenSession, WebError>
@@ -40,14 +40,17 @@ export interface SessionRegistry {
 
 /**
  * Keeps one running core per session. A session opens the first time a page asks
- * for it and stays open until the server stops, so switching back is free.
+ * for it and stays open until the server stops, so switching back is free. A
+ * server may start with none: the first session is the one a page asks for.
  */
 export const makeSessionRegistry = (input: {
-  readonly initial: OpenSession
+  readonly initial?: OpenSession
   readonly factory: SessionFactory
 }): Effect.Effect<SessionRegistry, never, Scope.Scope> =>
   Effect.gen(function* () {
-    const opened = new Map<string, OpenSession>([[input.initial.summary.id, input.initial]])
+    const opened = new Map<string, OpenSession>(
+      input.initial === undefined ? [] : [[input.initial.summary.id, input.initial]],
+    )
     // The scope this registry lives in: every session it opens is closed with it.
     const own = yield* Scope.Scope
 
@@ -66,7 +69,8 @@ export const makeSessionRegistry = (input: {
       }).pipe(Effect.provideService(Scope.Scope, own))
 
     return {
-      initial: input.initial.summary.id,
+      // '' when the server holds none yet: a page then starts one itself.
+      initial: input.initial?.summary.id ?? '',
       list: input.factory.list,
       open: openInOwnScope,
       hostOf: (id) => opened.get(id)?.host,
