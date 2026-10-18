@@ -319,6 +319,104 @@ const Model = (props: { store: SessionStore }) => {
   )
 }
 
+/**
+ * The + menu at the composer's left. Every item is only the command a human
+ * would type; a word that wants input starts in the draft instead of sending a
+ * request the page would have to guess at.
+ */
+const Plus = (props: { store: SessionStore; onStart: (text: string) => void }) => {
+  const [open, setOpen] = createSignal(false)
+  let menu: HTMLDivElement | undefined
+
+  onMount(() => {
+    const onPointer = (event: MouseEvent): void => {
+      if (!open() || menu?.contains(event.target as Node) === true) return
+      setOpen(false)
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onPointer)
+    document.addEventListener('keydown', onKey)
+    onCleanup(() => {
+      document.removeEventListener('mousedown', onPointer)
+      document.removeEventListener('keydown', onKey)
+    })
+  })
+
+  const start = (text: string): void => {
+    setOpen(false)
+    props.onStart(text)
+  }
+
+  const send = (text: string): void => {
+    setOpen(false)
+    props.store.send({ kind: 'submit', text })
+  }
+
+  return (
+    <div
+      class="composer-plus"
+      ref={(node) => {
+        menu = node
+      }}
+    >
+      <button
+        id="composer-plus"
+        class="plus-button"
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open()}
+        title="commands that shape this session"
+        onClick={() => setOpen(!open())}
+      >
+        +
+      </button>
+      <Show when={open()}>
+        <div
+          id="plus-list"
+          class="plus-list"
+          role="menu"
+          aria-label="the commands this menu starts"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            data-plus-action="goal"
+            onClick={() => start('/goal ')}
+          >
+            Goal…
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            data-plus-action="compact"
+            onClick={() => send('/compact')}
+          >
+            Compact
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            data-plus-action="model"
+            onClick={() => start('/model ')}
+          >
+            Model…
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            data-plus-action="effort"
+            onClick={() => start('/effort ')}
+          >
+            Effort…
+          </button>
+        </div>
+      </Show>
+    </div>
+  )
+}
+
 /** The list of commands a slash word is choosing from, above the input. */
 const Completion = (props: {
   store: SessionStore
@@ -395,9 +493,8 @@ export const Composer = (props: { store: SessionStore }) => {
     if (textarea !== undefined) grow(textarea)
   }
 
-  /** Puts the edit command in the composer, so the objective is changed where it reads. */
-  const editGoal = (objective: string): void => {
-    const text = '/goal edit ' + objective
+  /** Puts a command in the composer, so its word is finished where it reads. */
+  const start = (text: string): void => {
     props.store.setDraft(text)
     const node = textarea
     if (node === undefined) return
@@ -406,6 +503,9 @@ export const Composer = (props: { store: SessionStore }) => {
     node.focus()
     node.setSelectionRange(text.length, text.length)
   }
+
+  /** The edit command, so the objective is changed where it reads. */
+  const editGoal = (objective: string): void => start('/goal edit ' + objective)
 
   const candidates = (): ReadonlyArray<CommandView> => {
     const found = token()
@@ -527,6 +627,7 @@ export const Composer = (props: { store: SessionStore }) => {
           }}
         />
         <div class="actions">
+          <Plus store={props.store} onStart={start} />
           <div id="seat">
             <Model store={props.store} />
             <Effort store={props.store} />

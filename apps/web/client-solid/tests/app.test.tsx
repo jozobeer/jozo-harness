@@ -440,6 +440,39 @@ describe('the Solid page', () => {
     })
   })
 
+  test('the + menu holds no rules: every item sends a command or starts one in the draft', () => {
+    const { store, calls } = makeStore({ sessionId: 'a' })
+    const { container } = render(() => <Composer store={store} />)
+
+    fireEvent.click(container.querySelector('#composer-plus') as Element)
+    const items = [...container.querySelectorAll('[data-plus-action]')]
+    expect(items.map((item) => item.getAttribute('data-plus-action'))).toEqual([
+      'goal',
+      'compact',
+      'model',
+      'effort',
+    ])
+
+    // A word that wants input moves to the composer; the rule stays in the command.
+    fireEvent.click(container.querySelector('[data-plus-action="goal"]') as Element)
+    expect(calls).toContainEqual({ kind: 'draft', text: '/goal ' })
+
+    fireEvent.click(container.querySelector('#composer-plus') as Element)
+    fireEvent.click(container.querySelector('[data-plus-action="compact"]') as Element)
+    expect(calls).toContainEqual({
+      kind: 'command',
+      command: { kind: 'submit', text: '/compact' },
+    })
+
+    fireEvent.click(container.querySelector('#composer-plus') as Element)
+    fireEvent.click(container.querySelector('[data-plus-action="model"]') as Element)
+    expect(calls).toContainEqual({ kind: 'draft', text: '/model ' })
+
+    fireEvent.click(container.querySelector('#composer-plus') as Element)
+    fireEvent.click(container.querySelector('[data-plus-action="effort"]') as Element)
+    expect(calls).toContainEqual({ kind: 'draft', text: '/effort ' })
+  })
+
   test('a slash on the first word offers the commands, and Enter inserts the picked one', () => {
     const { store, calls } = makeStore({
       sessionId: 'a',

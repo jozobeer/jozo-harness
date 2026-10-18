@@ -177,7 +177,12 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
             return
           }
           if (options.commands !== undefined) {
-            const outcome = yield* options.commands.run(text, options.session)
+            const outcome = yield* options.commands.run(text, options.session, {
+              route: () => options.agent.options.route,
+              effort: () => options.agent.options.reasoningEffort ?? '',
+              setModel: (model) => options.agent.setRoute(model),
+              setEffort: (effort) => options.agent.setEffort(effort),
+            })
             if (outcome !== undefined) return
           }
           yield* options.agent.followup({ text, source: 'user' })

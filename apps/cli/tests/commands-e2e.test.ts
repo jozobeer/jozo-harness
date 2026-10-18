@@ -116,6 +116,20 @@ describe('commands in the REPL', () => {
     expect(observed.events.filter((event) => event.type === 'turn/start')).toHaveLength(1)
   })
 
+  test('the model and effort commands switch the request that follows them', async () => {
+    const observed = await runLines(['/model stub/other', '/effort max', 'hello'])
+    const headers = observed.events.flatMap((event) =>
+      event.type === 'request/header' ? [event.data] : [],
+    )
+
+    expect(observed.code).toBe(0)
+    expect(observed.printed).toContain('model: stub/other')
+    expect(observed.printed).toContain('effort: max')
+    expect(headers.at(-1)?.provider).toBe('stub')
+    expect(headers.at(-1)?.model).toBe('other')
+    expect(headers.at(-1)?.params.reasoning_effort).toBe('max')
+  })
+
   test('a goal command records the goal the tool would and moves its phase', async () => {
     const observed = await runLines([
       '/goal ship it',

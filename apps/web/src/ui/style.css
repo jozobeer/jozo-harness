@@ -1317,6 +1317,63 @@ footer {
   color: var(--text);
 }
 
+/* The + menu hangs off the composer's left edge, above the input. */
+.composer-plus {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.plus-button {
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: var(--text-base);
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.plus-button:hover,
+.plus-button[aria-expanded='true'] {
+  border-color: var(--line);
+  color: var(--text);
+}
+
+.plus-list {
+  position: absolute;
+  bottom: calc(100% + var(--s2));
+  left: 0;
+  z-index: 5;
+  display: flex;
+  min-width: 12rem;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 35%);
+}
+
+.plus-list button {
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.plus-list button:hover {
+  background: var(--bg-hover);
+}
+
 /* The model switch hangs off the chip it belongs to, above the composer. */
 .seat-model {
   position: relative;

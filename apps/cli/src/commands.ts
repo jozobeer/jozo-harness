@@ -2,7 +2,10 @@ import { Effect } from 'effect'
 import {
   commandHelp,
   cwdOf,
+  DEFAULT_COMPACT_MAX_BYTES,
+  pruneFor,
   type CommandsShape,
+  type CompactOptions,
   type Session,
   type SessionHeader,
 } from '@jozo-harness/session'
@@ -89,6 +92,25 @@ const GOAL_PHASE_WORDS: Readonly<Record<string, GoalArgs['action']>> = {
   done: 'complete',
 }
 
+/**
+ * What a human-asked `/compact` folds with: the newest message stays (a request
+ * cannot end on nothing), and every older message over the standard price is
+ * pruned now. Summarizing a span is the loop's own call, not a command's.
+ */
+const MANUAL_COMPACT: CompactOptions = {
+  retainTokens: 0,
+  maxBytes: DEFAULT_COMPACT_MAX_BYTES,
+}
+
+/** What an effort is called in an answer: the empty word leaves it to the provider. */
+const shownEffort = (effort: string): string => (effort === '' ? 'default' : effort)
+
+/** The word an effort command writes; `default` hands the choice back to the provider. */
+const effortWord = (input: string): string => {
+  const word = input.trim()
+  return word === 'default' ? '' : word
+}
+
 /** The session's log as the goal tool writes it; a lost write is a bug, not an answer. */
 const goalLogOf = (session: Session): GoalLog => ({
   events: () => session.events(),
@@ -107,6 +129,54 @@ export const installBuiltinCommands = (commands: CommandsShape): Effect.Effect<v
       name: 'status',
       summary: 'where this session stands: model, cwd, turns, goal, schedules',
       run: (_input, context) => Effect.succeed({ ok: true, text: statusText(context.session) }),
+    })
+    yield* commands.register({
+      name: 'model',
+      summary: 'switch the route this session asks, as provider/model; alone reads it',
+      run: (input, context) =>
+        Effect.gen(function* () {
+          const control = context.control
+          const route = input.trim()
+          if (control === undefined) return { ok: false, text: 'no agent here to switch' }
+          if (route !== '') yield* control.setModel(route)
+          return { ok: true, text: 'model: ' + (route === '' ? control.route() : route) }
+        }),
+    })
+    yield* commands.register({
+      name: 'effort',
+      summary: 'switch the reasoning effort the provider is asked for; alone reads it',
+      run: (input, context) =>
+        Effect.gen(function* () {
+          const control = context.control
+          const word = input.trim()
+          const effort = effortWord(word)
+          if (control === undefined) return { ok: false, text: 'no agent here to switch' }
+          // With no word the command reads; `default` writes the empty word on purpose.
+          if (word !== '') yield* control.setEffort(effort)
+          return {
+            ok: true,
+            text: 'effort: ' + shownEffort(word === '' ? control.effort() : effort),
+          }
+        }),
+    })
+    yield* commands.register({
+      name: 'compact',
+      summary: 'fold the oversized parts of this history now',
+      run: (_input, context) =>
+        Effect.gen(function* () {
+          const prune = pruneFor(context.session.events(), MANUAL_COMPACT)
+          if (prune === undefined) return { ok: true, text: 'nothing to compact' }
+          yield* context.session.append('compaction/prune', prune).pipe(Effect.orDie)
+          return {
+            ok: true,
+            text:
+              'compacted ' +
+              String(prune.replacements.length) +
+              ' messages, ' +
+              String(prune.shadowedBytes) +
+              ' bytes freed',
+          }
+        }),
     })
     yield* commands.register({
       name: 'goal',
