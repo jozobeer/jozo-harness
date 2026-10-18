@@ -24,21 +24,12 @@ import {
   type Waiting,
 } from '../../src/ui/board.ts'
 import { basenameOf, whenOf } from '../lib.ts'
-import { pourFrom } from '../pour.ts'
 import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY, keepPaths, pathsFrom } from '../recent.ts'
 import type { BrowseAnswer, SessionStore } from '../store.ts'
 import { Button } from './ui/button.tsx'
 import { Fizz } from './ui/fizz.tsx'
 
-/** A span the way the board says it: 38s, 6m, 2h. */
-const elapsedOf = (ms: number): string => {
-  const seconds = Math.max(0, Math.floor(ms / 1000))
-  if (seconds < 60) return String(seconds) + 's'
-  const minutes = Math.floor(seconds / 60)
-  return minutes < 60 ? String(minutes) + 'm' : String(Math.floor(minutes / 60)) + 'h'
-}
-
-/** The clock the running rows read; one tick a second. */
+/** The clock the rows read; one tick a second. */
 const createNow = () => {
   const [now, setNow] = createSignal(Date.now())
   const timer = setInterval(() => setNow(Date.now()), 1000)
@@ -428,9 +419,6 @@ const Section = (props: { title: string; count: number; children: JSX.Element })
   </Show>
 )
 
-const runningDetail = (entry: BoardEntry, now: number): string =>
-  elapsedOf(now - entry.since) + ' · ' + String(entry.calls) + ' calls'
-
 /** The mark says how a session stands; the same cell says when it last did. */
 const restDetail = (entry: BoardEntry, now: number): string => whenOf(entry.since, now)
 
@@ -680,7 +668,10 @@ export const Board = (props: { store: SessionStore }) => {
   const rows = createMemo(() =>
     byKey([...board().waiting, ...board().running, ...board().rest], (entry) => entry.summary.id),
   )
-  const recent = createMemo(() => recentGroupsOf(board().rest))
+  // A running session keeps its place in Recent too: moving it to a section of
+  // its own made the rail jump on every turn.
+  const recentEntries = createMemo(() => [...board().rest, ...board().running])
+  const recent = createMemo(() => recentGroupsOf(recentEntries()))
   const folders = createMemo(() => byKey(recent(), (group) => group.cwd))
   const noMatch = (): boolean =>
     query().trim() !== '' &&
@@ -741,25 +732,7 @@ export const Board = (props: { store: SessionStore }) => {
             {(id) => <WaitingCard entry={atKey(rows(), id)} store={props.store} />}
           </For>
         </Section>
-        <Section title="Running" count={board().running.length}>
-          <For each={keysOf(board().running, (entry) => entry.summary.id)}>
-            {(id) => {
-              const entry = () => atKey(rows(), id)
-              return (
-                <div
-                  class="board-running pour rising"
-                  style={{ '--pour-from': pourFrom(entry().since, Date.now()) }}
-                >
-                  <Row entry={entry()} store={props.store} detail={runningDetail(entry(), now())} />
-                  <Show when={entry().doing !== ''}>
-                    <p class="board-doing">{entry().doing}</p>
-                  </Show>
-                </div>
-              )
-            }}
-          </For>
-        </Section>
-        <Section title="Recent" count={board().rest.length}>
+        <Section title="Recent" count={recentEntries().length}>
           <For each={keysOf(recent(), (group) => group.cwd)}>
             {(cwd) => (
               <RecentFolder

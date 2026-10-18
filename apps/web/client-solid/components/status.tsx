@@ -45,9 +45,6 @@ export const Status = (props: { store: SessionStore; drawer: boolean; onDrawer: 
       <Show when={fleet().waiting.length > 0}>
         <span class="fleet waiting">{String(fleet().waiting.length) + ' waiting on you'}</span>
       </Show>
-      <Show when={fleet().running.length > 0}>
-        <span class="fleet">{String(fleet().running.length) + ' running'}</span>
-      </Show>
     </>
   )
 }
