@@ -13,7 +13,7 @@ import {
   type WorkspacesPort,
 } from '../src/server/index.ts'
 import type { JobDetailView, RunStateView, SessionSummary } from '../src/shared/rpc.ts'
-import { createSessionStore, type SessionStore } from '../client-solid/store.ts'
+import { createSessionStore, type BrowseAnswer, type SessionStore } from '../client-solid/store.ts'
 import { draftKey } from '../src/ui/draft.ts'
 import { THEME_KEY } from '../src/ui/theme.ts'
 
@@ -259,6 +259,10 @@ interface Served {
 /** The folders a page may start in; these tests never open a new workspace. */
 const workspacesPort: WorkspacesPort = {
   list: () => Effect.succeed({ cwd: '/work', items: [{ cwd: '/work', lastUsedAt: 0 }] }),
+  browse: (path) =>
+    path === '/work/missing'
+      ? Effect.fail(new WebError({ message: 'no such directory' }))
+      : Effect.succeed({ path: path === '' ? '/work' : path, parent: '/', items: ['/work/src'] }),
   add: () => Effect.void,
 }
 
@@ -389,6 +393,27 @@ describe('the page store', () => {
           })
         }),
       ).pipe(Effect.ensuring(Effect.promise(() => rm(root, { recursive: true, force: true })))),
+    )
+  }, 15_000)
+
+  test('the Add workspace dialog reads a folder and hears why it cannot', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          const answers: Array<BrowseAnswer> = []
+          store.browseDirectories('', (answer) => answers.push(answer))
+          yield* until(() => answers.length === 1, 'read the starting folder')
+          expect(answers[0]).toEqual({
+            kind: 'listed',
+            view: { path: '/work', parent: '/', items: ['/work/src'] },
+          })
+          store.browseDirectories('/work/missing', (answer) => answers.push(answer))
+          yield* until(() => answers.length === 2, 'heard the refusal')
+          expect(answers[1]).toEqual({ kind: 'refused', message: 'no such directory' })
+        }),
+      ),
     )
   }, 15_000)
 

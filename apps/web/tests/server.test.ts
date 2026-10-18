@@ -219,6 +219,14 @@ const makeWorkspaces = (): { readonly port: WorkspacesPort; readonly added: Arra
           : Effect.sync(() => {
               added.push(cwd)
             }),
+      browse: (path) =>
+        path === '/forbidden'
+          ? Effect.fail(new WebError({ message: 'cannot read this directory' }))
+          : Effect.succeed({
+              path: path === '' ? '/work' : path,
+              parent: '/',
+              items: ['/work/other'],
+            }),
     },
   }
 }
@@ -451,7 +459,12 @@ describe('the web transport', () => {
             const refused = yield* client
               .addWorkspace({ cwd: '/missing' })
               .pipe(Effect.catch((message) => Effect.succeed(message)))
-            return { offered, made, resumed, added, refused }
+            const browsed = yield* client.browseDirectories({ path: '/work' })
+            const started = yield* client.browseDirectories({ path: '' })
+            const browseRefused = yield* client
+              .browseDirectories({ path: '/forbidden' })
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
+            return { offered, made, resumed, added, refused, browsed, started, browseRefused }
           }).pipe(clientLayers(wsUrl))
           const result = yield* withoutServices(useClient)
           yield* Deferred.succeed(started.stop, undefined)
@@ -473,6 +486,14 @@ describe('the web transport', () => {
     expect(observed.added).toBe(true)
     expect(workspaces.added).toEqual(['/elsewhere'])
     expect(observed.refused).toBe('no such directory')
+    expect(observed.browsed).toEqual({
+      path: '/work',
+      parent: '/',
+      items: ['/work/other'],
+    })
+    // A blank path is the dialog opening on the run's own folder.
+    expect(observed.started.path).toBe('/work')
+    expect(observed.browseRefused).toBe('cannot read this directory')
     await rm(root, { recursive: true, force: true })
   })
 
