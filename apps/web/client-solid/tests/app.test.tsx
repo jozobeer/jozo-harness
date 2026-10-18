@@ -846,6 +846,54 @@ describe('the Solid page', () => {
     expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'inspect', turn: 1, callId: 'c1' } })
   })
 
+  test('a running turn keeps its finished bars still between events', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(10_000)
+    try {
+      const at = (seq: number, time: number, type: string, data: unknown) => ({
+        seq,
+        time,
+        type,
+        data,
+      })
+      const { store } = makeStore({
+        trace: traceOf([
+          at(1, 1_000, 'turn/start', { turn: 1 }),
+          at(2, 2_000, 'step/start', { step: 1 }),
+          at(3, 3_000, 'tool/call', {
+            callId: 'c1',
+            name: 'bash',
+            arguments: '{}',
+            summary: 'pnpm test',
+          }),
+          at(4, 4_000, 'tool/result', {
+            callId: 'c1',
+            isError: false,
+            summary: 'exit 0',
+            content: [],
+          }),
+          at(5, 5_000, 'step/start', { step: 2 }),
+          at(6, 6_000, 'tool/call', {
+            callId: 'c2',
+            name: 'bash',
+            arguments: '{}',
+            summary: 'pnpm build',
+          }),
+        ]),
+      })
+
+      const { container } = render(() => <Waterfall store={store} />)
+      const done = container.querySelector('button.wf-row.tool.done .wf-bar') as HTMLElement
+      const before = done.getAttribute('style')
+
+      vi.advanceTimersByTime(1000)
+
+      expect(done.getAttribute('style')).toBe(before)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   test('the switch marks the reading on screen and hands over the other', () => {
     const chosen: Array<Lens> = []
     const { container } = render(() => (

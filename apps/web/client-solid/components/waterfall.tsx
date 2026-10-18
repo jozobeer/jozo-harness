@@ -1,5 +1,11 @@
 import { For, Index, Show, createMemo, createSignal, onCleanup } from 'solid-js'
-import { toolsOf, type TraceStep, type TraceTool, type TraceTurn } from '../../src/ui/trace.ts'
+import {
+  axisEndOf,
+  toolsOf,
+  type TraceStep,
+  type TraceTool,
+  type TraceTurn,
+} from '../../src/ui/trace.ts'
 import type { SessionStore } from '../store.ts'
 
 /** A span the way the axis says it: 0.3s, 38s, 4m 12s. */
@@ -39,31 +45,37 @@ const matches = (tool: TraceTool, filter: Filter): boolean =>
   (filter.text === '' || (tool.name + ' ' + tool.summary).toLowerCase().includes(filter.text))
 
 /** One model call on the axis: the time the model spent before it asked for tools. */
-const ModelRow = (props: { turn: TraceTurn; step: TraceStep; end: number }) => (
-  <div class="wf-row model">
-    <span class="wf-name">model</span>
-    <span class="wf-summary">{props.step.reasoning.split('\n')[0] ?? ''}</span>
-    <span class="wf-track">
-      <span
-        class="wf-bar"
-        style={barOf(
-          props.turn,
-          props.step.startedAt,
-          thinkingEnd(props.step, props.end),
-          props.end,
-        )}
-      />
-    </span>
-    <span class="wf-took">{spanOf(thinkingEnd(props.step, props.end) - props.step.startedAt)}</span>
-  </div>
-)
+const ModelRow = (props: {
+  turn: TraceTurn
+  step: TraceStep
+  axisEnd: number
+  liveEnd: number
+}) => {
+  const to = () => thinkingEnd(props.step, props.liveEnd)
+  return (
+    <div class="wf-row model">
+      <span class="wf-name">model</span>
+      <span class="wf-summary">{props.step.reasoning.split('\n')[0] ?? ''}</span>
+      <span class="wf-track">
+        <span class="wf-bar" style={barOf(props.turn, props.step.startedAt, to(), props.axisEnd)} />
+      </span>
+      <span class="wf-took">{spanOf(to() - props.step.startedAt)}</span>
+    </div>
+  )
+}
 
-const ToolRow = (props: { turn: TraceTurn; tool: TraceTool; end: number; store: SessionStore }) => {
+const ToolRow = (props: {
+  turn: TraceTurn
+  tool: TraceTool
+  axisEnd: number
+  liveEnd: number
+  store: SessionStore
+}) => {
   const selected = () => {
     const pane = props.store.state().pane
     return pane?.kind === 'inspect' && pane.callId === props.tool.callId
   }
-  const to = () => props.tool.endedAt ?? props.end
+  const to = () => props.tool.endedAt ?? props.liveEnd
   return (
     <button
       class={'wf-row tool ' + props.tool.status + (selected() ? ' selected' : '')}
@@ -75,7 +87,7 @@ const ToolRow = (props: { turn: TraceTurn; tool: TraceTool; end: number; store: 
       <span class="wf-name">{props.tool.name}</span>
       <span class="wf-summary">{props.tool.summary}</span>
       <span class="wf-track">
-        <span class="wf-bar" style={barOf(props.turn, props.tool.startedAt, to(), props.end)} />
+        <span class="wf-bar" style={barOf(props.turn, props.tool.startedAt, to(), props.axisEnd)} />
       </span>
       <span class="wf-took">{spanOf(to() - props.tool.startedAt)}</span>
     </button>
@@ -93,7 +105,9 @@ const shareOf = (turn: TraceTurn, end: number): string => {
 }
 
 const TurnLane = (props: { turn: TraceTurn; now: number; filter: Filter; store: SessionStore }) => {
-  const end = () => props.turn.endedAt ?? props.now
+  // The axis stops at the last event; the live end only grows the bar that runs.
+  const axisEnd = () => axisEndOf(props.turn)
+  const liveEnd = () => props.turn.endedAt ?? props.now
   const failed = () => toolsOf(props.turn).filter((tool) => tool.status === 'error').length
   return (
     <section class={'wf-turn' + (props.turn.endedAt === undefined ? ' running' : '')}>
@@ -101,13 +115,13 @@ const TurnLane = (props: { turn: TraceTurn; now: number; filter: Filter; store: 
         <span class="wf-turn-number">{'turn ' + String(props.turn.turn)}</span>
         <span class="wf-turn-prompt">{props.turn.prompt}</span>
         <span class="wf-turn-facts">
-          {spanOf(end() - props.turn.startedAt) +
+          {spanOf(liveEnd() - props.turn.startedAt) +
             ' · ' +
             String(props.turn.steps.length) +
             ' steps · ' +
             String(toolsOf(props.turn).length) +
             ' calls · ' +
-            shareOf(props.turn, end())}
+            shareOf(props.turn, liveEnd())}
         </span>
         <Show when={failed() > 0}>
           <span class="wf-turn-failed">{String(failed()) + ' failed'}</span>
@@ -117,11 +131,17 @@ const TurnLane = (props: { turn: TraceTurn; now: number; filter: Filter; store: 
         {(step) => (
           <>
             <Show when={props.filter.text === '' && !props.filter.failedOnly}>
-              <ModelRow turn={props.turn} step={step()} end={end()} />
+              <ModelRow turn={props.turn} step={step()} axisEnd={axisEnd()} liveEnd={liveEnd()} />
             </Show>
             <Index each={step().tools.filter((tool) => matches(tool, props.filter))}>
               {(tool) => (
-                <ToolRow turn={props.turn} tool={tool()} end={end()} store={props.store} />
+                <ToolRow
+                  turn={props.turn}
+                  tool={tool()}
+                  axisEnd={axisEnd()}
+                  liveEnd={liveEnd()}
+                  store={props.store}
+                />
               )}
             </Index>
           </>

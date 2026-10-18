@@ -234,3 +234,19 @@ export const traceOf = (log: ReadonlyArray<UiSessionEvent>): ReadonlyArray<Trace
 /** Every tool call of a turn, in the order the steps asked for them. */
 export const toolsOf = (turn: TraceTurn): ReadonlyArray<TraceTool> =>
   turn.steps.flatMap((step) => step.tools)
+
+/**
+ * Where a running turn's axis ends: the last moment its log records. The clock
+ * would move it every second, rescaling every finished bar on the lane; a new
+ * event moves it only when there is something new to place.
+ */
+export const axisEndOf = (turn: TraceTurn): number =>
+  turn.endedAt ??
+  Math.max(
+    turn.startedAt,
+    ...turn.steps.flatMap((step) => [
+      step.startedAt,
+      step.endedAt ?? step.startedAt,
+      ...step.tools.flatMap((tool) => [tool.startedAt, tool.endedAt ?? tool.startedAt]),
+    ]),
+  )
