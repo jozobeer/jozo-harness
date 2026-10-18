@@ -1,9 +1,10 @@
 import { fireEvent, render } from '@solidjs/testing-library'
-import { describe, expect, test } from 'vitest'
+import { beforeEach, describe, expect, test } from 'vitest'
 import { createSignal } from 'solid-js'
 import type { UiCommand } from '@jozo-harness/ui-protocol'
 import { emptyConversation } from '@jozo-harness/ui-view'
 import { initialState, withDraft, withTheme, type Pane, type WebState } from '../../src/ui/state.ts'
+import { App } from '../app.tsx'
 import { Composer } from '../components/composer.tsx'
 import { ContextPane } from '../components/context-pane.tsx'
 import { Conversation } from '../components/conversation.tsx'
@@ -14,6 +15,7 @@ import { LensSwitch } from '../components/lens-switch.tsx'
 import { lensFrom, type Lens } from '../lens.ts'
 import type { SessionStore } from '../store.ts'
 import { traceOf } from '../../src/ui/trace.ts'
+import { RAIL_COLLAPSED_KEY, RAIL_KEY, railCollapsedFrom, railWidthFrom } from '../rail.ts'
 
 /** One call a component made, in the order it made them. */
 type Call =
@@ -177,11 +179,18 @@ describe('the Solid page', () => {
   test('the rail narrows to the sessions whose title or folder says what was typed', () => {
     const { store } = makeStore({
       sessions: [
-        { id: 'aaaabbbb', cwd: '/one/work', createdAt: Date.now() - 60_000, title: 'first' },
+        {
+          id: 'aaaabbbb',
+          cwd: '/one/work',
+          createdAt: Date.now() - 60_000,
+          updatedAt: Date.now() - 60_000,
+          title: 'first',
+        },
         {
           id: 'ccccdddd',
           cwd: '/two/project-tail',
           createdAt: Date.now() - 60_000,
+          updatedAt: Date.now() - 60_000,
           title: 'second',
         },
       ],
@@ -215,7 +224,15 @@ describe('the Solid page', () => {
 
   test('the page opens the search from / or Mod+K, but not while a field has the keys', () => {
     const { store } = makeStore({
-      sessions: [{ id: 'aaaabbbb', cwd: '/one/work', createdAt: Date.now(), title: 'first' }],
+      sessions: [
+        {
+          id: 'aaaabbbb',
+          cwd: '/one/work',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          title: 'first',
+        },
+      ],
     })
 
     const { container } = render(() => <Board store={store} />)
@@ -596,5 +613,89 @@ describe('the Solid page', () => {
       'answers',
       'answers',
     ])
+  })
+})
+
+describe('the rail', () => {
+  beforeEach(() => localStorage.clear())
+
+  test('a kept width is read back inside the range the rail allows', () => {
+    expect([
+      railWidthFrom(null),
+      railWidthFrom('300'),
+      railWidthFrom('100'),
+      railWidthFrom('900'),
+      railWidthFrom('wide'),
+    ]).toEqual([280, 300, 264, 420, 280])
+    expect(railCollapsedFrom('true')).toBe(true)
+    expect([railCollapsedFrom(null), railCollapsedFrom('false')]).toEqual([false, false])
+  })
+
+  test('the rail opens at the width and fold kept from an earlier visit', () => {
+    localStorage.setItem(RAIL_KEY, '305')
+    localStorage.setItem(RAIL_COLLAPSED_KEY, 'true')
+    const { store } = makeStore()
+
+    const { container } = render(() => <App store={store} />)
+
+    const shell = container.querySelector('#shell') as HTMLElement
+    expect(shell.style.getPropertyValue('--rail-w')).toBe('305px')
+    expect(shell.getAttribute('data-rail')).toBe('collapsed')
+    expect(container.querySelector('#rail-fold')?.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  test('the header button and Mod+B fold the rail and remember it', () => {
+    const { store } = makeStore()
+
+    const { container } = render(() => <App store={store} />)
+
+    const shell = container.querySelector('#shell') as HTMLElement
+    const fold = container.querySelector('#rail-fold') as HTMLButtonElement
+    expect(shell.style.getPropertyValue('--rail-w')).toBe('280px')
+    expect(fold.getAttribute('aria-expanded')).toBe('true')
+
+    fireEvent.click(fold)
+    expect(shell.getAttribute('data-rail')).toBe('collapsed')
+    expect(fold.getAttribute('aria-expanded')).toBe('false')
+    expect(localStorage.getItem(RAIL_COLLAPSED_KEY)).toBe('true')
+
+    fireEvent.keyDown(document, { key: 'b', metaKey: true })
+    expect(shell.getAttribute('data-rail')).toBe('open')
+    expect(fold.getAttribute('aria-expanded')).toBe('true')
+    expect(localStorage.getItem(RAIL_COLLAPSED_KEY)).toBe('false')
+
+    // The shortcut leaves a field's keys alone.
+    const field = document.createElement('input')
+    document.body.append(field)
+    field.focus()
+    fireEvent.keyDown(field, { key: 'b', metaKey: true })
+    expect(shell.getAttribute('data-rail')).toBe('open')
+    field.remove()
+  })
+
+  test('dragging the boundary keeps the rail in range and remembers the width', () => {
+    const { store } = makeStore()
+
+    const { container } = render(() => <App store={store} />)
+
+    const shell = container.querySelector('#shell') as HTMLElement
+    const handle = container.querySelector('#rail-resize') as HTMLElement
+    expect(handle.getAttribute('role')).toBe('separator')
+    expect(handle.getAttribute('aria-valuenow')).toBe('280')
+
+    fireEvent.pointerDown(handle, { button: 0, clientX: 280 })
+    fireEvent.pointerMove(window, { clientX: 500 })
+    expect(handle.getAttribute('aria-valuenow')).toBe('420')
+    expect(shell.style.getPropertyValue('--rail-w')).toBe('420px')
+
+    fireEvent.pointerMove(window, { clientX: 100 })
+    expect(handle.getAttribute('aria-valuenow')).toBe('264')
+    fireEvent.pointerUp(window, { clientX: 100 })
+    expect(localStorage.getItem(RAIL_KEY)).toBe('264')
+
+    fireEvent.keyDown(handle, { key: 'ArrowRight' })
+    expect(handle.getAttribute('aria-valuenow')).toBe('272')
+    expect(shell.style.getPropertyValue('--rail-w')).toBe('272px')
+    expect(localStorage.getItem(RAIL_KEY)).toBe('272')
   })
 })
