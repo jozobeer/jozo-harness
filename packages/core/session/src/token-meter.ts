@@ -1,4 +1,4 @@
-import type { ContentBlock, RequestMessage } from '@jozo-harness/llm'
+import type { ContentBlock, LlmUsage, RequestMessage } from '@jozo-harness/llm'
 import { deriveMessagesWithSeqs } from './derive.ts'
 import type { SessionEvent } from './events.ts'
 import { lastRequestHeader } from './request-header.ts'
@@ -112,6 +112,17 @@ const surfaceBytes = (events: ReadonlyArray<SessionEvent>, imageTokens: number):
   toolsBytes(events) + foldedBytes(events, imageTokens)
 
 /**
+ * Tokens one request occupied in the window. Cache reads and writes are disjoint
+ * from `inputTokens`, but they still sat in the prompt; reasoning is already
+ * inside `outputTokens`, so it is not added again.
+ */
+const requestTokensOf = (usage: LlmUsage): number =>
+  usage.inputTokens +
+  (usage.cacheReadTokens ?? 0) +
+  (usage.cacheWriteTokens ?? 0) +
+  usage.outputTokens
+
+/**
  * The newest provider count in the log, as the tokens that one request carried.
  * Everything up to and including its answer is already inside the number.
  */
@@ -121,8 +132,7 @@ const newestUsage = (
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
     if (event?.type !== 'assistant/message' || event.data.usage === undefined) continue
-    const usage = event.data.usage
-    return { index, tokens: usage.inputTokens + usage.outputTokens }
+    return { index, tokens: requestTokensOf(event.data.usage) }
   }
   return undefined
 }

@@ -150,9 +150,10 @@ describe('statsViewOf', () => {
     expect(view.tokensPerSecond).toBe('400')
     expect(view.tokens).toBe('1.0k in · 500 cache read · 0 cache write · 200 out · 1.5k billed')
     expect(view.cache).toBe('33%')
-    expect(view.context).toBe('60% (usage)')
+    // 1,000 uncached + 500 cache read + 200 output, over a 2,000 window.
+    expect(view.context).toBe('85% (usage)')
     expect(statsLineTextOf(view)).toBe(
-      'tok/s 400 · 1.0k in · 500 cache read · 0 cache write · 200 out · 1.5k billed · cache 33% · context 60% (usage)',
+      'tok/s 400 · 1.0k in · 500 cache read · 0 cache write · 200 out · 1.5k billed · cache 33% · context 85% (usage)',
     )
   })
 
