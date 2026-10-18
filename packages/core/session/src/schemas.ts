@@ -18,6 +18,7 @@ const TurnEndReasonSchema: Schema.Schema<TurnEndReason> = Schema.Union([
     cause: Schema.Literals(['user', 'shutdown', 'parent-cancelled']),
   }),
   Schema.Struct({ kind: Schema.Literal('error'), failure: LlmFailureSchema }),
+  Schema.Struct({ kind: Schema.Literal('max-tokens') }),
 ])
 
 /**
