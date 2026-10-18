@@ -272,10 +272,25 @@
   }
 
   .tool-card .tool-summary,
-  .tool-card .tool-result {
+  .tool-card .tool-result,
+  .skill-card .skill-what,
+  .skill-card .skill-description {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .skill-card .tool-line {
+    grid-template-columns: 3.5em minmax(0, 1fr) minmax(0, 1fr) 3.5em;
+  }
+
+  .skill-card .skill-label,
+  .skill-card .skill-name {
+    color: var(--text);
+  }
+
+  .skill-card .skill-source {
+    margin-left: 6px;
   }
 
   .tool-took {
