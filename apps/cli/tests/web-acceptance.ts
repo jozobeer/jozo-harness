@@ -61,6 +61,9 @@ const longTurn = textTurn(
   Array.from({ length: 60 }, (_, index) => 'line-' + String(index + 1).padStart(2, '0')).join('\n'),
 )
 
+/** Every request the stub provider was sent, as it received them. */
+const sentParams: Array<Readonly<Record<string, unknown>>> = []
+
 const stubLlm: Plugin<{}, Llm, never> = {
   name: 'stub-llm',
   config: Schema.Struct({}),
@@ -72,17 +75,20 @@ const stubLlm: Plugin<{}, Llm, never> = {
       name: 'stub',
       capabilities: {
         toolChoice: false,
-        reasoningEffort: null,
+        // What the page offers as the effort choices, as a real endpoint declares them.
+        reasoningEffort: ['low', 'medium', 'high', 'xhigh', 'max'],
         images: 'none',
         promptCacheControl: false,
       },
-      stream: () => {
+      stream: (request) => {
+        sentParams.push(request.params as Readonly<Record<string, unknown>>)
         const scripts = [
           callBash,
           markdownTurn,
           textTurn('queued answer'),
           longTurn,
           textTurn('still here'),
+          textTurn('switched effort'),
         ]
         const script = scripts[call] ?? []
         call += 1
@@ -500,6 +506,138 @@ const readsTheSettings = async (client: Cdp, read: () => Promise<unknown>): Prom
   if (emptied === undefined) throw new Error('the pane body stayed after it was hidden')
 }
 
+/**
+ * Opening the page starts nothing: the rail stays empty until the human does
+ * something, so looking at the UI leaves the session store alone.
+ */
+const opensNothingByItself = async (client: Cdp): Promise<void> => {
+  await sleep(500)
+  const rows = await client.evaluate(sessionRows)
+  if (rows !== 0) throw new Error('the page opened a session by itself: ' + String(rows))
+  // Nothing is open, and the seat already says which model a session started now
+  // would ask, so the model can be picked before the first message.
+  const seat = await client.evaluate(
+    "(() => { const chip = document.getElementById('seat-model'); return chip === null ? 'gone' : chip.textContent })()",
+  )
+  if (seat !== 'stub/model') {
+    throw new Error('the seat had no model to start from: ' + String(seat))
+  }
+}
+
+/**
+ * Chooses another effort from the composer's seat and checks the provider was
+ * sent it: the seat is where the reader changes it, the wire is where it lands,
+ * and the model keeps the chip it had.
+ */
+const switchesTheEffort = async (client: Cdp, read: () => Promise<unknown>): Promise<void> => {
+  const model = await client.evaluate(
+    "(() => { const chip = document.getElementById('seat-model'); return chip === null ? '' : chip.textContent })()",
+  )
+  if (model !== 'stub/model') throw new Error('the model chip left the seat: ' + String(model))
+
+  const choices = await client.evaluate(
+    "(() => { const choice = document.getElementById('seat-effort'); return choice === null ? null : [...choice.options].map((option) => option.value).join(',') })()",
+  )
+  // The endpoint's words, with the provider choosing first.
+  if (choices !== ',low,medium,high,xhigh,max') {
+    throw new Error('the seat offered the wrong efforts: ' + String(choices))
+  }
+
+  await client.evaluate(
+    "(() => { const choice = document.getElementById('seat-effort'); choice.value = 'max'; choice.dispatchEvent(new Event('change', { bubbles: true })); return true })()",
+  )
+  // The core holds the switch, and the page reads it back from there.
+  const switched = await waitFor(
+    () => client.evaluate("document.getElementById('seat-effort').value"),
+    'max',
+  )
+  if (switched === undefined) {
+    throw new Error('the seat never showed the effort the page switched to')
+  }
+  await client.evaluate(type('go with max'))
+  if ((await waitFor(read, 'switched effort')) === undefined) {
+    throw new Error('the turn after the switch never answered')
+  }
+  const sent = sentParams[sentParams.length - 1]
+  if (sent?.reasoning_effort !== 'max') {
+    throw new Error('the provider was not sent the switched effort: ' + JSON.stringify(sent))
+  }
+  const kept = await client.evaluate(
+    "(() => { const chip = document.getElementById('seat-model'); return chip === null ? 'gone' : chip.textContent })()",
+  )
+  if (kept !== 'stub/model') throw new Error('the model chip left the seat: ' + String(kept))
+}
+
+/** The text inside one element, or '' when the page does not have it. */
+const textIn = (client: Cdp, selector: string): Promise<unknown> =>
+  client.evaluate("document.querySelector('" + selector + "')?.textContent ?? ''")
+
+/**
+ * The list hangs above the chip, and the chip keeps its line beside the efforts:
+ * the two boxes are the same row, so their tops differ by no more than a few
+ * pixels of alignment, never by the height of a whole control.
+ */
+const keepsTheSeatInPlace = async (client: Cdp): Promise<void> => {
+  const layout = await client.evaluate(
+    "(() => { const chip = document.getElementById('seat-model').getBoundingClientRect(); const list = document.getElementById('model-list').getBoundingClientRect(); const effort = document.getElementById('seat-effort').getBoundingClientRect(); return [list.bottom <= chip.top, effort.top - chip.top].join(',') })()",
+  )
+  if (!String(layout).startsWith('true')) {
+    throw new Error('the model list did not open above the seat: ' + String(layout))
+  }
+  if (Number(String(layout).split(',')[1]) > 8) {
+    throw new Error('the seat moved when the list opened: ' + String(layout))
+  }
+}
+
+/**
+ * This profile has no endpoint, so the list draws no row. The row the page would
+ * draw is measured where it would be drawn: a list a reader cannot read is no
+ * list, however well it is placed.
+ */
+const measuresTheModelRow = async (client: Cdp): Promise<void> => {
+  const sized = await client.evaluate(
+    "(() => { const list = document.getElementById('model-list'); const probe = document.createElement('button'); probe.className = 'model-option'; probe.textContent = 'stub/model'; list.appendChild(probe); const style = getComputedStyle(probe); const text = parseFloat(style.fontSize); const row = probe.getBoundingClientRect().height; probe.remove(); return text + ' ' + row })()",
+  )
+  const [text, row] = String(sized).split(' ').map(Number)
+  const readable = text !== undefined && text >= 13 && row !== undefined && row >= 24
+  if (!readable) throw new Error('the model rows are too small to read: ' + String(sized))
+}
+
+/** The chip pressed again: the list it opened goes away. */
+const closesTheModelList = async (client: Cdp): Promise<void> => {
+  await client.evaluate("document.getElementById('seat-model').click()")
+  const closed = await waitFor(
+    () => client.evaluate("document.getElementById('model-list') === null ? 'closed' : 'open'"),
+    'closed',
+    20,
+  )
+  if (closed === undefined) throw new Error('the model list stayed open')
+}
+
+/**
+ * Opens the model list on the composer's seat. This profile names no model
+ * endpoint, so there is nothing to fill the list with: what the reader gets is
+ * the reason, and the list closes again when the chip is pressed a second time.
+ */
+const asksForTheModels = async (client: Cdp, read: () => Promise<unknown>): Promise<void> => {
+  await client.evaluate("document.getElementById('seat-model').click()")
+  if ((await waitFor(() => textIn(client, '#model-list'), 'reading the models')) === undefined) {
+    throw new Error('the seat never opened a model list')
+  }
+  if ((await waitFor(read, 'no model list')) === undefined) {
+    throw new Error('a model list that cannot be asked for was not reported')
+  }
+  // A list nobody can fill offers no models, rather than models from nowhere.
+  const offered = await client.evaluate(
+    "document.querySelectorAll('#model-list .model-option').length",
+  )
+  if (offered !== 0)
+    throw new Error('the seat offered models no endpoint listed: ' + String(offered))
+  await keepsTheSeatInPlace(client)
+  await measuresTheModelRow(client)
+  await closesTheModelList(client)
+}
+
 const driveBrowser = async (url: string, profileDir: string): Promise<BrowserOutcome> => {
   const browser = spawn(
     [
@@ -527,6 +665,7 @@ const driveBrowser = async (url: string, profileDir: string): Promise<BrowserOut
         .join(' | ')
       throw new Error('the page never reported ready: ' + shown.slice(0, 400))
     }
+    await opensNothingByItself(client)
     const answer = await answersTheApproval(client, read)
     await keepsTheSocketWhileQuiet(client)
     await readsTheRun(read)
@@ -537,6 +676,8 @@ const driveBrowser = async (url: string, profileDir: string): Promise<BrowserOut
     await choosesATheme(client, read)
     await readsTheSettings(client, read)
     await checksTheAnimations(client, read)
+    await switchesTheEffort(client, read)
+    await asksForTheModels(client, read)
     await saveScreenshot(client)
     return { passed: true, answer }
   } finally {

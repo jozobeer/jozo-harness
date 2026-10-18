@@ -38,6 +38,40 @@ plugins:
 
 優先順は `--effort` > 設定ファイルの `effort` > 行の `effort` で、どれも無ければ provider の既定になる。値は `reasoning_effort` としてそのまま provider に渡るので、受け付ける語は provider が決める（`jzh --dump-config` が「effort in effect:」で実効値を出す）。
 
+## ブラウザ UI でセッションを始める
+
+`jzh web` を開いただけではセッションは作られない。**最初のメッセージを送ったとき**（または `New session` を押したとき）に作られ、そのセッションが使うモデルと effort は、そのとき効いている設定（`--model` / `--effort` > 設定ファイル > 行）で決まる。
+
+設定シートの `model` は「これから開くセッション」に効く。選んで `Use for new sessions` を押すと、そのあと開くセッションはそのモデルで始まり、同時に設定ファイルにも書かれるので次の run も同じモデルで始まる。すでに開いているセッションのモデルは、そのときには変わらない（下の「モデルを選ぶ」で変える）。
+
+### モデルを選ぶ（走っているセッションと、これから開くセッション）
+
+composer のモデルのチップを押すと、その endpoint が持つモデルの一覧が開く。選ぶと**そのセッションの route が変わり**、同時に**この run でこれから開くセッションもその route で始まる**。効くのは次のリクエストから（turn の途中なら次の step、待っていれば次の turn）。いま効いているモデルには印が付く。
+
+セッションをまだ開いていなければ、チップは「いま始めるとしたら使う route」を出す。最初のメッセージを送る前（や `New session` の前）に選んでおけば、そのセッションはそのモデルで始まる。
+
+一覧は provider の `GET /models` を叩くので、**チップを押したときだけ**読む。profile にモデル一覧を返す endpoint が無ければ、選ぶ代わりに理由がページに出る。返るのは `provider/model` の形で、provider は llm の行の `baseUrl` から決まる（知っている provider ならその route、知らなければ host 名）。
+
+席の選択はこの run の中だけのもので、**設定ファイルには書かない**。次の run に持ち越す値は設定ファイルの `model` なので、`jzh config set model <provider/model>` か、設定シートの `Use for new sessions` で書く（その選択はこの run の選択でもあるので、設定シートの `model` の行は席の選択をそのまま映す）。
+
+### 走っているセッションの effort を切り替える
+
+ブラウザ UI（`jzh web`）の composer には、モデルの隣に effort の選択がある。選ぶとそのセッションの effort が変わり、効くのは**次のリクエスト**から（turn の途中なら次の step、待っていれば次の turn）。`default` は「provider に任せる」に戻す。選択肢に無い語が効いているとき（`--effort max` など）は、その語も選択肢に並ぶ。
+
+並ぶ語は endpoint が受ける語なので、llm の行が決める。書かなければ `low` / `medium` / `high` / `xhigh` / `max` で、空配列にすると選択肢を出さない。
+
+```yaml
+plugins:
+  - id: llm
+    name: '@jozo-harness/llm-openai'
+    config:
+      baseUrl: https://ollama.com/v1
+      apiKeyEnv: OLLAMA_API_KEY
+      reasoningEfforts: [low, medium, high, xhigh, max]
+```
+
+切り替えはそのセッションが開いている間だけ効き、**これから開くセッションには持ち越さない**（新しいセッションは run の解決から始まる）。次の run に持ち越す値は設定ファイルの `effort` なので、`jzh config set effort <level>` で書く。
+
 ## 設定ファイルを雛形から始める
 
 ```sh

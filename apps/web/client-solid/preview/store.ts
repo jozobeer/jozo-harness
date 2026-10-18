@@ -22,6 +22,13 @@ const SETTINGS: SettingsView = {
   sessionRoot: '/Users/dev/.jzh/sessions',
 }
 
+/** The models the preview's seat offers, as a provider's list would. */
+const MODELS: ReadonlyArray<string> = [
+  'ollama-cloud/qwen3-coder:480b',
+  'ollama-cloud/glm-5.3',
+  'ollama-cloud/gemma4:31b',
+]
+
 const RUN: RunStateView = {
   goal: {
     objective: '再接続しても turn を一度だけ数える',
@@ -34,6 +41,9 @@ const RUN: RunStateView = {
   ],
   jobs: [{ id: 'j1a2b3c4d5', command: 'pnpm vitest --watch apps/web', running: true }],
   queued: [],
+  model: 'ollama-cloud/qwen3-coder:480b',
+  effort: 'high',
+  efforts: ['low', 'high'],
 }
 
 const replay = (state: WebState, events: ReadonlyArray<UiEvent>): WebState =>
@@ -62,14 +72,18 @@ const answered = (session: FixtureSession, command: UiCommand): ReadonlyArray<Ui
  */
 export const createPreviewStore = (now = Date.now()): SessionStore => {
   const sessions = [...fixtureSessions(now)]
+  // The model and the effort the preview's seat switches, so the chip answers like the real one.
+  let model = RUN.model
+  let effort = RUN.effort
+  const runNow = (): RunStateView => ({ ...RUN, model, effort })
   const open = (id: string | undefined, base: WebState): WebState => {
     const session = sessions.find((item) => item.summary.id === id) ?? sessions[0]
     if (session === undefined) return base
-    return { ...replay(withSession(base, session.summary), session.events), run: RUN }
+    return { ...replay(withSession(base, session.summary), session.events), run: runNow() }
   }
   const first: WebState = {
     ...withSessions(
-      { ...initialState, connected: true, settings: SETTINGS },
+      { ...initialState, connected: true, settings: SETTINGS, models: MODELS },
       sessions.map((s) => s.summary),
     ),
   }
@@ -84,10 +98,14 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
     const index = sessions.findIndex((item) => item.summary.id === id)
     const session = sessions[index]
     if (session === undefined) return
+    if (command.kind === 'effort') effort = command.effort
+    if (command.kind === 'model') model = command.model
     const more = answered(session, command)
     sessions[index] = { ...session, events: [...session.events, ...more] }
     setWatched(follow())
-    if (id === state().sessionId) setState((now) => replay(now, more))
+    if (id === state().sessionId) {
+      setState((now) => ({ ...replay(now, more), run: runNow() }))
+    }
   }
   return {
     state,
@@ -104,6 +122,12 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
     openJob: () => undefined,
     stopJob: () => undefined,
     askModels: () => undefined,
+    // The preview has one session at a time, so the pick is both the switch and
+    // the choice the ones opened after it would start from.
+    chooseModel: (picked) => {
+      model = picked
+      setState((now) => ({ ...now, run: runNow() }))
+    },
     setModel: () => undefined,
   }
 }

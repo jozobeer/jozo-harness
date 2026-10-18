@@ -256,4 +256,56 @@ describe('Agents', () => {
     expect(result.listed).toBe(0)
     expect(order).toEqual([])
   })
+
+  test('the effort of a session can be switched, and switched off again', async () => {
+    const seen = await withAgents(turnRunner(), () =>
+      Effect.gen(function* () {
+        const agents = yield* Agents
+        const agent = yield* agents.create({
+          cwd: '/work',
+          options: { route: 'r', reasoningEffort: 'low' },
+        })
+        const started = agent.options.reasoningEffort
+        yield* agent.setEffort('high')
+        const switched = agent.options.reasoningEffort
+        yield* agent.setEffort('')
+        return {
+          started,
+          switched,
+          cleared: agent.options.reasoningEffort,
+          // The switch changes the effort and leaves the rest of the options as they were.
+          route: agent.options.route,
+        }
+      }),
+    )
+
+    expect(seen.started).toBe('low')
+    expect(seen.switched).toBe('high')
+    expect(seen.cleared).toBeUndefined()
+    expect(seen.route).toBe('r')
+  })
+
+  test('the route of a session can be switched on its own', async () => {
+    const seen = await withAgents(turnRunner(), () =>
+      Effect.gen(function* () {
+        const agents = yield* Agents
+        const agent = yield* agents.create({
+          cwd: '/work',
+          options: { route: 'stub/model', reasoningEffort: 'low' },
+        })
+        const started = agent.options.route
+        yield* agent.setRoute('stub/other')
+        return {
+          started,
+          switched: agent.options.route,
+          // The switch changes the route and leaves the rest of the options as they were.
+          effort: agent.options.reasoningEffort,
+        }
+      }),
+    )
+
+    expect(seen.started).toBe('stub/model')
+    expect(seen.switched).toBe('stub/other')
+    expect(seen.effort).toBe('low')
+  })
 })

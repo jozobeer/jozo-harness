@@ -77,6 +77,12 @@ export const RunStateViewSchema = Schema.Struct({
   jobs: Schema.Array(JobViewSchema),
   /** What the human typed while a turn was running; it becomes the next turn. */
   queued: Schema.Array(Schema.String),
+  /** The route this session asks now, `provider/model`, as the next request will. */
+  model: Schema.String,
+  /** The effort this session asks the provider for now; '' leaves the choice to the provider. */
+  effort: Schema.String,
+  /** The effort words the provider takes, as a page offers them; empty declares none. */
+  efforts: Schema.Array(Schema.String),
 })
 
 export type RunStateView = typeof RunStateViewSchema.Type
@@ -135,9 +141,12 @@ export const ModelsRpc = Rpc.make('models', {
   error: Schema.String,
 })
 
-/** Writes the model into the settings file; the next run reads it there. */
+/**
+ * The route the sessions this run opens from now on start from. `remember` also
+ * writes it into the settings file, so the runs after this one read it there.
+ */
 export const SetModelRpc = Rpc.make('setModel', {
-  payload: Schema.Struct({ model: Schema.String }),
+  payload: Schema.Struct({ model: Schema.String, remember: Schema.Boolean }),
   success: Schema.Boolean,
   error: Schema.String,
 })

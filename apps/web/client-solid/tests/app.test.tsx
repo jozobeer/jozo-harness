@@ -23,6 +23,9 @@ type Call =
   | { readonly kind: 'pane'; readonly pane: Pane | undefined }
   | { readonly kind: 'command'; readonly command: UiCommand }
   | { readonly kind: 'sendTo'; readonly sessionId: string; readonly command: UiCommand }
+  | { readonly kind: 'model'; readonly model: string }
+  | { readonly kind: 'chooseModel'; readonly model: string }
+  | { readonly kind: 'askModels' }
 
 /** A store the components can be rendered against: signals in, calls out. */
 const makeStore = (
@@ -51,8 +54,9 @@ const makeStore = (
     showPane: (pane) => calls.push({ kind: 'pane', pane }),
     openJob: () => undefined,
     stopJob: () => undefined,
-    askModels: () => undefined,
-    setModel: () => undefined,
+    askModels: () => calls.push({ kind: 'askModels' }),
+    setModel: (model) => calls.push({ kind: 'model', model }),
+    chooseModel: (model) => calls.push({ kind: 'chooseModel', model }),
   }
   return { store, calls, setState: update }
 }
@@ -186,6 +190,161 @@ describe('the Solid page', () => {
     expect(calls).toContainEqual({ kind: 'command', command: { kind: 'cancel' } })
   })
 
+  test('the seat offers the effort words the endpoint takes, beside the model chip', () => {
+    const { store, calls } = makeStore({
+      sessionId: 'a',
+      info: { cwd: '/work', model: 'stub/model', turns: 1 },
+      run: {
+        goal: null,
+        schedules: [],
+        jobs: [],
+        queued: [],
+        model: 'stub/model',
+        effort: 'low',
+        efforts: ['low', 'high'],
+      },
+    })
+
+    const { container } = render(() => <Composer store={store} />)
+
+    // The model chip is where it was, saying what this run uses.
+    expect(container.querySelector('#seat-model')?.textContent).toBe('stub/model')
+
+    const choice = container.querySelector('#seat-effort') as HTMLSelectElement
+    // The provider choosing is one of the choices, and the endpoint's words are the rest.
+    expect([...choice.options].map((option) => option.value)).toEqual(['', 'low', 'high'])
+    expect(choice.value).toBe('low')
+
+    fireEvent.change(choice, { target: { value: 'high' } })
+    expect(calls).toContainEqual({ kind: 'command', command: { kind: 'effort', effort: 'high' } })
+
+    fireEvent.change(choice, { target: { value: '' } })
+    expect(calls).toContainEqual({ kind: 'command', command: { kind: 'effort', effort: '' } })
+  })
+
+  test('an effort the endpoint does not name still shows, so the seat never lies', () => {
+    const { store } = makeStore({
+      run: {
+        goal: null,
+        schedules: [],
+        jobs: [],
+        queued: [],
+        model: 'stub/model',
+        effort: 'max',
+        efforts: ['low', 'high'],
+      },
+    })
+
+    const { container } = render(() => <Composer store={store} />)
+
+    const choice = container.querySelector('#seat-effort') as HTMLSelectElement
+    expect([...choice.options].map((option) => option.value)).toEqual(['', 'low', 'high', 'max'])
+    expect(choice.value).toBe('max')
+  })
+
+  test('the seat lists the models the provider offers and switches this session to the picked one', () => {
+    const { store, calls } = makeStore({
+      sessionId: 'a',
+      info: { cwd: '/work', model: '', turns: 1 },
+      run: {
+        goal: null,
+        schedules: [],
+        jobs: [],
+        queued: [],
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+      },
+      models: ['stub/model', 'stub/other'],
+    })
+
+    const { container } = render(() => <Composer store={store} />)
+
+    // The chip says what this session asks now, which is the run state's word.
+    expect(container.querySelector('#seat-model')?.textContent).toBe('stub/model')
+    expect(container.querySelector('#model-list')).toBeNull()
+
+    fireEvent.click(container.querySelector('#seat-model') as Element)
+
+    const options = [...container.querySelectorAll('#model-list button')]
+    expect(options.map((option) => option.textContent)).toEqual(['stub/model', 'stub/other'])
+    // The one in effect is marked, so the list reads as a choice rather than a menu.
+    expect(options[0]?.getAttribute('aria-current')).toBe('true')
+
+    fireEvent.click(options[1] as Element)
+
+    expect(calls).toContainEqual({ kind: 'chooseModel', model: 'stub/other' })
+    // The pick closes the list; what it did shows in the chip once the core says so.
+    expect(container.querySelector('#model-list')).toBeNull()
+  })
+
+  test('a seat with no session yet offers the route the next one starts from', () => {
+    const { store, calls } = makeStore({
+      sessionId: '',
+      settings: {
+        model: 'stub/model',
+        effort: '',
+        settingsPath: '/work/settings.yml',
+        cwd: '/work',
+        sessionRoot: '/work/sessions',
+      },
+      models: ['stub/model', 'stub/other'],
+    })
+
+    const { container } = render(() => <Composer store={store} />)
+
+    // Nothing is open, so the chip says what a session opened now would ask.
+    expect(container.querySelector('#seat-model')?.textContent).toBe('stub/model')
+
+    fireEvent.click(container.querySelector('#seat-model') as Element)
+    const options = [...container.querySelectorAll('#model-list button')]
+    // The choice is the one the sessions opened from now on start from, not a switch
+    // of a session that is not there.
+    expect(container.querySelector('#model-list .card-hint')?.textContent).toContain(
+      'the next session starts from it',
+    )
+
+    fireEvent.click(options[1] as Element)
+    expect(calls).toContainEqual({ kind: 'chooseModel', model: 'stub/other' })
+  })
+
+  test('a seat whose models were never read asks for them when the list is opened', () => {
+    const { store, calls } = makeStore({
+      sessionId: 'a',
+      info: { cwd: '/work', model: 'stub/model', turns: 0 },
+    })
+
+    const { container } = render(() => <Composer store={store} />)
+
+    fireEvent.click(container.querySelector('#seat-model') as Element)
+
+    // The list is the provider's, so it is asked for when the reader wants it.
+    expect(calls).toContainEqual({ kind: 'askModels' })
+    expect(container.querySelector('#model-list')?.textContent).toContain('reading the models')
+  })
+
+  test('the pane says what a picked model is for, and hands the pick to the store', () => {
+    const { store, calls } = makeStore({
+      pane: { kind: 'settings' },
+      settings: {
+        model: 'stub/model',
+        effort: '',
+        settingsPath: '/work/settings.yml',
+        cwd: '/work',
+        sessionRoot: '/work/sessions',
+      },
+      models: ['stub/model', 'stub/other'],
+    })
+
+    const { container } = render(() => <ContextPane store={store} />)
+
+    const choice = container.querySelector('#model-choice') as HTMLSelectElement
+    choice.value = 'stub/other'
+    fireEvent.click(container.querySelector('#use-model') as Element)
+
+    expect(calls).toContainEqual({ kind: 'model', model: 'stub/other' })
+  })
+
   test('the pane reads the run state and hands a tab click to the store', () => {
     const { store, calls } = makeStore({
       pane: { kind: 'run' },
@@ -194,6 +353,9 @@ describe('the Solid page', () => {
         schedules: [],
         jobs: [],
         queued: [],
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
       },
     })
 
