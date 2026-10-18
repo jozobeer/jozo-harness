@@ -115,6 +115,31 @@ describe('openAiAdapter', () => {
     expect(error.code).toBe('AUTH')
   })
 
+  test('a context-length rejection becomes a CONTEXT_WINDOW_EXCEEDED LlmFailure', async () => {
+    const error = await Effect.runPromise(
+      Effect.flip(
+        collect(
+          new Response(
+            '{"error":{"message":"This model\'s maximum context length is 131072 tokens. Your request was 140000 tokens."}}',
+            { status: 400 },
+          ),
+        ),
+      ),
+    )
+    expect(error.code).toBe('CONTEXT_WINDOW_EXCEEDED')
+  })
+
+  test('a server error becomes a SERVER LlmFailure, and other rejections stay PROVIDER', async () => {
+    const server = await Effect.runPromise(
+      Effect.flip(collect(new Response('overloaded', { status: 503 }))),
+    )
+    const refused = await Effect.runPromise(
+      Effect.flip(collect(new Response('bad argument', { status: 400 }))),
+    )
+    expect(server.code).toBe('SERVER')
+    expect(refused.code).toBe('PROVIDER')
+  })
+
   test('a rejected fetch becomes a TRANSPORT LlmFailure', async () => {
     const failing = openAiAdapter({
       baseUrl: 'https://example.test/v1',
@@ -129,6 +154,43 @@ describe('openAiAdapter', () => {
     })
     const error = await Effect.runPromise(Effect.flip(Stream.runCollect(failing.stream(request))))
     expect(error.code).toBe('TRANSPORT')
+  })
+
+  test('refuses an image block when the route declares it carries none', async () => {
+    let fetched = 0
+    const streaming = openAiAdapter({
+      baseUrl: 'https://example.test/v1',
+      apiKey: () => 'key',
+      capabilities: {
+        toolChoice: false,
+        reasoningEffort: null,
+        images: 'none',
+        promptCacheControl: false,
+      },
+      fetch: (() => {
+        fetched += 1
+        return Promise.resolve(new Response(''))
+      }) as unknown as typeof fetch,
+    })
+    const withImage: LlmRequest = {
+      ...request,
+      messages: [
+        {
+          role: 'tool',
+          toolCallId: 'c1',
+          content: [{ type: 'image', mediaType: 'image/png', data: 'AA==' }],
+        },
+      ],
+    }
+
+    const error = await Effect.runPromise(
+      Effect.flip(Stream.runCollect(streaming.stream(withImage))),
+    )
+
+    expect(error).toBeInstanceOf(LlmFailure)
+    expect(error.code).toBe('INVALID_REQUEST')
+    expect(error.message).toContain('cannot carry images')
+    expect(fetched).toBe(0)
   })
 
   test('a body that cannot be read fails as a transport error', async () => {

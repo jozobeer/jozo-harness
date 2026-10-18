@@ -12,12 +12,12 @@ import {
   type GoalState,
 } from './goal-state.ts'
 
-const ACTIONS = ['create', 'edit', 'pause', 'resume', 'complete', 'blocked'] as const
+const ACTIONS = ['read', 'create', 'edit', 'pause', 'resume', 'complete', 'blocked'] as const
 
 const Parameters = Schema.Struct({
   action: Schema.Literals(ACTIONS).annotate({
     description:
-      'create starts a new goal; edit changes its words; pause, resume, complete, and blocked move its phase.',
+      'read reports the current goal; create starts a new goal; edit changes its words; pause, resume, complete, and blocked move its phase.',
   }),
   objective: Schema.optionalKey(
     Schema.String.annotate({
@@ -43,6 +43,7 @@ export interface GoalValue {
   readonly action: string
   readonly objective: string
   readonly phase: GoalPhase
+  readonly rounds: number
   readonly maxGoalRounds: number
   readonly note?: string
   readonly blockedReason?: string
@@ -56,22 +57,34 @@ export interface GoalLog {
   readonly append: (state: GoalState) => Effect.Effect<void, ToolError>
 }
 
-const valueOf = (action: string, state: GoalState): GoalValue => ({
+const valueOf = (action: string, state: GoalState, rounds: number): GoalValue => ({
   action,
   objective: state.objective,
   phase: state.phase,
+  rounds,
   maxGoalRounds: state.maxGoalRounds,
   ...(state.note === undefined ? {} : { note: state.note }),
   ...(state.blockedReason === undefined ? {} : { blockedReason: state.blockedReason }),
 })
 
 const record = (action: string, state: GoalState, log: GoalLog) =>
-  log.append(state).pipe(Effect.map(() => valueOf(action, state)))
+  log.append(state).pipe(Effect.map(() => valueOf(action, state, goalRounds(log.events()))))
 
 const refuse = (message: string) => new ToolError({ code: 'invalid-arguments', message })
 
-const createGoal = (args: GoalArgs, log: GoalLog) =>
-  args.objective === undefined || args.objective.trim() === ''
+/** Reads the goal back without writing: a resumed session can ask where it stands. */
+const readGoal = (log: GoalLog) => {
+  const current = currentGoal(log.events())
+  return current === undefined
+    ? Effect.fail(refuse('there is no goal to read'))
+    : Effect.succeed(valueOf('read', current, goalRounds(log.events())))
+}
+
+const createGoal = (args: GoalArgs, log: GoalLog) => {
+  if (currentGoal(log.events()) !== undefined) {
+    return Effect.fail(refuse('a goal already exists; use action edit to change it'))
+  }
+  return args.objective === undefined || args.objective.trim() === ''
     ? Effect.fail(refuse('objective is required to create a goal'))
     : record(
         'create',
@@ -83,6 +96,7 @@ const createGoal = (args: GoalArgs, log: GoalLog) =>
         },
         log,
       )
+}
 
 const editGoal = (args: GoalArgs, current: GoalState, log: GoalLog) => {
   const note = args.note ?? current.note
@@ -161,6 +175,10 @@ const setPhase = (action: string, phase: GoalPhase, current: GoalState, log: Goa
 const goalLine = (value: GoalValue): string =>
   'goal ' +
   value.phase +
+  ' ' +
+  String(value.rounds) +
+  '/' +
+  String(value.maxGoalRounds) +
   ': ' +
   value.objective +
   (value.note === undefined ? '' : '\n' + value.note) +
@@ -173,13 +191,14 @@ const goalLine = (value: GoalValue): string =>
 export const makeGoalTool = (log: GoalLog): ToolDefinition<GoalArgs, GoalValue> => ({
   name: 'goal',
   description:
-    'Records the objective this session works toward and how it stands. Use it when the direct request is a long-running objective; while the phase is active the next round runs on its own, so complete it when the objective is achieved and block it only for a condition that persists.',
+    'Records the objective this session works toward and how it stands. Use action read to check the objective, phase, and rounds; while the phase is active the next round runs on its own, so complete it when the objective is achieved and block it only for a condition that persists.',
   parameters: Parameters,
   output: {
     schema: Schema.Struct({
       action: Schema.String,
       objective: Schema.String,
       phase: Schema.Literals(['active', 'paused', 'blocked', 'complete']),
+      rounds: Schema.Int,
       maxGoalRounds: Schema.Int,
       note: Schema.optionalKey(Schema.String),
       blockedReason: Schema.optionalKey(Schema.String),
@@ -188,6 +207,7 @@ export const makeGoalTool = (log: GoalLog): ToolDefinition<GoalArgs, GoalValue> 
   },
   execute: (args) =>
     Effect.gen(function* () {
+      if (args.action === 'read') return yield* readGoal(log)
       if (args.action === 'create') return yield* createGoal(args, log)
       const current = currentGoal(log.events())
       if (current === undefined) {

@@ -106,6 +106,41 @@ describe('glob tool', () => {
     await rm(dir, { recursive: true, force: true })
   })
 
+  test('finds files in dot-directories instead of hiding them', async () => {
+    const dir = await workspace()
+    await writeFileDeep(join(dir, '.github', 'workflows', 'ci.yml'), 'permissions: read-all\n')
+
+    const result = await Effect.runPromise(call(globTool, { pattern: '.github/workflows/**' }, dir))
+
+    expect(result?.value).toEqual({
+      files: ['.github/workflows/ci.yml'],
+      seen: 1,
+      truncated: false,
+    })
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('starts the walk at the given path', async () => {
+    const dir = await workspace()
+
+    const result = await Effect.runPromise(call(globTool, { pattern: '**/*.ts', path: 'sub' }, dir))
+
+    expect(result?.value).toEqual({ files: ['sub/b.ts'], seen: 1, truncated: false })
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('refuses a path outside the workspace', async () => {
+    const dir = await workspace()
+
+    const result = await Effect.runPromise(
+      call(globTool, { pattern: '**/*.ts', path: '../outside' }, dir),
+    )
+
+    expect(result?.isError).toBe(true)
+    expect(JSON.stringify(result?.content)).toContain('escapes the workspace')
+    await rm(dir, { recursive: true, force: true })
+  })
+
   test('a capped listing says how to see the rest', async () => {
     const dir = await workspace()
 
@@ -172,6 +207,45 @@ describe('grep tool', () => {
     expect(written.get('c1-grep')).toContain('many.txt:1: needle one')
     expect(written.get('c1-grep')).toContain('many.txt:3: needle three')
     expect(textOf(result)).toContain('full result is stored at /spill/c1-grep.txt')
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('searches only under the given path', async () => {
+    const dir = await workspace()
+
+    const result = await Effect.runPromise(call(grepTool, { pattern: 'const', path: 'sub' }, dir))
+
+    expect(result?.value).toEqual({
+      matches: [{ file: 'sub/b.ts', line: 1, text: 'const two = 2' }],
+      seen: 1,
+      truncated: false,
+    })
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('searches dot-directories instead of hiding them', async () => {
+    const dir = await workspace()
+    await writeFileDeep(join(dir, '.github', 'workflows', 'ci.yml'), 'permissions: read-all\n')
+
+    const result = await Effect.runPromise(call(grepTool, { pattern: 'permissions' }, dir))
+
+    expect(result?.value).toEqual({
+      matches: [{ file: '.github/workflows/ci.yml', line: 1, text: 'permissions: read-all' }],
+      seen: 1,
+      truncated: false,
+    })
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('refuses a path outside the workspace', async () => {
+    const dir = await workspace()
+
+    const result = await Effect.runPromise(
+      call(grepTool, { pattern: 'needle', path: '../outside' }, dir),
+    )
+
+    expect(result?.isError).toBe(true)
+    expect(JSON.stringify(result?.content)).toContain('escapes the workspace')
     await rm(dir, { recursive: true, force: true })
   })
 

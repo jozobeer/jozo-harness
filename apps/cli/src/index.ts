@@ -47,6 +47,7 @@ import {
   type SessionError,
 } from '@jozo-harness/session'
 import { Tier0Tools, type Tier0ToolBuilder } from '@jozo-harness/tools-tier0'
+import { installRetry, type RetryConfig } from '@jozo-harness/agent-loop'
 import { installBuiltinCommands } from './commands.ts'
 import { listModels, modelEndpointOf } from './models.ts'
 import {
@@ -288,9 +289,11 @@ const installTier0 = (
   tools: ToolRegistry,
   tier0: Tier0ToolBuilder,
   approval: ApprovalShape | undefined,
+  jobs: JobsShape,
 ) =>
   Effect.gen(function* () {
-    for (const tool of tier0(approval)) yield* tools.register(tool)
+    // The registry lets a timed-out bash call keep running as a job instead of dying.
+    for (const tool of tier0(approval, jobs)) yield* tools.register(tool)
   })
 
 /** Tier 1 tools ask the user; their questions and answers join the log. */
@@ -655,6 +658,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
         tools,
         Context.get(wiring.context, Tier0Tools),
         Context.get(wiring.context, Approval),
+        wiring.jobs,
       )
     }
     if (hasRow(wiring.rows, '@jozo-harness/tools-tier1')) {
@@ -672,6 +676,12 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
         wiring.jobs,
       )
     }
+    // A failed provider attempt is retried for the codes the loop row lists; the
+    // loop only decides what to do when a listener answers, so this is the wiring
+    // that makes the retry path part of a run.
+    const loopRow = wiring.rows.find((row) => row.name === '@jozo-harness/agent-loop')
+    const retry = (loopRow?.config as { readonly retry?: RetryConfig } | undefined)?.retry
+    yield* installRetry(wiring.hooks, retry ?? {})
     const composition: Preset = {
       profiles: profileNamesOf(wiring.options.profiles),
       tools: tools.schemas().map((schema) => schema.name),

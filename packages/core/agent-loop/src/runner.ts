@@ -49,6 +49,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { groupCalls, type CallBatch } from './batch.ts'
 import type { AgentRequest } from './hooks.ts'
+import { retryConfigSchema } from './retry.ts'
 
 export class AgentLoop extends Context.Service<AgentLoop, AgentRunner>()(
   'jozo-harness/AgentLoop',
@@ -100,6 +101,12 @@ const spillOf = (agent: Agent): SpillOptions => ({
 
 const isToolCall = (block: ContentBlock): block is ToolCall => block.type === 'tool-call'
 
+/** What the model reads for a call no result ever reached the log. */
+const interruptedText = (name: string, started: boolean): string =>
+  started
+    ? `tool ${name} did not finish: its outcome is unknown. Do not retry blindly; retry only a read-only or idempotent call, and verify external state before retrying one with side effects.`
+    : `tool ${name} did not start; retry it if it is still needed.`
+
 const splitRoute = (route: string): { readonly provider: string; readonly model: string } => {
   const index = route.indexOf('/')
   return index < 0
@@ -110,16 +117,68 @@ const splitRoute = (route: string): { readonly provider: string; readonly model:
 const countEvents = (session: Session, type: 'turn/start' | 'step/start'): number =>
   session.events().filter((event) => event.type === type).length
 
-/** The calls the log holds with no result: the run that made them is gone. */
-const openCalls = (
-  events: ReadonlyArray<SessionEvent>,
-): ReadonlyArray<{ readonly callId: string; readonly name: string }> => {
-  const open = new Map<string, string>()
+/** A call the log holds with no result: the run that made it is gone. */
+interface OpenCall {
+  readonly callId: string
+  readonly name: string
+  /** Whether the log records the call leaving for the tool: its outcome is then unknown. */
+  readonly started: boolean
+}
+
+/**
+ * The calls the log holds with no result: the run that made them is gone. A call
+ * the model requested but the pipeline never recorded dispatching has not
+ * started; one with a `tool/call` may already have run, so its outcome is unknown.
+ */
+const openCalls = (events: ReadonlyArray<SessionEvent>): ReadonlyArray<OpenCall> => {
+  const open = new Map<string, OpenCall>()
   for (const event of events) {
-    if (event.type === 'tool/call') open.set(event.data.callId, event.data.name)
-    if (event.type === 'tool/result') open.delete(event.data.callId)
+    switch (event.type) {
+      case 'assistant/message':
+        for (const call of event.data.content.filter(isToolCall)) {
+          open.set(call.id, { callId: call.id, name: call.name, started: false })
+        }
+        break
+      case 'tool/call':
+        open.set(event.data.callId, {
+          callId: event.data.callId,
+          name: event.data.name,
+          started: true,
+        })
+        break
+      case 'tool/result':
+        open.delete(event.data.callId)
+        break
+    }
   }
-  return [...open.entries()].map(([callId, name]) => ({ callId, name }))
+  return [...open.values()]
+}
+
+/** The newest turn and step the log opened and never closed. */
+const openBoundary = (
+  events: ReadonlyArray<SessionEvent>,
+): { readonly turn: number | undefined; readonly step: number | undefined } => {
+  let turn: number | undefined
+  let step: number | undefined
+  for (const event of events) {
+    switch (event.type) {
+      case 'turn/start':
+        turn = event.data.turn
+        step = undefined
+        break
+      case 'turn/end':
+        turn = undefined
+        step = undefined
+        break
+      case 'step/start':
+        step = event.data.step
+        break
+      case 'step/end':
+        step = undefined
+        break
+    }
+  }
+  return { turn, step }
 }
 
 const recordedTurnEnd = (session: Session, turn: number): boolean =>
@@ -322,17 +381,30 @@ const agentLoopEffect = (
         return checkpointOf(range, summary, envelope)
       })
 
+    /**
+     * Folds the history when the meter says it is past the line, or when a provider
+     * refused the request and the loop needs the surface to shrink before one more
+     * attempt. A forced fold prunes first, so the auxiliary summary call is made on
+     * the smaller history; the answer says whether the estimate actually came down.
+     */
     const recordCompaction = (
       agent: Agent,
       envelope: Omit<AgentRequest, 'messages'>,
-    ): Effect.Effect<void> =>
+      force = false,
+    ): Effect.Effect<boolean> =>
       Effect.gen(function* () {
         const events = agent.session.events()
-        if (!meterOf(events, budget).compacts) return
-        const checkpoint = yield* checkpointFor(envelope, events)
+        const meter = meterOf(events, budget)
+        if (!force && !meter.compacts) return false
+        if (force) {
+          const first = pruneFor(events, compact)
+          if (first !== undefined) yield* append(agent, 'compaction/prune', first)
+        }
+        const checkpoint = yield* checkpointFor(envelope, agent.session.events())
         if (checkpoint !== undefined) yield* append(agent, 'compaction/checkpoint', checkpoint)
         const prune = pruneFor(agent.session.events(), compact)
         if (prune !== undefined) yield* append(agent, 'compaction/prune', prune)
+        return meterOf(agent.session.events(), budget).estimated < meter.estimated
       })
 
     /** The request envelope of this step, before the history is folded into it. */
@@ -360,15 +432,97 @@ const agentLoopEffect = (
       messages: deriveMessages(agent.session.events()),
     })
 
-    /** Sends the settled request until a hook says to stop retrying. */
-    const streamUntilSettled = (agent: Agent, request: AgentRequest): Effect.Effect<StepOutcome> =>
+    /**
+     * The request after a fold that made the surface smaller, and nothing when the
+     * fold left it as large: the loop only resends what can still fit.
+     */
+    const rebuildAfterFold = (
+      agent: Agent,
+      envelope: Omit<AgentRequest, 'messages'>,
+      rebuild: () => Effect.Effect<AgentRequest>,
+      attempt: number,
+      failure: LlmFailure,
+    ): Effect.Effect<AgentRequest | undefined> =>
       Effect.gen(function* () {
+        if (!(yield* recordCompaction(agent, envelope, true))) return undefined
+        yield* append(agent, 'llm/retry', {
+          attempt,
+          code: failure.code,
+          delayMs: 0,
+          cause: 'context-overflow',
+        })
+        return yield* rebuild()
+      })
+
+    /** Whether the hooks ask for one more attempt; a retry waits out its delay and records itself. */
+    const retryAfterFailure = (
+      agent: Agent,
+      failure: LlmFailure,
+      attempt: number,
+    ): Effect.Effect<boolean> =>
+      Effect.gen(function* () {
+        const decision = yield* hooks.waterfall('agent/request-error', agent, failure, attempt)
+        if (decision?.kind !== 'retry') return false
+        const delayMs = decision.delayMs ?? 0
+        if (delayMs > 0) yield* Effect.sleep(delayMs)
+        yield* append(agent, 'llm/retry', {
+          attempt,
+          code: failure.code,
+          delayMs,
+          cause: 'transient',
+        })
+        return true
+      })
+
+    /**
+     * The request to send again after a context overflow, and nothing when this
+     * attempt is not one or the fold left the surface as large.
+     */
+    const resendAfterOverflow = (
+      agent: Agent,
+      envelope: Omit<AgentRequest, 'messages'>,
+      rebuild: () => Effect.Effect<AgentRequest>,
+      attempt: number,
+      failure: LlmFailure,
+      alreadyRecovered: boolean,
+    ): Effect.Effect<AgentRequest | undefined> =>
+      alreadyRecovered || failure.code !== 'CONTEXT_WINDOW_EXCEEDED'
+        ? Effect.succeed(undefined)
+        : rebuildAfterFold(agent, envelope, rebuild, attempt, failure)
+
+    /**
+     * Sends the settled request until a hook says to stop retrying. A context
+     * overflow gets one fold-and-rebuild attempt before the same hooks decide; the
+     * request is only resent when the fold actually made the surface smaller.
+     */
+    const streamUntilSettled = (
+      agent: Agent,
+      request: AgentRequest,
+      envelope: Omit<AgentRequest, 'messages'>,
+      rebuild: () => Effect.Effect<AgentRequest>,
+    ): Effect.Effect<StepOutcome> =>
+      Effect.gen(function* () {
+        let current = request
+        let attempt = 0
+        let overflowRecovered = false
         while (true) {
-          const outcome = yield* streamStep(agent, request)
+          const outcome = yield* streamStep(agent, current)
           if (outcome.ok) return outcome
-          const decision = yield* hooks.waterfall('agent/request-error', outcome.failure)
-          if (decision?.kind !== 'retry') return outcome
-          // A retry resends the settled request; assembly and request/header do not repeat.
+          attempt += 1
+          const rebuilt = yield* resendAfterOverflow(
+            agent,
+            envelope,
+            rebuild,
+            attempt,
+            outcome.failure,
+            overflowRecovered,
+          )
+          if (rebuilt !== undefined) {
+            overflowRecovered = true
+            current = rebuilt
+            continue
+          }
+          if (!(yield* retryAfterFailure(agent, outcome.failure, attempt))) return outcome
         }
       })
 
@@ -388,11 +542,17 @@ const agentLoopEffect = (
           cwdOf(agent.session.events(), agent.session.header),
           opening,
         )
-        yield* recordCompaction(agent, envelopeOf(agent, build))
-        const base = requestOf(agent, build)
-        const request = (yield* hooks.waterfall('agent/request', base)) ?? base
-        yield* recordRequestHeader(agent, request)
-        return yield* streamUntilSettled(agent, request)
+        const envelope = envelopeOf(agent, build)
+        yield* recordCompaction(agent, envelope)
+        const rebuild = (): Effect.Effect<AgentRequest> =>
+          Effect.gen(function* () {
+            const base = requestOf(agent, build)
+            const rebuilt = (yield* hooks.waterfall('agent/request', base)) ?? base
+            yield* recordRequestHeader(agent, rebuilt)
+            return rebuilt
+          })
+        const request = yield* rebuild()
+        return yield* streamUntilSettled(agent, request, envelope, rebuild)
       })
 
     const runOne = (
@@ -410,6 +570,9 @@ const agentLoopEffect = (
             sessionId: agent.id,
             cwd: cwdOf(agent.session.events(), agent.session.header),
             callId: call.id,
+            // The tool refuses work the route cannot carry; the adapter would
+            // otherwise drop the block and leave the model an empty result.
+            images: llm.capabilities.images,
             // A tool that pages its own result stores the overflow through the
             // same writer the pipeline uses, so both live beside the session.
             ...(spill.spill === undefined ? {} : { spill: spill.spill }),
@@ -464,33 +627,44 @@ const agentLoopEffect = (
     }
 
     /** What a call gets when the run that made it never finished it. */
-    const didNotFinish = (agent: Agent, callId: string, name: string): Effect.Effect<void> =>
+    const didNotFinish = (
+      agent: Agent,
+      callId: string,
+      name: string,
+      started: boolean,
+    ): Effect.Effect<void> =>
       append(agent, 'tool/result', {
         callId,
         isError: true,
-        content: [{ type: 'text' as const, text: `tool ${name} did not finish` }],
+        content: [{ type: 'text' as const, text: interruptedText(name, started) }],
       }).pipe(Effect.catchCause(() => Effect.void))
 
     const failPending = (
       agent: Agent,
       pending: ReadonlyMap<string, ToolCall>,
     ): Effect.Effect<void> =>
-      Effect.forEach([...pending.values()], (call) => didNotFinish(agent, call.id, call.name), {
-        discard: true,
-      })
-
-    /**
-     * The log a run resumes from can hold a call with no result: a process killed
-     * between the call and its answer, or a question the reader never answered. A
-     * turn that asks with that history asks the model about a call it never got an
-     * answer for, so those calls are written down as unfinished before it does.
-     */
-    const closeOpenCalls = (agent: Agent): Effect.Effect<void> =>
       Effect.forEach(
-        openCalls(agent.session.events()),
-        (call) => didNotFinish(agent, call.callId, call.name),
+        [...pending.values()],
+        (call) => didNotFinish(agent, call.id, call.name, true),
         { discard: true },
       )
+
+    /**
+     * The log a run resumes from can end inside a turn: a process killed between a
+     * call and its answer, or a question the reader never answered. The next turn
+     * writes down what did not finish, closes the step and turn the dead run left
+     * open, and so keeps turn numbering and history balanced before it asks again.
+     */
+    const repairInterruptedRun = (agent: Agent): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const { turn, step } = openBoundary(agent.session.events())
+        for (const call of openCalls(agent.session.events())) {
+          yield* didNotFinish(agent, call.callId, call.name, call.started)
+        }
+        if (turn === undefined) return
+        if (step !== undefined) yield* append(agent, 'step/end', { step })
+        yield* append(agent, 'turn/end', { turn, reason: { kind: 'interrupted' } })
+      })
 
     const executeCalls = (agent: Agent, calls: ReadonlyArray<ToolCall>): Effect.Effect<void> =>
       Effect.gen(function* () {
@@ -554,7 +728,7 @@ const agentLoopEffect = (
     const runTurn = (agent: Agent): Effect.Effect<void> => {
       const turn = countEvents(agent.session, 'turn/start') + 1
       const program = Effect.gen(function* () {
-        yield* closeOpenCalls(agent)
+        yield* repairInterruptedRun(agent)
         yield* append(agent, 'turn/start', { turn })
         const claimed = yield* agent.inbox.claim(true).pipe(Effect.orDie)
         const decision = yield* hooks.waterfall('agent/pre-step', { agent, messages: claimed })
@@ -628,6 +802,8 @@ export const agentLoopConfigSchema = Schema.Struct({
    * by this much before the headroom is taken off. Unset reserves nothing.
    */
   maxTokens: Schema.optionalKey(Schema.Int),
+  /** Transient provider failures worth another attempt, and how long to wait. */
+  retry: Schema.optionalKey(retryConfigSchema),
 })
 
 export type AgentLoopConfig = Schema.Schema.Type<typeof agentLoopConfigSchema>

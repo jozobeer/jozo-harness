@@ -31,7 +31,8 @@ export const renderGoalRound = (goal: GoalState, round: number): string =>
   'tool results, and durable session state as authoritative; inspect them instead of assuming ' +
   'earlier narration is still current. Make concrete progress and verify the result. Before ' +
   'claiming completion, gather evidence that the whole objective is achieved, read the current ' +
-  'goal, and mark it complete. If work remains, leave the goal active for the next round. Report ' +
+  'goal with the goal tool (action read), and mark it complete. If work remains, leave the goal ' +
+  'active for the next round. Report ' +
   'blocked only after the same blocking condition has persisted for at least ' +
   String(MIN_BLOCKED_ROUNDS) +
   ' rounds.\n' +

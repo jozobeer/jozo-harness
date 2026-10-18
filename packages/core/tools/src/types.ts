@@ -22,6 +22,12 @@ export interface ToolRunContext {
   readonly cwd: string
   readonly callId: string
   /**
+   * What the routed adapter carries as images. A tool that hands the model an
+   * image refuses when the route declares none, instead of returning a block
+   * the adapter would drop. Absent when the caller does not know the route.
+   */
+  readonly images?: 'base64' | 'none'
+  /**
    * How to put a result too large to show beside the session. The loop owns the
    * location; a tool that pages its own result asks this for the way back. Absent
    * when nothing will store the text, and then the tool says how to narrow instead.

@@ -33,6 +33,10 @@ const VARIABLE = /\{\{([A-Za-z0-9_-]+)\}\}/g
 /** The first line of every runtime snapshot. */
 export const RUNTIME_CONTEXT_HEADER = 'Current runtime context:'
 
+/** The line that says an older snapshot no longer speaks for the session. */
+export const RUNTIME_CONTEXT_SUPERSEDES =
+  'This snapshot supersedes any earlier runtime-context snapshot.'
+
 const compareEntries = (
   left: { readonly name: string; readonly order: number },
   right: { readonly name: string; readonly order: number },
@@ -141,7 +145,9 @@ export function makeSystemPrompt(): SystemPromptShape {
           const text = yield* entry.text(subject)
           if (text !== undefined && text !== '') lines.push('- ' + text)
         }
-        return lines.length === 0 ? '' : [RUNTIME_CONTEXT_HEADER, ...lines].join('\n')
+        return lines.length === 0
+          ? ''
+          : [RUNTIME_CONTEXT_HEADER, RUNTIME_CONTEXT_SUPERSEDES, ...lines].join('\n')
       }),
 
     render,

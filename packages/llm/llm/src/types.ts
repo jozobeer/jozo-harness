@@ -52,6 +52,7 @@ export type StreamChunk =
 export const LLM_FAILURE_CODES = [
   'AUTH',
   'RATE_LIMIT',
+  'SERVER',
   'TIMEOUT',
   'ABORTED',
   'EMPTY_RESPONSE',

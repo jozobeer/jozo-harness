@@ -86,3 +86,19 @@ describe('SystemPrompt service', () => {
     expect(text).toBe(IDENTITY_TEXT)
   })
 })
+
+describe('guidance matches the tools it describes', () => {
+  test('delegation names the fork default and the batched start', () => {
+    const line = toolGuidance({ variables: {}, tools: [schema('subagent')] })
+
+    expect(line).toContain('together in one assistant message')
+    expect(line).toContain('forks')
+    expect(line).toContain('fresh')
+  })
+
+  test('both web tools ask for a citation', () => {
+    const line = toolGuidance({ variables: {}, tools: [schema('web_fetch'), schema('web_search')] })
+
+    expect(line.match(/markdown link/g)).toHaveLength(2)
+  })
+})

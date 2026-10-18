@@ -46,6 +46,27 @@ export const resolveInside = (
   return Effect.succeed(target)
 }
 
+/**
+ * The workspace-relative directory a search starts at, or the root itself when
+ * the caller names none. The same boundary as every other path applies, so a
+ * search cannot be pointed outside the workspace or through a link.
+ *
+ * @param root - the workspace the call runs in.
+ * @param path - the directory the caller named, absolute or relative.
+ * @returns the workspace-relative start, empty for the workspace root.
+ */
+export const resolveSearchStart = (
+  root: string,
+  path: string | undefined,
+): Effect.Effect<string, ToolError> => {
+  if (path === undefined) return Effect.succeed('')
+  const named = isAbsolute(path) ? resolve(path) : resolve(root, path)
+  if (named === resolve(root)) return Effect.succeed('')
+  return Effect.map(resolveInside(root, path, 'workspace-write'), (inside) =>
+    relative(root, inside).split(sep).join('/'),
+  )
+}
+
 /** The first component below the root that is a link, if any. Parts that are not there yet are new work. */
 const linkIn = (root: string, inside: string): string | undefined => {
   let walk = root

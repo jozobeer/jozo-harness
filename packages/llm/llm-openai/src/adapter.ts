@@ -3,6 +3,7 @@ import {
   type ContentBlock,
   type LlmAdapter,
   type LlmCapabilities,
+  type LlmFailureCode,
   type LlmRequest,
   type RequestMessage,
   type StreamChunk,
@@ -24,6 +25,10 @@ const DEFAULT_IDLE_TIMEOUT_MS = 300_000
 
 const textOf = (content: ReadonlyArray<ContentBlock>): string =>
   content.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('')
+
+/** Whether any message carries an image block the encoder cannot render. */
+const carriesImage = (messages: ReadonlyArray<RequestMessage>): boolean =>
+  messages.some((message) => message.content.some((block) => block.type === 'image'))
 
 const encodeMessage = (message: RequestMessage): Record<string, unknown> => {
   const toolCalls = message.content.flatMap((block) =>
@@ -50,9 +55,27 @@ const encodeMessage = (message: RequestMessage): Record<string, unknown> => {
   return { role: message.role, content: textOf(message.content) }
 }
 
+/**
+ * The wording OpenAI-compatible providers use when the input itself is too long.
+ * The status alone cannot tell this from any other rejected request, so the body
+ * is the only signal; an endpoint that words it differently stays PROVIDER.
+ */
+const CONTEXT_OVERFLOW =
+  /context[ _-]?(?:length|window)|too many tokens|input is too long|prompt is too long|reduce the length/i
+
+const codeForStatus = (status: number): LlmFailureCode => {
+  if (status === 401 || status === 403) return 'AUTH'
+  if (status === 429) return 'RATE_LIMIT'
+  if (status >= 500) return 'SERVER'
+  return 'PROVIDER'
+}
+
+/** A rejected request says whether the input itself was too long. */
+const rejectedAsTooLong = (status: number, detail: string): boolean =>
+  (status === 400 || status === 413) && CONTEXT_OVERFLOW.test(detail)
+
 const failureForStatus = (status: number, detail: string): LlmFailure => {
-  const code =
-    status === 401 || status === 403 ? 'AUTH' : status === 429 ? 'RATE_LIMIT' : 'PROVIDER'
+  const code = rejectedAsTooLong(status, detail) ? 'CONTEXT_WINDOW_EXCEEDED' : codeForStatus(status)
   return new LlmFailure({
     code,
     message: `provider returned HTTP ${status}: ${detail.slice(0, 200)}`,
@@ -82,6 +105,17 @@ export function openAiAdapter(options: OpenAiAdapterOptions): LlmAdapter {
           if (apiKey === undefined || apiKey === '') {
             return yield* Effect.fail(
               new LlmFailure({ code: 'AUTH', message: 'no API key is configured' }),
+            )
+          }
+          // The adapter encodes text only, so an image that reaches it would
+          // vanish. Refuse loudly instead of sending an empty result.
+          if (options.capabilities.images === 'none' && carriesImage(request.messages)) {
+            return yield* Effect.fail(
+              new LlmFailure({
+                code: 'INVALID_REQUEST',
+                message:
+                  'the current route cannot carry images, but the request contains one; answer without it or switch to an image-capable route',
+              }),
             )
           }
           const body = JSON.stringify({
