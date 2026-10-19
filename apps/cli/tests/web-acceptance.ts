@@ -393,6 +393,27 @@ const animationsOf = (selector: string): string =>
   "); if (node === null) return 'missing'; const style = getComputedStyle(node); return style.animationName + ' ' + style.animationDuration })()"
 
 /** The port's own motion: a block, the sheet, the card, the composer, and the quiet reader. */
+/** Duration of the two transitions this run added, as the page computes them. */
+const transitionDurationOf = (selector: string): string =>
+  'getComputedStyle(document.querySelector(' + JSON.stringify(selector) + ')).transitionDuration'
+
+/** A chosen tab and segment ease into their colour instead of repainting. */
+const easesIntoTheChosenColour = async (client: Cdp): Promise<void> => {
+  const tab = await client.evaluate(transitionDurationOf('.tab'))
+  if (!String(tab).startsWith('0.18s')) throw new Error('the tab does not ease: ' + String(tab))
+  const segment = await client.evaluate(transitionDurationOf('.lens-option'))
+  if (!String(segment).startsWith('0.16s')) {
+    throw new Error('the segment does not ease: ' + String(segment))
+  }
+}
+
+/** Those same transitions are silent for a reader who asked for less motion. */
+const easementsStayQuiet = async (client: Cdp): Promise<void> => {
+  const quiet = await client.evaluate(transitionDurationOf('.tab'))
+  if (String(quiet) !== '0s')
+    throw new Error('a transition stayed under reduced motion: ' + String(quiet))
+}
+
 const checksTheAnimations = async (client: Cdp, read: () => Promise<unknown>): Promise<void> => {
   const block = await client.evaluate(animationsOf('#conversation .block'))
   if (block !== 'jzh-block-in 0.18s') throw new Error('a block does not arrive: ' + String(block))
@@ -405,6 +426,7 @@ const checksTheAnimations = async (client: Cdp, read: () => Promise<unknown>): P
     "getComputedStyle(document.getElementById('composer')).transitionDuration",
   )
   if (lifted !== '0.2s') throw new Error('the composer does not lift: ' + String(lifted))
+  await easesIntoTheChosenColour(client)
   // The reader who asked for less motion gets none of it.
   await client.send('Emulation.setEmulatedMedia', {
     features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
@@ -417,6 +439,7 @@ const checksTheAnimations = async (client: Cdp, read: () => Promise<unknown>): P
   if (quiet !== 'none 0s') {
     throw new Error('an animation stayed under reduced motion: ' + String(quiet))
   }
+  await easementsStayQuiet(client)
 }
 
 /** The attribute the stylesheet keys on, or '' while the system's choice stands. */
