@@ -1,9 +1,13 @@
 import { Icon, type IconName } from './icon.tsx'
 
-/** A run that went wrong or was stopped reads as failed; any other end, as done. */
+/**
+ * Only a turn that answered reads as done. An error, a stop by hand, the token
+ * cap, and a run that died inside the turn all ended short, so they read as
+ * failed; a mark that said done for them would be the one lie the row can tell.
+ */
 const shapeOf = (outcome: string | undefined): IconName => {
   if (outcome === undefined) return 'idle'
-  return outcome === 'error' || outcome === 'cancelled' ? 'failed' : 'done'
+  return outcome === 'completed' ? 'done' : 'failed'
 }
 
 /**

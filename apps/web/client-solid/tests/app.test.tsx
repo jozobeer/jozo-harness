@@ -165,6 +165,45 @@ describe('the Solid page', () => {
     expect(mark('cold')?.classList.value).toBe('icon end-mark idle session-mark')
   })
 
+  test('a turn cut at the cap, lost with the run, or stopped by hand reads as failed', () => {
+    const ended = (outcome: string, extra?: object) =>
+      [
+        { seq: 1, time: 1_000, type: 'turn/start', data: { turn: 1 } },
+        {
+          seq: 2,
+          time: 2_000,
+          type: 'turn/end',
+          data: { turn: 1, reason: { kind: outcome, ...extra } },
+        },
+      ]
+        .map((event) => ({ kind: 'session' as const, event }))
+        .reduce(watchedAfter, emptyWatched)
+    const session = (id: string) => ({
+      id,
+      cwd: '/work',
+      createdAt: 0,
+      updatedAt: 2_000,
+      title: id,
+    })
+    const { store } = makeStore(
+      { sessions: [session('cut'), session('lost'), session('stopped')] },
+      new Map([
+        ['cut', ended('max-tokens')],
+        ['lost', ended('interrupted')],
+        ['stopped', ended('cancelled', { cause: 'user' })],
+      ]),
+    )
+    const { container } = render(() => <Board store={store} />)
+    const marks = [...container.querySelectorAll('.session-row .end-mark')].map(
+      (mark) => mark.classList.value,
+    )
+    expect(marks).toEqual([
+      'icon end-mark failed session-mark',
+      'icon end-mark failed session-mark',
+      'icon end-mark failed session-mark',
+    ])
+  })
+
   test('the board puts a session that waits first, and answers it in place', () => {
     const asking = [
       {
