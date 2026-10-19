@@ -10,15 +10,35 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
  * working once it has opened a page.
  */
 
+/**
+ * The https origin a reverse proxy publishes this server under, as the page's
+ * own Host and Origin. It is an explicit addition to the loopback names, never
+ * a pattern: a request that names any other host stays refused.
+ */
+export interface PublicOrigin {
+  /** The Host header the proxy passes on, with a port when it is not 443. */
+  readonly host: string
+  /** The Origin a page served from there sends. */
+  readonly origin: string
+}
+
 /** The names a page may use to reach a server bound to loopback, at its port. */
-const hostsAt = (port: number): ReadonlyArray<string> => [
+const hostsAt = (port: number, publicOrigin: PublicOrigin | undefined): ReadonlyArray<string> => [
   '127.0.0.1:' + String(port),
   'localhost:' + String(port),
+  // The listener is IPv4 loopback, but a local forwarder on the IPv6 loopback
+  // names this machine too; both spellings are loopback, neither is a pattern.
+  '[::1]:' + String(port),
+  ...(publicOrigin === undefined ? [] : [publicOrigin.host.toLowerCase()]),
 ]
 
-/** The origins those names give a page served over http. */
-const originsAt = (port: number): ReadonlyArray<string> =>
-  hostsAt(port).map((host) => 'http://' + host)
+/** The origins those names give a page: http on loopback, https for the published one. */
+const originsAt = (port: number, publicOrigin: PublicOrigin | undefined): ReadonlyArray<string> => [
+  'http://127.0.0.1:' + String(port),
+  'http://localhost:' + String(port),
+  'http://[::1]:' + String(port),
+  ...(publicOrigin === undefined ? [] : [publicOrigin.origin.toLowerCase()]),
+]
 
 /** One query parameter, where a missing or empty one reads the same. */
 const queryParam = (url: string, name: string): string | undefined => {
@@ -101,17 +121,23 @@ export const cookieOf = (header: string | undefined, name: string): string | und
 export const authCookie = (token: string, secure: boolean): string =>
   COOKIE_NAME + '=' + token + '; Path=/; HttpOnly; SameSite=Strict' + (secure ? '; Secure' : '')
 
-/** True only for the loopback host and the port this server bound. */
-export const hostAllowed = (host: string | undefined, port: number): boolean =>
-  host !== undefined && hostsAt(port).includes(host.toLowerCase())
+/** True only for a loopback name, or the published origin's host, at this port. */
+export const hostAllowed = (
+  host: string | undefined,
+  port: number,
+  publicOrigin?: PublicOrigin,
+): boolean => host !== undefined && hostsAt(port, publicOrigin).includes(host.toLowerCase())
 
 /**
  * True for the page's own origin and for a client that names none. A browser
  * always names one; refusing only a foreign origin keeps native clients (and
  * their tests) able to connect without pretending to be a page.
  */
-export const originAllowed = (origin: string | undefined, port: number): boolean =>
-  origin === undefined || originsAt(port).includes(origin.toLowerCase())
+export const originAllowed = (
+  origin: string | undefined,
+  port: number,
+  publicOrigin?: PublicOrigin,
+): boolean => origin === undefined || originsAt(port, publicOrigin).includes(origin.toLowerCase())
 
 /** Compares the token in constant time, so a reply says only match or no match. */
 export const tokenMatches = (given: string | undefined, expected: string): boolean => {

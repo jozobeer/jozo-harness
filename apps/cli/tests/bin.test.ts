@@ -44,6 +44,50 @@ describe('parseArgs', () => {
     expect(parseArgs(['--resume']).errors).toEqual(['--resume needs a value'])
   })
 
+  test('reads the https origin jzh web may be published under', () => {
+    const parsed = parseArgs([
+      'web',
+      '--port',
+      '4310',
+      '--public-url',
+      'https://myhost.tailnet.ts.net',
+    ])
+    expect(parsed.web).toBe(true)
+    expect(parsed.port).toBe(4310)
+    expect(parsed.publicUrl).toEqual({
+      host: 'myhost.tailnet.ts.net',
+      origin: 'https://myhost.tailnet.ts.net',
+    })
+    expect(parsed.errors).toEqual([])
+    // A trailing slash is the same origin after the URL parser normalizes it.
+    expect(parseArgs(['web', '--public-url', 'https://myhost.tailnet.ts.net/']).errors).toEqual([])
+  })
+
+  test('refuses a public url that is not a bare https origin', () => {
+    const message = '--public-url needs an https origin such as https://host.tailnet.ts.net'
+    const errorsOf = (value: string): ReadonlyArray<string> =>
+      parseArgs(['web', '--public-url', value]).errors
+    expect(errorsOf('http://myhost.tailnet.ts.net')).toEqual([message])
+    expect(errorsOf('https://myhost.tailnet.ts.net/ui')).toEqual([message])
+    expect(errorsOf('https://myhost.tailnet.ts.net/?session=s-1')).toEqual([message])
+    expect(errorsOf('https://myhost.tailnet.ts.net/#top')).toEqual([message])
+    expect(errorsOf('https://user@myhost.tailnet.ts.net')).toEqual([message])
+    expect(errorsOf('not a url')).toEqual([message])
+  })
+
+  test('refuses a public url outside jzh web', () => {
+    const parsed = parseArgs([
+      '--public-url',
+      'https://myhost.tailnet.ts.net',
+      'do',
+      'the',
+      'thing',
+    ])
+    expect(parsed.web).toBe(false)
+    expect(parsed.publicUrl).toBeUndefined()
+    expect(parsed.errors).toEqual(['--public-url is only for `jzh web`'])
+  })
+
   test('defaults to the headless profile', () => {
     const parsed = parseArgs([])
     expect(parsed.profile).toBe('headless')

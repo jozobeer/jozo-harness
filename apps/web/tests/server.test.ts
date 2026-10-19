@@ -13,6 +13,8 @@ import {
   serveWeb,
   WebError,
   type OpenSession,
+  type PublicOrigin,
+  type ReadyUrls,
   type SessionFactory,
   type SettingsPort,
   type SettingsView,
@@ -222,6 +224,8 @@ const clientLayers =
 
 interface Started {
   readonly origin: string
+  readonly localUrl: string
+  readonly publicUrl: string | undefined
   readonly code: string
   readonly token: string
   readonly cookie: string
@@ -238,12 +242,17 @@ interface HttpObservation {
   readonly setCookie: string | undefined
 }
 
-/** Asks one URL the way a browser first opens the startup URL. */
-const httpGet = (url: string): Promise<HttpObservation> =>
+/** Asks one URL the way a browser first opens the startup URL; `host` overrides its Host header. */
+const httpGet = (url: string, host?: string): Promise<HttpObservation> =>
   new Promise((resolve, reject) => {
     const target = new URL(url)
     const asked = request(
-      { hostname: target.hostname, port: target.port, path: target.pathname + target.search },
+      {
+        hostname: target.hostname,
+        port: target.port,
+        path: target.pathname + target.search,
+        ...(host === undefined ? {} : { headers: { host } }),
+      },
       (response) => {
         response.resume()
         const location = response.headers.location
@@ -324,9 +333,11 @@ const start = (
   web: FakeWeb,
   settings: ReturnType<typeof makeSettings>,
   workspaces: ReturnType<typeof makeWorkspaces> = makeWorkspaces(),
+  /** The https origin a proxy would publish, when the test drives one. */
+  publicUrl?: PublicOrigin,
 ): Effect.Effect<Started, never, Scope.Scope> =>
   Effect.gen(function* () {
-    const ready = yield* Deferred.make<string>()
+    const ready = yield* Deferred.make<ReadyUrls>()
     const stop = yield* Deferred.make<void>()
     yield* Effect.forkScoped(
       serveWeb({
@@ -337,13 +348,15 @@ const start = (
         commands: web.initial.commands,
         port: 0,
         staticRoot,
-        onReady: (url) => {
-          void Effect.runSync(Deferred.succeed(ready, url))
+        ...(publicUrl === undefined ? {} : { publicUrl }),
+        onReady: (urls) => {
+          void Effect.runSync(Deferred.succeed(ready, urls))
         },
         interrupt: Deferred.await(stop),
       }),
     )
-    const page = new URL(yield* Deferred.await(ready))
+    const urls = yield* Deferred.await(ready)
+    const page = new URL(urls.local)
     const code = page.searchParams.get('code')
     if (code === null) throw new Error('the server reported no code')
     const exchanged = yield* Effect.promise(() => httpGet(page.href))
@@ -352,6 +365,8 @@ const start = (
     const token = cookie.slice(cookie.indexOf('=') + 1)
     return {
       origin: page.origin,
+      localUrl: urls.local,
+      publicUrl: urls.public,
       code,
       token,
       cookie,
@@ -1136,6 +1151,74 @@ describe('the web transport', () => {
 
     expect(observed.status).toBe(403)
     expect(observed.socket).toEqual({ opened: false, status: 403 })
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('a published origin is served, and only that name joins the loopback gate', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-root-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const published = { host: 'myhost.tailnet.ts.net', origin: 'https://myhost.tailnet.ts.net' }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, makeSettings(), makeWorkspaces(), published)
+          const port = new URL(started.origin).port
+          const publicCode = new URL(started.publicUrl ?? '').searchParams.get('code') ?? ''
+          const localCode = new URL(started.localUrl).searchParams.get('code') ?? ''
+          // The proxy passes the browser's Host on, so the exchange names it too.
+          const exchanged = yield* Effect.promise(() =>
+            httpGet('http://127.0.0.1:' + port + '/?code=' + publicCode, published.host),
+          )
+          const cookie = exchanged.setCookie?.split(';')[0] ?? ''
+          const token = cookie.slice(cookie.indexOf('=') + 1)
+          const socket = 'ws://127.0.0.1:' + port + '/ui?token=' + token
+          const opened = yield* Effect.promise(() =>
+            attemptSocket(socket, {
+              origin: published.origin,
+              headers: { host: published.host },
+            }),
+          )
+          const httpOrigin = yield* Effect.promise(() =>
+            attemptSocket(socket, {
+              origin: 'http://myhost.tailnet.ts.net',
+              headers: { host: published.host },
+            }),
+          )
+          const foreignHost = yield* Effect.promise(() =>
+            attemptSocket(socket, { headers: { host: 'evil.example' } }),
+          )
+          const foreignGet = yield* Effect.promise(() =>
+            httpGet('http://127.0.0.1:' + port + '/', 'evil.example'),
+          )
+          yield* Deferred.succeed(started.stop, undefined)
+          return {
+            publicUrl: started.publicUrl,
+            publicCode,
+            localCode,
+            exchanged,
+            opened,
+            httpOrigin,
+            foreignHost,
+            foreignGet,
+          }
+        }),
+      ),
+    )
+
+    expect(observed.publicUrl).toMatch(/^https:\/\/myhost\.tailnet\.ts\.net\/\?code=[0-9a-f]{64}$/)
+    // Each printed address carries its own one-time code: opening one spends neither.
+    expect(observed.publicCode).toMatch(/^[0-9a-f]{64}$/)
+    expect(observed.publicCode).not.toBe(observed.localCode)
+    expect(observed.exchanged.status).toBe(303)
+    // The page is https through the proxy, so the cookie says Secure even when
+    // the proxy does not forward x-forwarded-proto.
+    expect(observed.exchanged.setCookie).toContain('Secure')
+    expect(observed.opened.opened).toBe(true)
+    expect(observed.httpOrigin).toEqual({ opened: false, status: 403 })
+    expect(observed.foreignHost).toEqual({ opened: false, status: 403 })
+    expect(observed.foreignGet.status).toBe(403)
     await rm(root, { recursive: true, force: true })
   })
 })

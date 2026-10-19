@@ -145,6 +145,7 @@ import {
   type CommandView,
   type InitialSession,
   type OpenSession,
+  type PublicOrigin,
   type RunStateView,
   type SessionFactory,
   type SettingsPort,
@@ -183,7 +184,12 @@ export interface CommandOptions {
   /** When present, the command serves the interactive terminal UI. */
   readonly tui?: TuiIo
   /** When present, the command serves the browser UI on that port (0 picks one). */
-  readonly web?: { readonly port: number; readonly staticRoot?: string }
+  readonly web?: {
+    readonly port: number
+    readonly staticRoot?: string
+    /** The https origin a proxy publishes, when the caller named one. */
+    readonly publicUrl?: PublicOrigin | undefined
+  }
   /** Completes to request a \`user\` cancellation, as SIGINT does. */
   readonly interrupt?: Effect.Effect<void>
   /** Answers an approval request; the default denies, so nothing hangs unanswered. */
@@ -593,12 +599,19 @@ type Work =
       readonly port: number
       /** The built app to serve; the shipped build when the caller names none. */
       readonly staticRoot: string | undefined
+      /** The https origin a proxy publishes; undefined keeps the page loopback-only. */
+      readonly publicUrl: PublicOrigin | undefined
     }
 
 const workOf = (options: CommandOptions): Work | undefined => {
   if (options.task !== undefined) return { kind: 'task', task: options.task }
   if (options.web !== undefined) {
-    return { kind: 'web', port: options.web.port, staticRoot: options.web.staticRoot }
+    return {
+      kind: 'web',
+      port: options.web.port,
+      staticRoot: options.web.staticRoot,
+      publicUrl: options.web.publicUrl,
+    }
   }
   if (options.tui !== undefined) return { kind: 'tui', io: options.tui }
   if (options.lines !== undefined) return { kind: 'lines', lines: options.lines }
@@ -1189,8 +1202,16 @@ const serveWebUi = (
           commands: () => defaultCommands,
           port: work.port,
           staticRoot,
-          onReady: (url) => {
-            options.stderr('jzh web: ' + url + '\n')
+          ...(work.publicUrl === undefined ? {} : { publicUrl: work.publicUrl }),
+          onReady: (urls) => {
+            // One line while the page is loopback-only; two when a proxy also
+            // publishes it, so the address to open on another device is explicit.
+            if (urls.public === undefined) {
+              options.stderr('jzh web: ' + urls.local + '\n')
+              return
+            }
+            options.stderr('jzh web: local  ' + urls.local + '\n')
+            options.stderr('jzh web: public ' + urls.public + '\n')
           },
           ...(options.interrupt === undefined ? {} : { interrupt: options.interrupt }),
         })

@@ -1,3 +1,5 @@
+import type { PublicOrigin } from '@jozo-harness/web'
+
 export interface ParsedArgs {
   readonly profile: string
   /** The raw --profile, so a settings file can be overridden. */
@@ -17,6 +19,8 @@ export interface ParsedArgs {
   readonly all: boolean
   /** Port for `jzh web`; 0 asks the system for a free one. */
   readonly port: number
+  /** The https origin `jzh web` is published under; undefined keeps it loopback-only. */
+  readonly publicUrl: PublicOrigin | undefined
   readonly resume: string | undefined
   /** Continue a resumed session even when this run's composition differs from its own. */
   readonly allowPresetChange: boolean
@@ -54,6 +58,7 @@ const FLAGS: ReadonlyMap<string, FlagSpec> = new Map<string, FlagSpec>([
   ['--config', { kind: 'value' }],
   ['--search', { kind: 'value' }],
   ['--port', { kind: 'value' }],
+  ['--public-url', { kind: 'value' }],
   ['--allow-preset-change', { kind: 'boolean' }],
   ['--subagents', { kind: 'boolean' }],
   ['--all', { kind: 'boolean' }],
@@ -113,6 +118,47 @@ const portOf = (raw: string | undefined, errors: Array<string>): number => {
   return port
 }
 
+/** A parsed URL, or undefined for a value that is not one. */
+const urlOf = (raw: string): URL | undefined => {
+  try {
+    return new URL(raw)
+  } catch {
+    return undefined
+  }
+}
+
+/** Only a bare https origin: the value becomes both the admitted origin and a printed URL. */
+const isPublicOrigin = (url: URL): boolean =>
+  url.protocol === 'https:' &&
+  url.pathname === '/' &&
+  url.search === '' &&
+  url.hash === '' &&
+  url.username === '' &&
+  url.password === ''
+
+/**
+ * The origin `jzh web` may be published under. It is refused outside `jzh web`
+ * rather than ignored: it decides what the gate admits, so a run that does not
+ * serve a page has no business carrying one.
+ */
+const publicOriginOf = (
+  raw: string | undefined,
+  web: boolean,
+  errors: Array<string>,
+): PublicOrigin | undefined => {
+  if (raw === undefined) return undefined
+  if (!web) {
+    errors.push('--public-url is only for `jzh web`')
+    return undefined
+  }
+  const url = urlOf(raw)
+  if (url === undefined || !isPublicOrigin(url)) {
+    errors.push('--public-url needs an https origin such as https://host.tailnet.ts.net')
+    return undefined
+  }
+  return { host: url.host, origin: url.origin }
+}
+
 /** What the positional words name: a subcommand, or the one-shot task. */
 interface Words {
   readonly models: boolean
@@ -144,12 +190,14 @@ const wordsOf = (words: ReadonlyArray<string>): Words => {
 export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
   const { values, words, errors } = scan(argv)
   const port = portOf(first(values, '--port'), errors)
+  const selected = wordsOf(words)
   return {
-    ...wordsOf(words),
+    ...selected,
     profile: first(values, '--profile') ?? 'headless',
     profileFlag: first(values, '--profile'),
     patches: values.get('--patch') ?? [],
     port,
+    publicUrl: publicOriginOf(first(values, '--public-url'), selected.web, errors),
     resume: first(values, '--resume'),
     allowPresetChange: values.has('--allow-preset-change'),
     model: first(values, '--model') ?? '',

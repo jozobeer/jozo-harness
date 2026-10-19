@@ -373,8 +373,8 @@ const serve = (
         commands: () => [],
         port: 0,
         staticRoot: root,
-        onReady: (url) => {
-          void Effect.runSync(Deferred.succeed(ready, url))
+        onReady: (urls) => {
+          void Effect.runSync(Deferred.succeed(ready, urls.local))
         },
         interrupt: Deferred.await(stop),
       }),
