@@ -82,12 +82,51 @@ const failureForStatus = (status: number, detail: string): LlmFailure => {
   })
 }
 
+/** Aborts one attempt when the body produces no bytes within the idle budget. */
+interface IdleGuard {
+  readonly signal: AbortSignal
+  readonly timedOut: () => boolean
+  arm(): void
+  disarm(): void
+}
+
+/**
+ * The idle budget restarts on every read. A total-time bound would cut a long
+ * reasoning stream that is still producing tokens, while no bound at all would
+ * let a stalled provider hold the turn open forever.
+ */
+const idleGuardOf = (timeoutMs: number): IdleGuard => {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let expired = false
+  const disarm = (): void => {
+    if (timer !== undefined) clearTimeout(timer)
+    timer = undefined
+  }
+  const arm = (): void => {
+    disarm()
+    timer = setTimeout(() => {
+      expired = true
+      controller.abort()
+    }, timeoutMs)
+  }
+  return { signal: controller.signal, timedOut: () => expired, arm, disarm }
+}
+
+const readFailureOf = (cause: unknown, guard: IdleGuard): LlmFailure =>
+  guard.timedOut()
+    ? new LlmFailure({
+        code: 'TIMEOUT',
+        message: 'provider stream went idle; no bytes arrived within the idle budget',
+      })
+    : new LlmFailure({ code: 'TRANSPORT', message: `cannot read the response: ${String(cause)}` })
+
 /**
  * OpenAI-compatible adapter. One `stream` call is one provider attempt: it never
  * retries internally, so a failed attempt stays visible to the agent loop.
  *
- * The recorded Ollama Cloud stream is buffered before decoding; incremental
- * delivery is a follow-up once the HTTP client seam is Effect-native.
+ * The body is decoded as it arrives, so a step's text reaches the loop before the
+ * provider finishes, and the idle timer restarts on every chunk.
  */
 export function openAiAdapter(options: OpenAiAdapterOptions): LlmAdapter {
   const send = options.fetch ?? fetch
@@ -128,20 +167,29 @@ export function openAiAdapter(options: OpenAiAdapterOptions): LlmAdapter {
             stream_options: { include_usage: true },
             ...request.params,
           })
+          const guard = idleGuardOf(timeout)
+          guard.arm()
           const response = yield* Effect.tryPromise({
             try: () =>
               send(url, {
                 method: 'POST',
                 headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
                 body,
-                signal: AbortSignal.timeout(timeout),
+                signal: guard.signal,
               }),
-            catch: (cause) =>
-              new LlmFailure({
-                code:
-                  cause instanceof Error && cause.name === 'TimeoutError' ? 'TIMEOUT' : 'TRANSPORT',
-                message: `provider request failed: ${String(cause)}`,
-              }),
+            catch: (cause) => {
+              const failure = guard.timedOut()
+                ? new LlmFailure({
+                    code: 'TIMEOUT',
+                    message: `provider did not answer within ${timeout} ms`,
+                  })
+                : new LlmFailure({
+                    code: 'TRANSPORT',
+                    message: `provider request failed: ${String(cause)}`,
+                  })
+              guard.disarm()
+              return failure
+            },
           })
           if (!response.ok) {
             const detail = yield* Effect.match(
@@ -151,21 +199,33 @@ export function openAiAdapter(options: OpenAiAdapterOptions): LlmAdapter {
               }),
               { onFailure: () => '', onSuccess: (value) => value },
             )
+            guard.disarm()
             return yield* Effect.fail(failureForStatus(response.status, detail))
           }
-          const text = yield* Effect.tryPromise({
-            try: () => response.text(),
-            catch: (cause) =>
-              new LlmFailure({
-                code: 'TRANSPORT',
-                message: `cannot read the response: ${String(cause)}`,
-              }),
-          })
+          const responseBody = response.body
+          if (responseBody === null) {
+            guard.disarm()
+            return yield* Effect.fail(
+              new LlmFailure({ code: 'TRANSPORT', message: 'the response carried no body' }),
+            )
+          }
+          guard.arm()
           const decoder = new OpenAiStreamDecoder()
-          const chunks: Array<StreamChunk> = []
-          for (const line of text.split('\n')) chunks.push(...decoder.push(line))
-          chunks.push(...decoder.push('data: [DONE]'))
-          return Stream.fromIterable(chunks)
+          return Stream.fromReadableStream({
+            evaluate: () => responseBody,
+            onError: (cause) => readFailureOf(cause, guard),
+          }).pipe(
+            // Each network read resets the budget: a heartbeat keeps a long
+            // reasoning response alive without a total-time cap.
+            Stream.tap(() => Effect.sync(() => guard.arm())),
+            Stream.decodeText(),
+            Stream.splitLines,
+            // A provider may close without [DONE]; the decoder still holds a
+            // finish until usage arrives, so flush it just as a [DONE] would.
+            Stream.concat(Stream.make('data: [DONE]')),
+            Stream.flatMap((line) => Stream.fromIterable(decoder.push(line))),
+            Stream.ensuring(Effect.sync(() => guard.disarm())),
+          )
         }),
       ),
   }
