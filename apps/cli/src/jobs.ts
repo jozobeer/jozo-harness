@@ -24,6 +24,7 @@ export const jobsOf = (jobs: JobsShape): RunStateView['jobs'] =>
     command: job.command,
     running: job.running,
     startedAt: job.startedAt,
+    ...(job.endedAt === undefined ? {} : { endedAt: job.endedAt }),
     tail: tailOf(job.output),
   }))
 

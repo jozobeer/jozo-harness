@@ -809,6 +809,84 @@ body {
   color: var(--accent);
 }
 
+/* Live work heads its rows with a count; what settled folds behind its own count. */
+.run-work-counts {
+  color: var(--dim);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.run-work .run-jobs,
+.run-work .run-children {
+  margin-top: var(--s2);
+}
+
+.run-work-done {
+  margin-top: var(--s2);
+}
+
+.run-work-done-head {
+  display: flex;
+  gap: var(--s2);
+  align-items: baseline;
+  justify-content: space-between;
+  color: var(--dim);
+  cursor: pointer;
+  list-style: none;
+}
+
+.run-work-done-head::-webkit-details-marker {
+  display: none;
+}
+
+.run-work-done-head .run-section-title {
+  margin-top: 0;
+}
+
+/* The dot says at a glance whether the row still works; the words say the rest. */
+.run-job-dot,
+.run-child-dot {
+  flex: none;
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.run-job-dot.running,
+.run-child-dot.running,
+.run-child-dot.cancelling {
+  background: var(--accent);
+}
+
+.run-job-row .run-job-command {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.run-job-state {
+  white-space: nowrap;
+}
+
+.run-child-preset {
+  flex: none;
+  color: var(--text);
+}
+
+.run-child-activity {
+  flex: none;
+  color: var(--dim);
+}
+
+/* A press arms the stop; the second press is the one that ends the work. */
+.run-job-stop.armed,
+.run-child-stop.armed {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
 .rail-button {
   margin-top: 6px;
   padding: 5px 8px;

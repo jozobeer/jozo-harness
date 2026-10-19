@@ -3,13 +3,24 @@ import type { RunStateView } from '@jozo-harness/web'
 import { WebError } from '@jozo-harness/web'
 import { Effect } from 'effect'
 
+/** When a child stopped working: the last event it wrote, or absent while it works. */
+const endedAtOf = (child: Agent): number | undefined =>
+  child.status === 'running' || child.status === 'cancelling'
+    ? undefined
+    : child.session.events().at(-1)?.time
+
 /** The children one session started, as the Run pane lists them. */
 export const subagentsOf = (children: ReadonlyArray<Agent>): RunStateView['subagents'] =>
-  children.map((child) => ({
-    id: child.id,
-    status: child.status,
-    startedAt: child.session.header.createdAt,
-  }))
+  children.map((child) => {
+    const endedAt = endedAtOf(child)
+    return {
+      id: child.id,
+      status: child.status,
+      startedAt: child.session.header.createdAt,
+      ...(child.options.preset === undefined ? {} : { preset: child.options.preset }),
+      ...(endedAt === undefined ? {} : { endedAt }),
+    }
+  })
 
 /**
  * Stops one child this session started. A child another session started, or an

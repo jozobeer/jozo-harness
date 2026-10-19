@@ -123,6 +123,10 @@ const takeBackClipboard = (): void => {
 const labelOf = (root: ParentNode, selector: string): string | null | undefined =>
   root.querySelector(selector)?.getAttribute('aria-label')
 
+/** The text a selector picks, or nothing when it is absent. */
+const textOf = (root: ParentNode, selector: string): string | null | undefined =>
+  root.querySelector(selector)?.textContent
+
 describe('the Solid page', () => {
   test('the board marks how each session ended, green until the reader has seen it', () => {
     const ended = (outcome: string, failure?: object) =>
@@ -1603,8 +1607,19 @@ describe('the Solid page', () => {
         schedules: [],
         jobs: [],
         subagents: [
-          { id: 'child-12345678', status: 'running', startedAt: Date.now() - 3_000 },
-          { id: 'child-9abcdef0', status: 'idle', startedAt: Date.now() - 90_000 },
+          {
+            id: 'child-12345678',
+            status: 'running',
+            startedAt: Date.now() - 3_000,
+            preset: 'reviewer',
+          },
+          {
+            id: 'child-9abcdef0',
+            status: 'idle',
+            startedAt: Date.now() - 90_000,
+            preset: 'builder',
+            endedAt: Date.now() - 30_000,
+          },
         ],
         todos: [],
         todoCounts: { pending: 0, inProgress: 0, completed: 0 },
@@ -1623,9 +1638,25 @@ describe('the Solid page', () => {
     const running = container.querySelector('[data-subagent-id="child-12345678"]') as Element
     const idle = container.querySelector('[data-subagent-id="child-9abcdef0"]') as Element
     expect(container.querySelectorAll('.run-child-row')).toHaveLength(2)
-    expect(running.querySelector('.run-child-state')?.textContent).toBe('running')
-    expect(running.querySelector('.run-child-id')?.textContent).toBe('child-12')
-    expect(idle.querySelector('.run-child-state')?.textContent).toBe('idle')
+    expect(
+      container.querySelectorAll('.run-work-subagents .run-section-title')[0]?.textContent,
+    ).toBe('subagents')
+    expect(textOf(container, '.run-work-subagents .run-work-counts')).toBe('1 running / 1 done')
+    // The child that still works comes first, whatever order the core held them in.
+    expect(
+      [...container.querySelectorAll('.run-child-row')].map((row) =>
+        row.getAttribute('data-subagent-id'),
+      ),
+    ).toEqual(['child-12345678', 'child-9abcdef0'])
+    expect(textOf(running, '.run-child-state')).toBe('running')
+    expect(textOf(running, '.run-child-id')).toBe('child-12')
+    expect(textOf(running, '.run-child-preset')).toBe('reviewer')
+    expect(textOf(running, '.run-child-activity')).toBe('working')
+    expect(textOf(running, '.run-child-elapsed')).toBe('3s')
+    expect(textOf(idle, '.run-child-state')).toBe('idle')
+    expect(textOf(idle, '.run-child-preset')).toBe('builder')
+    expect(textOf(idle, '.run-child-activity')).toBe('idle')
+    expect(textOf(idle, '.run-child-elapsed')).toBe('1m')
     // Only a child that still works offers a stop; an idle one has nothing to stop.
     expect(running.querySelector('.run-child-stop')).not.toBeNull()
     expect(idle.querySelector('.run-child-stop')).toBeNull()
@@ -1633,7 +1664,13 @@ describe('the Solid page', () => {
     fireEvent.click(running.querySelector('.run-child') as Element)
     expect(calls).toContainEqual({ kind: 'moveTo', id: 'child-12345678', cwd: undefined })
 
-    fireEvent.click(running.querySelector('.run-child-stop') as Element)
+    // The first press arms the stop; the second one is the one that ends the child.
+    const stop = running.querySelector('.run-child-stop') as Element
+    fireEvent.click(stop)
+    expect(stop.classList.contains('armed')).toBe(true)
+    expect(stop.textContent).toBe('press again')
+    expect(calls).not.toContainEqual({ kind: 'stopSubagent', id: 'child-12345678' })
+    fireEvent.click(stop)
     expect(calls).toContainEqual({ kind: 'stopSubagent', id: 'child-12345678' })
   })
 
@@ -1646,18 +1683,19 @@ describe('the Solid page', () => {
         schedules: [],
         jobs: [
           {
+            id: 'job-9f8e7d6c',
+            command: 'pnpm build',
+            running: false,
+            startedAt: startedAt - 60_000,
+            endedAt: startedAt - 58_000,
+            tail: 'built in 2s',
+          },
+          {
             id: 'job-1a2b3c4d',
             command: 'pnpm vitest --watch',
             running: true,
             startedAt,
             tail: 'RUN v4.0.3',
-          },
-          {
-            id: 'job-9f8e7d6c',
-            command: 'pnpm build',
-            running: false,
-            startedAt: startedAt - 60_000,
-            tail: 'built in 2s',
           },
         ],
         subagents: [],
@@ -1678,20 +1716,39 @@ describe('the Solid page', () => {
     const running = container.querySelector('[data-job-id="job-1a2b3c4d"]') as Element
     const done = container.querySelector('[data-job-id="job-9f8e7d6c"]') as Element
     expect(container.querySelectorAll('.run-job-row')).toHaveLength(2)
-    expect(running.querySelector('.run-job-state')?.textContent).toBe('running')
-    expect(running.querySelector('.run-job-command')?.textContent).toBe('pnpm vitest --watch')
-    expect(running.querySelector('.run-job-elapsed')?.textContent).toBe('3s')
-    expect(running.querySelector('.run-job-tail')?.textContent).toBe('RUN v4.0.3')
+    expect(textOf(container, '.run-work-jobs .run-work-counts')).toBe('1 running / 1 done')
+    // Running work leads; a finished job is not ahead of it merely because it started first.
+    expect(
+      [...container.querySelectorAll('.run-job-row')].map((row) => row.getAttribute('data-job-id')),
+    ).toEqual(['job-1a2b3c4d', 'job-9f8e7d6c'])
+    expect(textOf(running, '.run-job-state')).toBe('running')
+    expect(textOf(running, '.run-job-command')).toBe('pnpm vitest --watch')
+    expect(textOf(running, '.run-job-elapsed')).toBe('3s')
+    expect(running.querySelector('.run-job-dot')?.classList.contains('running')).toBe(true)
+    expect(textOf(running, '.run-job-tail')).toBe('RUN v4.0.3')
     // Only a job that still runs offers a stop; a finished one has nothing to stop.
     expect(running.querySelector('.run-job-stop')).not.toBeNull()
-    expect(done.querySelector('.run-job-elapsed')).toBeNull()
     expect(done.querySelector('.run-job-stop')).toBeNull()
-    expect(done.querySelector('.run-job-tail')?.textContent).toBe('built in 2s')
+    expect(textOf(done, '.run-job-state')).toBe('finished')
+    expect(textOf(done, '.run-job-elapsed')).toBe('2s')
+    expect(textOf(done, '.run-job-tail')).toBe('built in 2s')
+
+    // What finished waits folded behind its own count until the reader opens it.
+    const folded = container.querySelector('[data-jobs-done]') as HTMLDetailsElement
+    expect(folded).not.toBeNull()
+    expect(folded.open).toBe(false)
+    expect(textOf(folded, '.run-work-done-head')).toContain('1')
 
     fireEvent.click(running.querySelector('.run-job') as Element)
     expect(calls).toContainEqual({ kind: 'openJob', id: 'job-1a2b3c4d' })
 
-    fireEvent.click(running.querySelector('.run-job-stop') as Element)
+    // The first press arms the stop; the second one is the one that ends the job.
+    const stop = running.querySelector('.run-job-stop') as Element
+    fireEvent.click(stop)
+    expect(stop.classList.contains('armed')).toBe(true)
+    expect(stop.textContent).toBe('press again')
+    expect(calls).not.toContainEqual({ kind: 'stopJob', id: 'job-1a2b3c4d' })
+    fireEvent.click(stop)
     expect(calls).toContainEqual({ kind: 'stopJob', id: 'job-1a2b3c4d' })
   })
 

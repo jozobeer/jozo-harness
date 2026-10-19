@@ -167,6 +167,8 @@ export const JobViewSchema = Schema.Struct({
   running: Schema.Boolean,
   /** When the job began, in ms; the page reads the elapsed time from it. */
   startedAt: Schema.Number,
+  /** When the job stopped, in ms; absent while it still runs. */
+  endedAt: Schema.optionalKey(Schema.Number),
   /** The end of the newest line the job produced, for a row that stays one row. */
   tail: Schema.String,
 })
@@ -178,6 +180,10 @@ export const SubagentViewSchema = Schema.Struct({
   status: Schema.String,
   /** When the child session began, in ms; the page reads the elapsed time from it. */
   startedAt: Schema.Number,
+  /** The agent preset the child runs under, so its row names the role, not just an id. */
+  preset: Schema.optionalKey(Schema.String),
+  /** When the child stopped, in ms; absent while it still works. */
+  endedAt: Schema.optionalKey(Schema.Number),
 })
 
 /** One step of the plan the session recorded with todo_write. */
