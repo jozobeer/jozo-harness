@@ -49,7 +49,8 @@ jzh --dump-config
 jzh config [set K V|init]       settings: show them, write one key, start a file
 jzh models                      list the models the provider offers
 jzh auth [add|set|list|remove]  keep the keys a provider needs
-jzh web [--port N]              browser UI over a local server
+jzh web [--port N] [--public-url <https origin>]
+                                browser UI over a local server
 jzh --resume <sessionId> [task]
 jzh sessions                    list the sessions on disk
 jzh sessions <sessionId>        read one session back
@@ -221,7 +222,7 @@ const workSelection = (
   io: MainIo,
 ): Present<'task'> | Present<'tui'> | Present<'web'> | Present<'lines'> | Record<never, never> => {
   if (parsed.task !== undefined) return { task: parsed.task }
-  if (parsed.web) return { web: { port: parsed.port } }
+  if (parsed.web) return { web: { port: parsed.port, publicUrl: parsed.publicUrl } }
   const tui = io.tui
   if (tui !== undefined && !parsed.json && (parsed.tui || io.tty === true)) return { tui }
   return io.lines === undefined ? {} : { lines: io.lines }

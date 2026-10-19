@@ -99,6 +99,7 @@ tool が宣言する能力（`exec` や `network`）では承認を求めない�
 | `--resume <sessionId>` | 過去のセッションを開く |
 | `--allow-preset-change` | tool の減少や profile の変更があっても再開する（C6） |
 | `--port <N>` | `jzh web` のポート。0 は空きポート |
+| `--public-url <https origin>` | `jzh web` を proxy 越しに公開する origin。許可する Host / Origin と起動メッセージの URL を決める。`jzh web` 以外ではエラー |
 | `--json` | セッションイベントを JSON 行で出す |
 | `--tui` | パイプ越しでも端末 UI を開く |
 | `--dump-config` | 設定面を出力して終わる |
@@ -140,12 +141,12 @@ tool が宣言する能力（`exec` や `network`）では承認を求めない�
 | 設定 | `~/.config/jzh/config.yaml` | `--config`、`XDG_CONFIG_HOME` |
 | 秘密 | `~/.config/jzh/secrets.env`（モード 600） | `jzh auth add` / `set` / `remove` / `list` |
 | セッションログ | `~/.jzh/sessions/<id>/session.v1.jsonl` | `@jozo-harness/session-jsonl` 行の `root` |
-| Web UI | `127.0.0.1` のみ | `--port` |
+| Web UI | bind は `127.0.0.1` に固定 | `--port`、公開は `--public-url` |
 
 ## 設定できないもの
 
 - provider の能力（tool の強制なし、画像なし、prompt cache 制御なし）は adapter に固定されている。reasoning effort は `effort` / `--effort` で指定でき、adapter は `reasoning_effort` としてそのまま渡す（endpoint がその語を受け付けるかは検証しない）
-- Web UI の bind 先は `127.0.0.1` に固定されている
+- Web UI の bind 先は `127.0.0.1` に固定されている（tailnet へは `--public-url` と `tailscale serve` で公開する）
 - セッションログの形式は `session.v1.jsonl` に固定されている
 - tool ごとの実行時間の上限は tool の定義側にある
 

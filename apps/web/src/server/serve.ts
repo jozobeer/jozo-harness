@@ -17,6 +17,7 @@ import {
   tokenFromUrl,
   tokenMatches,
   type CodeExchange,
+  type PublicOrigin,
 } from './auth.ts'
 import { makeWebProtocol, type Connection } from './protocol.ts'
 import { applyMeta, readMeta, sessionActionOf, withMeta } from './session-meta.ts'
@@ -34,6 +35,12 @@ import type { WorkspacesPort } from './workspaces.ts'
 
 export const UI_PATH = '/ui'
 
+/** Where to open the page: the loopback address, and the published one when it has one. */
+export interface ReadyUrls {
+  readonly local: string
+  readonly public?: string
+}
+
 export interface ServeWebOptions {
   /** The session a page opens when it names none; absent while the server holds none. */
   readonly initial?: InitialSession
@@ -49,7 +56,12 @@ export interface ServeWebOptions {
   readonly port: number
   /** Where the browser app to serve sits; the caller owns where its tree keeps it. */
   readonly staticRoot: string
-  readonly onReady: (url: string) => void
+  /**
+   * The https origin a reverse proxy publishes; its Host and Origin join the
+   * loopback ones in the gate, and its address becomes the second ready URL.
+   */
+  readonly publicUrl?: PublicOrigin
+  readonly onReady: (urls: ReadyUrls) => void
   /** Completes to stop the server, as SIGINT does. */
   readonly interrupt?: Effect.Effect<void>
 }
@@ -214,6 +226,7 @@ const exchangeCode = (
   response: ServerResponse,
   token: string,
   codes: CodeExchange,
+  secure: boolean,
 ): boolean => {
   const code = codeFromUrl(request.url ?? '')
   if (pathOf(request) !== '/' || code === undefined) return false
@@ -223,12 +236,24 @@ const exchangeCode = (
   }
   response.writeHead(303, {
     location: '/',
-    'set-cookie': authCookie(token, request.headers['x-forwarded-proto'] === 'https'),
+    'set-cookie': authCookie(token, secure),
     'cache-control': 'no-store',
   })
   response.end()
   return true
 }
+
+/**
+ * True when the browser that repeats this cookie reached the page over https:
+ * either the proxy says so, or the request names the published host, which is
+ * only reachable through the https origin the command was given.
+ */
+const secureExchange = (
+  request: IncomingMessage,
+  publicOrigin: PublicOrigin | undefined,
+): boolean =>
+  request.headers['x-forwarded-proto'] === 'https' ||
+  (publicOrigin !== undefined && request.headers.host?.toLowerCase() === publicOrigin.host)
 
 /** Answers one HTTP request: the socket path refuses plain HTTP, everything else is a file. */
 const respondTo = async (
@@ -236,16 +261,17 @@ const respondTo = async (
   response: ServerResponse,
   staticRoot: string,
   port: number,
+  publicOrigin: PublicOrigin | undefined,
   token: string,
   codes: CodeExchange,
 ): Promise<void> => {
   // A page served under another name could read this one through a rebinding
   // proxy; the name the request asked for must be one this server answers to.
-  if (!hostAllowed(request.headers.host, port)) {
+  if (!hostAllowed(request.headers.host, port, publicOrigin)) {
     endWith(response, 403, 'forbidden')
     return
   }
-  if (exchangeCode(request, response, token, codes)) return
+  if (exchangeCode(request, response, token, codes, secureExchange(request, publicOrigin))) return
   const path = pathOf(request)
   if (path === UI_PATH) {
     endWith(response, 426, 'websocket required')
@@ -295,11 +321,20 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
       // which trades for the token in an HttpOnly cookie and then dies.
       const token = randomBytes(32).toString('hex')
       const codes = codeExchange(() => Date.now())
+      const publicOrigin = options.publicUrl
       // The chosen port is known only once the listener is up; requests arrive after.
       let boundPort = options.port
 
       const server = createServer((request, response) => {
-        void respondTo(request, response, options.staticRoot, boundPort, token, codes).catch(() => {
+        void respondTo(
+          request,
+          response,
+          options.staticRoot,
+          boundPort,
+          publicOrigin,
+          token,
+          codes,
+        ).catch(() => {
           response.destroy()
         })
       })
@@ -309,10 +344,10 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
       const refusalOf = (
         request: IncomingMessage,
       ): { readonly status: number; readonly message: string } | undefined => {
-        if (!hostAllowed(request.headers.host, boundPort)) {
+        if (!hostAllowed(request.headers.host, boundPort, publicOrigin)) {
           return { status: 403, message: 'forbidden host' }
         }
-        if (!originAllowed(request.headers.origin, boundPort)) {
+        if (!originAllowed(request.headers.origin, boundPort, publicOrigin)) {
           return { status: 403, message: 'forbidden origin' }
         }
         // A page repeats the cookie; a script may name the token or redeem a fresh
@@ -376,7 +411,14 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
         Layer.provide(Layer.succeed(RpcServer.Protocol, protocol)),
       ) as unknown as Layer.Layer<never>
       yield* Effect.forkScoped(Layer.launch(rpc))
-      options.onReady('http://127.0.0.1:' + String(port) + '/?code=' + codes.issue())
+      const local = 'http://127.0.0.1:' + String(port) + '/?code=' + codes.issue()
+      // Each address gets its own code: opening the page on one must not spend
+      // the link printed for the other.
+      options.onReady(
+        publicOrigin === undefined
+          ? { local }
+          : { local, public: publicOrigin.origin + '/?code=' + codes.issue() },
+      )
       return options.interrupt === undefined
         ? yield* Effect.never
         : yield* options.interrupt.pipe(Effect.as(130))

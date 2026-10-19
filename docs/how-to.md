@@ -46,6 +46,27 @@ plugins:
 
 設定シートの `model` は「これから開くセッション」に効く。選んで `Use for new sessions` を押すと、そのあと開くセッションはそのモデルで始まり、同時に設定ファイルにも書かれるので次の run も同じモデルで始まる。すでに開いているセッションのモデルは、そのときには変わらない（下の「モデルを選ぶ」で変える）。
 
+### tailnet の別端末から開く
+
+`jzh web` の bind は `127.0.0.1` のままだ。tailnet の別端末から開くときは、Tailscale の `serve` に https を終端させ、公開する origin を `--public-url` で明示する。Serve は元の `Host` をそのまま渡すので、`--public-url` の Host と Origin だけが loopback に追加で通る。他の host は従来どおり 403 で、許可をワイルドカードにはしない。
+
+```sh
+# MagicDNS と HTTPS 証明書が有効になっていることが前提
+tailscale serve --bg 4310
+jzh web --port 4310 --public-url https://<machine>.<tailnet>.ts.net
+```
+
+起動メッセージは 2 行になる。2 行目（public）の URL を別端末で開く。
+
+```
+jzh web: local  http://127.0.0.1:4310/?code=...
+jzh web: public https://<machine>.<tailnet>.ts.net/?code=...
+```
+
+local と public はそれぞれ別の短命 code を持つので、片方を開いても他方の URL は使える。`--port 0` は Serve の向き先が定まらないため、固定 port を使う。`--public-url` を付けないときの出力は従来どおり 1 行で、到達範囲も loopback だけになる。
+
+起動 URL はその run を開ける credential である。code は 60 秒・1 回限りで、開けば `HttpOnly; SameSite=Strict` の cookie に変わり URL からは消える。**開く前の URL をチャットや issue に貼らない。** `--public-url` は https origin だけを受け付け、パス・query・fragment・userinfo が付いた値と `jzh web` 以外での指定は起動前にエラーになる。
+
 ### モデルを選ぶ（走っているセッションと、これから開くセッション）
 
 composer のモデルのチップを押すと、その endpoint が持つモデルの一覧が開く。選ぶと**そのセッションの route が変わり**、同時に**この run でこれから開くセッションもその route で始まる**。効くのは次のリクエストから（turn の途中なら次の step、待っていれば次の turn）。いま効いているモデルには印が付く。

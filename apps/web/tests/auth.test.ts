@@ -21,6 +21,9 @@ describe('the gate in front of the web socket', () => {
   test('accepts only a loopback host at the port the server bound', () => {
     expect(hostAllowed('127.0.0.1:4310', 4310)).toBe(true)
     expect(hostAllowed('localhost:4310', 4310)).toBe(true)
+    // A browser that resolves localhost to its IPv6 name still names this machine.
+    expect(hostAllowed('[::1]:4310', 4310)).toBe(true)
+    expect(hostAllowed('[::2]:4310', 4310)).toBe(false)
     expect(hostAllowed('127.0.0.1:4311', 4310)).toBe(false)
     expect(hostAllowed('evil.example:4310', 4310)).toBe(false)
     expect(hostAllowed(undefined, 4310)).toBe(false)
@@ -29,10 +32,32 @@ describe('the gate in front of the web socket', () => {
   test('accepts the page origin, and a client that names no origin', () => {
     expect(originAllowed('http://127.0.0.1:4310', 4310)).toBe(true)
     expect(originAllowed('http://localhost:4310', 4310)).toBe(true)
+    expect(originAllowed('http://[::1]:4310', 4310)).toBe(true)
+    expect(originAllowed('http://[::1]:4311', 4310)).toBe(false)
     expect(originAllowed(undefined, 4310)).toBe(true)
     expect(originAllowed('http://evil.example', 4310)).toBe(false)
     expect(originAllowed('null', 4310)).toBe(false)
     expect(originAllowed('https://127.0.0.1:4310', 4310)).toBe(false)
+  })
+
+  test('adds only the published origin to the loopback names', () => {
+    const published = {
+      host: 'myhost.tailnet.ts.net',
+      origin: 'https://myhost.tailnet.ts.net',
+    }
+    expect(hostAllowed('myhost.tailnet.ts.net', 4310, published)).toBe(true)
+    expect(hostAllowed('MYHOST.TAILNET.TS.NET', 4310, published)).toBe(true)
+    expect(originAllowed('https://myhost.tailnet.ts.net', 4310, published)).toBe(true)
+    expect(originAllowed('HTTPS://MYHOST.TAILNET.TS.NET', 4310, published)).toBe(true)
+    // The published name is https-only, and another host is never a near miss.
+    expect(originAllowed('http://myhost.tailnet.ts.net', 4310, published)).toBe(false)
+    expect(hostAllowed('myhost.tailnet.ts.net.evil.example', 4310, published)).toBe(false)
+    expect(originAllowed('https://myhost.tailnet.ts.net.evil.example', 4310, published)).toBe(false)
+    // Loopback still passes, and nothing does when no origin was published.
+    expect(hostAllowed('127.0.0.1:4310', 4310, published)).toBe(true)
+    expect(originAllowed(undefined, 4310, published)).toBe(true)
+    expect(hostAllowed('myhost.tailnet.ts.net', 4310)).toBe(false)
+    expect(originAllowed('https://myhost.tailnet.ts.net', 4310)).toBe(false)
   })
 
   test('compares a token without saying where it differs', () => {
