@@ -2,8 +2,9 @@
  * One rule for colour, poured like a glass of beer. Gold is the human's turn
  * and the agent's work in progress; what waits on the reader foams (bubbles
  * rise through it) and is drawn as a glass whichever the theme, while work in
- * progress fills a mug that has no foam yet. Hop green is the moment something
- * finished well, and it settles to a quiet mark; red is what failed and stays.
+ * progress fills a mug that has no foam yet. Hop green is a finish the reader
+ * has not seen yet, and it settles to a quiet mark once they have; red is what
+ * failed and stays.
  * What is merely selected wears steel.
  */
 :root {

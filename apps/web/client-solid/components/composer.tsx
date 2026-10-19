@@ -1,4 +1,15 @@
-import { For, Match, Show, Switch, createSignal, onCleanup, onMount } from 'solid-js'
+import {
+  For,
+  Match,
+  Show,
+  Switch,
+  createEffect,
+  createSignal,
+  on,
+  onCleanup,
+  onMount,
+  type JSX,
+} from 'solid-js'
 import { plainText } from '@jozo-harness/ui-view'
 import type { SubmitMode } from '@jozo-harness/ui-protocol'
 import type { CommandView } from '../../src/shared/rpc.ts'
@@ -18,10 +29,12 @@ import {
   type ReferenceToken,
 } from '../../src/ui/references.ts'
 import { levelOf } from '../pour.ts'
+import { watchWidth } from '../rail.ts'
 import type { SessionStore } from '../store.ts'
 import { acceleratedSend, oppositeMode, submitModeFor } from '../submission.ts'
 import { Button } from './ui/button.tsx'
 import { Fizz } from './ui/fizz.tsx'
+import { Icon } from './ui/icon.tsx'
 
 /** How long the composer waits after the last key before it asks for files. */
 const REFERENCE_ASK_DELAY = 150
@@ -31,20 +44,6 @@ const grow = (node: HTMLTextAreaElement): void => {
   node.style.height = 'auto'
   node.style.height = Math.min(node.scrollHeight, 220) + 'px'
 }
-
-/** The up arrow that sends, drawn here so the page carries no icon package. */
-const SendIcon = () => (
-  <svg class="action-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-    <path d="M8 2.5 13 7.5 9.2 7.5 9.2 13.5 6.8 13.5 6.8 7.5 3 7.5Z" fill="currentColor" />
-  </svg>
-)
-
-/** The square that stops the run, drawn the same way. */
-const StopIcon = () => (
-  <svg class="action-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-    <rect x="3.5" y="3.5" width="9" height="9" rx="2" fill="currentColor" />
-  </svg>
-)
 
 /** Input waiting for its turn, each line labelled with where it is waiting. */
 const Waiting = (props: { label: 'queued' | 'steering'; messages: ReadonlyArray<string> }) => (
@@ -152,7 +151,10 @@ const Takeover = (props: { store: SessionStore }) => {
           <section class="block approval takeover-card">
             <Fizz />
             <div class="card-head">
-              <strong>{'Approve · ' + approval().tool}</strong>
+              <strong>
+                <Icon name="approval" />
+                {'Approve · ' + approval().tool}
+              </strong>
               <span class="card-keys">y / n</span>
             </div>
             <Show when={approval().reason !== ''}>
@@ -200,7 +202,10 @@ const Takeover = (props: { store: SessionStore }) => {
           <section class="block takeover-card">
             <Fizz />
             <div class="card-head">
-              <strong>Question</strong>
+              <strong>
+                <Icon name="ask" />
+                Question
+              </strong>
               <span class="card-keys">type an answer, Enter</span>
             </div>
             <div
@@ -269,18 +274,21 @@ const Effort = (props: { store: SessionStore }) => {
 
   return (
     <Show when={known()}>
-      <select
-        id="seat-effort"
-        class="seat-effort"
-        title="the reasoning effort the next request asks for"
-        aria-label="the reasoning effort the next request asks for"
-        value={current()}
-        onChange={(event) => props.store.chooseEffort(event.currentTarget.value)}
-      >
-        <option value="">default</option>
-        <For each={declared()}>{(effort) => <option value={effort}>{effort}</option>}</For>
-        <Show when={extra()}>{(effort) => <option value={effort()}>{effort()}</option>}</Show>
-      </select>
+      <span class="seat-effort-field">
+        <Icon name="effort" />
+        <select
+          id="seat-effort"
+          class="seat-effort"
+          title="the reasoning effort the next request asks for"
+          aria-label="the reasoning effort the next request asks for"
+          value={current()}
+          onChange={(event) => props.store.chooseEffort(event.currentTarget.value)}
+        >
+          <option value="">default</option>
+          <For each={declared()}>{(effort) => <option value={effort}>{effort}</option>}</For>
+          <Show when={extra()}>{(effort) => <option value={effort()}>{effort()}</option>}</Show>
+        </select>
+      </span>
     </Show>
   )
 }
@@ -346,7 +354,8 @@ const Model = (props: { store: SessionStore }) => {
           title="the model this session asks; pick another one here"
           onClick={toggle}
         >
-          {current()}
+          <Icon name="model" />
+          <span>{current()}</span>
         </button>
         <Show when={open()}>
           <div
@@ -394,7 +403,12 @@ const Model = (props: { store: SessionStore }) => {
  * would type; a word that wants input starts in the draft instead of sending a
  * request the page would have to guess at.
  */
-const Plus = (props: { store: SessionStore; onStart: (text: string) => void }) => {
+const Plus = (props: {
+  store: SessionStore
+  onStart: (text: string) => void
+  /** The seat's chips, when the composer is too narrow to keep them in the row. */
+  seat?: (() => JSX.Element) | undefined
+}) => {
   const [open, setOpen] = createSignal(false)
   let menu: HTMLDivElement | undefined
 
@@ -440,7 +454,7 @@ const Plus = (props: { store: SessionStore; onStart: (text: string) => void }) =
         title="commands that shape this session"
         onClick={() => setOpen(!open())}
       >
-        +
+        <Icon name="plus" />
       </button>
       <Show when={open()}>
         <div
@@ -449,6 +463,7 @@ const Plus = (props: { store: SessionStore; onStart: (text: string) => void }) =
           role="menu"
           aria-label="the commands this menu starts"
         >
+          <Show when={props.seat}>{(draw) => <div class="plus-seat">{draw()()}</div>}</Show>
           <button
             type="button"
             role="menuitem"
@@ -602,6 +617,34 @@ const BusyEnter = (props: {
   </Show>
 )
 
+/** Below this width the seat folds into + whatever it holds: a phone keeps the row for typing. */
+const COMPACT_WIDTH = 560
+
+/**
+ * How far the row would run past its edge with every chip on one line. The seat
+ * is read at its own width for the moment, then handed back to the row.
+ */
+const overflowOf = (row: HTMLElement): number => {
+  const seat = row.querySelector<HTMLElement>('#seat')
+  if (seat === null) return 0
+  const kept = seat.style.cssText
+  seat.style.cssText = kept + ';flex:none;width:max-content'
+  const over = row.scrollWidth - row.clientWidth
+  seat.style.cssText = kept
+  return Math.max(0, over)
+}
+
+/** What the seat shows, so a longer model name or a new chip is measured again. */
+const seatFactsOf = (state: ReturnType<SessionStore['state']>): string =>
+  [
+    state.run?.model,
+    state.run?.effort,
+    state.settings?.model,
+    state.settings?.effort,
+    state.info.model,
+    state.conversation.running,
+  ].join('|')
+
 /** The input, and what sits above it: waiting input and the thing to answer. */
 export const Composer = (props: {
   store: SessionStore
@@ -611,6 +654,19 @@ export const Composer = (props: {
   onBusyEnter?: (mode: SubmitMode) => void
 }) => {
   let textarea: HTMLTextAreaElement | undefined
+  let row: HTMLDivElement | undefined
+  const [compact, setCompact] = createSignal(false)
+  /** The row's width, and the width its chips need on one line, read while the seat sat in it. */
+  let width = 0
+  let need = 0
+  /** The seat folds into + once its chips would not fit beside the buttons on one line. */
+  const fit = (): void => {
+    // A row never measured, or hidden, says nothing about what fits; the seat stays.
+    if (width === 0) return
+    if (row !== undefined && !compact()) need = width + overflowOf(row)
+    setCompact(width < Math.max(COMPACT_WIDTH, need))
+  }
+  createEffect(on([compact, () => seatFactsOf(props.store.state())], fit, { defer: true }))
   /** The slash word the popup belongs to; undefined closes it. */
   const [token, setToken] = createSignal<CommandToken | undefined>()
   /** The @word the file popup belongs to; undefined closes it. */
@@ -635,11 +691,31 @@ export const Composer = (props: {
       props.store.send({ kind: 'approve', callId: approval.callId, approved: key === 'y' })
     }
     document.addEventListener('keydown', onKey)
-    onCleanup(() => document.removeEventListener('keydown', onKey))
+    const stopWidth = watchWidth(row, (next) => {
+      width = next
+      fit()
+    })
+    onCleanup(() => {
+      document.removeEventListener('keydown', onKey)
+      stopWidth?.()
+    })
   })
 
   /** The mode this page prefers while a turn runs; queue is the untouched default. */
   const preferred = (): SubmitMode => props.busyEnter ?? 'queue'
+
+  /** The chips that say how the next request runs; a narrow composer keeps them behind +. */
+  const seat = () => (
+    <div id="seat">
+      <Model store={props.store} />
+      <Effort store={props.store} />
+      <BusyEnter
+        store={props.store}
+        mode={preferred()}
+        onChoose={props.onBusyEnter ?? (() => undefined)}
+      />
+    </div>
+  )
 
   /** Sends the draft; an accelerated gesture asks for the other of the two modes. */
   const send = (accelerated = false): void => {
@@ -883,17 +959,14 @@ export const Composer = (props: {
             }
           }}
         />
-        <div class="actions">
-          <Plus store={props.store} onStart={start} />
-          <div id="seat">
-            <Model store={props.store} />
-            <Effort store={props.store} />
-            <BusyEnter
-              store={props.store}
-              mode={preferred()}
-              onChoose={props.onBusyEnter ?? (() => undefined)}
-            />
-          </div>
+        <div
+          class="actions"
+          ref={(node) => {
+            row = node
+          }}
+        >
+          <Plus store={props.store} onStart={start} seat={compact() ? seat : undefined} />
+          <Show when={!compact()}>{seat()}</Show>
           {/* While something waits on the reader, the card's button is the one in amber. */}
           <Button
             id="send"
@@ -903,7 +976,7 @@ export const Composer = (props: {
             aria-label="Send the message"
             title="Send the message (Enter)"
           >
-            <SendIcon />
+            <Icon name="send" />
           </Button>
           <Button
             id="cancel"
@@ -914,7 +987,7 @@ export const Composer = (props: {
             disabled={!running()}
             onClick={() => props.store.send({ kind: 'cancel' })}
           >
-            <StopIcon />
+            <Icon name="stop" />
           </Button>
         </div>
       </form>

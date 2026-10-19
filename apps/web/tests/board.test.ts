@@ -65,7 +65,22 @@ describe('the board', () => {
       since: 1000,
       calls: 1,
       doing: 'bash pnpm test',
+      ended: undefined,
     })
+  })
+
+  test('a session tells how its last turn ended, past a skill load written after it', () => {
+    const failed = follow(
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'turn/end', {
+        turn: 1,
+        reason: { kind: 'error', failure: { code: 'llm', message: 'down' } },
+      }),
+      at(3, 'tool/call', { callId: 's1', name: 'skill', arguments: '{}', summary: 'SKILL.md' }),
+    )
+    expect(failed.trace.map((turn) => turn.standalone)).toEqual([false, true])
+    expect(entryOf(summary('a'), failed).ended).toEqual({ outcome: 'error', at: 2000 })
+    expect(entryOf(summary('a'), undefined).ended).toBeUndefined()
   })
 
   test('an approval puts the session on the waiting list, ahead of the running ones', () => {
@@ -177,6 +192,7 @@ describe('the board', () => {
       status: 'idle',
       said: 'fixed it',
       since: 5000,
+      ended: { outcome: 'completed', at: 5000 },
     })
     const asking = follow(
       at(1, 'interaction/ask/requested', { id: 'q', question: 'which?', options: [] }),
