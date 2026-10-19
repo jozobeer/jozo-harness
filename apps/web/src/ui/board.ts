@@ -100,7 +100,8 @@ export const entryOf = (summary: SessionSummary, watched: Watched | undefined): 
     status: statusOf(watched, waiting),
     waiting,
     since: facts.since ?? summary.updatedAt,
-    turns: watched.trace.length,
+    // A load written outside a turn is a call, not a turn the session ran.
+    turns: watched.trace.filter((entry) => !entry.standalone).length,
   }
 }
 

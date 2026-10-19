@@ -1,7 +1,7 @@
 import { Cause, Effect, Fiber, Queue, Stream } from 'effect'
 import { RpcClient, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
-import type { SubmitMode, UiCommand, UiEvent } from '@jozo-harness/ui-protocol'
+import type { SubmitMode, UiCommand, UiEvent, UiSessionEvent } from '@jozo-harness/ui-protocol'
 import { batch, createSignal, type Accessor } from 'solid-js'
 import {
   UiRpcs,
@@ -133,9 +133,23 @@ const detailIfOpen = (
     : now
 }
 
-/** What one session's log told the page to read again. */
-const needsRefresh = (type: string): boolean =>
-  type === 'turn/end' || type === 'goal/updated' || type.startsWith('agent/inbox/')
+/** The tool a call names; '' when the event carries none. */
+const calledTool = (data: unknown): string => {
+  if (typeof data !== 'object' || data === null) return ''
+  const name = (data as Record<string, unknown>).name
+  return typeof name === 'string' ? name : ''
+}
+
+/**
+ * What one session's log told the page to read again. A forced skill load is
+ * written outside a turn, so no turn/end follows it: the call itself is the word
+ * that the Run pane now lists the skill.
+ */
+const needsRefresh = (event: UiSessionEvent): boolean =>
+  event.type === 'turn/end' ||
+  event.type === 'goal/updated' ||
+  event.type.startsWith('agent/inbox/') ||
+  (event.type === 'tool/call' && calledTool(event.data) === 'skill')
 
 const sessionInUrl = (search: string): string | undefined => {
   const value = new URLSearchParams(search).get('session')
@@ -514,7 +528,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
                 scheduleFold()
               })
               // Handed over rather than awaited: the feed has to keep draining.
-              if (event.kind === 'session' && needsRefresh(event.event.type)) {
+              if (event.kind === 'session' && needsRefresh(event.event)) {
                 yield* Queue.offer(refreshes, undefined)
               }
             }),

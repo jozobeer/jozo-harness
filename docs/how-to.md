@@ -124,6 +124,8 @@ jzh config                         # 入ったことを確かめる
 
 同じディレクトリを二度足しても増えない。
 
+`/release` のように名前だけを送ると、その skill を読んで会話にカードを出す。turn は始まらない。後ろに文章を付けたときだけ、その文章を入力に turn が始まる。
+
 ## 書き込みと実行の許可を変える
 
 `preset` はコマンドを走らせる sandbox モードを決める。`read-only` は書き込み不可、`workspace-write` はコマンドの cwd と一時ディレクトリと `writableRoots` に書き込み可、`full` は封じ込めなしである。同梱 `base` profile の `safety` 行に、変えたいキーだけを重ねる。

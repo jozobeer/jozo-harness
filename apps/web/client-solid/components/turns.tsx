@@ -144,6 +144,19 @@ const Skill = (props: { tool: TraceTool }) => (
   </details>
 )
 
+/** A call the log wrote outside any turn: its card stands alone because no turn holds it. */
+const Load = (props: { turn: TraceTurn }) => (
+  <article class="block load">
+    <Index each={toolsOf(props.turn)}>
+      {(tool) => (
+        <Show when={tool().name === 'skill'} fallback={<Tool tool={tool()} />}>
+          <Skill tool={tool()} />
+        </Show>
+      )}
+    </Index>
+  </article>
+)
+
 /** One step of the process: a line of what the model thought, what it said, and its calls. */
 const Step = (props: { step: TraceStep; last: boolean }) => (
   <li class="step">
@@ -283,12 +296,19 @@ export const Turns = (props: { store: SessionStore }) => {
   return (
     <Index each={turns()}>
       {(turn) => (
-        <Turn
-          turn={turn()}
-          live={props.store.state().conversation.live}
-          now={now()}
-          store={props.store}
-        />
+        <Show
+          when={turn().standalone}
+          fallback={
+            <Turn
+              turn={turn()}
+              live={props.store.state().conversation.live}
+              now={now()}
+              store={props.store}
+            />
+          }
+        >
+          <Load turn={turn()} />
+        </Show>
       )}
     </Index>
   )
