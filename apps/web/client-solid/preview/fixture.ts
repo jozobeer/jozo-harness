@@ -104,7 +104,7 @@ const grep = (pattern: string, hits: number): Call => ({
 
 const edit = (path: string, before: number, after: number, from = '', to = ''): Call => ({
   name: 'edit',
-  args: { path, old_string: from, new_string: to },
+  args: { path, oldString: from, newString: to },
   summary: path,
   result: 'lines: ' + String(before) + ' → ' + String(after),
 })

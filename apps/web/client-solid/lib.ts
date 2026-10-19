@@ -21,6 +21,16 @@ export const elapsedOf = (at: number, now: number): string => {
   return String(Math.floor(minutes / 60)) + 'h'
 }
 
+/** A span of time the way the page says it: 0.3s, 38s, 4m 12s, 1h 03m. */
+export const spanOf = (ms: number): string => {
+  if (ms < 10_000) return (Math.max(0, ms) / 1000).toFixed(1) + 's'
+  const seconds = Math.round(ms / 1000)
+  if (seconds < 60) return String(seconds) + 's'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return String(minutes) + 'm ' + String(seconds % 60).padStart(2, '0') + 's'
+  return String(Math.floor(minutes / 60)) + 'h ' + String(minutes % 60).padStart(2, '0') + 'm'
+}
+
 export const basenameOf = (path: string): string => {
   const parts = path.split('/')
   return parts[parts.length - 1] ?? path
