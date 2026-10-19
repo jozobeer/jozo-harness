@@ -34,6 +34,10 @@ describe('static files', () => {
     await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
     const found = await staticResponse(root, '/')
     expect(found?.headers.get('content-type')).toBe('text/html; charset=utf-8')
+    // The startup URL carries the token until the page strips it, so the page
+    // must not name that address to another request or leave it in a cache.
+    expect(found?.headers.get('referrer-policy')).toBe('no-referrer')
+    expect(found?.headers.get('cache-control')).toBe('no-store')
     expect(await found?.text()).toBe('<h1>jozo-harness</h1>')
     expect(await staticResponse(root, '/missing.js')).toBeUndefined()
     await rm(root, { recursive: true, force: true })
