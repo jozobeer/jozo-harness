@@ -121,9 +121,9 @@ jzh auth list         # 入っている名前を見る
 
 ## Ollama の local daemon 経由で prompt cache を効かせる
 
-同梱の `base` profile は、起動時に `http://127.0.0.1:11434/v1` の local daemon を一度だけ probe する。答えればそちらを使い、答えなければ `https://ollama.com/v1` にそのまま繋ぐ。どちらの経路でもモデル名は同じものを使う。
+同梱の `base` profile は、`localBaseUrl` に `http://127.0.0.1:11434/v1` を置き、リクエストを常にその local daemon へ送る。dsh の web profile と同じく、daemon が動いている前提である。`baseUrl` の `https://ollama.com/v1` は `jzh models` がモデル一覧を読む先として残る。route のモデル名は cloud の名前（例 `deepseek-v4.1-flash`）のままで、local daemon へ送るときだけ Ollama の cloud 名（`deepseek-v4.1-flash:cloud`、タグ付きなら `deepseek-v4-pro:0813-cloud`）に直す。
 
-local daemon が動いているかは、先に model 一覧で確かめられる。
+local daemon が動いているかは、先に model 一覧で確かめられる。一覧が空でも、Ollama が cloud model を中継できればよい。
 
 ```sh
 curl -sf http://127.0.0.1:11434/v1/models >/dev/null && echo local
@@ -135,7 +135,7 @@ cache が効いたかは、2 step 以上走る依頼を出したあと、セッ�
 jq -c 'select(.type == "assistant/message") | .usage.cacheReadTokens' ~/.jzh/sessions/<id>.jsonl
 ```
 
-local daemon を止めて走らせると、警告 `local daemon at ... did not answer; using ...` を出して cloud 直結に fallback する。local daemon を使わない設定にしたいときは、行から `localBaseUrl` を外す（または `jzh config` の patch で消す）。
+local daemon を止めて走らせると、リクエストは接続エラーになる。cloud への自動 fallback はない。cloud 直結にしたいときは、`jzh config set plugins.llm.localBaseUrl ''` で local route を切る。
 
 ## スキルを読ませる
 

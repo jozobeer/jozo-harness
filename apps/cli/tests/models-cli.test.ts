@@ -48,6 +48,9 @@ const setUp = async (baseUrl: string, settings?: string) => {
       "    name: '@jozo-harness/llm-openai'",
       '    config:',
       '      baseUrl: ' + baseUrl,
+      // The test points at its own stub; the bundled profile points every
+      // request at the local Ollama daemon, so opt out of that route.
+      '      localBaseUrl: ""',
       '      apiKeyEnv: ' + keyEnv,
       '  - id: session-jsonl',
       "    name: '@jozo-harness/session-jsonl'",

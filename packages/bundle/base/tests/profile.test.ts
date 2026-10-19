@@ -40,11 +40,15 @@ describe('base profile', () => {
       promptCacheControl: false,
     }
 
-    const budget = tokenBudgetOf(loopConfig, capabilities, 'deepseek-v4.1-flash:cloud')
+    // The canonical route names the model without the local daemon's suffix;
+    // the explicit local spelling stays budgeted the same way.
+    for (const model of ['deepseek-v4.1-flash', 'deepseek-v4.1-flash:cloud']) {
+      const budget = tokenBudgetOf(loopConfig, capabilities, model)
 
-    expect(budget.contextWindow).toBe(1_048_576)
-    expect(budget.reserveTokens).toBe(393_216)
-    expect(thresholdOf(budget)).toBe(589_824)
+      expect(budget.contextWindow, model).toBe(1_048_576)
+      expect(budget.reserveTokens, model).toBe(393_216)
+      expect(thresholdOf(budget), model).toBe(589_824)
+    }
   })
 
   test('a profile patch overrides one row by id without reordering it', async () => {

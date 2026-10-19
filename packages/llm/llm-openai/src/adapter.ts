@@ -16,6 +16,8 @@ export interface OpenAiAdapterOptions {
   readonly apiKey: () => string | undefined
   /** Whether the route may be called without a key, as a local daemon is. */
   readonly allowAnonymous?: boolean
+  /** How this endpoint names a route's model; absent sends the route's own name. */
+  readonly modelName?: (model: string) => string
   readonly capabilities: LlmCapabilities
   /** Idle budget for one attempt. Defaults to five minutes. */
   readonly streamIdleTimeoutMs?: number
@@ -138,6 +140,8 @@ export function openAiAdapter(options: OpenAiAdapterOptions): LlmAdapter {
   const send = options.fetch ?? fetch
   const timeout = options.streamIdleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS
   const url = `${options.baseUrl.replace(/\/$/, '')}/chat/completions`
+  /** The route's model name as this endpoint reads it; the route's own when it names no rule. */
+  const wireModelOf = options.modelName ?? ((model: string) => model)
 
   return {
     name: 'openai',
@@ -164,7 +168,7 @@ export function openAiAdapter(options: OpenAiAdapterOptions): LlmAdapter {
             )
           }
           const body = JSON.stringify({
-            model: request.model,
+            model: wireModelOf(request.model),
             messages: request.messages.map(encodeMessage),
             ...(request.tools === undefined
               ? {}

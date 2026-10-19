@@ -10,15 +10,15 @@
 
 | 軸 | 記録する値 | production の確認先 | 正規化するときの注意 |
 |---|---|---|---|
-| provider / transport: endpoint | 実際に叩いた URL、local daemon に届いたか | `baseUrl` と `localBaseUrl`（`jzh:packages/bundle/base/profiles/base.yml:30`）。既定は local が答えれば local、答えなければ cloud（`jzh:packages/llm/llm-openai/src/plugin.ts:46`） | cloud に固定すると暗黙の prefix cache が消える。cache の差は測れなくなる |
-| provider / transport: prompt cache | `cacheReadTokens`、`cacheWriteTokens`、明示制御の有無 | wire は `prompt_tokens_details.cached_tokens`（`jzh:packages/llm/llm-openai/src/sse.ts:52`）、usage は `LlmUsage`（`jzh:packages/llm/llm/src/types.ts:38`）、集計は `jzh:packages/core/session/src/usage-stats.ts:57` | 明示 API が無いことは暗黙 cache が無いことを意味しない。`promptCacheControl: false`（`jzh:packages/llm/llm-openai/src/plugin.ts:119`）は明示制御だけを言う |
-| provider / transport: streaming | chunk が到着順に届くか、finish の flush、idle timeout | SSE の読み取りは `jzh:packages/llm/llm-openai/src/adapter.ts:131`、idle の既定は 300,000 ms（チャンク間、`jzh:packages/llm/llm-openai/src/adapter.ts:26`） | 全体時間のタイムアウトに読み替えない |
+| provider / transport: endpoint | 実際に叩いた URL、local daemon に届いたか | `baseUrl` と `localBaseUrl`（`jzh:packages/bundle/base/profiles/base.yml:30`）。`localBaseUrl` があれば常に local、なければ cloud（`jzh:packages/llm/llm-openai/src/plugin.ts:64`） | cloud に固定すると暗黙の prefix cache が消える。cache の差は測れなくなる |
+| provider / transport: prompt cache | `cacheReadTokens`、`cacheWriteTokens`、明示制御の有無 | wire は `prompt_tokens_details.cached_tokens`（`jzh:packages/llm/llm-openai/src/sse.ts:52`）、usage は `LlmUsage`（`jzh:packages/llm/llm/src/types.ts:38`）、集計は `jzh:packages/core/session/src/usage-stats.ts:57` | 明示 API が無いことは暗黙 cache が無いことを意味しない。`promptCacheControl: false`（`jzh:packages/llm/llm-openai/src/plugin.ts:80`）は明示制御だけを言う |
+| provider / transport: streaming | chunk が到着順に届くか、finish の flush、idle timeout | SSE の読み取りは `jzh:packages/llm/llm-openai/src/adapter.ts:132`、idle の既定は 300,000 ms（チャンク間、`jzh:packages/llm/llm-openai/src/adapter.ts:26`） | 全体時間のタイムアウトに読み替えない |
 | provider / transport: retry | 再試行する code、回数、待ち時間 | `jzh:packages/core/agent-loop/src/retry.ts:6`（既定 maxRetries 5、初回 500 ms、上限 10 s、RATE_LIMIT / SERVER / TIMEOUT / TRANSPORT / EMPTY_RESPONSE） | 再試行を足すと step 数と latency が変わる。失敗の種類ごとに分ける |
-| provider / transport: model metadata | route、モデル名、contextWindow / maxTokens と宣言元 | base profile の `models`（`jzh:packages/bundle/base/profiles/base.yml:43`）と adapter の `LlmCapabilities`（`jzh:packages/llm/llm/src/types.ts:84`） | profile の既定値とモデル定義を混ぜない。A/B の dsh patch は 52,768 / 32,768 を宣言する（`jzh:scripts/ab/dsh-provider.patch.yml:20`） |
-| production defaults: context window | 窓のトークン数と宣言元 | 既定ルートは 1,048,576（`jzh:packages/bundle/base/profiles/base.yml:45`） | 128,000 を既定と思わない。窓はモデルごとの `models` から読む |
-| production defaults: max output | 出力予約と wire の `max_tokens` | 既定ルートは 393,216（`jzh:packages/bundle/base/profiles/base.yml:46`） | 予約を compaction の線から引くかどうかを分けて書く |
+| provider / transport: model metadata | route、モデル名、contextWindow / maxTokens と宣言元 | base profile の `models`（`jzh:packages/bundle/base/profiles/base.yml:44`）と adapter の `LlmCapabilities`（`jzh:packages/llm/llm/src/types.ts:84`） | profile の既定値とモデル定義を混ぜない。A/B の dsh patch は 52,768 / 32,768 を宣言する（`jzh:scripts/ab/dsh-provider.patch.yml:20`） |
+| production defaults: context window | 窓のトークン数と宣言元 | 既定ルートは 1,048,576（`jzh:packages/bundle/base/profiles/base.yml:46`） | 128,000 を既定と思わない。窓はモデルごとの `models` から読む |
+| production defaults: max output | 出力予約と wire の `max_tokens` | 既定ルートは 393,216（`jzh:packages/bundle/base/profiles/base.yml:47`） | 予約を compaction の線から引くかどうかを分けて書く |
 | production defaults: compaction line | `contextWindow` / `thresholdRatio` / `headroomTokens` / `maxTokens` と計算した線 | 既定は `min(1,048,576 × 0.8, 1,048,576 − 393,216 − 65,536) = 589,824`（[設定](../configuration.md)） | A/B の 16,000 は比較用の線であり、production の線ではない |
-| production defaults: profile route | `provider/model` と profile 名 | 既定ルートは `ollama-cloud/deepseek-v4.1-flash`。model key は `deepseek-v4.1-flash:cloud`（[設定](../configuration.md)） | route を変えると窓・cache・endpoint が同時に変わる。軸ごとに分けて記録する |
+| production defaults: profile route | `provider/model` と profile 名 | 既定ルートは `ollama-cloud/deepseek-v4.1-flash`。model key は route の model 名と同じ `deepseek-v4.1-flash`（[設定](../configuration.md)）。local daemon へは wire で `:cloud` を付けるが、route と model key には付けない | route を変えると窓・cache・endpoint が同時に変わる。軸ごとに分けて記録する |
 
 ## 正規化の規則
 

@@ -28,8 +28,8 @@ plugins:
     name: '@jozo-harness/llm-openai'
     config:
       baseUrl: https://ollama.com/v1
-      # A local daemon serves the same cloud models with a prompt cache; a run
-      # that cannot reach it keeps the base URL above.
+      # Requests go to the local daemon, which serves the same cloud models with
+      # a prompt cache. baseUrl stays for `jzh models`, which lists from the cloud.
       localBaseUrl: http://127.0.0.1:11434/v1
       apiKeyEnv: OLLAMA_API_KEY
       # The effort words this endpoint takes; the UI offers them as the choices.
@@ -39,8 +39,11 @@ plugins:
   - id: agent-loop
     name: '@jozo-harness/agent-loop'
     config:
-      # The default route's window, so a 60k session never reaches the line.
+      # The default route's window, so a 60k session never reaches the line. The
+      # key is the route's model name; the local daemon's name is a wire detail.
       models:
-        deepseek-v4.1-flash:cloud:
+        deepseek-v4.1-flash: &default-window
           contextWindow: 1048576
           maxTokens: 393216
+        # A route that spells the local daemon's name gets the same window.
+        deepseek-v4.1-flash:cloud: *default-window
