@@ -62,7 +62,7 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 |---|---|
 | `@jozo-harness/session-jsonl` | `root`（必須）— セッションログのディレクトリ |
 | `@jozo-harness/safety` | `preset`（必須）— `read-only` / `workspace-write` / `full`。コマンドと file tool が従う sandbox モードを決める、`sandbox` — `none` / `auto` / `seatbelt` / `bwrap`（**既定は `auto`**。macOS では `seatbelt`、Linux では `bwrap` を選ぶ）、`writableRoots` — sandbox が書き込めるディレクトリ（既定はコマンドの cwd と一時ディレクトリ。ここに足す） |
-| `@jozo-harness/llm-openai` | `baseUrl`（必須）、`apiKeyEnv`（必須）— キーを持つ環境変数の名前、`localBaseUrl` — リクエストを送る local daemon の OpenAI 互換 URL。指定すると常にそこへ送り、daemon が動いている前提になる。空文字にすると local を使わず `baseUrl` に送る。`baseUrl` は `jzh models` のモデル一覧を読む先でもある。local 経由では route のモデル名を Ollama の cloud 名（`<model>:cloud`、タグ付きなら `<model>:<tag>-cloud`）に直して送る、`streamIdleTimeoutMs` — チャンク間の無応答を許す上限（ミリ秒、既定 300000。チャンクが届くたびに測り直す）、`reasoningEfforts` — この endpoint が受ける effort の語（UI が選択肢に並べる。既定は `low` / `medium` / `high` / `xhigh` / `max`、空配列なら選択肢を出さない） |
+| `@jozo-harness/llm-openai` | `baseUrl`（必須）、`apiKeyEnv`（必須）— キーを持つ環境変数の名前、`localBaseUrl` — リクエストを送る local daemon の OpenAI 互換 URL。指定すると常にそこへ送り、daemon が動いている前提になる。空文字にすると local を使わず `baseUrl` に送る。`baseUrl` は `jzh models` のモデル一覧を読む先でもある。local 経由では route のモデル名を Ollama の cloud 名（`<model>:cloud`、タグ付きなら `<model>:<tag>-cloud`）に直して送る、`streamIdleTimeoutMs` — チャンク間の無応答を許す上限（ミリ秒、既定 300000。チャンクが届くたびに測り直す）、`headers` — 毎回のリクエストにそのまま付けるヘッダ（endpoint が client の user agent や routing 用の id を求めるときに使う。`Authorization` と `Content-Type` は adapter が決める）、`reasoningEfforts` — この endpoint が受ける effort の語（UI が選択肢に並べる。既定は `low` / `medium` / `high` / `xhigh` / `max`、空配列なら選択肢を出さない） |
 | `@jozo-harness/agent-loop` | `models` — ルートのモデル名（`provider/model` の model 部分）をキーに、`contextWindow` と `maxTokens` をモデルごとに持つ（同じ行の単一値より優先する）、`contextWindow` — ルートしたモデルの context window（トークン）。`models` のそのモデルの値、この値、adapter の値、128000 の順に使う、`thresholdRatio` — 推定が窓のこの割合に達したら compaction する（既定 0.8）、`headroomTokens` — 発火点と窓の間に必ず空けるトークン（既定 65536）、`maxTokens` — 1 リクエストが答えのために予約するトークン。`models` にそのモデルの値があればそちらを使う。provider へ `max_tokens` として送り、発火点から先に引く（既定は無し＝予約しない）、`retainTokens` — 末尾で内容を置き換えない範囲を、推定トークンで表した目標（既定は窓の 16%。最新の 1 件は大きさによらず残る）、`maxBytes` — これを超える text block を、保持の外でスタブに置き換える（バイト、既定 32000）、`maxParallelToolCalls` — 並列に走らせる tool call の上限（既定 10。0 以下でも 1 件ずつ） |
 | `@jozo-harness/mcp` | `command`（必須）、`prefix` |
 
@@ -75,6 +75,29 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 tool が宣言する能力（`exec` や `network`）では承認を求めない。境界を越えようとした呼び出しは sandbox が拒否し、結果に `[sandbox: file access denied under <mode> mode]` と、1回だけ許される再試行の案内が付く。`bash` / `write` / `edit` の `sandbox_permissions`（より広いモード）と `justification`（1文の理由）を付けて同じ呼び出しをやり直すと、人間に1回だけ確認が出る。拒否されれば呼び出しは拒否されたままで、その往復はセッションログに残る。答える者がいない実行は拒否される。
 
 `@jozo-harness/mcp` の行は MCP サーバを起動し、その tool を `prefix`（既定 `mcp__`）を頭に付けて登録する。
+
+### OpenCode Console に向ける
+
+Console の chat completions は OpenAI 互換で、endpoint は `https://opencode.ai/inference/openai/v1` である。行の `baseUrl` と `apiKeyEnv` をそこへ向けると、その route で turn が走る。
+
+```yaml
+plugins:
+  - id: llm
+    name: '@jozo-harness/llm-openai'
+    config:
+      baseUrl: https://opencode.ai/inference/openai/v1
+      apiKeyEnv: OPENCODE_API_KEY
+      headers:
+        User-Agent: jzh/1.0
+```
+
+route は `opencode/<model>`、wire に送る model は `<model>` そのものである。Console の chat completions 一覧にある id（`deepseek-v4.1-flash` など）をそのまま書く。GPT / Claude / Gemini の family は別の API を話すので、この adapter では扱えない。
+
+キーは `OPENCODE_API_KEY` に置く。`jzh auth add` はまだ OpenCode を知らないため、シェル、`.env`、`secrets.env` のいずれかに置く。`headers` は静的な値なので、会話ごとに変える `x-opencode-session` はまだ組み立てられない。
+
+`jzh models` は `baseUrl + /models` を読む。Console ではこれが 404 になり、一覧は `https://opencode.ai/inference/v1/models` にある。今は一覧を取れないので、モデル名は手で指定する。
+
+無料 tier のモデルを OpenCode 本体以外から呼ぶと 403 の `FreeTierError` になる。adapter はこれを `AUTH` として扱い、provider の本文をメッセージに残す。OpenCode Go は client の user agent と会話ごとに安定した `x-opencode-session` を求める。`headers` で user agent は送れる。
 
 ## plugin の schema に無い行キー
 
@@ -126,6 +149,7 @@ tool が宣言する能力（`exec` や `network`）では承認を求めない�
 | 変数 | 効果 |
 |---|---|
 | `OLLAMA_API_KEY` / `OPENAI_API_KEY` | provider のキー。名前は行の `apiKeyEnv` が決める |
+| `OPENCODE_API_KEY` | OpenCode Console のキー。`apiKeyEnv` にこの名前を置く |
 | `BRAVE_API_KEY` | あると既定の `web_search` provider が付く |
 | `DEEPSEEK_API_KEY` | `search: deepseek` のとき `web_search` が DeepSeek Search API を呼ぶ。無い場合は tool error が `jzh auth add deepseek` を案内する |
 | `XDG_CONFIG_HOME` | `config.yaml` と `secrets.env` を置くディレクトリ |

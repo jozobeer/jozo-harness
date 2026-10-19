@@ -30,6 +30,25 @@ describe('OpenAiStreamDecoder', () => {
     expect(assembled.usage?.cacheReadTokens).toBe(0)
   })
 
+  test('reads DeepSeek-style reasoning_content as the reasoning block, once per delta', () => {
+    const chunks = decodeOpenAiStream([
+      'data: {"choices":[{"delta":{"reasoning_content":"think"},"finish_reason":null}]}',
+      'data: {"choices":[{"delta":{"reasoning":"ing","reasoning_content":"ing","content":"hi"},"finish_reason":null}]}',
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+    ])
+    const reasoning = chunks.flatMap((chunk) =>
+      chunk.type === 'reasoning-delta' ? [chunk.text] : [],
+    )
+    const text = chunks.flatMap((chunk) => (chunk.type === 'text-delta' ? [chunk.text] : []))
+
+    // Console's chat-completions family (DeepSeek, GLM, Kimi) uses this spelling.
+    expect(reasoning).toEqual(['think', 'ing'])
+    expect(text).toEqual(['hi'])
+    expect(
+      chunks.flatMap((chunk) => (chunk.type === 'block-start' ? [chunk.blockType] : [])),
+    ).toEqual(['reasoning', 'text'])
+  })
+
   test('keeps cached prompt tokens out of the non-cache input', () => {
     const chunks = decodeOpenAiStream([
       'data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}',
