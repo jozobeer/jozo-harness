@@ -127,6 +127,54 @@ describe('openAiAdapter', () => {
     expect(sent).not.toHaveProperty('reasoningEffort')
   })
 
+  test('an anonymous local route sends no Authorization header when no key is set', async () => {
+    const fixture = await readFile(
+      new URL('../fixtures/ollama-cloud-tool-call.sse', import.meta.url),
+      'utf8',
+    )
+    const headers: Array<Headers> = []
+    const streaming = openAiAdapter({
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      apiKey: () => undefined,
+      allowAnonymous: true,
+      capabilities: {
+        toolChoice: false,
+        reasoningEffort: null,
+        images: 'none',
+        promptCacheControl: false,
+      },
+      fetch: ((_url: string, init: RequestInit) => {
+        headers.push(new Headers(init.headers))
+        return Promise.resolve(new Response(fixture, { status: 200 }))
+      }) as unknown as typeof fetch,
+    })
+
+    const chunks = await Effect.runPromise(Stream.runCollect(streaming.stream(request)))
+
+    expect(headers[0]?.has('Authorization')).toBe(false)
+    expect(headers[0]?.get('Content-Type')).toBe('application/json')
+    expect([...chunks].some((chunk) => chunk.type === 'finish')).toBe(true)
+  })
+
+  test('a route that does not allow anonymous calls still fails without a key', async () => {
+    const streaming = openAiAdapter({
+      baseUrl: 'https://example.test/v1',
+      apiKey: () => undefined,
+      capabilities: {
+        toolChoice: false,
+        reasoningEffort: null,
+        images: 'none',
+        promptCacheControl: false,
+      },
+      fetch: (() => Promise.reject(new Error('must not be called'))) as unknown as typeof fetch,
+    })
+
+    const error = await Effect.runPromise(Effect.flip(Stream.runCollect(streaming.stream(request))))
+
+    expect(error).toBeInstanceOf(LlmFailure)
+    expect(error.code).toBe('AUTH')
+  })
+
   test('an HTTP error becomes an AUTH LlmFailure', async () => {
     const error = await Effect.runPromise(
       Effect.flip(collect(new Response('nope', { status: 401 }))),

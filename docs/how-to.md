@@ -96,6 +96,24 @@ jzh auth list         # 入っている名前を見る
 
 `.env` に書く場合は `OLLAMA_API_KEY=` を作業ディレクトリかその祖先に置く。どれが勝つかは [configuration.md](configuration.md) の環境変数の節にある。
 
+## Ollama の local daemon 経由で prompt cache を効かせる
+
+同梱の `base` profile は、起動時に `http://127.0.0.1:11434/v1` の local daemon を一度だけ probe する。答えればそちらを使い、答えなければ `https://ollama.com/v1` にそのまま繋ぐ。どちらの経路でもモデル名は同じものを使う。
+
+local daemon が動いているかは、先に model 一覧で確かめられる。
+
+```sh
+curl -sf http://127.0.0.1:11434/v1/models >/dev/null && echo local
+```
+
+cache が効いたかは、2 step 以上走る依頼を出したあと、セッションログの `assistant/message` の `usage.cacheReadTokens` で見る。2 step 目以降が 0 より大きければ、同じ prefix が cache から返っている。
+
+```sh
+jq -c 'select(.type == "assistant/message") | .usage.cacheReadTokens' ~/.jzh/sessions/<id>.jsonl
+```
+
+local daemon を止めて走らせると、警告 `local daemon at ... did not answer; using ...` を出して cloud 直結に fallback する。local daemon を使わない設定にしたいときは、行から `localBaseUrl` を外す（または `jzh config` の patch で消す）。
+
 ## スキルを読ませる
 
 ```
