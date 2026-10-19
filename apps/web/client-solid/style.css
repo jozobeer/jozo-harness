@@ -1563,7 +1563,8 @@
   }
 
   #seat .seat-chip,
-  .seat-effort-field {
+  .seat-effort-field,
+  .context-ring {
     min-height: 24px;
     padding: 1px 8px;
     border: 1px solid var(--line);
@@ -1574,6 +1575,7 @@
   }
 
   #seat .seat-chip:hover,
+  .context-ring:hover,
   .seat-effort-field:hover,
   .seat-effort-field:focus-within {
     border-color: var(--line-strong);
@@ -1649,5 +1651,214 @@
   /* On the amber button a hairline arrow thins out; the send arrow is drawn heavier. */
   #send .icon-line {
     stroke-width: 2;
+  }
+}
+
+/*
+ * Usage: the context on top, then what went in, how fast the newest turn wrote,
+ * and what came out. The speed is a car's dial: a blue ring up to the reading,
+ * the reading large in its middle.
+ */
+@layer client {
+  .usage-total {
+    color: var(--dim);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .usage-context {
+    display: grid;
+    gap: 3px;
+    margin-top: 6px;
+  }
+
+  .usage-context-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: var(--text-sm);
+  }
+
+  .usage-context-of,
+  .usage-left {
+    color: var(--dim);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .usage-bar {
+    position: relative;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--line);
+  }
+
+  .usage-bar > i {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: 3px;
+    background: var(--dim);
+  }
+
+  .usage-fire {
+    position: absolute;
+    top: -3px;
+    bottom: -3px;
+    width: 2px;
+    margin-left: -1px;
+    border-radius: 1px;
+    background: var(--warn);
+  }
+
+  /* Close to the line compaction runs at, the bar and its words turn gold. */
+  .usage-context.near .usage-bar > i {
+    background: var(--warn);
+  }
+
+  .usage-context.near .usage-left {
+    color: var(--warn);
+  }
+
+  .usage-trio {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    margin-top: 8px;
+  }
+
+  .usage-side {
+    display: grid;
+    min-width: 0;
+  }
+
+  .usage-side.out {
+    text-align: right;
+  }
+
+  .usage-key,
+  .usage-note {
+    color: var(--dim);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .usage-value {
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1.15;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The dial sits up toward the context, not centred on the numbers beside it. */
+  .dial {
+    align-self: start;
+    width: 124px;
+    height: auto;
+    margin-top: -10px;
+    overflow: visible;
+  }
+
+  .dial-face {
+    fill: var(--bg-sunken);
+    stroke: var(--line-strong);
+    stroke-width: 1;
+  }
+
+  .dial-track,
+  .dial-fill {
+    fill: none;
+    stroke-width: 3;
+    stroke-linecap: round;
+  }
+
+  .dial-track {
+    stroke: var(--line);
+  }
+
+  .dial-fill {
+    stroke: var(--speed);
+  }
+
+  .dial-tick {
+    stroke: var(--rest);
+    stroke-width: 0.8;
+  }
+
+  .dial-tick.mid {
+    stroke: var(--dim);
+    stroke-width: 1.2;
+  }
+
+  .dial-tick.major {
+    stroke: var(--text);
+    stroke-width: 1.8;
+  }
+
+  .dial-value {
+    fill: var(--text);
+    font: 700 30px var(--sans);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Three digits and four draw smaller, so the widest still clears the ticks. */
+  .dial-value.mid {
+    font-size: 27px;
+  }
+
+  .dial-value.long {
+    font-size: 23px;
+  }
+
+  .dial-unit {
+    fill: var(--dim);
+    font: 7.5px var(--sans);
+    letter-spacing: 0.04em;
+  }
+
+  /* The ring beside the composer: the same pill as the seat's chips. */
+  .context-ring {
+    display: inline-flex;
+    flex: none;
+    gap: 5px;
+    align-items: center;
+    background: none;
+    font-family: var(--mono);
+    cursor: pointer;
+  }
+
+  .context-ring.near {
+    border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+    color: var(--warn);
+  }
+
+  .context-ring-mark {
+    width: 14px;
+    height: 14px;
+    transform: rotate(-90deg);
+  }
+
+  .context-ring-mark circle {
+    fill: none;
+    stroke-width: 2.2;
+  }
+
+  .ring-track {
+    stroke: var(--line-strong);
+  }
+
+  .ring-used {
+    stroke: currentColor;
+    stroke-linecap: round;
+  }
+
+  .ring-fire {
+    stroke: var(--warn);
+    stroke-width: 3;
+  }
+
+  /* The seat keeps its chips' width, so the ring sits right after them. */
+  .actions > #seat {
+    flex: 0 1 auto;
   }
 }

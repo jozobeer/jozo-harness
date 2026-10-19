@@ -8,6 +8,7 @@ import {
   tokensPerSecondOf,
   tokensPerSecondText,
   usageStatsOf,
+  usageViewOf,
 } from '../src/index.ts'
 import { event, headerEvent } from './support.ts'
 
@@ -177,5 +178,38 @@ describe('statsViewOf', () => {
 
     expect(view.context).toBe('—')
     expect(statsLineTextOf(view)).toBe('tok/s — · — · cache — · context —')
+  })
+})
+
+describe('usageViewOf', () => {
+  const budget = { contextWindow: 2_000, thresholdRatio: 0.8, headroomTokens: 0 }
+
+  test('words the totals as /status rounds them and gives the shares the bar and dial draw', () => {
+    const events = [
+      headerEvent('/work'),
+      event(2, 'user/message', { text: 'x'.repeat(400), source: 'user' }),
+      turn(3, 1),
+      usage(4, 1_000, 200, { read: 500, write: 0 }),
+    ]
+    expect(usageViewOf(events, budget)).toEqual({
+      // 1,000 uncached + 500 cache read billed, and 200 out.
+      total: '1.7k',
+      input: '1.5k',
+      output: '200',
+      turns: 1,
+      cache: '33%',
+      speed: { text: '400', value: 400 },
+      // The estimate is 1,700 of 2,000; compaction runs at 1,600, so nothing is left.
+      context: { used: '1.7k', window: '2.0k', left: '0', share: 0.85, fire: 0.8 },
+    })
+  })
+
+  test('a log with nothing counted leaves out what it cannot state, rather than showing zero', () => {
+    expect(usageViewOf([headerEvent()])).toEqual({
+      total: '—',
+      input: '—',
+      output: '—',
+      turns: 0,
+    })
   })
 })

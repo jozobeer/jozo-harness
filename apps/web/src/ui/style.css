@@ -32,6 +32,8 @@
   /* What is selected: a session, a tab, a theme. */
   --select: #8aa0b4;
   --select-soft: #252c34;
+  /* How fast the model writes: the speed dial's ring, a blue of its own. */
+  --speed: #5aa9e6;
   --user: #fbfaf6;
   --tool: #9cc97a;
   --error: #ec6a5e;
@@ -94,6 +96,7 @@
     --pour: color-mix(in srgb, #f7b500 18%, #ffffff);
     --select: #3d5a73;
     --select-soft: #e3eaf0;
+    --speed: #2a72b8;
     --user: #16191d;
     --tool: #2b7327;
     --error: #b3261e;
@@ -123,6 +126,7 @@
   --pour: color-mix(in srgb, #f7b500 18%, #ffffff);
   --select: #3d5a73;
   --select-soft: #e3eaf0;
+  --speed: #2a72b8;
   --user: #16191d;
   --tool: #2b7327;
   --error: #b3261e;

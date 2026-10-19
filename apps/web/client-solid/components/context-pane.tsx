@@ -12,6 +12,7 @@ import { Button } from './ui/button.tsx'
 import { Icon } from './ui/icon.tsx'
 import { GoalMark, roundsOf } from './ui/goal-mark.tsx'
 import { Mug } from './ui/mug.tsx'
+import { Usage } from './usage.tsx'
 
 const Goal = (props: { goal: RunStateView['goal'] }) => (
   <Show when={props.goal} fallback={<div class="run-empty">no goal</div>}>
@@ -201,6 +202,7 @@ const Run = (props: { store: SessionStore }) => {
         {(state) => (
           <>
             <Goal goal={state().goal} />
+            <Usage usage={state().usage} />
             <Todos todos={state().todos} counts={state().todoCounts} />
             <Skills skills={state().skills} />
             <PromptSections sections={state().promptSections} />

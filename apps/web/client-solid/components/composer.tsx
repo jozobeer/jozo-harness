@@ -35,6 +35,7 @@ import { Button } from './ui/button.tsx'
 import { Fizz } from './ui/fizz.tsx'
 import { GoalMark, roundsOf } from './ui/goal-mark.tsx'
 import { Icon } from './ui/icon.tsx'
+import { ContextRing } from './usage.tsx'
 
 /** How long the composer waits after the last key before it asks for files. */
 const REFERENCE_ASK_DELAY = 150
@@ -963,6 +964,7 @@ export const Composer = (props: {
         >
           <Plus store={props.store} onStart={start} seat={compact() ? seat : undefined} />
           <Show when={!compact()}>{seat()}</Show>
+          <ContextRing store={props.store} />
           {/* While something waits on the reader, the card's button is the one in amber. */}
           <Button
             id="send"

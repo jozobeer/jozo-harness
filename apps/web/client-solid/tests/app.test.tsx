@@ -7,6 +7,7 @@ import { initialState, withDraft, withTheme, type Pane, type WebState } from '..
 import { App } from '../app.tsx'
 import { Composer } from '../components/composer.tsx'
 import { ContextPane } from '../components/context-pane.tsx'
+import { SpeedDial } from '../components/usage.tsx'
 import { elapsedOf } from '../lib.ts'
 import { Conversation } from '../components/conversation.tsx'
 import { Board } from '../components/board.tsx'
@@ -2046,14 +2047,75 @@ describe('the rail', () => {
     expect(container.querySelector('.branch')).toBeNull()
   })
 
-  test('the status bar reads the token stats the run carried', () => {
-    const stats = {
-      tokensPerSecond: '12',
-      tokens: '1.0k in · 200 out',
-      cache: '45%',
-      context: '12% (usage)',
+  /** A run that used 540k of a 1M window, 50k before compaction runs. */
+  const usedRun = () => ({
+    goal: null,
+    schedules: [],
+    jobs: [],
+    subagents: [],
+    todos: [],
+    todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+    skills: [],
+    promptSections: [],
+    queued: [],
+    steering: [],
+    model: 'stub/model',
+    effort: '',
+    efforts: [],
+    usage: {
+      total: '371k',
+      input: '360k',
+      output: '11k',
+      turns: 8,
+      cache: '94%',
+      speed: { text: '42', value: 42 },
+      context: { used: '540k', window: '1.0M', left: '50k', share: 0.54, fire: 0.59 },
+    },
+  })
+  const textsAt = (root: ParentNode, selector: string): ReadonlyArray<string | null> =>
+    [...root.querySelectorAll(selector)].map((node) => node.textContent)
+
+  test('usage reads in the Run pane, gold within a tenth of compaction, and not in the status bar', () => {
+    const { store } = makeStore({ sessionId: 'a', pane: { kind: 'run' }, run: usedRun() })
+    const { container } = render(() => <ContextPane store={store} />)
+    expect(textsAt(container, '#run-usage .usage-total')).toEqual(['371k tokens'])
+    expect(textsAt(container, '.usage-context-of')).toEqual(['540k / 1.0M'])
+    expect(textsAt(container, '.usage-context.near .usage-left')).toEqual(['Compacts in 50k'])
+    expect(textsAt(container, '.dial-value')).toEqual(['42'])
+    expect(container.querySelector('.dial-fill')).not.toBeNull()
+    expect(textsAt(container, '.usage-note')).toEqual(['Cache 94%', '8 turns'])
+
+    const strip = render(() => <Status store={store} drawer={false} onDrawer={() => undefined} />)
+    expect(strip.container.textContent).not.toContain('371k')
+  })
+
+  test('the ring beside the composer reads the context and opens the Run pane at its usage', async () => {
+    const { store, calls } = makeStore({ sessionId: 'a', pane: { kind: 'run' }, run: usedRun() })
+    render(() => <ContextPane store={store} />)
+    const { container } = render(() => <Composer store={store} />)
+    const ring = container.querySelector('#context-ring') as HTMLElement
+    expect(ring.textContent).toBe('54%')
+    expect(ring.title).toBe('Context 540k / 1.0M · Compacts in 50k')
+    // jsdom scrolls nothing, so the scroll the ring asks for is caught here.
+    const scrolled = vi.fn()
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      value: scrolled,
+      configurable: true,
+    })
+    try {
+      fireEvent.click(ring)
+      expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'run' } })
+      await new Promise((done) => requestAnimationFrame(done))
+      expect(scrolled).toHaveBeenCalledWith({ block: 'nearest' })
+    } finally {
+      Reflect.deleteProperty(Element.prototype, 'scrollIntoView')
     }
+  })
+
+  test('usage the log cannot state stays out: no cache line, an empty dial, a dash for its speed', () => {
     const { store } = makeStore({
+      sessionId: 'a',
+      pane: { kind: 'run' },
       run: {
         goal: null,
         schedules: [],
@@ -2068,27 +2130,23 @@ describe('the rail', () => {
         model: 'stub/model',
         effort: '',
         efforts: [],
-        stats,
+        usage: { total: '—', input: '—', output: '—', turns: 0 },
       },
     })
-
-    const { container } = render(() => (
-      <Status store={store} drawer={false} onDrawer={() => undefined} />
-    ))
-
-    const shown = container.querySelector('.stats')
-    const text = '12 tok/s · 1.0k in · 200 out · cache 45% · ctx 12% (usage)'
-    expect(shown?.textContent).toBe(text)
-    expect(shown?.getAttribute('title')).toBe(text)
+    const { container } = render(() => <ContextPane store={store} />)
+    expect(container.querySelector('.dial-value')?.textContent).toBe('—')
+    expect(container.querySelector('.dial-fill')).toBeNull()
+    expect(container.querySelector('.usage-context')).toBeNull()
+    expect([...container.querySelectorAll('.usage-note')].map((note) => note.textContent)).toEqual([
+      '0 turns',
+    ])
   })
 
-  test('the status bar leaves the stats out until the run has them', () => {
-    const { store } = makeStore()
-    const { container } = render(() => (
-      <Status store={store} drawer={false} onDrawer={() => undefined} />
-    ))
-
-    expect(container.querySelector('.stats')).toBeNull()
+  test('a turn faster than the dial fills the whole ring, and its reading says how fast', () => {
+    const { container } = render(() => <SpeedDial speed={{ text: '2100', value: 2100 }} />)
+    const ring = (selector: string) => container.querySelector(selector)?.getAttribute('d')
+    expect(ring('.dial-fill')).toBe(ring('.dial-track'))
+    expect(container.querySelector('.dial-value.long')?.textContent).toBe('2100')
   })
 
   test('the status bar says working while a session runs, without counting runners', () => {

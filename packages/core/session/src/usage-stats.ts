@@ -247,3 +247,68 @@ export const statsLineTextOf = (view: StatsView): string =>
   view.cache +
   ' · context ' +
   view.context
+
+/** The context as a page draws it: the words it shows, and the shares its bar marks. */
+export interface ContextUsageView {
+  readonly used: string
+  readonly window: string
+  /** What is left before compaction runs; 0 once the estimate has reached the line. */
+  readonly left: string
+  /** The estimate and the compaction line, each as a share of the window. */
+  readonly share: number
+  readonly fire: number
+}
+
+/**
+ * The usage a page draws: the words rounded the way /status rounds them, and the
+ * numbers its shapes need. A number the log cannot state is left out, never zero.
+ */
+export interface UsageView {
+  /** Input the provider billed plus output; an em dash before any request reported usage. */
+  readonly total: string
+  readonly input: string
+  readonly output: string
+  readonly turns: number
+  /** The share of input read from the cache. */
+  readonly cache?: string
+  /** The newest turn's decode speed, as words and as the value a dial fills to. */
+  readonly speed?: { readonly text: string; readonly value: number }
+  readonly context?: ContextUsageView
+}
+
+const shareOf = (part: number, whole: number): number =>
+  whole <= 0 ? 0 : Math.min(1, Math.max(0, part / whole))
+
+const contextUsageOf = (context: ContextStats): ContextUsageView => ({
+  used: tokenCountText(context.estimated),
+  window: tokenCountText(context.contextWindow),
+  left: tokenCountText(Math.max(0, context.threshold - context.estimated)),
+  share: shareOf(context.estimated, context.contextWindow),
+  fire: shareOf(context.threshold, context.contextWindow),
+})
+
+const tokenWordsOf = (totals: UsageTotals): Pick<UsageView, 'total' | 'input' | 'output'> => {
+  if (totals.requests === 0) return { total: DASH, input: DASH, output: DASH }
+  const billed = billedInputTokens(totals)
+  return {
+    total: tokenCountText(billed + totals.outputTokens),
+    input: tokenCountText(billed),
+    output: tokenCountText(totals.outputTokens),
+  }
+}
+
+/** Everything the page's usage section and context ring draw, from the log and the loop's budget. */
+export const usageViewOf = (
+  events: ReadonlyArray<SessionEvent>,
+  budget?: TokenBudget,
+): UsageView => {
+  const stats = usageStatsOf(events)
+  const speed = stats.tokensPerSecond
+  return {
+    ...tokenWordsOf(stats.totals),
+    turns: events.filter((event) => event.type === 'turn/start').length,
+    ...(stats.cacheHitRate === undefined ? {} : { cache: cacheRateText(stats.cacheHitRate) }),
+    ...(speed === undefined ? {} : { speed: { text: tokensPerSecondText(speed), value: speed } }),
+    ...(budget === undefined ? {} : { context: contextUsageOf(contextStatsOf(events, budget)) }),
+  }
+}
