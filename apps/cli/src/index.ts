@@ -56,6 +56,7 @@ import { Tier0Tools, type Tier0ToolBuilder, type WorktreeHost } from '@jozo-harn
 import {
   agentLoopConfigSchema,
   installRetry,
+  modelOfRoute,
   tokenBudgetOf,
   type RetryConfig,
 } from '@jozo-harness/agent-loop'
@@ -1406,7 +1407,11 @@ const buildSession = (
     // here lets /status and the page report the line compaction would fire on.
     const loopRow = rows.find((row) => row.name === '@jozo-harness/agent-loop')
     const loopConfig = Schema.decodeUnknownSync(agentLoopConfigSchema)(loopRow?.config ?? {})
-    const budget = tokenBudgetOf(loopConfig, Context.get(context, Llm).capabilities)
+    const budget = tokenBudgetOf(
+      loopConfig,
+      Context.get(context, Llm).capabilities,
+      modelOfRoute(agent.options.route),
+    )
     // What a human can type at this session is not the model's business; both the
     // REPL and a UI run it through the same registry and the log keeps the record.
     const commands = makeCommands()

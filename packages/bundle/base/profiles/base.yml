@@ -35,3 +35,9 @@ plugins:
     name: '@jozo-harness/agent'
   - id: agent-loop
     name: '@jozo-harness/agent-loop'
+    config:
+      # The default route's window, so a 60k session never reaches the line.
+      models:
+        deepseek-v4.1-flash:cloud:
+          contextWindow: 1048576
+          maxTokens: 393216
