@@ -126,11 +126,6 @@ const Search = (props: { query: string; onQuery: (query: string) => void }) => {
   )
 }
 
-/**
- * The row that opens a session; every session shows exactly one. Hovering or
- * right-clicking offers the menu that renames, pins, archives, or deletes it;
- * a double-click puts the name itself in reach.
- */
 /** How a row stands at a glance: a mug filling while it works, full while it waits on you, else a dot. */
 const SessionMark = (props: { entry: BoardEntry }) => (
   <Switch fallback={<span class="session-mark" />}>
@@ -143,6 +138,11 @@ const SessionMark = (props: { entry: BoardEntry }) => (
   </Switch>
 )
 
+/**
+ * The row that opens a session; every session shows exactly one. Hovering or
+ * right-clicking offers the menu that renames, pins, archives, or deletes it;
+ * a double-click puts the name itself in reach.
+ */
 const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) => {
   const id = () => props.entry.summary.id
   const pinned = () => props.entry.summary.pinned === true
