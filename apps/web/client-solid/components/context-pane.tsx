@@ -102,6 +102,7 @@ const ChildLinks = (props: { store: SessionStore; blocks: ReadonlyArray<Conversa
                 data-session-id={id}
                 onClick={() => props.store.moveTo(id)}
               >
+                <Icon name="subagent" />
                 {'subagent · ' + id.slice(0, 8)}
               </button>
             </li>
@@ -126,6 +127,7 @@ const LiveSubagents = (props: { store: SessionStore; subagents: RunStateView['su
               data-session-id={child.id}
               onClick={() => props.store.moveTo(child.id)}
             >
+              <Icon name="subagent" />
               <span class="run-child-state">{child.status}</span>
               <span class="run-child-id">{child.id.slice(0, 8)}</span>
               <Show when={working()}>
@@ -160,6 +162,7 @@ const Jobs = (props: { store: SessionStore; jobs: RunStateView['jobs'] }) => (
             type="button"
             onClick={() => props.store.openJob(job.id)}
           >
+            <Icon name="job" />
             <span class="run-job-state">{job.running ? 'running' : 'done'}</span>
             <span class="run-job-id">{job.id}</span>
             <span class="run-job-command">{job.command}</span>
@@ -370,10 +373,10 @@ const Job = (props: { store: SessionStore; pane: Extract<Pane, { kind: 'job' }> 
 )
 
 const PANES = [
-  { kind: 'changes', label: 'changes' },
-  { kind: 'run', label: 'run' },
-  { kind: 'settings', label: 'settings' },
-  { kind: 'trajectory', label: 'turns' },
+  { kind: 'changes', label: 'changes', icon: 'changes' },
+  { kind: 'run', label: 'run', icon: 'run' },
+  { kind: 'settings', label: 'settings', icon: 'settings' },
+  { kind: 'trajectory', label: 'turns', icon: 'turns' },
 ] as const
 
 type Tab = (typeof PANES)[number]['kind']
@@ -422,6 +425,7 @@ export const ContextPane = (props: { store: SessionStore }) => {
                 type="button"
                 onClick={() => toggle(entry.kind)}
               >
+                <Icon name={entry.icon} />
                 {entry.label}
               </button>
             )}
@@ -446,7 +450,7 @@ export const ContextPane = (props: { store: SessionStore }) => {
           aria-label="hide the pane"
           onClick={() => props.store.showPane(undefined)}
         >
-          ×
+          <Icon name="close" />
         </button>
       </header>
       <div

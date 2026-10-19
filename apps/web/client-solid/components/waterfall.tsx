@@ -8,6 +8,7 @@ import {
   type TraceTurn,
 } from '../../src/ui/trace.ts'
 import type { SessionStore } from '../store.ts'
+import { Icon, toolIconOf } from './ui/icon.tsx'
 
 /** A span the way the axis says it: 0.3s, 38s, 4m 12s. */
 export const spanOf = (ms: number): string => {
@@ -66,6 +67,7 @@ const ModelRow = (props: {
   const to = () => thinkingEnd(props.step, props.liveEnd)
   return (
     <div class="wf-row model">
+      <Icon name="model" class="wf-icon" />
       <span class="wf-name">model</span>
       <span class="wf-summary">{props.step.reasoning.split('\n')[0] ?? ''}</span>
       <span class="wf-track">
@@ -96,6 +98,7 @@ const ToolRow = (props: {
         props.store.showPane({ kind: 'inspect', turn: props.turn.turn, callId: props.tool.callId })
       }
     >
+      <Icon name={toolIconOf(props.tool.name)} class="wf-icon" />
       <span class="wf-name">{props.tool.name}</span>
       <span class="wf-summary">{summaryBodyOf(props.tool.name, props.tool.summary)}</span>
       <span class="wf-track">

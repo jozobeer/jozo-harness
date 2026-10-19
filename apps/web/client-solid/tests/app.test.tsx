@@ -16,7 +16,8 @@ import { Markdown } from '../components/turns.tsx'
 import { Waterfall } from '../components/waterfall.tsx'
 import { LensSwitch } from '../components/lens-switch.tsx'
 import { lensFrom, type Lens } from '../lens.ts'
-import { FINISHED_MS, justFinished, levelOf, pourFrom } from '../pour.ts'
+import { levelOf, pourFrom } from '../pour.ts'
+import { SEEN_KEY, SeenContext, createSeen, looksFrom } from '../seen.ts'
 import type { SessionStore } from '../store.ts'
 import type { DirectoryView, SessionAction } from '../../src/shared/rpc.ts'
 import { traceOf } from '../../src/ui/trace.ts'
@@ -122,6 +123,48 @@ const labelOf = (root: ParentNode, selector: string): string | null | undefined 
   root.querySelector(selector)?.getAttribute('aria-label')
 
 describe('the Solid page', () => {
+  test('the board marks how each session ended, green until the reader has seen it', () => {
+    const ended = (outcome: string, failure?: object) =>
+      [
+        { seq: 1, time: 1_000, type: 'turn/start', data: { turn: 1 } },
+        {
+          seq: 2,
+          time: 2_000,
+          type: 'turn/end',
+          data: { turn: 1, reason: { kind: outcome, ...failure } },
+        },
+      ]
+        .map((event) => ({ kind: 'session' as const, event }))
+        .reduce(watchedAfter, emptyWatched)
+    const session = (id: string) => ({
+      id,
+      cwd: '/work',
+      createdAt: 0,
+      updatedAt: 2_000,
+      title: id,
+    })
+    const { store } = makeStore(
+      { sessions: [session('news'), session('read'), session('broke'), session('cold')] },
+      new Map([
+        ['news', ended('completed')],
+        ['read', ended('completed')],
+        ['broke', ended('error', { failure: { code: 'llm', message: 'down' } })],
+      ]),
+    )
+    const seen = { fresh: (id: string) => id !== 'read' }
+    const { container } = render(() => (
+      <SeenContext.Provider value={seen}>
+        <Board store={store} />
+      </SeenContext.Provider>
+    ))
+    const mark = (id: string) =>
+      container.querySelector(`button.session[data-session-id="${id}"] .session-mark`)
+    expect(mark('news')?.classList.value).toBe('icon end-mark done fresh session-mark')
+    expect(mark('read')?.classList.value).toBe('icon end-mark done session-mark')
+    expect(mark('broke')?.classList.value).toBe('icon end-mark failed session-mark')
+    expect(mark('cold')?.classList.value).toBe('icon end-mark idle session-mark')
+  })
+
   test('the board puts a session that waits first, and answers it in place', () => {
     const asking = [
       {
@@ -447,7 +490,7 @@ describe('the Solid page', () => {
     expect(card.open).toBe(false)
   })
 
-  test('a running turn fills a mug from when it began, and rests on a dot once it ends', () => {
+  test('a running turn fills a mug from when it began, and rests on a check once it ends', () => {
     const now = Date.now()
     const events = [
       { seq: 1, time: now - 2_000, type: 'turn/start', data: { turn: 1 } },
@@ -462,14 +505,20 @@ describe('the Solid page', () => {
       trace: traceOf(events),
     })
 
-    const { container } = render(() => <Conversation store={store} />)
+    // The reader opened the session before the turn ended, so its finish is news.
+    const seen = { fresh: (_id: string, endedAt: number) => endedAt >= now }
+    const { container } = render(() => (
+      <SeenContext.Provider value={seen}>
+        <Conversation store={store} />
+      </SeenContext.Provider>
+    ))
     const mug = container.querySelector<SVGElement>('.process-line .mug')
     expect(mug?.classList.contains('filling')).toBe(true)
     // The level starts from the two seconds the turn has run, so a reload keeps it.
     expect(Number.parseFloat(mug?.style.getPropertyValue('--pour-from') ?? '')).toBeLessThanOrEqual(
       -2,
     )
-    expect(container.querySelector('.process-dot')).toBeNull()
+    expect(container.querySelector('.process-line .end-mark')).toBeNull()
     // The fold's mark closes the line, after what the turn has done.
     expect(container.querySelector('.process-line > .process-chevron')).not.toBeNull()
 
@@ -482,7 +531,7 @@ describe('the Solid page', () => {
       ]),
     }))
     expect(container.querySelector('.process-line .mug')).toBeNull()
-    expect(container.querySelector('.process-dot.completed')).not.toBeNull()
+    expect(container.querySelector('.process-line .end-mark.done.fresh')).not.toBeNull()
   })
 
   test('a running turn keeps one line from its first moment, and fills it as calls come and go', () => {
@@ -2246,25 +2295,32 @@ describe('the pour', () => {
     expect(levelOf(9, 8)).toBe('1')
     expect(levelOf(1, 0)).toBe('0')
   })
+})
 
-  test('a finish lights once while the page watched it, then rests', () => {
-    vi.useFakeTimers()
-    try {
-      const [running, setRunning] = createSignal(true)
-      const lit = createRoot(() => justFinished(running))
-      expect(lit()).toBe(false)
+describe('the finish the reader has seen', () => {
+  test('a finish stays fresh until the reader has had its session open and left it', () => {
+    localStorage.removeItem(SEEN_KEY)
+    let clock = 1_000
+    const [open, setOpen] = createSignal('')
+    const seen = createRoot(() => createSeen(open, () => clock))
+    // What ended before this browser first kept count is not news.
+    expect(seen.fresh('a', 500)).toBe(false)
+    expect(seen.fresh('a', 2_000)).toBe(true)
 
-      setRunning(false)
-      expect(lit()).toBe(true)
-      vi.advanceTimersByTime(FINISHED_MS)
-      expect(lit()).toBe(false)
+    clock = 3_000
+    setOpen('a')
+    expect(seen.fresh('a', 2_000)).toBe(false)
+    // A turn that ends while the reader is on it stays green until they move on.
+    expect(seen.fresh('a', 4_000)).toBe(true)
 
-      // Work that had already finished when the page drew it never lights.
-      const [done] = createSignal(false)
-      const quiet = createRoot(() => justFinished(done))
-      expect(quiet()).toBe(false)
-    } finally {
-      vi.useRealTimers()
-    }
+    clock = 5_000
+    setOpen('b')
+    expect(seen.fresh('a', 4_000)).toBe(false)
+    expect(looksFrom(localStorage.getItem(SEEN_KEY), 0)).toEqual({
+      since: 1_000,
+      at: { a: 5_000, b: 5_000 },
+    })
+    expect(looksFrom('not json', 7)).toEqual({ since: 7, at: {} })
+    expect(looksFrom('{"since":"x"}', 7)).toEqual({ since: 7, at: {} })
   })
 })

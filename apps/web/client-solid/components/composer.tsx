@@ -22,6 +22,7 @@ import type { SessionStore } from '../store.ts'
 import { acceleratedSend, oppositeMode, submitModeFor } from '../submission.ts'
 import { Button } from './ui/button.tsx'
 import { Fizz } from './ui/fizz.tsx'
+import { Icon } from './ui/icon.tsx'
 
 /** How long the composer waits after the last key before it asks for files. */
 const REFERENCE_ASK_DELAY = 150
@@ -31,20 +32,6 @@ const grow = (node: HTMLTextAreaElement): void => {
   node.style.height = 'auto'
   node.style.height = Math.min(node.scrollHeight, 220) + 'px'
 }
-
-/** The up arrow that sends, drawn here so the page carries no icon package. */
-const SendIcon = () => (
-  <svg class="action-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-    <path d="M8 2.5 13 7.5 9.2 7.5 9.2 13.5 6.8 13.5 6.8 7.5 3 7.5Z" fill="currentColor" />
-  </svg>
-)
-
-/** The square that stops the run, drawn the same way. */
-const StopIcon = () => (
-  <svg class="action-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-    <rect x="3.5" y="3.5" width="9" height="9" rx="2" fill="currentColor" />
-  </svg>
-)
 
 /** Input waiting for its turn, each line labelled with where it is waiting. */
 const Waiting = (props: { label: 'queued' | 'steering'; messages: ReadonlyArray<string> }) => (
@@ -152,7 +139,10 @@ const Takeover = (props: { store: SessionStore }) => {
           <section class="block approval takeover-card">
             <Fizz />
             <div class="card-head">
-              <strong>{'Approve · ' + approval().tool}</strong>
+              <strong>
+                <Icon name="approval" />
+                {'Approve · ' + approval().tool}
+              </strong>
               <span class="card-keys">y / n</span>
             </div>
             <Show when={approval().reason !== ''}>
@@ -200,7 +190,10 @@ const Takeover = (props: { store: SessionStore }) => {
           <section class="block takeover-card">
             <Fizz />
             <div class="card-head">
-              <strong>Question</strong>
+              <strong>
+                <Icon name="ask" />
+                Question
+              </strong>
               <span class="card-keys">type an answer, Enter</span>
             </div>
             <div
@@ -269,18 +262,21 @@ const Effort = (props: { store: SessionStore }) => {
 
   return (
     <Show when={known()}>
-      <select
-        id="seat-effort"
-        class="seat-effort"
-        title="the reasoning effort the next request asks for"
-        aria-label="the reasoning effort the next request asks for"
-        value={current()}
-        onChange={(event) => props.store.chooseEffort(event.currentTarget.value)}
-      >
-        <option value="">default</option>
-        <For each={declared()}>{(effort) => <option value={effort}>{effort}</option>}</For>
-        <Show when={extra()}>{(effort) => <option value={effort()}>{effort()}</option>}</Show>
-      </select>
+      <span class="seat-effort-field">
+        <Icon name="effort" />
+        <select
+          id="seat-effort"
+          class="seat-effort"
+          title="the reasoning effort the next request asks for"
+          aria-label="the reasoning effort the next request asks for"
+          value={current()}
+          onChange={(event) => props.store.chooseEffort(event.currentTarget.value)}
+        >
+          <option value="">default</option>
+          <For each={declared()}>{(effort) => <option value={effort}>{effort}</option>}</For>
+          <Show when={extra()}>{(effort) => <option value={effort()}>{effort()}</option>}</Show>
+        </select>
+      </span>
     </Show>
   )
 }
@@ -346,7 +342,8 @@ const Model = (props: { store: SessionStore }) => {
           title="the model this session asks; pick another one here"
           onClick={toggle}
         >
-          {current()}
+          <Icon name="model" />
+          <span>{current()}</span>
         </button>
         <Show when={open()}>
           <div
@@ -440,7 +437,7 @@ const Plus = (props: { store: SessionStore; onStart: (text: string) => void }) =
         title="commands that shape this session"
         onClick={() => setOpen(!open())}
       >
-        +
+        <Icon name="plus" />
       </button>
       <Show when={open()}>
         <div
@@ -903,7 +900,7 @@ export const Composer = (props: {
             aria-label="Send the message"
             title="Send the message (Enter)"
           >
-            <SendIcon />
+            <Icon name="send" />
           </Button>
           <Button
             id="cancel"
@@ -914,7 +911,7 @@ export const Composer = (props: {
             disabled={!running()}
             onClick={() => props.store.send({ kind: 'cancel' })}
           >
-            <StopIcon />
+            <Icon name="stop" />
           </Button>
         </div>
       </form>

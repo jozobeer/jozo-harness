@@ -174,9 +174,8 @@
     transition: transform 200ms ease-out;
   }
 
-  .process-dot,
-  .session-mark {
-    transition: background-color 600ms ease-out;
+  .end-mark {
+    transition: color 600ms ease-out;
   }
 }
 
@@ -288,6 +287,10 @@
     stroke-linejoin: round;
   }
 
+  .icon-fill {
+    fill: currentColor;
+  }
+
   /* A folder of Recent folds the same way, over rows it keeps drawn. */
   .fold {
     display: grid;
@@ -305,16 +308,6 @@
 
   .process-line:hover {
     color: var(--text);
-  }
-
-  /* A turn that finished rests as a quiet dot; for a moment after it finished well, it is green. */
-  /* The dot takes the mug's 16px, so the line does not shift when the turn ends. */
-  .process-dot {
-    width: 8px;
-    height: 8px;
-    margin: 0 4px;
-    border-radius: 50%;
-    background: var(--rest);
   }
 
   /*
@@ -369,15 +362,6 @@
   .run-todo-mark svg {
     display: inline-block;
     vertical-align: middle;
-  }
-
-  .process-dot.finished {
-    background: var(--tool);
-  }
-
-  .process-dot.error,
-  .process-dot.cancelled {
-    background: var(--error);
   }
 
   .process-state {
@@ -437,7 +421,7 @@
 
   .tool-line {
     display: grid;
-    grid-template-columns: 3.5em minmax(0, 1fr) auto 3.5em;
+    grid-template-columns: 14px 3.5em minmax(0, 1fr) auto 3.5em;
     gap: var(--s2);
     padding: 1px 0;
     color: var(--dim);
@@ -472,7 +456,7 @@
   }
 
   .skill-card .tool-line {
-    grid-template-columns: 3.5em minmax(0, 1fr) minmax(0, 1fr) 3.5em;
+    grid-template-columns: 14px 3.5em minmax(0, 1fr) minmax(0, 1fr) 3.5em;
   }
 
   .skill-card .skill-label,
@@ -846,14 +830,6 @@
 
   .session-mark {
     justify-self: center;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--line-strong);
-  }
-
-  .session.idle .session-mark {
-    background: var(--rest);
   }
 
   #session-list .session-name {
@@ -1328,7 +1304,7 @@
 
   .wf-row {
     display: grid;
-    grid-template-columns: 4.5em minmax(0, 14em) minmax(0, 1fr) 4.5em;
+    grid-template-columns: 14px 4.5em minmax(0, 14em) minmax(0, 1fr) 4.5em;
     gap: var(--s2);
     align-items: center;
     width: 100%;
@@ -1502,5 +1478,113 @@
       transform: none;
       visibility: visible;
     }
+  }
+}
+
+/*
+ * Line icons beside the words they stand for. How a piece of work ended is a
+ * line mark: a check that stays green until the reader has seen it, then rests;
+ * a red cross; a quiet ring for a session that has not run yet.
+ */
+@layer client {
+  .end-mark {
+    color: var(--rest);
+  }
+
+  .end-mark.done {
+    color: var(--dim);
+  }
+
+  .end-mark.done.fresh {
+    color: var(--tool);
+  }
+
+  .end-mark.failed {
+    color: var(--error);
+  }
+
+  .tool-icon,
+  .wf-icon {
+    align-self: center;
+    width: 14px;
+    height: 14px;
+  }
+
+  .board-title {
+    align-items: center;
+  }
+
+  .session-search-field {
+    position: relative;
+  }
+
+  .session-search-icon {
+    position: absolute;
+    top: 50%;
+    left: 10px;
+    color: var(--dim);
+    pointer-events: none;
+    translate: 0 -50%;
+  }
+
+  .session-search {
+    padding-left: 32px;
+  }
+
+  .lens-option,
+  .tab,
+  .seat-chip,
+  .seat-effort-field,
+  .card-head strong {
+    display: inline-flex;
+    gap: 5px;
+    align-items: center;
+  }
+
+  .lens-option .icon,
+  .tab .icon,
+  .seat-chip .icon,
+  .seat-effort-field .icon {
+    width: 14px;
+    height: 14px;
+  }
+
+  .seat-effort-field {
+    gap: 0;
+    padding-left: 6px;
+    color: var(--dim);
+  }
+
+  .seat-effort-field .seat-effort {
+    padding-left: 4px;
+  }
+
+  .pane-close,
+  .plus-button {
+    display: inline-grid;
+    place-items: center;
+  }
+
+  .run-child {
+    display: flex;
+    gap: var(--s2);
+    align-items: center;
+  }
+
+  .run-child .icon,
+  .run-job .icon {
+    align-self: center;
+    width: 14px;
+    height: 14px;
+  }
+
+  .actions .btn-icon .icon {
+    width: 14px;
+    height: 14px;
+  }
+
+  /* On the amber button a hairline arrow thins out; the send arrow is drawn heavier. */
+  #send .icon-line {
+    stroke-width: 2;
   }
 }
