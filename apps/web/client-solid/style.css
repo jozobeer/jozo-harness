@@ -323,7 +323,7 @@
 
   .process-now {
     flex-basis: 100%;
-    padding-left: calc(0.8em + 28px);
+    padding-left: calc(0.8em + 36px);
     overflow: hidden;
     font-family: var(--mono);
     font-size: var(--text-xs);
@@ -777,10 +777,6 @@
     height: 8px;
     border-radius: 50%;
     background: var(--line-strong);
-  }
-
-  .session.waiting .session-mark {
-    background: var(--accent-fill);
   }
 
   .session.idle .session-mark {
