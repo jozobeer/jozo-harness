@@ -25,6 +25,13 @@ const Goal = (props: { goal: RunStateView['goal'] }) => (
   </Show>
 )
 
+/** What a todo's mark says to a reader who cannot see the icon. */
+const todoState: Readonly<Record<RunStateView['todos'][number]['status'], string>> = {
+  pending: 'not started',
+  in_progress: 'in progress',
+  completed: 'completed',
+}
+
 const Todos = (props: { todos: RunStateView['todos']; counts: RunStateView['todoCounts'] }) => (
   <Show when={props.todos.length > 0}>
     <div class="run-section">
@@ -37,7 +44,7 @@ const Todos = (props: { todos: RunStateView['todos']; counts: RunStateView['todo
       <For each={props.todos}>
         {(todo) => (
           <li class={'run-todo ' + todo.status}>
-            <span class="run-todo-mark">
+            <span class="run-todo-mark" role="img" aria-label={todoState[todo.status]}>
               <Switch fallback={<Icon name="square" />}>
                 <Match when={todo.status === 'in_progress'}>
                   <Mug state="filling" />
