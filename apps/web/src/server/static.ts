@@ -48,6 +48,20 @@ export const staticPath = (root: string, requestPath: string): string | undefine
   return candidate === base || candidate.startsWith(base + sep) ? candidate : undefined
 }
 
+/**
+ * The headers a file answers with. The page is opened from a URL that carries
+ * the startup token until its script strips it, so the page may not name that
+ * address to another request and may not wait in a cache.
+ */
+const headersOf = (path: string): Record<string, string> =>
+  path.endsWith('.html')
+    ? {
+        'content-type': typeOf(path),
+        'referrer-policy': 'no-referrer',
+        'cache-control': 'no-store',
+      }
+    : { 'content-type': typeOf(path) }
+
 /** The page a compiled binary carries, or undefined when this run is not one. */
 const assetResponse = (requestPath: string): Response | undefined => {
   if (sea === undefined || !sea.isSea()) return undefined
@@ -55,7 +69,7 @@ const assetResponse = (requestPath: string): Response | undefined => {
   if (relative === undefined) return undefined
   try {
     return new Response(sea.getAsset('web/' + relative), {
-      headers: { 'content-type': typeOf(relative) },
+      headers: headersOf(relative),
     })
   } catch {
     return undefined
@@ -87,5 +101,5 @@ export const staticResponse = async (
     () => undefined,
   )
   if (info === undefined || !info.isFile()) return undefined
-  return new Response(await readFile(path), { headers: { 'content-type': typeOf(path) } })
+  return new Response(await readFile(path), { headers: headersOf(path) })
 }

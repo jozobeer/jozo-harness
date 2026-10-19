@@ -25,6 +25,10 @@ declare const localStorage: {
   getItem: (key: string) => string | null
   setItem: (key: string, value: string) => void
 }
+declare const sessionStorage: {
+  getItem: (key: string) => string | null
+  setItem: (key: string, value: string) => void
+}
 /** The frame clock, which a page has only where it is painted. */
 declare const requestAnimationFrame: ((run: (time: number) => void) => number) | undefined
 
@@ -41,6 +45,24 @@ export const tokenOfSearch = (search: string): string | undefined => {
   return token === null || token === '' ? undefined : token
 }
 
+/** Where this tab keeps the token once it is out of the address bar. */
+const TOKEN_KEY = 'jzh.web.token'
+
+/** The token an earlier load of this tab kept, for a reload that no longer names one. */
+const keptToken = (): string | undefined => {
+  const token = sessionStorage.getItem(TOKEN_KEY)
+  return token === null || token === '' ? undefined : token
+}
+
+/** Takes the token out of the address bar, keeping whatever else the URL named. */
+const forgetToken = (): void => {
+  const params = new URLSearchParams(window.location.search)
+  if (!params.has('token')) return
+  params.delete('token')
+  const query = params.toString()
+  history.replaceState(null, '', query === '' ? window.location.pathname : '?' + query)
+}
+
 /**
  * Runs `run` before the page is painted next, or on the next turn of the event
  * loop where there is no paint to wait for. A page handed a whole log at once
@@ -55,9 +77,18 @@ export const onNextFrame = (run: () => void): void => {
   setTimeout(run, 0)
 }
 
-/** The socket this page talks to: the host that served it, and its token. */
-export const pageSocket = (): string =>
-  socketAt(window.location.protocol, window.location.host, tokenOfSearch(window.location.search))
+/**
+ * The socket this page talks to: the host that served it, and its token. The
+ * startup URL carries the token, so reading it also takes it out of the address
+ * bar and keeps it for this tab: a reload, a copied address, and the history
+ * entry stop carrying a credential that lives as long as the server.
+ */
+export const pageSocket = (): string => {
+  const fromUrl = tokenOfSearch(window.location.search)
+  if (fromUrl !== undefined) sessionStorage.setItem(TOKEN_KEY, fromUrl)
+  forgetToken()
+  return socketAt(window.location.protocol, window.location.host, fromUrl ?? keptToken())
+}
 
 /** The search string the page was opened with, which may name a session. */
 export const pageSearch = (): string => window.location.search
@@ -91,6 +122,8 @@ export const keepBusyEnter = (mode: SubmitMode): void => {
  */
 export const addressSession = (id: string | undefined): void => {
   const params = new URLSearchParams(window.location.search)
+  // The token was a startup credential, not part of where the page stands.
+  params.delete('token')
   if (id === undefined) params.delete('session')
   else params.set('session', id)
   const query = params.toString()

@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'vitest'
-import { keepBusyEnter, keptBusyEnter, socketAt, tokenOfSearch } from '../dom.ts'
+import {
+  addressSession,
+  keepBusyEnter,
+  keptBusyEnter,
+  pageSocket,
+  socketAt,
+  tokenOfSearch,
+} from '../dom.ts'
 
 describe('the socket a page opens', () => {
   test('carries the token the page was opened with', () => {
@@ -13,6 +20,35 @@ describe('the socket a page opens', () => {
     expect(tokenOfSearch('?token=abc')).toBe('abc')
     expect(tokenOfSearch('?session=s-1')).toBeUndefined()
     expect(tokenOfSearch('?token=')).toBeUndefined()
+  })
+})
+
+describe('the token a page is opened with', () => {
+  test('leaves the address after the socket reads it, keeping the session named there', () => {
+    sessionStorage.clear()
+    window.history.replaceState(null, '', '/?token=abc&session=s-1')
+
+    expect(pageSocket()).toBe('ws://localhost:3000/ui?token=abc')
+    expect(window.location.search).toBe('?session=s-1')
+  })
+
+  test('survives a reload without the token in the address', () => {
+    sessionStorage.clear()
+    window.history.replaceState(null, '', '/?token=abc')
+    pageSocket()
+
+    window.history.replaceState(null, '', '/')
+    expect(pageSocket()).toBe('ws://localhost:3000/ui?token=abc')
+  })
+
+  test('never writes the token back while addressing a session', () => {
+    sessionStorage.clear()
+    window.history.replaceState(null, '', '/?token=abc&session=s-1')
+    pageSocket()
+
+    addressSession('s-2')
+    expect(window.location.search).toBe('?session=s-2')
+    expect(pageSocket()).toBe('ws://localhost:3000/ui?token=abc')
   })
 })
 
