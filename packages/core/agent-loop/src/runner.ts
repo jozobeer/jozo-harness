@@ -850,7 +850,10 @@ const agentLoopEffect = (
     const run: AgentRunner['run'] = (agent: Agent) =>
       Effect.gen(function* () {
         while (true) {
-          yield* Queue.take(agent.driver.wake)
+          // The wake is only in memory. A message already queued in the log has to
+          // open its turn after a restart, and again after that turn if another is
+          // still waiting; a new wake is what an empty inbox waits on.
+          if (!agent.inbox.pending) yield* Queue.take(agent.driver.wake)
           if (!agent.inbox.pending) continue
           yield* agent.driver.setStatus('running')
           yield* runTurn(agent).pipe(Effect.ensuring(agent.driver.setStatus('idle')))
