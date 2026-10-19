@@ -547,6 +547,56 @@
     font-size: var(--text-xs);
   }
 
+  .review-tools {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+    margin-bottom: var(--s3);
+    padding: 5px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--bg-raise);
+    color: var(--dim);
+    font-size: var(--text-xs);
+  }
+
+  .review-total {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s3);
+  }
+
+  .review-counts {
+    display: inline-flex;
+    gap: 6px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .review-add {
+    color: var(--tool);
+  }
+
+  .review-del {
+    color: var(--error);
+  }
+
+  .review-wrap {
+    flex: none;
+    padding: 2px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--dim);
+    font-size: var(--text-xs);
+  }
+
+  .review-wrap[aria-pressed='true'] {
+    border-color: var(--select);
+    background: var(--select-soft);
+    color: var(--text);
+  }
+
   .review-files {
     display: flex;
     flex-direction: column;
@@ -555,6 +605,10 @@
   }
 
   .review-file {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: baseline;
+    gap: var(--s3);
     padding: 5px 8px;
     border: 0;
     border-left: 2px solid transparent;
@@ -564,7 +618,18 @@
     font-family: var(--mono);
     font-size: var(--text-xs);
     text-align: left;
-    overflow-wrap: anywhere;
+  }
+
+  .review-file-path {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .review-file-edits {
+    flex: none;
+    color: var(--dim);
+    font-variant-numeric: tabular-nums;
   }
 
   .review-file.active {
@@ -590,19 +655,78 @@
     font-size: var(--text-xs);
   }
 
+  /* The pane scrolls as a whole, so one long file cannot push the rest off it. */
   .diff {
-    display: flex;
-    flex-direction: column;
-    margin: 0;
-    padding: 6px 0;
+    max-height: 24rem;
+    overflow: auto;
     background: var(--code-bg);
-    overflow-x: auto;
     font: var(--text-xs) / 1.55 var(--mono);
   }
 
-  .diff span {
+  .diff-line {
+    display: grid;
+    grid-template-columns: 3.5em 3.5em 1.4em minmax(0, 1fr);
+  }
+
+  .diff-gutter {
+    padding: 0 4px;
+    border-right: 1px solid var(--line-soft);
+    color: var(--dim);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    user-select: none;
+  }
+
+  .diff-sign {
+    color: var(--dim);
+    text-align: center;
+    user-select: none;
+  }
+
+  .diff-text {
     padding: 0 10px;
     white-space: pre;
+  }
+
+  .diff.wrap .diff-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .diff-hunk {
+    padding: 3px 10px;
+    border-top: 1px solid var(--line-soft);
+    border-bottom: 1px solid var(--line-soft);
+    background: var(--bg);
+    color: var(--dim);
+  }
+
+  .diff-hunk:first-child {
+    border-top: 0;
+  }
+
+  .diff-gap {
+    padding: 1px 10px;
+    color: var(--dim);
+    text-align: center;
+    user-select: none;
+  }
+
+  .diff-fold {
+    width: 100%;
+    padding: 4px 10px;
+    border: 0;
+    border-top: 1px solid var(--line-soft);
+    border-radius: 0;
+    background: var(--bg);
+    color: var(--dim);
+    font: inherit;
+    text-align: center;
+  }
+
+  .diff-fold:hover {
+    background: var(--bg-hover);
+    color: var(--text);
   }
 
   .diff-del {

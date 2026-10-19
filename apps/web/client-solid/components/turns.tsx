@@ -12,7 +12,7 @@ import { Linkify } from './linkify.tsx'
 import { EndMark } from './ui/end-mark.tsx'
 import { Icon, toolIconOf } from './ui/icon.tsx'
 import { Mug } from './ui/mug.tsx'
-import { spanOf } from '../edits.ts'
+import { spanOf } from '../lib.ts'
 import { useSeen } from '../seen.ts'
 import type { SessionStore } from '../store.ts'
 

@@ -14,6 +14,7 @@ import { Board } from '../components/board.tsx'
 import { Status } from '../components/status.tsx'
 import { emptyWatched, watchedAfter, type Watched } from '../../src/ui/board.ts'
 import { Markdown } from '../components/turns.tsx'
+import { Review } from '../components/review.tsx'
 import { Waterfall } from '../components/waterfall.tsx'
 import { LensSwitch } from '../components/lens-switch.tsx'
 import { lensFrom, type Lens } from '../lens.ts'
@@ -483,6 +484,89 @@ describe('the Solid page', () => {
 
     fireEvent.click(container.querySelector('button.change') as Element)
     expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'changes', path: 'a.ts' } })
+  })
+
+  test('the changes pane lists a file with its counts and draws the diff in hunks', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const content = Array.from({ length: 20 }, (_, n) => 'line ' + String(n)).join('\n')
+    const { store, calls } = makeStore({
+      info: { cwd: '/work', model: '', turns: 2 },
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'step/start', { step: 1 }),
+        at(3, 'tool/call', {
+          callId: 'c1',
+          name: 'edit',
+          arguments: JSON.stringify({
+            path: 'notes.txt',
+            oldString: 'one\ntwo',
+            newString: 'one\ntwo\nthree',
+          }),
+          summary: 'edit notes.txt',
+        }),
+        at(4, 'tool/result', {
+          callId: 'c1',
+          isError: false,
+          summary: 'lines: 2 → 3',
+          content: [],
+        }),
+        at(5, 'step/end', { step: 1 }),
+        at(6, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+        at(7, 'turn/start', { turn: 2 }),
+        at(8, 'step/start', { step: 1 }),
+        at(9, 'tool/call', {
+          callId: 'c2',
+          name: 'write',
+          arguments: JSON.stringify({ path: '/work/notes.txt', content }),
+          summary: 'write /work/notes.txt',
+        }),
+      ]),
+    })
+
+    const { container } = render(() => <Review store={store} path="/work/notes.txt" />)
+
+    // One file, however its path was spelled, with what the calls added and took away.
+    expect(container.querySelectorAll('.review-file')).toHaveLength(1)
+    const file = container.querySelector('.review-file') as HTMLElement
+    expect(file.classList.contains('active')).toBe(true)
+    expect(textOf(file, '.review-file-path')).toBe('notes.txt')
+    expect(textOf(file, '.review-file-edits')).toBe('2 edits')
+    expect(textOf(file, '.review-add')).toBe('+23')
+    expect(textOf(file, '.review-del')).toBe('−2')
+
+    // The first call reads as a hunk with both gutters, under its header.
+    const first = container.querySelectorAll('.edit')[0] as HTMLElement
+    expect(textOf(first, '.diff-hunk')).toBe('@@ -1,2 +1,3 @@')
+    const gutters = [...first.querySelectorAll('.diff-line')].map((line) =>
+      [...line.children].slice(0, 2).map((cell) => cell.textContent),
+    )
+    expect(gutters).toEqual([
+      ['1', ''],
+      ['2', ''],
+      ['', '1'],
+      ['', '2'],
+      ['', '3'],
+    ])
+
+    // The long write keeps its head and tail until the reader opens the middle.
+    const folded = container.querySelector('.diff-fold') as HTMLButtonElement
+    expect(folded.textContent).toBe('Show 5 more lines')
+    expect(folded.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(folded)
+    expect(folded.getAttribute('aria-expanded')).toBe('true')
+    expect(folded.textContent).toBe('Fold the middle')
+    const second = container.querySelectorAll('.edit')[1] as HTMLElement
+    expect(second.querySelectorAll('.diff-line')).toHaveLength(20)
+
+    const wrap = container.querySelector('.review-wrap') as HTMLButtonElement
+    expect(wrap.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(wrap)
+    expect(wrap.getAttribute('aria-pressed')).toBe('true')
+    expect((container.querySelector('.diff') as HTMLElement).classList.contains('wrap')).toBe(true)
+
+    // The list hands the pane the normalized path, so a second click finds the same file.
+    fireEvent.click(file)
+    expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'changes', path: 'notes.txt' } })
   })
 
   test('URLs in the prompt, a tool card and its output are links', () => {
