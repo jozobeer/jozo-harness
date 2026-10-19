@@ -29,6 +29,7 @@ import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY, keepPaths, pathsFrom } from '../re
 import type { BrowseAnswer, SessionStore } from '../store.ts'
 import { Button } from './ui/button.tsx'
 import { Fizz } from './ui/fizz.tsx'
+import { Icon } from './ui/icon.tsx'
 import { Mug } from './ui/mug.tsx'
 
 /** The clock the rows read; one tick a second. */
@@ -474,32 +475,41 @@ const RecentFolder = (props: {
           if (!open()) props.onFold(props.group.cwd)
         }}
       >
-        <span class="recent-caret" aria-hidden="true">
-          {folded() ? '▸' : '▾'}
-        </span>
         <span class="recent-name">{basenameOf(props.group.cwd)}</span>
         <span class="recent-count">{String(props.group.entries.length)}</span>
+        <Icon name="chevron-down" class="recent-chevron" />
       </button>
-      <Show when={!folded()}>
-        <For each={keysOf(rows(), (entry) => entry.summary.id)}>
-          {(id) => {
-            const entry = () => atKey(props.rows, id)
-            return (
-              <Row entry={entry()} store={props.store} detail={restDetail(entry(), props.now)} />
-            )
-          }}
-        </For>
-        <Show when={more() && !all()}>
-          <button class="recent-more" type="button" onClick={() => props.onShown(props.group.cwd)}>
-            Show more
-          </button>
-        </Show>
-        <Show when={more() && expanded() && !open()}>
-          <button class="recent-more" type="button" onClick={() => props.onShown(props.group.cwd)}>
-            Show less
-          </button>
-        </Show>
-      </Show>
+      {/* The rows stay drawn while folded, so the fold can close over them; inert keeps them out of reach. */}
+      <div class="fold" data-open={String(!folded())} inert={folded()}>
+        <div class="fold-body">
+          <For each={keysOf(rows(), (entry) => entry.summary.id)}>
+            {(id) => {
+              const entry = () => atKey(props.rows, id)
+              return (
+                <Row entry={entry()} store={props.store} detail={restDetail(entry(), props.now)} />
+              )
+            }}
+          </For>
+          <Show when={more() && !all()}>
+            <button
+              class="recent-more"
+              type="button"
+              onClick={() => props.onShown(props.group.cwd)}
+            >
+              Show more
+            </button>
+          </Show>
+          <Show when={more() && expanded() && !open()}>
+            <button
+              class="recent-more"
+              type="button"
+              onClick={() => props.onShown(props.group.cwd)}
+            >
+              Show less
+            </button>
+          </Show>
+        </div>
+      </div>
     </section>
   )
 }

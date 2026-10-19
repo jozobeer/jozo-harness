@@ -10,6 +10,7 @@ import type { SessionStore } from '../store.ts'
 import { Review } from './review.tsx'
 import { Inspector } from './inspector.tsx'
 import { Button } from './ui/button.tsx'
+import { Icon } from './ui/icon.tsx'
 import { Mug } from './ui/mug.tsx'
 
 const Goal = (props: { goal: RunStateView['goal'] }) => (
@@ -24,12 +25,6 @@ const Goal = (props: { goal: RunStateView['goal'] }) => (
   </Show>
 )
 
-/** The marks of a todo that is not in progress; the one in progress fills a mug. */
-const todoMarks: Readonly<Record<string, string>> = {
-  pending: '[ ]',
-  completed: '[x]',
-}
-
 const Todos = (props: { todos: RunStateView['todos']; counts: RunStateView['todoCounts'] }) => (
   <Show when={props.todos.length > 0}>
     <div class="run-section">
@@ -43,9 +38,14 @@ const Todos = (props: { todos: RunStateView['todos']; counts: RunStateView['todo
         {(todo) => (
           <li class={'run-todo ' + todo.status}>
             <span class="run-todo-mark">
-              <Show when={todo.status === 'in_progress'} fallback={todoMarks[todo.status] ?? '[ ]'}>
-                <Mug state="filling" />
-              </Show>
+              <Switch fallback={<Icon name="square" />}>
+                <Match when={todo.status === 'in_progress'}>
+                  <Mug state="filling" />
+                </Match>
+                <Match when={todo.status === 'completed'}>
+                  <Icon name="check-square" />
+                </Match>
+              </Switch>
             </span>
             <span class="run-todo-content">{todo.content}</span>
           </li>
