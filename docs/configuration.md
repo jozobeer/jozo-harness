@@ -165,12 +165,12 @@ route は `opencode/<model>`、wire に送る model は `<model>` そのもの�
 | 設定 | `~/.config/jzh/config.yaml` | `--config`、`XDG_CONFIG_HOME` |
 | 秘密 | `~/.config/jzh/secrets.env`（モード 600） | `jzh auth add` / `set` / `remove` / `list` |
 | セッションログ | `~/.jzh/sessions/<id>/session.v1.jsonl` | `@jozo-harness/session-jsonl` 行の `root` |
-| Web UI | bind は `127.0.0.1` に固定 | `--port`、公開は `--public-url` |
+| Web UI | `127.0.0.1`。Tailscale を検出したときは tailnet IPv4 でも同じポートを listen する（`0.0.0.0` / `::` では受けない） | `--port`、公開は `--public-url` |
 
 ## 設定できないもの
 
 - provider の能力（tool の強制なし、画像なし、prompt cache 制御なし）は adapter に固定されている。reasoning effort は `effort` / `--effort` で指定でき、adapter は `reasoning_effort` としてそのまま渡す（endpoint がその語を受け付けるかは検証しない）
-- Web UI の bind 先は `127.0.0.1` に固定されている（tailnet へは `--public-url` と `tailscale serve` で公開する）
+- Web UI の bind 先は `127.0.0.1` と、起動時に検出したこのマシンの tailnet IPv4 に限る（`0.0.0.0` / `::` では受けない）。tailnet の MagicDNS は listen ポート付きの `http://` で届く。ポート無しの https は `--public-url` と `tailscale serve` で公開する
 - セッションログの形式は `session.v1.jsonl` に固定されている
 - tool ごとの実行時間の上限は tool の定義側にある
 

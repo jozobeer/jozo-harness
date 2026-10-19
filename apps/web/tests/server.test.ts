@@ -8,7 +8,7 @@ import { RpcClient, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
 import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { tmpdir } from 'node:os'
+import { networkInterfaces, tmpdir } from 'node:os'
 import {
   serveWeb,
   WebError,
@@ -18,6 +18,7 @@ import {
   type SessionFactory,
   type SettingsPort,
   type SettingsView,
+  type TailnetAddresses,
   type WorkspacesPort,
 } from '../src/server/index.ts'
 import {
@@ -257,6 +258,7 @@ const clientLayers =
 interface Started {
   readonly origin: string
   readonly localUrl: string
+  readonly tailnetUrls: ReadonlyArray<string>
   readonly publicUrl: string | undefined
   readonly code: string
   readonly token: string
@@ -272,6 +274,16 @@ interface HttpObservation {
   readonly status: number
   readonly location: string | undefined
   readonly setCookie: string | undefined
+}
+
+/** A non-loopback IPv4 this machine holds: the shape Tailscale reports for a tailnet. */
+const localAddress = (): string => {
+  const address = Object.values(networkInterfaces())
+    .flatMap((entries) => entries ?? [])
+    .filter((entry) => entry.family === 'IPv4' && !entry.internal)
+    .map((entry) => entry.address)[0]
+  if (address === undefined) throw new Error('this machine has no non-loopback IPv4 to bind')
+  return address
 }
 
 /** Asks one URL the way a browser first opens the startup URL; `host` overrides its Host header. */
@@ -367,6 +379,8 @@ const start = (
   workspaces: ReturnType<typeof makeWorkspaces> = makeWorkspaces(),
   /** The https origin a proxy would publish, when the test drives one. */
   publicUrl?: PublicOrigin,
+  /** The tailnet addresses a detection would name, when the test drives one. */
+  tailnet?: TailnetAddresses,
 ): Effect.Effect<Started, never, Scope.Scope> =>
   Effect.gen(function* () {
     const ready = yield* Deferred.make<ReadyUrls>()
@@ -381,6 +395,7 @@ const start = (
         port: 0,
         staticRoot,
         ...(publicUrl === undefined ? {} : { publicUrl }),
+        ...(tailnet === undefined ? {} : { tailnet }),
         onReady: (urls) => {
           void Effect.runSync(Deferred.succeed(ready, urls))
         },
@@ -398,6 +413,7 @@ const start = (
     return {
       origin: page.origin,
       localUrl: urls.local,
+      tailnetUrls: urls.tailnet,
       publicUrl: urls.public,
       code,
       token,
@@ -1380,6 +1396,122 @@ describe('the web transport', () => {
     expect(observed.httpOrigin).toEqual({ opened: false, status: 403 })
     expect(observed.foreignHost).toEqual({ opened: false, status: 403 })
     expect(observed.foreignGet.status).toBe(403)
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('a detected tailnet is served at the bound port, address and name apart', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-root-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const ip = localAddress()
+    const dns = 'myhost.tailnet.ts.net'
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, makeSettings(), makeWorkspaces(), undefined, {
+            ip,
+            dns,
+          })
+          const first = new URL(started.tailnetUrls[0] ?? '')
+          const second = new URL(started.tailnetUrls[1] ?? '')
+          const port = new URL(started.localUrl).port
+          const dnsCode = second.searchParams.get('code') ?? ''
+          // The page is reached at the address, but names the MagicDNS host in
+          // its Host and Origin headers, as a browser would.
+          const exchanged = yield* Effect.promise(() =>
+            httpGet('http://' + ip + ':' + port + '/?code=' + dnsCode, dns + ':' + port),
+          )
+          const cookie = exchanged.setCookie?.split(';')[0] ?? ''
+          const token = cookie.slice(cookie.indexOf('=') + 1)
+          const socket = 'ws://' + ip + ':' + port + '/ui?token=' + token
+          const opened = yield* Effect.promise(() =>
+            attemptSocket(socket, {
+              origin: 'http://' + dns + ':' + port,
+              headers: { host: dns + ':' + port },
+            }),
+          )
+          const ipOrigin = yield* Effect.promise(() =>
+            attemptSocket(socket, {
+              origin: 'http://' + ip + ':' + port,
+              headers: { host: ip + ':' + port },
+            }),
+          )
+          const portlessHost = yield* Effect.promise(() =>
+            attemptSocket(socket, { headers: { host: dns } }),
+          )
+          const httpsOrigin = yield* Effect.promise(() =>
+            attemptSocket(socket, {
+              origin: 'https://' + dns + ':' + port,
+              headers: { host: dns + ':' + port },
+            }),
+          )
+          yield* Deferred.succeed(started.stop, undefined)
+          return {
+            localUrl: started.localUrl,
+            tailnetUrls: started.tailnetUrls,
+            first,
+            second,
+            exchanged,
+            opened,
+            ipOrigin,
+            portlessHost,
+            httpsOrigin,
+          }
+        }),
+      ),
+    )
+
+    const port = new URL(observed.localUrl).port
+    expect(observed.tailnetUrls).toHaveLength(2)
+    expect(observed.first.origin).toBe('http://' + ip + ':' + port)
+    expect(observed.second.origin).toBe('http://' + dns + ':' + port)
+    // Each address carries a fresh code; opening one spends neither the other
+    // nor the loopback link.
+    expect(observed.first.searchParams.get('code')).toMatch(/^[0-9a-f]{64}$/)
+    expect(observed.second.searchParams.get('code')).toMatch(/^[0-9a-f]{64}$/)
+    expect(observed.first.searchParams.get('code')).not.toBe(
+      observed.second.searchParams.get('code'),
+    )
+    expect(observed.first.searchParams.get('code')).not.toBe(
+      new URL(observed.localUrl).searchParams.get('code'),
+    )
+    expect(observed.exchanged.status).toBe(303)
+    expect(observed.opened.opened).toBe(true)
+    expect(observed.ipOrigin.opened).toBe(true)
+    // The name without its port, and the https spelling, are not near misses.
+    expect(observed.portlessHost).toEqual({ opened: false, status: 403 })
+    expect(observed.httpsOrigin).toEqual({ opened: false, status: 403 })
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('a tailnet address this machine does not hold leaves the run on loopback', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-root-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const dns = 'myhost.tailnet.ts.net'
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          // TEST-NET-1 is never assigned to an interface, so the second listen fails.
+          const started = yield* start(root, web, makeSettings(), makeWorkspaces(), undefined, {
+            ip: '192.0.2.1',
+            dns,
+          })
+          const port = new URL(started.origin).port
+          // No listener waits on the name, so the gate does not admit it either.
+          const nameAtPort = yield* Effect.promise(() =>
+            httpGet('http://127.0.0.1:' + port + '/', dns + ':' + port),
+          )
+          yield* Deferred.succeed(started.stop, undefined)
+          return { tailnetUrls: started.tailnetUrls, nameAtPort }
+        }),
+      ),
+    )
+
+    expect(observed.tailnetUrls).toEqual([])
+    expect(observed.nameAtPort.status).toBe(403)
     await rm(root, { recursive: true, force: true })
   })
 })

@@ -60,6 +60,43 @@ describe('the gate in front of the web socket', () => {
     expect(originAllowed('https://myhost.tailnet.ts.net', 4310)).toBe(false)
   })
 
+  test('adds only the detected tailnet names, at the bound port', () => {
+    const tailnet = { ip: '100.88.96.60', dns: 'myhost.tailnet.ts.net' }
+    expect(hostAllowed('100.88.96.60:4310', 4310, undefined, tailnet)).toBe(true)
+    expect(hostAllowed('myhost.tailnet.ts.net:4310', 4310, undefined, tailnet)).toBe(true)
+    expect(hostAllowed('MYHOST.TAILNET.TS.NET:4310', 4310, undefined, tailnet)).toBe(true)
+    expect(originAllowed('http://100.88.96.60:4310', 4310, undefined, tailnet)).toBe(true)
+    expect(originAllowed('http://myhost.tailnet.ts.net:4310', 4310, undefined, tailnet)).toBe(true)
+    // The port is part of both names; https is the published origin's spelling.
+    expect(hostAllowed('100.88.96.60', 4310, undefined, tailnet)).toBe(false)
+    expect(hostAllowed('myhost.tailnet.ts.net', 4310, undefined, tailnet)).toBe(false)
+    expect(hostAllowed('100.88.96.60:4311', 4310, undefined, tailnet)).toBe(false)
+    expect(originAllowed('https://myhost.tailnet.ts.net:4310', 4310, undefined, tailnet)).toBe(
+      false,
+    )
+    expect(originAllowed('http://myhost.tailnet.ts.net:4311', 4310, undefined, tailnet)).toBe(false)
+    // Another machine in the tailnet, or the bare suffix, is never admitted.
+    expect(hostAllowed('other.tailnet.ts.net:4310', 4310, undefined, tailnet)).toBe(false)
+    expect(hostAllowed('100.88.96.61:4310', 4310, undefined, tailnet)).toBe(false)
+    expect(hostAllowed('myhost.tailnet.ts.net.evil.example:4310', 4310, undefined, tailnet)).toBe(
+      false,
+    )
+    // Loopback keeps its names, and no detection admits nothing.
+    expect(hostAllowed('127.0.0.1:4310', 4310, undefined, tailnet)).toBe(true)
+    expect(hostAllowed('100.88.96.60:4310', 4310)).toBe(false)
+    expect(originAllowed('http://100.88.96.60:4310', 4310)).toBe(false)
+  })
+
+  test('admits only the tailnet address the detection named', () => {
+    const ipOnly = { ip: '100.88.96.60' }
+    expect(hostAllowed('100.88.96.60:4310', 4310, undefined, ipOnly)).toBe(true)
+    expect(hostAllowed('myhost.tailnet.ts.net:4310', 4310, undefined, ipOnly)).toBe(false)
+
+    const nameOnly = { dns: 'myhost.tailnet.ts.net' }
+    expect(hostAllowed('myhost.tailnet.ts.net:4310', 4310, undefined, nameOnly)).toBe(true)
+    expect(hostAllowed('100.88.96.60:4310', 4310, undefined, nameOnly)).toBe(false)
+  })
+
   test('compares a token without saying where it differs', () => {
     expect(tokenMatches('abc', 'abc')).toBe(true)
     expect(tokenMatches('abd', 'abc')).toBe(false)
