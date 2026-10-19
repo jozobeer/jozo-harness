@@ -6,7 +6,18 @@ import { Effect, Layer, Stream } from 'effect'
 import { RpcSerialization, RpcServer } from 'effect/rpc'
 import { sendCommand } from '@jozo-harness/ui-protocol'
 import { UiRpcs, type CommandView } from '../shared/rpc.ts'
-import { hostAllowed, originAllowed, tokenFromUrl, tokenMatches } from './auth.ts'
+import {
+  authCookie,
+  COOKIE_NAME,
+  codeExchange,
+  codeFromUrl,
+  cookieOf,
+  hostAllowed,
+  originAllowed,
+  tokenFromUrl,
+  tokenMatches,
+  type CodeExchange,
+} from './auth.ts'
 import { makeWebProtocol, type Connection } from './protocol.ts'
 import { applyMeta, readMeta, sessionActionOf, withMeta } from './session-meta.ts'
 import {
@@ -193,12 +204,40 @@ const endWith = (response: ServerResponse, status: number, body: string): void =
   response.end(body)
 }
 
+/**
+ * Trades a startup code for the auth cookie and a redirect to a clean address.
+ * The exchange happens before any page is served, so a code never sits in a URL
+ * the browser could keep or hand on. False means this was not that request.
+ */
+const exchangeCode = (
+  request: IncomingMessage,
+  response: ServerResponse,
+  token: string,
+  codes: CodeExchange,
+): boolean => {
+  const code = codeFromUrl(request.url ?? '')
+  if (pathOf(request) !== '/' || code === undefined) return false
+  if (!codes.redeem(code)) {
+    endWith(response, 401, 'the code is expired or already used')
+    return true
+  }
+  response.writeHead(303, {
+    location: '/',
+    'set-cookie': authCookie(token, request.headers['x-forwarded-proto'] === 'https'),
+    'cache-control': 'no-store',
+  })
+  response.end()
+  return true
+}
+
 /** Answers one HTTP request: the socket path refuses plain HTTP, everything else is a file. */
 const respondTo = async (
   request: IncomingMessage,
   response: ServerResponse,
   staticRoot: string,
   port: number,
+  token: string,
+  codes: CodeExchange,
 ): Promise<void> => {
   // A page served under another name could read this one through a rebinding
   // proxy; the name the request asked for must be one this server answers to.
@@ -206,6 +245,7 @@ const respondTo = async (
     endWith(response, 403, 'forbidden')
     return
   }
+  if (exchangeCode(request, response, token, codes)) return
   const path = pathOf(request)
   if (path === UI_PATH) {
     endWith(response, 426, 'websocket required')
@@ -238,8 +278,9 @@ const refuseUpgrade = (socket: Duplex, status: number, message: string): void =>
 
 /**
  * Serves the sessions of one profile: the browser app and the RPC socket.
- * Binds to loopback, and the socket asks for the token the ready URL carries;
- * a foreign Host or Origin is refused before the handshake.
+ * Binds to loopback; the ready URL carries a one-time code that the first page
+ * load trades for a strict HttpOnly cookie, and a foreign Host or Origin is
+ * refused before the handshake.
  */
 export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
   Effect.scoped(
@@ -250,13 +291,15 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
       })
       const { protocol, attach } = yield* makeWebProtocol
       const connections = new Map<WebSocket, Connection>()
-      // One token per run: it rides in the ready URL and the socket repeats it.
+      // One token per run, kept out of the ready URL: that URL carries a code
+      // which trades for the token in an HttpOnly cookie and then dies.
       const token = randomBytes(32).toString('hex')
+      const codes = codeExchange(() => Date.now())
       // The chosen port is known only once the listener is up; requests arrive after.
       let boundPort = options.port
 
       const server = createServer((request, response) => {
-        void respondTo(request, response, options.staticRoot, boundPort).catch(() => {
+        void respondTo(request, response, options.staticRoot, boundPort, token, codes).catch(() => {
           response.destroy()
         })
       })
@@ -272,7 +315,10 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
         if (!originAllowed(request.headers.origin, boundPort)) {
           return { status: 403, message: 'forbidden origin' }
         }
-        return tokenMatches(tokenFromUrl(request.url ?? ''), token)
+        // A page repeats the cookie; a script may still name the token directly.
+        const offered =
+          cookieOf(request.headers.cookie, COOKIE_NAME) ?? tokenFromUrl(request.url ?? '')
+        return tokenMatches(offered, token)
           ? undefined
           : { status: 401, message: 'a token is required' }
       }
@@ -328,7 +374,7 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
         Layer.provide(Layer.succeed(RpcServer.Protocol, protocol)),
       ) as unknown as Layer.Layer<never>
       yield* Effect.forkScoped(Layer.launch(rpc))
-      options.onReady('http://127.0.0.1:' + String(port) + '/?token=' + token)
+      options.onReady('http://127.0.0.1:' + String(port) + '/?code=' + codes.issue())
       return options.interrupt === undefined
         ? yield* Effect.never
         : yield* options.interrupt.pipe(Effect.as(130))

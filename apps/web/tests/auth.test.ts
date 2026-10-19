@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'vitest'
-import { hostAllowed, originAllowed, tokenFromUrl, tokenMatches } from '../src/server/auth.ts'
+import {
+  authCookie,
+  codeExchange,
+  codeFromUrl,
+  cookieOf,
+  hostAllowed,
+  originAllowed,
+  tokenFromUrl,
+  tokenMatches,
+} from '../src/server/auth.ts'
 
 describe('the gate in front of the web socket', () => {
   test('reads the token a url carries, and nothing when it names none', () => {
@@ -31,5 +40,38 @@ describe('the gate in front of the web socket', () => {
     expect(tokenMatches('abd', 'abc')).toBe(false)
     expect(tokenMatches('ab', 'abc')).toBe(false)
     expect(tokenMatches(undefined, 'abc')).toBe(false)
+  })
+
+  test('reads the single-use code a startup url carries', () => {
+    expect(codeFromUrl('/?code=abc')).toBe('abc')
+    expect(codeFromUrl('/?session=s-1&code=abc')).toBe('abc')
+    expect(codeFromUrl('/')).toBeUndefined()
+    expect(codeFromUrl('/?code=')).toBeUndefined()
+  })
+
+  test('redeems a code once and only while it is fresh', () => {
+    let now = 1_000
+    const codes = codeExchange(() => now, 60_000)
+    const fresh = codes.issue()
+    expect(fresh).toMatch(/^[0-9a-f]{64}$/)
+    expect(codes.redeem(fresh)).toBe(true)
+    expect(codes.redeem(fresh)).toBe(false)
+
+    const stale = codes.issue()
+    now += 60_001
+    expect(codes.redeem(stale)).toBe(false)
+    expect(codes.redeem(undefined)).toBe(false)
+  })
+
+  test('reads one cookie by name from the header a browser repeats', () => {
+    expect(cookieOf('jzh_web=abc; other=1', 'jzh_web')).toBe('abc')
+    expect(cookieOf('other=1; jzh_web=abc', 'jzh_web')).toBe('abc')
+    expect(cookieOf('other=1', 'jzh_web')).toBeUndefined()
+    expect(cookieOf(undefined, 'jzh_web')).toBeUndefined()
+  })
+
+  test('builds a strict cookie, secure only where the page was https', () => {
+    expect(authCookie('abc', false)).toBe('jzh_web=abc; Path=/; HttpOnly; SameSite=Strict')
+    expect(authCookie('abc', true)).toBe('jzh_web=abc; Path=/; HttpOnly; SameSite=Strict; Secure')
   })
 })
