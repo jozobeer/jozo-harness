@@ -315,12 +315,14 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
         if (!originAllowed(request.headers.origin, boundPort)) {
           return { status: 403, message: 'forbidden origin' }
         }
-        // A page repeats the cookie; a script may still name the token directly.
+        // A page repeats the cookie; a script may name the token or redeem a fresh
+        // startup code, so an e2e can connect with the URL the command printed.
         const offered =
           cookieOf(request.headers.cookie, COOKIE_NAME) ?? tokenFromUrl(request.url ?? '')
-        return tokenMatches(offered, token)
+        if (tokenMatches(offered, token)) return undefined
+        return codes.peek(codeFromUrl(request.url ?? ''))
           ? undefined
-          : { status: 401, message: 'a token is required' }
+          : { status: 401, message: 'a token or a code is required' }
       }
 
       /** Wires one accepted socket as the page's RPC connection. */

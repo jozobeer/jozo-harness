@@ -380,10 +380,10 @@ const serve = (
       }),
     )
     const page = new URL(yield* Deferred.await(ready))
-    const token = page.searchParams.get('token')
-    if (token === null) throw new Error('the server reported no token')
+    const code = page.searchParams.get('code')
+    if (code === null) throw new Error('the server reported no code')
     return {
-      wsUrl: 'ws://' + page.host + '/ui?token=' + token,
+      wsUrl: 'ws://' + page.host + '/ui?code=' + code,
       stop,
       root,
       opens: () => opens,

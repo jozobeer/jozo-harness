@@ -44,6 +44,13 @@ export interface CodeExchange {
   readonly issue: () => string
   /** Consumes a code, answering whether it named one still worth trading. */
   readonly redeem: (code: string | undefined) => boolean
+  /**
+   * Answers whether a code is still worth trading, without trading it. The page
+   * trades it once for a cookie; a socket may name it for as long as it lives, so
+   * a script can connect with the URL the command printed and reconnect after a
+   * reload without a browser to hold the cookie.
+   */
+  readonly peek: (code: string | undefined) => boolean
 }
 
 /**
@@ -65,6 +72,11 @@ export const codeExchange = (now: () => number, ttlMs = CODE_TTL_MS): CodeExchan
       if (expiresAt === undefined) return false
       live.delete(code)
       return expiresAt > now()
+    },
+    peek: (code) => {
+      if (code === undefined) return false
+      const expiresAt = live.get(code)
+      return expiresAt !== undefined && expiresAt > now()
     },
   }
 }
