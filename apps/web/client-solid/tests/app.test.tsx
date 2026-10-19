@@ -16,7 +16,7 @@ import { Markdown } from '../components/turns.tsx'
 import { Waterfall } from '../components/waterfall.tsx'
 import { LensSwitch } from '../components/lens-switch.tsx'
 import { lensFrom, type Lens } from '../lens.ts'
-import { levelOf, pourFrom } from '../pour.ts'
+import { pourFrom } from '../pour.ts'
 import { SEEN_KEY, SeenContext, createSeen, looksFrom } from '../seen.ts'
 import type { SessionStore } from '../store.ts'
 import type { DirectoryView, SessionAction } from '../../src/shared/rpc.ts'
@@ -977,9 +977,9 @@ describe('the Solid page', () => {
     const bar = container.querySelector('#goal-bar')
     expect(bar?.textContent).toContain('ship it')
     expect(bar?.textContent).toContain('active')
-    expect(bar?.textContent).toContain('2/8')
-    // Two rounds of eight: the goal has poured a quarter of the way.
-    expect((bar as HTMLElement).style.getPropertyValue('--level')).toBe('0.25')
+    // The rounds are a count against a limit, not progress, so they are words.
+    expect(bar?.querySelector('.goal-rounds')?.textContent).toBe('round 2 / 8')
+    expect(bar?.querySelector('.goal-phase .mug.filling')).not.toBeNull()
 
     // The rules stay in the command: a button only says what the human typed.
     fireEvent.click(container.querySelector('[data-goal-action="pause"]') as Element)
@@ -996,6 +996,37 @@ describe('the Solid page', () => {
     // Edit puts the command in the draft, so the objective is changed where it is read.
     fireEvent.click(container.querySelector('[data-goal-action="edit"]') as Element)
     expect(calls).toContainEqual({ kind: 'draft', text: '/goal edit ship it' })
+  })
+
+  test('a goal is marked the way work is: a mug while it runs, empty while held, a dot once it stops', () => {
+    const markOf = (phase: string) => {
+      const { store } = makeStore({
+        sessionId: 'a',
+        run: {
+          goal: { objective: 'ship it', phase, rounds: 8, maxRounds: 8 },
+          schedules: [],
+          jobs: [],
+          subagents: [],
+          todos: [],
+          todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+          skills: [],
+          promptSections: [],
+          queued: [],
+          steering: [],
+          model: 'stub/model',
+          effort: '',
+          efforts: [],
+        },
+      })
+      const { container, unmount } = render(() => <Composer store={store} />)
+      const mark = container.querySelector('.goal-phase > svg')?.getAttribute('class')
+      unmount()
+      return mark
+    }
+    expect(markOf('active')).toBe('mug filling')
+    expect(markOf('paused')).toBe('mug empty')
+    expect(markOf('blocked')).toBe('icon goal-mark blocked')
+    expect(markOf('complete')).toBe('icon goal-mark complete')
   })
 
   test('a paused goal offers resume instead of pause', () => {
@@ -2437,12 +2468,6 @@ describe('the pour', () => {
   test('a rising level starts from how long the work has run, never from the future', () => {
     expect(pourFrom(1_000, 4_500)).toBe('-3.5s')
     expect(pourFrom(5_000, 4_000)).toBe('0s')
-  })
-
-  test('a level with an end is as full as its share of it, and no fuller', () => {
-    expect(levelOf(2, 8)).toBe('0.25')
-    expect(levelOf(9, 8)).toBe('1')
-    expect(levelOf(1, 0)).toBe('0')
   })
 })
 

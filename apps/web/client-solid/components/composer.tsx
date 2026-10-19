@@ -28,12 +28,12 @@ import {
   referencesFor,
   type ReferenceToken,
 } from '../../src/ui/references.ts'
-import { levelOf } from '../pour.ts'
 import { watchWidth } from '../rail.ts'
 import type { SessionStore } from '../store.ts'
 import { acceleratedSend, oppositeMode, submitModeFor } from '../submission.ts'
 import { Button } from './ui/button.tsx'
 import { Fizz } from './ui/fizz.tsx'
+import { GoalMark, roundsOf } from './ui/goal-mark.tsx'
 import { Icon } from './ui/icon.tsx'
 
 /** How long the composer waits after the last key before it asks for files. */
@@ -80,18 +80,14 @@ const GoalBar = (props: { store: SessionStore; onEdit: (objective: string) => vo
   return (
     <Show when={goal()}>
       {(current) => (
-        <section
-          id="goal-bar"
-          class="goal-bar pour"
-          style={{ '--level': levelOf(current().rounds, current().maxRounds) }}
-          aria-label="the goal this session works toward"
-        >
+        <section id="goal-bar" class="goal-bar" aria-label="the goal this session works toward">
           <div class="goal-line">
-            <span class={'goal-phase ' + current().phase}>{current().phase}</span>
-            <span class="goal-objective">{current().objective}</span>
-            <span class="goal-rounds">
-              {String(current().rounds) + '/' + String(current().maxRounds)}
+            <span class={'goal-phase ' + current().phase}>
+              <GoalMark phase={current().phase} />
+              {current().phase}
             </span>
+            <span class="goal-objective">{current().objective}</span>
+            <span class="goal-rounds">{roundsOf(current().rounds, current().maxRounds)}</span>
           </div>
           <div class="goal-actions">
             <Switch>

@@ -5,21 +5,24 @@ import type { Pane } from '../../src/ui/state.ts'
 import { THEMES, type Theme } from '../../src/ui/theme.ts'
 import type { TurnView } from '../../src/ui/trajectory.ts'
 import { childSessionsOf, elapsedOf } from '../lib.ts'
-import { levelOf } from '../pour.ts'
 import type { SessionStore } from '../store.ts'
 import { Review } from './review.tsx'
 import { Inspector } from './inspector.tsx'
 import { Button } from './ui/button.tsx'
 import { Icon } from './ui/icon.tsx'
+import { GoalMark, roundsOf } from './ui/goal-mark.tsx'
 import { Mug } from './ui/mug.tsx'
 
 const Goal = (props: { goal: RunStateView['goal'] }) => (
   <Show when={props.goal} fallback={<div class="run-empty">no goal</div>}>
     {(goal) => (
-      <div class="run-goal pour" style={{ '--level': levelOf(goal().rounds, goal().maxRounds) }}>
+      <div class="run-goal">
         <span class="run-objective">{goal().objective}</span>
-        <span class={'run-phase ' + goal().phase}>{goal().phase}</span>
-        <span class="run-rounds">{String(goal().rounds) + '/' + String(goal().maxRounds)}</span>
+        <span class={'run-phase ' + goal().phase}>
+          <GoalMark phase={goal().phase} />
+          {goal().phase}
+        </span>
+        <span class="run-rounds">{roundsOf(goal().rounds, goal().maxRounds)}</span>
       </div>
     )}
   </Show>
