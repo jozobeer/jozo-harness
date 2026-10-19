@@ -643,4 +643,99 @@ describe('the browser UI through the command', () => {
     await rm(workspace, { recursive: true, force: true })
     await rm(home, { recursive: true, force: true })
   }, 30_000)
+
+  test('a turn reads one skill catalog while another session is open', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-catalog-'))
+    const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-web-catalog-ws-'))
+    await mkdir(join(workspace, '.jzh', 'skills', 'demo'), { recursive: true })
+    await writeFile(
+      join(workspace, '.jzh', 'skills', 'demo', 'SKILL.md'),
+      '---\nname: demo\ndescription: Explains how to greet\n---\n\nbody\n',
+    )
+    const ready = Effect.runSync(Deferred.make<string>())
+    const stop = Effect.runSync(Deferred.make<void>())
+
+    const ids = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* Effect.forkScoped(
+            runCommand({
+              profiles: [profile(root)],
+              plugins,
+              cwd: workspace,
+              route: 'stub/model',
+              web: { port: 0, staticRoot },
+              stdout: () => undefined,
+              stderr: (text) => {
+                const match = /http:\/\/127\.0\.0\.1:\d+\/\S*/.exec(text)
+                if (match !== null) void Effect.runSync(Deferred.succeed(ready, match[0]))
+              },
+              interrupt: Deferred.await(stop),
+            }),
+          )
+          const page = new URL(yield* Deferred.await(ready))
+          const wsUrl = 'ws://' + page.host + '/ui?code=' + (page.searchParams.get('code') ?? '')
+
+          const used = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            // A page keeps every session it opened alive; both listen at once.
+            const first = yield* client.open({})
+            const second = yield* client.open({})
+            const firstDone = yield* Deferred.make<void>()
+            const secondDone = yield* Deferred.make<void>()
+            const watch = (sessionId: string, waiting: Deferred.Deferred<void>) =>
+              Effect.forkScoped(
+                client.events({ sessionId }).pipe(
+                  Stream.runForEach((event) =>
+                    Effect.gen(function* () {
+                      if (event.kind !== 'session' || event.event.type !== 'assistant/message') {
+                        return
+                      }
+                      yield* Deferred.succeed(waiting, undefined)
+                    }),
+                  ),
+                ),
+              )
+            yield* watch(first.id, firstDone)
+            yield* watch(second.id, secondDone)
+            yield* client.command({
+              sessionId: first.id,
+              command: { kind: 'submit', text: 'ping' },
+            })
+            yield* Deferred.await(firstDone)
+            yield* client.command({
+              sessionId: second.id,
+              command: { kind: 'submit', text: 'ping' },
+            })
+            yield* Deferred.await(secondDone)
+            return [first.id, second.id]
+          })
+
+          const opened = yield* withoutServices(used).pipe(
+            Effect.provide(RpcClient.layerProtocolSocket()),
+            Effect.provide(Socket.layerWebSocket(wsUrl)),
+            Effect.provide(Socket.layerWebSocketConstructorGlobal),
+            Effect.provide(RpcSerialization.layerJson),
+          )
+          yield* Deferred.succeed(stop, undefined)
+          return opened
+        }),
+      ),
+    )
+
+    // One turn opens with the catalog of its own session, once.
+    for (const id of ids) {
+      const session = await Effect.runPromise(jsonlSessions({ root }).open(id))
+      const catalogs = session.events.flatMap((event) =>
+        event.type === 'user/message' && event.data.source === 'skill-catalog'
+          ? [event.data.text]
+          : [],
+      )
+      expect(catalogs).toHaveLength(1)
+      expect(catalogs[0]).toContain('- demo: Explains how to greet')
+    }
+
+    await rm(root, { recursive: true, force: true })
+    await rm(workspace, { recursive: true, force: true })
+  }, 30_000)
 })

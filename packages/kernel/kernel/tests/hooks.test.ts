@@ -247,6 +247,35 @@ describe('waterfall', () => {
 })
 
 describe('Hooks service', () => {
+  // Two sessions in one process are two builds. A listener one build added must
+  // not answer the other's steps: the registry is the application's, not the process's.
+  test('gives each build its own registry', async () => {
+    const seen: string[] = []
+    const registrations = Effect.runSync(Scope.make())
+
+    const first = await Effect.runPromise(
+      Effect.gen(function* () {
+        const hooks = yield* Hooks
+        yield* hooks.on('test/emit', (value: string) => {
+          seen.push(value)
+        })
+        return hooks
+      }).pipe(Effect.provide(HooksLive), Effect.provideService(Scope.Scope, registrations)),
+    )
+    const second = await Effect.runPromise(
+      Effect.gen(function* () {
+        const hooks = yield* Hooks
+        yield* hooks.emit('test/emit', 'leaked')
+        return hooks
+      }).pipe(Effect.provide(HooksLive)),
+    )
+
+    expect(second).not.toBe(first)
+    expect(seen).toEqual([])
+
+    await Effect.runPromise(Scope.close(registrations, Exit.void))
+  })
+
   test('is usable through the context', async () => {
     const value = crypto.randomUUID()
     const seen: string[] = []

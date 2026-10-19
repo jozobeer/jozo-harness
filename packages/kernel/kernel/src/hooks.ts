@@ -95,4 +95,9 @@ export function makeHooks(): HookRegistry {
 /** Kernel service that owns the application-scoped hook registry. */
 export class Hooks extends Context.Service<Hooks, HookRegistry>()('jozo-harness/Hooks') {}
 
-export const HooksLive: Layer.Layer<Hooks> = Layer.succeed(Hooks, makeHooks())
+// Each build is its own application: sessions served by one process open and close
+// separately, so one build's listeners must not answer another's steps.
+export const HooksLive: Layer.Layer<Hooks> = Layer.effect(
+  Hooks,
+  Effect.sync(() => makeHooks()),
+)
