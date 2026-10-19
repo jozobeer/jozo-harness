@@ -222,10 +222,42 @@ const clientLayers =
 
 interface Started {
   readonly origin: string
+  readonly code: string
   readonly token: string
+  readonly cookie: string
+  readonly exchangeStatus: number
+  readonly exchangeLocation: string | undefined
   readonly wsUrl: string
   readonly stop: Deferred.Deferred<void>
 }
+
+/** What one plain GET answered, keeping the headers a redirect test reads. */
+interface HttpObservation {
+  readonly status: number
+  readonly location: string | undefined
+  readonly setCookie: string | undefined
+}
+
+/** Asks one URL the way a browser first opens the startup URL. */
+const httpGet = (url: string): Promise<HttpObservation> =>
+  new Promise((resolve, reject) => {
+    const target = new URL(url)
+    const asked = request(
+      { hostname: target.hostname, port: target.port, path: target.pathname + target.search },
+      (response) => {
+        response.resume()
+        const location = response.headers.location
+        const setCookie = response.headers['set-cookie']?.[0]
+        resolve({
+          status: response.statusCode ?? 0,
+          location: typeof location === 'string' ? location : undefined,
+          setCookie: typeof setCookie === 'string' ? setCookie : undefined,
+        })
+      },
+    )
+    asked.on('error', reject)
+    asked.end()
+  })
 
 const settingsView: SettingsView = {
   model: 'stub/model',
@@ -312,11 +344,19 @@ const start = (
       }),
     )
     const page = new URL(yield* Deferred.await(ready))
-    const token = page.searchParams.get('token')
-    if (token === null) throw new Error('the server reported no token')
+    const code = page.searchParams.get('code')
+    if (code === null) throw new Error('the server reported no code')
+    const exchanged = yield* Effect.promise(() => httpGet(page.href))
+    const cookie = exchanged.setCookie?.split(';')[0]
+    if (cookie === undefined) throw new Error('the server set no cookie')
+    const token = cookie.slice(cookie.indexOf('=') + 1)
     return {
       origin: page.origin,
+      code,
       token,
+      cookie,
+      exchangeStatus: exchanged.status,
+      exchangeLocation: exchanged.location,
       wsUrl: 'ws://' + page.host + '/ui?token=' + token,
       stop,
     }
@@ -988,7 +1028,7 @@ describe('the web transport', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  test('the ready url carries a token the socket must repeat', async () => {
+  test('the ready url carries a one-time code the page trades for a cookie', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-root-'))
     await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
     const web = makeWeb('a')
@@ -999,11 +1039,20 @@ describe('the web transport', () => {
         Effect.gen(function* () {
           const started = yield* start(root, web, settings)
           const socket = 'ws://' + new URL(started.origin).host + '/ui'
+          const reused = yield* Effect.promise(() =>
+            httpGet(started.origin + '/?code=' + started.code),
+          )
+          const expiredCode = yield* Effect.promise(() =>
+            httpGet(started.origin + '/?code=' + 'x'.repeat(64)),
+          )
           const noToken = yield* Effect.promise(() => attemptSocket(socket))
           const wrongToken = yield* Effect.promise(() =>
             attemptSocket(socket + '?token=' + 'x'.repeat(started.token.length)),
           )
           const rightToken = yield* Effect.promise(() => attemptSocket(started.wsUrl))
+          const cookieOnly = yield* Effect.promise(() =>
+            attemptSocket(socket, { headers: { cookie: started.cookie } }),
+          )
           const foreignOrigin = yield* Effect.promise(() =>
             attemptSocket(started.wsUrl, { origin: 'http://evil.example' }),
           )
@@ -1013,9 +1062,16 @@ describe('the web transport', () => {
           yield* Deferred.succeed(started.stop, undefined)
           return {
             token: started.token,
+            code: started.code,
+            cookie: started.cookie,
+            exchangeStatus: started.exchangeStatus,
+            exchangeLocation: started.exchangeLocation,
+            reused,
+            expiredCode,
             noToken,
             wrongToken,
             rightToken,
+            cookieOnly,
             foreignOrigin,
             pageOrigin,
           }
@@ -1023,10 +1079,17 @@ describe('the web transport', () => {
       ),
     )
 
+    expect(observed.code).toMatch(/^[0-9a-f]{64}$/)
     expect(observed.token).toMatch(/^[0-9a-f]{64}$/)
+    expect(observed.cookie).toMatch(/^jzh_web=/)
+    expect(observed.exchangeStatus).toBe(303)
+    expect(observed.exchangeLocation).toBe('/')
+    expect(observed.reused.status).toBe(401)
+    expect(observed.expiredCode.status).toBe(401)
     expect(observed.noToken).toEqual({ opened: false, status: 401 })
     expect(observed.wrongToken).toEqual({ opened: false, status: 401 })
     expect(observed.rightToken.opened).toBe(true)
+    expect(observed.cookieOnly.opened).toBe(true)
     expect(observed.foreignOrigin).toEqual({ opened: false, status: 403 })
     expect(observed.pageOrigin.opened).toBe(true)
     await rm(root, { recursive: true, force: true })

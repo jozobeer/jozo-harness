@@ -154,7 +154,7 @@ const served = <A, E>(
       )
       const page = new URL(yield* Deferred.await(ready))
       const result = yield* body(
-        'ws://' + page.host + '/ui?token=' + (page.searchParams.get('token') ?? ''),
+        'ws://' + page.host + '/ui?code=' + (page.searchParams.get('code') ?? ''),
       )
       yield* Deferred.succeed(stop, undefined)
       return result

@@ -152,7 +152,7 @@ describe('the browser UI through the command', () => {
         )
         const page = new URL(yield* Deferred.await(ready))
         const result = yield* body(
-          'ws://' + page.host + '/ui?token=' + (page.searchParams.get('token') ?? ''),
+          'ws://' + page.host + '/ui?code=' + (page.searchParams.get('code') ?? ''),
         )
         yield* Deferred.succeed(stop, undefined)
         return result
@@ -189,7 +189,7 @@ describe('the browser UI through the command', () => {
             }),
           )
           const page = new URL(yield* Deferred.await(ready))
-          const wsUrl = 'ws://' + page.host + '/ui?token=' + (page.searchParams.get('token') ?? '')
+          const wsUrl = 'ws://' + page.host + '/ui?code=' + (page.searchParams.get('code') ?? '')
 
           const used = Effect.gen(function* () {
             const client = yield* RpcClient.make(UiRpcs)
@@ -324,7 +324,7 @@ describe('the browser UI through the command', () => {
             }),
           )
           const page = new URL(yield* Deferred.await(ready))
-          const wsUrl = 'ws://' + page.host + '/ui?token=' + (page.searchParams.get('token') ?? '')
+          const wsUrl = 'ws://' + page.host + '/ui?code=' + (page.searchParams.get('code') ?? '')
 
           const origin = page.origin
           const used = Effect.gen(function* () {
@@ -418,7 +418,7 @@ describe('the browser UI through the command', () => {
             }),
           )
           const page = new URL(yield* Deferred.await(ready))
-          const wsUrl = 'ws://' + page.host + '/ui?token=' + (page.searchParams.get('token') ?? '')
+          const wsUrl = 'ws://' + page.host + '/ui?code=' + (page.searchParams.get('code') ?? '')
 
           const used = Effect.gen(function* () {
             const client = yield* RpcClient.make(UiRpcs)
@@ -584,7 +584,7 @@ describe('the browser UI through the command', () => {
             }),
           )
           const page = new URL(yield* Deferred.await(ready))
-          const wsUrl = 'ws://' + page.host + '/ui?token=' + (page.searchParams.get('token') ?? '')
+          const wsUrl = 'ws://' + page.host + '/ui?code=' + (page.searchParams.get('code') ?? '')
 
           const used = Effect.gen(function* () {
             const client = yield* RpcClient.make(UiRpcs)
