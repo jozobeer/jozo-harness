@@ -479,6 +479,21 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     )
 
     /**
+     * The word from other devices: a session one of them opens, renames, or
+     * deletes makes this page read the store again. Without it the list stayed
+     * as old as this page's own load.
+     */
+    yield* Effect.forkScoped(
+      keepsRunning(
+        'the store feed',
+        client
+          .storeChanged()
+          .pipe(Stream.runForEach(() => Effect.asVoid(Queue.offer(refreshes, undefined)))),
+        (message) => update((now) => withProblem(now, message)),
+      ),
+    )
+
+    /**
      * A turn is not the only thing that changes the Run pane: a job or a child
      * agent starts and finishes inside one, and a job can outlive the turn that
      * started it. While a turn or a job runs, the run state is read on a slow

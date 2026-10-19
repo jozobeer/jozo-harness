@@ -71,9 +71,41 @@ const makeHost = (id: string, cwd = '/work', working = true): FakeHost => {
       }),
     ),
   )
+  /** The log line one command leaves, so every page following the session sees it. */
+  let written = 0
+  const write = (type: string, data: unknown): void => {
+    written += 1
+    publish({
+      kind: 'session',
+      event: { seq: written, time: 1_700_000_000_000 + written, type, data },
+    })
+  }
+  /** The one event a command leaves in the log; a core writes it once, for every reader. */
+  const loggedBy = (command: UiCommand): { type: string; data: unknown } | undefined => {
+    switch (command.kind) {
+      case 'submit':
+        return { type: 'user/message', data: { text: command.text, source: 'user' } }
+      case 'approve':
+        return {
+          type: 'safety/approval/answered',
+          data: { callId: command.callId, approved: command.approved },
+        }
+      case 'answer':
+        return {
+          type: 'interaction/ask/answered',
+          data: { id: command.id, answer: command.answer },
+        }
+      case 'cancel':
+        return { type: 'turn/end', data: { reason: { kind: 'cancelled' } } }
+      default:
+        return undefined
+    }
+  }
   const record = (command: UiCommand): Effect.Effect<void> =>
     Effect.sync(() => {
       commands.push(command)
+      const logged = loggedBy(command)
+      if (logged !== undefined) write(logged.type, logged.data)
     })
   return {
     summary: { id, cwd, createdAt: 1, updatedAt: 1, title: '' },
@@ -507,6 +539,135 @@ describe('the web transport', () => {
     )
 
     expect(counts).toEqual({ first: 1, second: 1 })
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('opening a session on one page announces it to the other page', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-announce-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const settings = makeSettings()
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const wsUrl = started.wsUrl
+          const usePages = Effect.gen(function* () {
+            const one = yield* RpcClient.make(UiRpcs)
+            const two = yield* RpcClient.make(UiRpcs)
+            // The second page listens before the first one acts: a page that only
+            // reads the store again when a session event happens to refresh it
+            // would keep the list it saw at load.
+            const announced = yield* Effect.forkScoped(
+              two.storeChanged().pipe(Stream.take(1), Stream.runCollect),
+            )
+            yield* Effect.sleep(50)
+            const opened = yield* one.open({ cwd: '/work' })
+            const heard = yield* Fiber.join(announced).pipe(Effect.timeoutOption('1 second'))
+            const listed = yield* two.sessions()
+            return { opened: opened.id, heard: Option.isSome(heard), listed }
+          }).pipe(clientLayers(wsUrl))
+          const result = yield* withoutServices(usePages)
+          yield* Deferred.succeed(started.stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    expect(observed.opened).toBe('new-2')
+    expect(observed.heard).toBe(true)
+    expect(observed.listed.opened).toEqual(['a', 'new-2'])
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('a command one page sends reaches the page that follows the same session', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-command-tabs-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const settings = makeSettings()
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const wsUrl = started.wsUrl
+          const usePages = Effect.gen(function* () {
+            const one = yield* RpcClient.make(UiRpcs)
+            const two = yield* RpcClient.make(UiRpcs)
+            const heard = yield* Effect.forkScoped(
+              two.events({ sessionId: 'a' }).pipe(Stream.take(1), Stream.runCollect),
+            )
+            yield* Effect.sleep(50)
+            const accepted = yield* one.command({
+              sessionId: 'a',
+              command: { kind: 'submit', text: 'from the other device' },
+            })
+            const received = yield* Fiber.join(heard).pipe(Effect.timeoutOption('1 second'))
+            const type = Option.match(received, {
+              onNone: () => '',
+              onSome: (events) => {
+                const first = [...events][0]
+                return first?.kind === 'session' ? first.event.type : ''
+              },
+            })
+            return { accepted, type }
+          }).pipe(clientLayers(wsUrl))
+          const result = yield* withoutServices(usePages)
+          yield* Deferred.succeed(started.stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    expect(observed.accepted).toBe(true)
+    expect(observed.type).toBe('user/message')
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('an approval one page answers reaches the page that follows the same session', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-approval-tabs-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const settings = makeSettings()
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const wsUrl = started.wsUrl
+          const usePages = Effect.gen(function* () {
+            const one = yield* RpcClient.make(UiRpcs)
+            const two = yield* RpcClient.make(UiRpcs)
+            const heard = yield* Effect.forkScoped(
+              two.events({ sessionId: 'a' }).pipe(Stream.take(1), Stream.runCollect),
+            )
+            yield* Effect.sleep(50)
+            const accepted = yield* one.command({
+              sessionId: 'a',
+              command: { kind: 'approve', callId: 'c1', approved: true },
+            })
+            const received = yield* Fiber.join(heard).pipe(Effect.timeoutOption('1 second'))
+            const answered = Option.match(received, {
+              onNone: () => '',
+              onSome: (events) => {
+                const first = [...events][0]
+                if (first?.kind !== 'session') return ''
+                const data = first.event.data as { approved?: boolean }
+                return first.event.type + ':' + String(data.approved)
+              },
+            })
+            return { accepted, answered }
+          }).pipe(clientLayers(wsUrl))
+          const result = yield* withoutServices(usePages)
+          yield* Deferred.succeed(started.stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    expect(observed.accepted).toBe(true)
+    expect(observed.answered).toBe('safety/approval/answered:true')
     await rm(root, { recursive: true, force: true })
   })
 

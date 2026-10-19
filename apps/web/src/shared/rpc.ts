@@ -131,6 +131,16 @@ export const UiEventsRpc = Rpc.make('events', {
   stream: true,
 })
 
+/**
+ * Tells every page that the store changed: a session was opened, closed, or its
+ * row changed by another device. The page reads the list itself; the signal only
+ * says the copy it holds is old.
+ */
+export const StoreChangedRpc = Rpc.make('storeChanged', {
+  success: Schema.Number,
+  stream: true,
+})
+
 /** One thing the human can type at a session, ready for the composer's popup. */
 export const CommandViewSchema = Schema.Struct({
   name: Schema.String,
@@ -359,6 +369,7 @@ export const UiRpcs = RpcGroup.make(
   SessionActionRpc,
   UiCommandRpc,
   UiEventsRpc,
+  StoreChangedRpc,
   CommandsRpc,
   FilesRpc,
   StateRpc,
