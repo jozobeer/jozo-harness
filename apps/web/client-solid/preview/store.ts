@@ -77,6 +77,15 @@ const RUN: RunStateView = {
   model: 'ollama-cloud/qwen3-coder:480b',
   effort: 'high',
   efforts: ['low', 'high'],
+  usage: {
+    total: '371k',
+    input: '360k',
+    output: '11k',
+    turns: 8,
+    cache: '94%',
+    speed: { text: '42', value: 42 },
+    context: { used: '210k', window: '1.0M', left: '380k', share: 0.21, fire: 0.59 },
+  },
 }
 
 const replay = (state: WebState, events: ReadonlyArray<UiEvent>): WebState =>
