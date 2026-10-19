@@ -225,6 +225,8 @@ interface Started {
   readonly code: string
   readonly token: string
   readonly cookie: string
+  readonly exchangeStatus: number
+  readonly exchangeLocation: string | undefined
   readonly wsUrl: string
   readonly stop: Deferred.Deferred<void>
 }
@@ -353,6 +355,8 @@ const start = (
       code,
       token,
       cookie,
+      exchangeStatus: exchanged.status,
+      exchangeLocation: exchanged.location,
       wsUrl: 'ws://' + page.host + '/ui?token=' + token,
       stop,
     }
@@ -1060,6 +1064,8 @@ describe('the web transport', () => {
             token: started.token,
             code: started.code,
             cookie: started.cookie,
+            exchangeStatus: started.exchangeStatus,
+            exchangeLocation: started.exchangeLocation,
             reused,
             expiredCode,
             noToken,
@@ -1076,6 +1082,8 @@ describe('the web transport', () => {
     expect(observed.code).toMatch(/^[0-9a-f]{64}$/)
     expect(observed.token).toMatch(/^[0-9a-f]{64}$/)
     expect(observed.cookie).toMatch(/^jzh_web=/)
+    expect(observed.exchangeStatus).toBe(303)
+    expect(observed.exchangeLocation).toBe('/')
     expect(observed.reused.status).toBe(401)
     expect(observed.expiredCode.status).toBe(401)
     expect(observed.noToken).toEqual({ opened: false, status: 401 })
