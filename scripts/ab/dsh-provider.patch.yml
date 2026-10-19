@@ -7,6 +7,10 @@
 # headroom. Its requests reserve maxTokens (32,768), so a 52,768 window with
 # 4,000 headroom puts the line at 16,000 tokens, where run.ts puts jozo-harness's. The
 # summary's own cap would follow headroom down to 4,000; it stays at 8,000.
+#
+# The 16,000 line is a normalized axis. It is not evidence that the shipped window
+# behaves the same, and one A/B cell must run at production defaults; see
+# docs/notes/2026-10-19-parity-audit-axes.md.
 - id: llm-pi-ai
   config:
     providers:

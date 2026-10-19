@@ -6,6 +6,14 @@
 - `jzh:` はこのリポジトリのルートからのパス。
 - 証拠はすべてソースの読み取りによる。jozo-harness の `bun run check` は監査時に実行していない。
 
+## 監査の軸（2026-10-19 追記）
+
+2026-10-18 の監査は endpoint と compaction の線を正規化し、cache と context window の差を監査の外に置いた。provider / transport（endpoint、prompt cache、streaming、idle timeout、retry、model metadata）と production defaults（context window、max output、compaction line、profile route）を軸として固定し、正規化した軸の記録方法を定めた。軸ごとの確認先と既定値、正規化してよい条件は [DSH パリティ監査の軸](2026-10-19-parity-audit-axes.md) を正本にする。
+
+- 監査の記録は `docs/notes/` に置く。`.tmp/audit/LEDGER.md` は作業中の台帳であり、正本にしない。
+- 正規化した軸は「差が無いことの証拠」に使わない。各軸について、production の既定のまま走らせたセルを 1 つ以上別に持つ。
+- モデルの窓は profile の既定値ではなく、その走の route のモデル metadata から読む。2026-10-18 の「実窓 128,000 / 線 62,464」は当時の profile の既定値で、既定ルートのモデル定義ではなかった。
+
 ## 監査時点の測定値
 
 | 指標 | jozo-harness | dsh |
