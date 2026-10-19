@@ -14,6 +14,8 @@ import { OpenAiStreamDecoder } from './sse.ts'
 export interface OpenAiAdapterOptions {
   readonly baseUrl: string
   readonly apiKey: () => string | undefined
+  /** Whether the route may be called without a key, as a local daemon is. */
+  readonly allowAnonymous?: boolean
   readonly capabilities: LlmCapabilities
   /** Idle budget for one attempt. Defaults to five minutes. */
   readonly streamIdleTimeoutMs?: number
@@ -22,6 +24,10 @@ export interface OpenAiAdapterOptions {
 }
 
 const DEFAULT_IDLE_TIMEOUT_MS = 300_000
+
+/** Whether a configured key is present; a route may still allow an anonymous call. */
+const keyed = (apiKey: string | undefined): apiKey is string =>
+  apiKey !== undefined && apiKey !== ''
 
 const textOf = (content: ReadonlyArray<ContentBlock>): string =>
   content.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('')
@@ -141,7 +147,7 @@ export function openAiAdapter(options: OpenAiAdapterOptions): LlmAdapter {
       Stream.unwrap(
         Effect.gen(function* () {
           const apiKey = options.apiKey()
-          if (apiKey === undefined || apiKey === '') {
+          if (!keyed(apiKey) && options.allowAnonymous !== true) {
             return yield* Effect.fail(
               new LlmFailure({ code: 'AUTH', message: 'no API key is configured' }),
             )
@@ -173,7 +179,10 @@ export function openAiAdapter(options: OpenAiAdapterOptions): LlmAdapter {
             try: () =>
               send(url, {
                 method: 'POST',
-                headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+                headers: {
+                  ...(keyed(apiKey) ? { Authorization: `Bearer ${apiKey}` } : {}),
+                  'Content-Type': 'application/json',
+                },
                 body,
                 signal: guard.signal,
               }),

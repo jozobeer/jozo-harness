@@ -28,6 +28,9 @@ plugins:
     name: '@jozo-harness/llm-openai'
     config:
       baseUrl: https://ollama.com/v1
+      # A local daemon serves the same cloud models with a prompt cache; a run
+      # that cannot reach it keeps the base URL above.
+      localBaseUrl: http://127.0.0.1:11434/v1
       apiKeyEnv: OLLAMA_API_KEY
       # The effort words this endpoint takes; the UI offers them as the choices.
       reasoningEfforts: [low, medium, high, xhigh, max]
