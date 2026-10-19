@@ -137,6 +137,17 @@
     transform: translateY(-4px);
   }
 
+  /*
+   * The segment answers at once; the colour it moves to says where the press
+   * landed. The columns themselves swap instantly, so a streamed event never
+   * restarts an entry animation on the conversation.
+   */
+  .lens-option {
+    transition:
+      background-color 160ms ease-out,
+      color 160ms ease-out;
+  }
+
   .fizz i {
     animation: jzh-fizz 2.4s ease-out var(--delay, 0s) infinite;
   }

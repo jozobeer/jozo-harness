@@ -2073,3 +2073,16 @@ button.primary {
   border-radius: 8px;
   background: var(--line-strong) padding-box;
 }
+
+/*
+ * A tab's underline grows into the colour of the tab that was chosen, so the
+ * press reads as landing here rather than as an instant repaint. The padding
+ * stays out of the transition: it changes when the pane folds, not on a press.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .tab {
+    transition:
+      border-bottom-color 180ms ease-out,
+      color 180ms ease-out;
+  }
+}
