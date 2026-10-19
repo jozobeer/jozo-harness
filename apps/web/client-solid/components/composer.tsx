@@ -1,4 +1,4 @@
-import { For, Match, Show, Switch, createSignal, onCleanup, onMount } from 'solid-js'
+import { For, Match, Show, Switch, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
 import { plainText } from '@jozo-harness/ui-view'
 import type { SubmitMode } from '@jozo-harness/ui-protocol'
 import type { CommandView } from '../../src/shared/rpc.ts'
@@ -18,6 +18,7 @@ import {
   type ReferenceToken,
 } from '../../src/ui/references.ts'
 import { levelOf } from '../pour.ts'
+import { watchWidth } from '../rail.ts'
 import type { SessionStore } from '../store.ts'
 import { acceleratedSend, oppositeMode, submitModeFor } from '../submission.ts'
 import { Button } from './ui/button.tsx'
@@ -391,7 +392,12 @@ const Model = (props: { store: SessionStore }) => {
  * would type; a word that wants input starts in the draft instead of sending a
  * request the page would have to guess at.
  */
-const Plus = (props: { store: SessionStore; onStart: (text: string) => void }) => {
+const Plus = (props: {
+  store: SessionStore
+  onStart: (text: string) => void
+  /** The seat's chips, when the composer is too narrow to keep them in the row. */
+  seat?: (() => JSX.Element) | undefined
+}) => {
   const [open, setOpen] = createSignal(false)
   let menu: HTMLDivElement | undefined
 
@@ -446,6 +452,7 @@ const Plus = (props: { store: SessionStore; onStart: (text: string) => void }) =
           role="menu"
           aria-label="the commands this menu starts"
         >
+          <Show when={props.seat}>{(draw) => <div class="plus-seat">{draw()()}</div>}</Show>
           <button
             type="button"
             role="menuitem"
@@ -599,6 +606,9 @@ const BusyEnter = (props: {
   </Show>
 )
 
+/** Below this width the seat's chips would wrap under the input, so they fold into +. */
+const COMPACT_WIDTH = 560
+
 /** The input, and what sits above it: waiting input and the thing to answer. */
 export const Composer = (props: {
   store: SessionStore
@@ -608,6 +618,8 @@ export const Composer = (props: {
   onBusyEnter?: (mode: SubmitMode) => void
 }) => {
   let textarea: HTMLTextAreaElement | undefined
+  let form: HTMLFormElement | undefined
+  const [compact, setCompact] = createSignal(false)
   /** The slash word the popup belongs to; undefined closes it. */
   const [token, setToken] = createSignal<CommandToken | undefined>()
   /** The @word the file popup belongs to; undefined closes it. */
@@ -632,11 +644,28 @@ export const Composer = (props: {
       props.store.send({ kind: 'approve', callId: approval.callId, approved: key === 'y' })
     }
     document.addEventListener('keydown', onKey)
-    onCleanup(() => document.removeEventListener('keydown', onKey))
+    const stopWidth = watchWidth(form, (width) => setCompact(width < COMPACT_WIDTH))
+    onCleanup(() => {
+      document.removeEventListener('keydown', onKey)
+      stopWidth?.()
+    })
   })
 
   /** The mode this page prefers while a turn runs; queue is the untouched default. */
   const preferred = (): SubmitMode => props.busyEnter ?? 'queue'
+
+  /** The chips that say how the next request runs; a narrow composer keeps them behind +. */
+  const seat = () => (
+    <div id="seat">
+      <Model store={props.store} />
+      <Effort store={props.store} />
+      <BusyEnter
+        store={props.store}
+        mode={preferred()}
+        onChoose={props.onBusyEnter ?? (() => undefined)}
+      />
+    </div>
+  )
 
   /** Sends the draft; an accelerated gesture asks for the other of the two modes. */
   const send = (accelerated = false): void => {
@@ -818,6 +847,9 @@ export const Composer = (props: {
       </div>
       <form
         id="composer"
+        ref={(node) => {
+          form = node
+        }}
         onSubmit={(event) => {
           event.preventDefault()
           send()
@@ -881,16 +913,8 @@ export const Composer = (props: {
           }}
         />
         <div class="actions">
-          <Plus store={props.store} onStart={start} />
-          <div id="seat">
-            <Model store={props.store} />
-            <Effort store={props.store} />
-            <BusyEnter
-              store={props.store}
-              mode={preferred()}
-              onChoose={props.onBusyEnter ?? (() => undefined)}
-            />
-          </div>
+          <Plus store={props.store} onStart={start} seat={compact() ? seat : undefined} />
+          <Show when={!compact()}>{seat()}</Show>
           {/* While something waits on the reader, the card's button is the one in amber. */}
           <Button
             id="send"

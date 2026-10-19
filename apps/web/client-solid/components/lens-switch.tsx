@@ -2,7 +2,7 @@ import { For } from 'solid-js'
 import { LENSES, type Lens } from '../lens.ts'
 import { Icon, type IconName } from './ui/icon.tsx'
 
-const LABELS: Readonly<Record<Lens, string>> = { answers: 'Answers', timeline: 'Timeline' }
+const LABELS: Readonly<Record<Lens, string>> = { answers: 'Chat', timeline: 'Timeline' }
 const ICONS: Readonly<Record<Lens, IconName>> = { answers: 'answers', timeline: 'timeline' }
 
 /** The strip's switch between the two ways the middle column reads a session. */

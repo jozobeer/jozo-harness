@@ -7,8 +7,8 @@ const shapeOf = (outcome: string | undefined): IconName => {
 }
 
 /**
- * How a piece of work ended, as a line mark: a check, green while the reader has
- * not seen it; a cross in red; a quiet ring for work that has not ended yet.
+ * How a piece of work ended: a dot, green while the reader has not seen it and
+ * quiet once they have; a red dot when it failed; a ring for work with no end yet.
  */
 export const EndMark = (props: { outcome: string | undefined; fresh: boolean; class?: string }) => {
   const shape = (): IconName => shapeOf(props.outcome)

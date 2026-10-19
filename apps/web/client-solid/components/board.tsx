@@ -133,8 +133,8 @@ const Search = (props: { query: string; onQuery: (query: string) => void }) => {
 }
 
 /**
- * How a row stands at a glance: a mug filling while it works, full while it waits
- * on you, else how its last turn ended.
+ * How a row stands at a glance: a mug filling while it works, else how its last
+ * turn ended. A row that waits on you sits in a glass already, so it wears none.
  */
 const SessionMark = (props: { entry: BoardEntry }) => {
   const seen = useSeen()
@@ -143,18 +143,14 @@ const SessionMark = (props: { entry: BoardEntry }) => {
     return ended !== undefined && seen.fresh(props.entry.summary.id, ended.at)
   }
   return (
-    <Switch
+    <Show
+      when={props.entry.status === 'running'}
       fallback={
         <EndMark outcome={props.entry.ended?.outcome} fresh={fresh()} class="session-mark" />
       }
     >
-      <Match when={props.entry.status === 'running'}>
-        <Mug state="filling" since={props.entry.since} />
-      </Match>
-      <Match when={props.entry.status === 'waiting'}>
-        <Mug state="full" />
-      </Match>
-    </Switch>
+      <Mug state="filling" since={props.entry.since} />
+    </Show>
   )
 }
 
@@ -275,7 +271,9 @@ const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) 
             askRename()
           }}
         >
-          <SessionMark entry={props.entry} />
+          <Show when={props.entry.status !== 'waiting'}>
+            <SessionMark entry={props.entry} />
+          </Show>
           <span class="session-name">{titleOf(props.entry)}</span>
           <span class="session-detail">{props.detail}</span>
         </button>

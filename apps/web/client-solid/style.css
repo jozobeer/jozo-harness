@@ -1123,9 +1123,17 @@
     color: var(--beer-ink);
   }
 
-  /* On foam the mug is drawn in the glass's ink, like everything else on the card. */
-  .board-card .mug-outline {
-    stroke: var(--beer-ink);
+  /* The glass is the card's mark, so its row starts at the name. */
+  #session-list .board-card .session {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  #session-list .board-card .session-name {
+    grid-column: 1;
+  }
+
+  #session-list .board-card .session-detail {
+    grid-column: 2;
   }
 
   .board-asked {
@@ -1549,14 +1557,64 @@
     height: 14px;
   }
 
-  .seat-effort-field {
-    gap: 0;
-    padding-left: 6px;
-    color: var(--dim);
+  /* The seat reads as pills, each its icon and its value; the effort's select hides its own frame. */
+  #seat {
+    gap: 6px;
   }
 
-  .seat-effort-field .seat-effort {
-    padding-left: 4px;
+  #seat .seat-chip,
+  .seat-effort-field {
+    min-height: 24px;
+    padding: 1px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--dim);
+    font-size: var(--text-xs);
+    line-height: 18px;
+  }
+
+  #seat .seat-chip:hover,
+  .seat-effort-field:hover,
+  .seat-effort-field:focus-within {
+    border-color: var(--line-strong);
+    color: var(--text);
+  }
+
+  #seat .seat-effort-field .seat-effort {
+    height: auto;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    line-height: inherit;
+    appearance: none;
+    /* The pill is as wide as the word it shows, not the longest word it offers. */
+    field-sizing: content;
+    max-width: none;
+  }
+
+  /* Folded behind +, the seat heads the menu and its lists open in place. */
+  .plus-seat {
+    padding: 2px 2px var(--s2);
+    margin-bottom: 2px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .plus-seat #seat {
+    flex-wrap: wrap;
+  }
+
+  .plus-seat .seat-model {
+    flex-wrap: wrap;
+  }
+
+  .plus-seat .model-list {
+    flex-basis: 100%;
+    position: static;
+    min-width: 0;
+    max-width: none;
+    margin-top: var(--s2);
+    box-shadow: none;
   }
 
   .pane-close,
@@ -1576,6 +1634,11 @@
     align-self: center;
     width: 14px;
     height: 14px;
+  }
+
+  /* With the seat folded behind +, send and stop still close the row. */
+  .actions #send {
+    margin-left: auto;
   }
 
   .actions .btn-icon .icon {

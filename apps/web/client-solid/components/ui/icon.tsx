@@ -33,8 +33,9 @@ const SHAPES = {
       <rect x="2" y="2" width="12" height="12" rx="3" fill="currentColor" mask={`url(#${id})`} />
     </>
   ),
-  done: () => [ring(8, 8, 5.75), line('M5.5 8.2l1.7 1.7 3.3-3.4')],
-  failed: () => [ring(8, 8, 5.75), line('M6 6l4 4M10 6l-4 4')],
+  // A finish is a dot, not a check: the row's words say what was done, the dot only how it went.
+  done: () => dot(8, 8, 3.5),
+  failed: () => dot(8, 8, 3.5),
   idle: () => ring(8, 8, 2.5),
   plus: () => line('M8 3v10M3 8h10'),
   search: () => [ring(7, 7, 4.25), line('M10.2 10.2 13.5 13.5')],

@@ -211,8 +211,9 @@ describe('the Solid page', () => {
     expect(rows[0]?.textContent).toContain('ccccdddd')
     expect(rows[1]?.classList.contains('active')).toBe(true)
     expect(container.querySelector('.board-asked')?.textContent).toBe('Approve bash? network')
-    // What waits on you is the mug full and foaming; a session at rest keeps its dot.
-    expect(container.querySelector('.board-card .mug.full .mug-foam')).not.toBeNull()
+    // What waits on you is a glass already: the full mug heads the section, not each card.
+    expect(container.querySelector('.board-title .mug.full .mug-foam')).not.toBeNull()
+    expect(container.querySelector('.board-card .mug, .board-card .end-mark')).toBeNull()
     expect(rows[1]?.querySelector('.session-mark')).not.toBeNull()
 
     const allow = [...container.querySelectorAll('.board-card button')].find(
@@ -1174,6 +1175,61 @@ describe('the Solid page', () => {
     expect(calls).toContainEqual({ kind: 'chooseEffort', effort: '' })
   })
 
+  test('a narrow composer folds the seat behind +, and a wide one keeps it in the row', () => {
+    let width = 400
+    const observers: Array<() => void> = []
+    // jsdom measures nothing, so the width the composer reports is set here.
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        private readonly report: () => void
+        constructor(
+          callback: (entries: ReadonlyArray<{ contentRect: { width: number } }>) => void,
+        ) {
+          this.report = () => callback([{ contentRect: { width } }])
+        }
+        observe() {
+          observers.push(this.report)
+          this.report()
+        }
+        disconnect() {}
+      },
+    )
+    try {
+      const { store } = makeStore({
+        sessionId: 'a',
+        info: { cwd: '/work', model: 'stub/model', turns: 1 },
+        run: {
+          goal: null,
+          schedules: [],
+          jobs: [],
+          subagents: [],
+          todos: [],
+          todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+          skills: [],
+          promptSections: [],
+          queued: [],
+          steering: [],
+          model: 'stub/model',
+          effort: 'low',
+          efforts: ['low', 'high'],
+        },
+      })
+      const { container } = render(() => <Composer store={store} />)
+      expect(container.querySelector('#seat-model')).toBeNull()
+      fireEvent.click(container.querySelector('#composer-plus') as Element)
+      expect(container.querySelector('#plus-list #seat-model')?.textContent).toBe('stub/model')
+      expect(container.querySelector('#plus-list #seat-effort')).not.toBeNull()
+
+      width = 800
+      for (const report of observers) report()
+      expect(container.querySelector('#plus-list #seat-model')).toBeNull()
+      expect(container.querySelector('.actions > #seat #seat-model')).not.toBeNull()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   test('an effort the endpoint does not name still shows, so the seat never lies', () => {
     const { store } = makeStore({
       sessionId: 'a',
@@ -1639,7 +1695,7 @@ describe('the Solid page', () => {
     ))
 
     const pressed = container.querySelector('button[aria-pressed="true"]')
-    expect(pressed?.textContent).toBe('Answers')
+    expect(pressed?.textContent).toBe('Chat')
     fireEvent.click(container.querySelector('button[data-lens="timeline"]') as Element)
     expect(chosen).toEqual(['timeline'])
     expect([lensFrom('timeline'), lensFrom('waterfall'), lensFrom(null)]).toEqual([
@@ -1942,16 +1998,22 @@ describe('the rail', () => {
   })
 
   test('the status bar keeps the room the pane strip measured', () => {
-    let measure: ((width: number) => void) | undefined
+    // The composer watches its own width too, so each callback is kept by what it observes.
+    const measures = new Map<Element, (width: number) => void>()
     class FakeResizeObserver {
+      private readonly callback: (
+        entries: ReadonlyArray<{ readonly contentRect: { readonly width: number } }>,
+      ) => void
       constructor(
         callback: (
           entries: ReadonlyArray<{ readonly contentRect: { readonly width: number } }>,
         ) => void,
       ) {
-        measure = (width) => callback([{ contentRect: { width } }])
+        this.callback = callback
       }
-      observe(): void {}
+      observe(element: Element): void {
+        measures.set(element, (width) => this.callback([{ contentRect: { width } }]))
+      }
       disconnect(): void {}
     }
     vi.stubGlobal('ResizeObserver', FakeResizeObserver)
@@ -1959,7 +2021,7 @@ describe('the rail', () => {
       const { store } = makeStore()
       const { container } = render(() => <App store={store} />)
       const header = container.querySelector('#status') as HTMLElement
-      measure?.(221.4)
+      measures.get(container.querySelector('#context') as Element)?.(221.4)
       expect(header.style.getPropertyValue('--context-strip-w')).toBe('222px')
     } finally {
       vi.unstubAllGlobals()
