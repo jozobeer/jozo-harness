@@ -31,6 +31,7 @@ import { searchWorkspaceFiles } from './files.ts'
 import { branchOf } from './git-branch.ts'
 import type { SettingsPort } from './settings.ts'
 import { staticResponse } from './static.ts'
+import { makeStoreEvents, type StoreEvents } from './store-events.ts'
 import type { WorkspacesPort } from './workspaces.ts'
 
 export const UI_PATH = '/ui'
@@ -71,6 +72,7 @@ const handlersOf = (
   settings: SettingsPort,
   workspaces: WorkspacesPort,
   commands: () => ReadonlyArray<CommandView>,
+  store: StoreEvents,
 ) =>
   UiRpcs.toLayer({
     sessions: () =>
@@ -86,7 +88,11 @@ const handlersOf = (
       }).pipe(Effect.mapError((error) => error.message)),
     open: ({ sessionId, cwd }) =>
       Effect.gen(function* () {
+        // Resuming a session somebody already opened changes nothing another
+        // page reads; opening one more is the store change every page needs.
+        const known = sessionId !== undefined && registry.sessionOf(sessionId) !== undefined
         const session = yield* registry.open(sessionId, cwd)
+        if (!known) store.notify()
         const view = yield* settings.read()
         const meta = yield* readMeta(view.sessionRoot)
         return withMeta(session.summary, meta[session.summary.id])
@@ -117,6 +123,8 @@ const handlersOf = (
         }
         const view = yield* settings.read()
         yield* sessionActionOf(view.sessionRoot, sessionId, action)
+        // A rename, a pin, or a delete is another device's row as well.
+        store.notify()
         return true
       }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
     command: ({ sessionId, command }) => {
@@ -132,6 +140,7 @@ const handlersOf = (
       const host = registry.hostOf(sessionId)
       return host === undefined ? Stream.fail('the session is not open') : host.events
     },
+    storeChanged: () => store.subscribe(),
     state: ({ sessionId }) => {
       const view = registry.stateOf(sessionId)
       return view === undefined ? Effect.fail('the session is not open') : Effect.succeed(view)
@@ -316,6 +325,7 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
         factory: options.factory,
       })
       const { protocol, attach } = yield* makeWebProtocol
+      const store = makeStoreEvents()
       const connections = new Map<WebSocket, Connection>()
       // One token per run, kept out of the ready URL: that URL carries a code
       // which trades for the token in an HttpOnly cookie and then dies.
@@ -407,7 +417,9 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
       // Our schemas need no decoding services, but Effect types a stream RPC's
       // service requirement as `unknown`; the layer is pinned to what it is.
       const rpc: Layer.Layer<never> = RpcServer.layer(UiRpcs).pipe(
-        Layer.provide(handlersOf(registry, options.settings, options.workspaces, options.commands)),
+        Layer.provide(
+          handlersOf(registry, options.settings, options.workspaces, options.commands, store),
+        ),
         Layer.provide(Layer.succeed(RpcServer.Protocol, protocol)),
       ) as unknown as Layer.Layer<never>
       yield* Effect.forkScoped(Layer.launch(rpc))

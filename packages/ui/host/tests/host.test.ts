@@ -12,7 +12,7 @@ import {
 } from '@jozo-harness/session'
 import { Effect, Fiber, Stream, type Scope } from 'effect'
 import { makeUiHost } from '../src/index.ts'
-import type { UiHost } from '@jozo-harness/ui-protocol'
+import type { UiEvent, UiHost } from '@jozo-harness/ui-protocol'
 
 interface FakeInput {
   readonly session: Session
@@ -518,6 +518,35 @@ describe('ui host', () => {
         yield* Effect.sleep(10)
         const collected = yield* Fiber.join(first)
         expect([...collected].map((event) => event.kind)).toEqual(['session', 'session'])
+      }),
+    )
+  })
+
+  test('a second subscriber follows the same live log the first one reads', async () => {
+    const input = makeInput()
+    await withHost(input, (host) =>
+      Effect.gen(function* () {
+        // Two devices read one host: neither takes the other's copy of the log.
+        const first = yield* Effect.forkScoped(host.events.pipe(Stream.take(3), Stream.runCollect))
+        const second = yield* Effect.forkScoped(host.events.pipe(Stream.take(3), Stream.runCollect))
+        yield* Effect.sleep(10)
+        yield* input.append('safety/approval/requested', {
+          callId: 'c1',
+          tool: 'bash',
+          reason: 'outside the preset',
+        })
+        yield* input.append('safety/approval/answered', { callId: 'c1', approved: true })
+        yield* input.append('user/message', { text: 'after the approval', source: 'user' })
+        const typesOf = (events: ReadonlyArray<UiEvent>): ReadonlyArray<string> =>
+          events.flatMap((event) => (event.kind === 'session' ? [event.event.type] : []))
+        const one = [...(yield* Fiber.join(first))]
+        const two = [...(yield* Fiber.join(second))]
+        expect(typesOf(one)).toEqual([
+          'safety/approval/requested',
+          'safety/approval/answered',
+          'user/message',
+        ])
+        expect(typesOf(two)).toEqual(typesOf(one))
       }),
     )
   })
