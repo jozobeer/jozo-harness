@@ -57,6 +57,8 @@ export interface TraceTurn {
   /** The text of the last step that said anything: the turn's answer. */
   readonly answer: string
   readonly changed: ReadonlyArray<ChangedFile>
+  /** True when the log wrote the call outside any turn, as a forced skill load does. */
+  readonly standalone: boolean
 }
 
 /** The tools whose calls write a file the reader may want to review. */
@@ -137,6 +139,7 @@ const startTurn = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => [
     steps: [],
     answer: '',
     changed: [],
+    standalone: false,
   },
 ]
 
@@ -194,19 +197,57 @@ const withChange = (
     ? changed.map((file) => (file.path === path ? { ...file, edits: file.edits + 1 } : file))
     : [...changed, { path, edits: 1 }]
 
-const callTool = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => {
-  const tool: TraceTool = {
-    callId: textOf(event.data, 'callId'),
-    name: textOf(event.data, 'name'),
-    summary: textOf(event.data, 'summary'),
-    args: textOf(event.data, 'arguments'),
+const toolOf = (event: UiSessionEvent): TraceTool => ({
+  callId: textOf(event.data, 'callId'),
+  name: textOf(event.data, 'name'),
+  summary: textOf(event.data, 'summary'),
+  args: textOf(event.data, 'arguments'),
+  startedAt: event.time,
+  endedAt: undefined,
+  status: 'running',
+  result: '',
+  output: '',
+  images: [],
+})
+
+/** True while the last entry is a turn still running; a load written outside one is not. */
+const turnOpen = (turns: ReadonlyArray<TraceTurn>): boolean => {
+  const last = turns[turns.length - 1]
+  return last !== undefined && !last.standalone && last.endedAt === undefined
+}
+
+/** A call the log wrote outside any turn: it stands alone because no turn holds it. */
+const standaloneTurn = (
+  turns: ReadonlyArray<TraceTurn>,
+  tool: TraceTool,
+  event: UiSessionEvent,
+): ReadonlyArray<TraceTurn> => [
+  ...turns,
+  {
+    turn: 0,
+    prompt: '',
     startedAt: event.time,
     endedAt: undefined,
-    status: 'running',
-    result: '',
-    output: '',
-    images: [],
-  }
+    outcome: '',
+    steps: [
+      {
+        step: 0,
+        startedAt: event.time,
+        endedAt: undefined,
+        reasoning: '',
+        text: '',
+        tools: [tool],
+      },
+    ],
+    answer: '',
+    changed: [],
+    standalone: true,
+  },
+]
+
+const callTool = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => {
+  const tool = toolOf(event)
+  if (!turnOpen(turns)) return standaloneTurn(turns, tool, event)
   const path = writtenPath(tool.name, tool.args)
   const called = inLastStep(turns, (step) => ({ ...step, tools: [...step.tools, tool] }))
   return path === undefined
@@ -216,7 +257,7 @@ const callTool = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => {
 
 const settleTool = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => {
   const callId = textOf(event.data, 'callId')
-  const settled = (tool: TraceTool): TraceTool => ({
+  const withResult = (tool: TraceTool): TraceTool => ({
     ...tool,
     endedAt: event.time,
     status: fieldOf(event.data, 'isError') === true ? 'error' : 'done',
@@ -224,10 +265,12 @@ const settleTool = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => {
     output: partsOf(fieldOf(event.data, 'content'), 'text'),
     images: imagesOf(fieldOf(event.data, 'content')),
   })
-  return inLastStep(turns, (step) => ({
+  const settled = inLastStep(turns, (step) => ({
     ...step,
-    tools: step.tools.map((tool) => (tool.callId === callId ? settled(tool) : tool)),
+    tools: step.tools.map((tool) => (tool.callId === callId ? withResult(tool) : tool)),
   }))
+  // A load outside a turn has no turn/end to close it: its result is the end.
+  return inLastTurn(settled, (turn) => (turn.standalone ? { ...turn, endedAt: event.time } : turn))
 }
 
 type Fold = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => ReadonlyArray<TraceTurn>

@@ -93,6 +93,8 @@ interface FakeHost {
   readonly setSubagents: (subagents: RunStateView['subagents']) => void
   /** The jobs the run state reports now, as a running command would. */
   readonly setJobs: (jobs: RunStateView['jobs']) => void
+  /** The skills the run state reports now, as a forced load would. */
+  readonly setSkills: (skills: ReadonlyArray<string>) => void
   /** What one job detail read returns now, while its output grows. */
   readonly setJobDetail: (detail: JobDetailView) => void
   /** How many times a client read a job detail. */
@@ -136,6 +138,7 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
   let model = 'stub/model'
   let subagents: RunStateView['subagents'] = []
   let jobs: RunStateView['jobs'] = []
+  let skills: ReadonlyArray<string> = []
   let jobDetail: JobDetailView | undefined
   let jobReads = 0
   const host: FakeHost = {
@@ -149,7 +152,7 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
         subagents,
         todos: [],
         todoCounts: { pending: 0, inProgress: 0, completed: 0 },
-        skills: [],
+        skills,
         promptSections: [],
         queued: [],
         steering: [],
@@ -177,6 +180,9 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
     },
     setJobs: (next) => {
       jobs = next
+    },
+    setSkills: (next) => {
+      skills = next
     },
     setJobDetail: (next) => {
       jobDetail = next
@@ -513,6 +519,30 @@ describe('the page store', () => {
           )
           yield* until(() => host.states() > before, 'read the run state after the goal changed')
           expect(store.state().run).toBeDefined()
+        }),
+      ),
+    )
+  }, 15_000)
+
+  test('a skill load written outside a turn makes the page read its run state again', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          const before = host.states()
+          host.setSkills(['review'])
+          host.said(
+            event(1, 'tool/call', {
+              callId: 's1',
+              name: 'skill',
+              arguments: '{"name":"review"}',
+              summary: '/home/me/.agents/skills/review/SKILL.md',
+            }),
+          )
+
+          yield* until(() => host.states() > before, 'read the run state after the load')
+          expect(store.state().run?.skills).toEqual(['review'])
         }),
       ),
     )

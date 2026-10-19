@@ -536,6 +536,53 @@ describe('the Solid page', () => {
     expect(card?.open).toBe(false)
   })
 
+  test('a skill loaded outside a turn shows its card without a turn around it', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const path = '/home/me/.agents/skills/review/SKILL.md'
+    const { store } = makeStore({
+      conversation: {
+        ...emptyConversation,
+        blocks: [
+          {
+            kind: 'tool',
+            callId: 's1',
+            name: 'skill',
+            summary: path,
+            status: 'done',
+            result: 'review does things',
+            output: '# review\ncheck the diff',
+          },
+        ],
+      },
+      trace: traceOf([
+        at(1, 'assistant/message', {
+          content: [{ type: 'tool-call', id: 's1', name: 'skill', arguments: '{"name":"review"}' }],
+        }),
+        at(2, 'tool/call', {
+          callId: 's1',
+          name: 'skill',
+          arguments: '{"name":"review"}',
+          summary: path,
+        }),
+        at(3, 'tool/result', {
+          callId: 's1',
+          isError: false,
+          summary: 'review does things',
+          content: [{ type: 'text', text: '# review\ncheck the diff' }],
+        }),
+      ]),
+    })
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    const card = container.querySelector('.tool-card.skill-card') as HTMLDetailsElement | null
+    expect(card?.querySelector('.skill-name')?.textContent).toBe('review')
+    expect(card?.querySelector('.skill-source')?.textContent).toBe(path)
+    expect(card?.querySelector('.tool-output')?.textContent).toBe('# review\ncheck the diff')
+    // No turn ran, so the card stands alone instead of folding into a process line.
+    expect(container.querySelector('.process')).toBeNull()
+  })
+
   test('a read_image result draws the image, its path, bytes, and loaded size', () => {
     const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
     const { store } = makeStore({

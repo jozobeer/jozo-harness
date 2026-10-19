@@ -169,7 +169,8 @@ const TurnLane = (props: { turn: TraceTurn; now: number; filter: Filter; store: 
  * it broke; a row opens in the inspector.
  */
 export const Waterfall = (props: { store: SessionStore; live?: boolean }) => {
-  const turns = createMemo(() => props.store.state().trace)
+  // A forced skill load happens outside a turn; the trace sheet is turns alone.
+  const turns = createMemo(() => props.store.state().trace.filter((turn) => !turn.standalone))
   const now = createNow(() => props.live !== false)
   const [text, setText] = createSignal('')
   const [failedOnly, setFailedOnly] = createSignal(false)

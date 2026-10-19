@@ -157,6 +157,10 @@
     margin-bottom: var(--s6);
   }
 
+  #conversation .block.load {
+    margin-bottom: var(--s6);
+  }
+
   #conversation .block.turn::before,
   #conversation .block.turn .block::before {
     display: none;

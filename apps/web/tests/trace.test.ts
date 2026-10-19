@@ -99,7 +99,56 @@ describe('the trace', () => {
     expect(finished[0] === undefined ? 0 : axisEndOf(finished[0])).toBe(120)
   })
 
-  test('events before any turn and bodies it cannot read change nothing', () => {
+  test('a call written before any turn stands on its own, so a forced skill load stays visible', () => {
+    const path = '/home/me/.agents/skills/review/SKILL.md'
+    const entries = traceOf([
+      said(10, {
+        type: 'tool-call',
+        id: 's1',
+        name: 'skill',
+        arguments: '{"name":"review"}',
+      }),
+      event(
+        'tool/call',
+        { callId: 's1', name: 'skill', arguments: '{"name":"review"}', summary: path },
+        11,
+      ),
+      event(
+        'tool/result',
+        {
+          callId: 's1',
+          isError: false,
+          summary: 'review does things',
+          content: [{ type: 'text', text: '# review' }],
+        },
+        12,
+      ),
+      event('turn/start', { turn: 1 }, 20),
+      claim('check the diff', 'user', 21),
+      event('step/start', { step: 1 }, 22),
+    ])
+    const [load, turn] = entries
+    expect(entries.map((entry) => entry.standalone)).toEqual([true, false])
+    expect(load?.prompt).toBe('')
+    expect(load?.endedAt).toBe(12)
+    expect(
+      load === undefined
+        ? []
+        : toolsOf(load).map((tool) => [
+            tool.name,
+            tool.status,
+            tool.summary,
+            tool.result,
+            tool.startedAt,
+            tool.endedAt,
+          ]),
+    ).toEqual([['skill', 'done', path, 'review does things', 11, 12]])
+    expect(turn?.turn).toBe(1)
+    expect(turn?.prompt).toBe('check the diff')
+    expect(turn === undefined ? [] : toolsOf(turn)).toEqual([])
+  })
+
+  test('a step or header before any turn and bodies it cannot read change nothing', () => {
     expect(traceOf([event('step/start', { step: 1 }, 1), event('session/header', {}, 2)])).toEqual(
       [],
     )
