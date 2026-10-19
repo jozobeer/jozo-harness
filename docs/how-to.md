@@ -333,6 +333,8 @@ REPL・TUI・Web では、行頭が `/` の行はコマンドとしてその場�
 
 `/status` の `stats` 行はセッションログから読める値だけを出す。tok/s は最後の turn の decode 区間、token は非キャッシュ入力・cache read / write・output・課金入力、cache は cache read ÷ 課金入力、context は runner が compaction に使うのと同じ budget に対する推定値の割合である。ログに無い値は `—` になり、0 と偽らない。
 
+Web UI は同じ値を、Run ペインの Usage と composer の context の輪で見せる。Usage は context の棒（compaction の位置に印）、入力と出力、最後の turn の tok/s を 0〜500 の速度計で示す。500 を超えると輪は満ちきり、中央の数字がそのまま速さを示す。compaction まで窓の 10% を切ると、棒と輪が金になる。輪を押すと Run ペインの Usage が開く。
+
 知らない名前は登録済みの一覧を返す。コマンドの答えは TUI と Web では会話の notice として出る。
 
 ## 過去のセッションを探して読む

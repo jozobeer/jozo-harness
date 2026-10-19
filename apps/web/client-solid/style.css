@@ -174,9 +174,8 @@
     transition: transform 200ms ease-out;
   }
 
-  .process-dot,
-  .session-mark {
-    transition: background-color 600ms ease-out;
+  .end-mark {
+    transition: color 600ms ease-out;
   }
 }
 
@@ -288,6 +287,10 @@
     stroke-linejoin: round;
   }
 
+  .icon-fill {
+    fill: currentColor;
+  }
+
   /* A folder of Recent folds the same way, over rows it keeps drawn. */
   .fold {
     display: grid;
@@ -305,16 +308,6 @@
 
   .process-line:hover {
     color: var(--text);
-  }
-
-  /* A turn that finished rests as a quiet dot; for a moment after it finished well, it is green. */
-  /* The dot takes the mug's 16px, so the line does not shift when the turn ends. */
-  .process-dot {
-    width: 8px;
-    height: 8px;
-    margin: 0 4px;
-    border-radius: 50%;
-    background: var(--rest);
   }
 
   /*
@@ -369,15 +362,6 @@
   .run-todo-mark svg {
     display: inline-block;
     vertical-align: middle;
-  }
-
-  .process-dot.finished {
-    background: var(--tool);
-  }
-
-  .process-dot.error,
-  .process-dot.cancelled {
-    background: var(--error);
   }
 
   .process-state {
@@ -437,7 +421,7 @@
 
   .tool-line {
     display: grid;
-    grid-template-columns: 3.5em minmax(0, 1fr) auto 3.5em;
+    grid-template-columns: 14px 3.5em minmax(0, 1fr) auto 3.5em;
     gap: var(--s2);
     padding: 1px 0;
     color: var(--dim);
@@ -472,7 +456,7 @@
   }
 
   .skill-card .tool-line {
-    grid-template-columns: 3.5em minmax(0, 1fr) minmax(0, 1fr) 3.5em;
+    grid-template-columns: 14px 3.5em minmax(0, 1fr) minmax(0, 1fr) 3.5em;
   }
 
   .skill-card .skill-label,
@@ -846,14 +830,6 @@
 
   .session-mark {
     justify-self: center;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--line-strong);
-  }
-
-  .session.idle .session-mark {
-    background: var(--rest);
   }
 
   #session-list .session-name {
@@ -1147,9 +1123,17 @@
     color: var(--beer-ink);
   }
 
-  /* On foam the mug is drawn in the glass's ink, like everything else on the card. */
-  .board-card .mug-outline {
-    stroke: var(--beer-ink);
+  /* The glass is the card's mark, so its row starts at the name. */
+  #session-list .board-card .session {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  #session-list .board-card .session-name {
+    grid-column: 1;
+  }
+
+  #session-list .board-card .session-detail {
+    grid-column: 2;
   }
 
   .board-asked {
@@ -1328,7 +1312,7 @@
 
   .wf-row {
     display: grid;
-    grid-template-columns: 4.5em minmax(0, 14em) minmax(0, 1fr) 4.5em;
+    grid-template-columns: 14px 4.5em minmax(0, 14em) minmax(0, 1fr) 4.5em;
     gap: var(--s2);
     align-items: center;
     width: 100%;
@@ -1502,5 +1486,379 @@
       transform: none;
       visibility: visible;
     }
+  }
+}
+
+/*
+ * Line icons beside the words they stand for. How a piece of work ended is a
+ * line mark: a check that stays green until the reader has seen it, then rests;
+ * a red cross; a quiet ring for a session that has not run yet.
+ */
+@layer client {
+  .end-mark {
+    color: var(--rest);
+  }
+
+  .end-mark.done {
+    color: var(--dim);
+  }
+
+  .end-mark.done.fresh {
+    color: var(--tool);
+  }
+
+  .end-mark.failed {
+    color: var(--error);
+  }
+
+  .tool-icon,
+  .wf-icon {
+    align-self: center;
+    width: 14px;
+    height: 14px;
+  }
+
+  .board-title {
+    align-items: center;
+  }
+
+  .session-search-field {
+    position: relative;
+  }
+
+  .session-search-icon {
+    position: absolute;
+    top: 50%;
+    left: 10px;
+    color: var(--dim);
+    pointer-events: none;
+    translate: 0 -50%;
+  }
+
+  .session-search {
+    padding-left: 32px;
+  }
+
+  .lens-option,
+  .tab,
+  .seat-chip,
+  .seat-effort-field,
+  .card-head strong {
+    display: inline-flex;
+    gap: 5px;
+    align-items: center;
+  }
+
+  .lens-option .icon,
+  .tab .icon,
+  .seat-chip .icon,
+  .seat-effort-field .icon {
+    width: 14px;
+    height: 14px;
+  }
+
+  /* The seat reads as pills, each its icon and its value; the effort's select hides its own frame. */
+  #seat {
+    gap: 6px;
+  }
+
+  #seat .seat-chip,
+  .seat-effort-field,
+  .context-ring {
+    min-height: 24px;
+    padding: 1px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--dim);
+    font-size: var(--text-xs);
+    line-height: 18px;
+  }
+
+  #seat .seat-chip:hover,
+  .context-ring:hover,
+  .seat-effort-field:hover,
+  .seat-effort-field:focus-within {
+    border-color: var(--line-strong);
+    color: var(--text);
+  }
+
+  #seat .seat-effort-field .seat-effort {
+    height: auto;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    line-height: inherit;
+    appearance: none;
+    /* The pill is as wide as the word it shows, not the longest word it offers. */
+    field-sizing: content;
+    max-width: none;
+  }
+
+  /* Folded behind +, the seat heads the menu and its lists open in place. */
+  .plus-seat {
+    padding: 2px 2px var(--s2);
+    margin-bottom: 2px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .plus-seat #seat {
+    flex-wrap: wrap;
+  }
+
+  .plus-seat .seat-model {
+    flex-wrap: wrap;
+  }
+
+  .plus-seat .model-list {
+    flex-basis: 100%;
+    position: static;
+    min-width: 0;
+    max-width: none;
+    margin-top: var(--s2);
+    box-shadow: none;
+  }
+
+  .pane-close,
+  .plus-button {
+    display: inline-grid;
+    place-items: center;
+  }
+
+  .run-child {
+    display: flex;
+    gap: var(--s2);
+    align-items: center;
+  }
+
+  .run-child .icon,
+  .run-job .icon {
+    align-self: center;
+    width: 14px;
+    height: 14px;
+  }
+
+  /* With the seat folded behind +, send and stop still close the row. */
+  .actions #send {
+    margin-left: auto;
+  }
+
+  .actions .btn-icon .icon {
+    width: 14px;
+    height: 14px;
+  }
+
+  /* On the amber button a hairline arrow thins out; the send arrow is drawn heavier. */
+  #send .icon-line {
+    stroke-width: 2;
+  }
+}
+
+/*
+ * Usage: the context on top, then what went in, how fast the newest turn wrote,
+ * and what came out. The speed is a car's dial: a blue ring up to the reading,
+ * the reading large in its middle.
+ */
+@layer client {
+  .usage-total {
+    color: var(--dim);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .usage-context {
+    display: grid;
+    gap: 3px;
+    margin-top: 6px;
+  }
+
+  .usage-context-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: var(--text-sm);
+  }
+
+  .usage-context-of,
+  .usage-left {
+    color: var(--dim);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .usage-bar {
+    position: relative;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--line);
+  }
+
+  .usage-bar > i {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: 3px;
+    background: var(--dim);
+  }
+
+  .usage-fire {
+    position: absolute;
+    top: -3px;
+    bottom: -3px;
+    width: 2px;
+    margin-left: -1px;
+    border-radius: 1px;
+    background: var(--warn);
+  }
+
+  /* Close to the line compaction runs at, the bar and its words turn gold. */
+  .usage-context.near .usage-bar > i {
+    background: var(--warn);
+  }
+
+  .usage-context.near .usage-left {
+    color: var(--warn);
+  }
+
+  .usage-trio {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    margin-top: 8px;
+  }
+
+  .usage-side {
+    display: grid;
+    min-width: 0;
+  }
+
+  .usage-side.out {
+    text-align: right;
+  }
+
+  .usage-key,
+  .usage-note {
+    color: var(--dim);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .usage-value {
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1.15;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The dial sits up toward the context, not centred on the numbers beside it. */
+  .dial {
+    align-self: start;
+    width: 124px;
+    height: auto;
+    margin-top: -10px;
+    overflow: visible;
+  }
+
+  .dial-face {
+    fill: var(--bg-sunken);
+    stroke: var(--line-strong);
+    stroke-width: 1;
+  }
+
+  .dial-track,
+  .dial-fill {
+    fill: none;
+    stroke-width: 3;
+    stroke-linecap: round;
+  }
+
+  .dial-track {
+    stroke: var(--line);
+  }
+
+  .dial-fill {
+    stroke: var(--speed);
+  }
+
+  .dial-tick {
+    stroke: var(--rest);
+    stroke-width: 0.8;
+  }
+
+  .dial-tick.mid {
+    stroke: var(--dim);
+    stroke-width: 1.2;
+  }
+
+  .dial-tick.major {
+    stroke: var(--text);
+    stroke-width: 1.8;
+  }
+
+  .dial-value {
+    fill: var(--text);
+    font: 700 30px var(--sans);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Three digits and four draw smaller, so the widest still clears the ticks. */
+  .dial-value.mid {
+    font-size: 27px;
+  }
+
+  .dial-value.long {
+    font-size: 23px;
+  }
+
+  .dial-unit {
+    fill: var(--dim);
+    font: 7.5px var(--sans);
+    letter-spacing: 0.04em;
+  }
+
+  /* The ring beside the composer: the same pill as the seat's chips. */
+  .context-ring {
+    display: inline-flex;
+    flex: none;
+    gap: 5px;
+    align-items: center;
+    background: none;
+    font-family: var(--mono);
+    cursor: pointer;
+  }
+
+  .context-ring.near {
+    border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+    color: var(--warn);
+  }
+
+  .context-ring-mark {
+    width: 14px;
+    height: 14px;
+    transform: rotate(-90deg);
+  }
+
+  .context-ring-mark circle {
+    fill: none;
+    stroke-width: 2.2;
+  }
+
+  .ring-track {
+    stroke: var(--line-strong);
+  }
+
+  .ring-used {
+    stroke: currentColor;
+    stroke-linecap: round;
+  }
+
+  .ring-fire {
+    stroke: var(--warn);
+    stroke-width: 3;
+  }
+
+  /* The seat keeps its chips' width, so the ring sits right after them. */
+  .actions > #seat {
+    flex: 0 1 auto;
   }
 }

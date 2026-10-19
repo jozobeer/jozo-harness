@@ -26,9 +26,11 @@ import {
 } from '../../src/ui/board.ts'
 import { basenameOf, whenOf } from '../lib.ts'
 import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY, keepPaths, pathsFrom } from '../recent.ts'
+import { useSeen } from '../seen.ts'
 import type { BrowseAnswer, SessionStore } from '../store.ts'
 import { Button } from './ui/button.tsx'
 import { Fizz } from './ui/fizz.tsx'
+import { EndMark } from './ui/end-mark.tsx'
 import { Icon } from './ui/icon.tsx'
 import { Mug } from './ui/mug.tsx'
 
@@ -107,37 +109,50 @@ const Search = (props: { query: string; onQuery: (query: string) => void }) => {
     onCleanup(() => document.removeEventListener('keydown', onKey))
   })
   return (
-    <input
-      id="session-search"
-      class="session-search"
-      type="search"
-      placeholder="Search sessions…"
-      aria-label="Search sessions"
-      value={props.query}
-      ref={(node) => {
-        field = node
-      }}
-      onInput={(event) => props.onQuery(event.currentTarget.value)}
-      onKeyDown={(event) => {
-        if (event.key !== 'Escape') return
-        props.onQuery('')
-        event.currentTarget.blur()
-      }}
-    />
+    <div class="session-search-field">
+      <Icon name="search" class="session-search-icon" />
+      <input
+        id="session-search"
+        class="session-search"
+        type="search"
+        placeholder="Search sessions…"
+        aria-label="Search sessions"
+        value={props.query}
+        ref={(node) => {
+          field = node
+        }}
+        onInput={(event) => props.onQuery(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape') return
+          props.onQuery('')
+          event.currentTarget.blur()
+        }}
+      />
+    </div>
   )
 }
 
-/** How a row stands at a glance: a mug filling while it works, full while it waits on you, else a dot. */
-const SessionMark = (props: { entry: BoardEntry }) => (
-  <Switch fallback={<span class="session-mark" />}>
-    <Match when={props.entry.status === 'running'}>
+/**
+ * How a row stands at a glance: a mug filling while it works, else how its last
+ * turn ended. A row that waits on you sits in a glass already, so it wears none.
+ */
+const SessionMark = (props: { entry: BoardEntry }) => {
+  const seen = useSeen()
+  const fresh = (): boolean => {
+    const ended = props.entry.ended
+    return ended !== undefined && seen.fresh(props.entry.summary.id, ended.at)
+  }
+  return (
+    <Show
+      when={props.entry.status === 'running'}
+      fallback={
+        <EndMark outcome={props.entry.ended?.outcome} fresh={fresh()} class="session-mark" />
+      }
+    >
       <Mug state="filling" since={props.entry.since} />
-    </Match>
-    <Match when={props.entry.status === 'waiting'}>
-      <Mug state="full" />
-    </Match>
-  </Switch>
-)
+    </Show>
+  )
+}
 
 /**
  * The row that opens a session; every session shows exactly one. Hovering or
@@ -256,7 +271,9 @@ const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) 
             askRename()
           }}
         >
-          <SessionMark entry={props.entry} />
+          <Show when={props.entry.status !== 'waiting'}>
+            <SessionMark entry={props.entry} />
+          </Show>
           <span class="session-name">{titleOf(props.entry)}</span>
           <span class="session-detail">{props.detail}</span>
         </button>
@@ -424,10 +441,16 @@ const WaitingCard = (props: { entry: BoardEntry; store: SessionStore }) => (
   </Show>
 )
 
-const Section = (props: { title: string; count: number; children: JSX.Element }) => (
+const Section = (props: {
+  title: string
+  icon: JSX.Element
+  count: number
+  children: JSX.Element
+}) => (
   <Show when={props.count > 0}>
     <section class="board-section">
       <h2 class="board-title">
+        {props.icon}
         {props.title}
         <span class="board-count">{String(props.count)}</span>
       </h2>
@@ -592,9 +615,11 @@ const WorkspacePicker = (props: { store: SessionStore }) => {
         type="button"
         onClick={() => props.store.moveTo(undefined, value() === '' ? undefined : value())}
       >
-        + New session
+        <Icon name="plus" />
+        New session
       </Button>
       <Button class="workspace-add-open" variant="quiet" type="button" onClick={openBrowser}>
+        <Icon name="folder" />
         Add workspace
       </Button>
       <Show when={browsing()}>
@@ -753,12 +778,12 @@ export const Board = (props: { store: SessionStore }) => {
         </button>
       </Show>
       <nav id="session-list" aria-label="Sessions">
-        <Section title="Waiting on you" count={board().waiting.length}>
+        <Section title="Waiting on you" icon={<Mug state="full" />} count={board().waiting.length}>
           <For each={keysOf(board().waiting, (entry) => entry.summary.id)}>
             {(id) => <WaitingCard entry={atKey(rows(), id)} store={props.store} />}
           </For>
         </Section>
-        <Section title="Recent" count={recentEntries().length}>
+        <Section title="Recent" icon={<Icon name="clock" />} count={recentEntries().length}>
           <For each={keysOf(recent(), (group) => group.cwd)}>
             {(cwd) => (
               <RecentFolder

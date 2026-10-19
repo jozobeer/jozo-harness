@@ -11,12 +11,14 @@ const WAVE = 'M-6 5q2-1.5 4 0t4 0t4 0t4 0t4 0t4 0t4 0'
 
 /**
  * Work in progress fills a mug; what waits on the reader is the same mug, full
- * and wearing foam. A filling mug that knows when its work began rises with the
- * time it has run; one that does not stays half full.
+ * and wearing foam; work that is held is the mug left empty. A filling mug that
+ * knows when its work began rises with the time it has run; one that does not
+ * stays half full.
  */
 export type MugProps =
   | { readonly state: 'filling'; readonly since?: number }
   | { readonly state: 'full' }
+  | { readonly state: 'empty' }
 
 export const Mug = (props: MugProps) => {
   const clip = createUniqueId()
@@ -35,7 +37,10 @@ export const Mug = (props: MugProps) => {
       <clipPath id={clip}>
         <path d={MUG} />
       </clipPath>
-      <g clip-path={'url(#' + clip + ')'}>
+      <g
+        clip-path={'url(#' + clip + ')'}
+        visibility={props.state === 'empty' ? 'hidden' : undefined}
+      >
         <g class="mug-level">
           <g class="mug-wave">
             <path class="mug-beer" d={WAVE + 'V17H-6z'} />

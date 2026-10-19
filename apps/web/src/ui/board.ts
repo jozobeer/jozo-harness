@@ -48,6 +48,14 @@ export interface BoardEntry {
   readonly doing: string
   /** The first line of the last answer; '' before there is one. */
   readonly said: string
+  /** How and when the last turn ended; undefined while it runs or before there is one. */
+  readonly ended: Ended | undefined
+}
+
+/** How a turn ended ('completed', 'error', 'cancelled', …), and when. */
+export interface Ended {
+  readonly outcome: string
+  readonly at: number
 }
 
 const waitingOf = (conversation: Conversation): Waiting | undefined => {
@@ -71,7 +79,14 @@ const closedEntry = (summary: SessionSummary): BoardEntry => ({
   calls: 0,
   doing: '',
   said: '',
+  ended: undefined,
 })
+
+/** A forced skill load writes a turn of its own that never ends, so it is passed over. */
+const endedOf = (trace: ReadonlyArray<TraceTurn>): Ended | undefined => {
+  const last = trace.findLast((entry) => !entry.standalone)
+  return last?.endedAt === undefined ? undefined : { outcome: last.outcome, at: last.endedAt }
+}
 
 /** What the last turn says: when its work began or ended, its calls, what runs, what it said. */
 const lastTurnFacts = (last: TraceTurn | undefined) => {
@@ -100,6 +115,7 @@ export const entryOf = (summary: SessionSummary, watched: Watched | undefined): 
     status: statusOf(watched, waiting),
     waiting,
     since: facts.since ?? summary.updatedAt,
+    ended: endedOf(watched.trace),
     // A load written outside a turn is a call, not a turn the session ran.
     turns: watched.trace.filter((entry) => !entry.standalone).length,
   }

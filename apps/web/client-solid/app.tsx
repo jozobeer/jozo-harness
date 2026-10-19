@@ -21,6 +21,7 @@ import {
 } from './rail.ts'
 import { keepBusyEnter, keptBusyEnter } from './dom.ts'
 import { createSessionStore, type SessionStore } from './store.ts'
+import { SeenContext, createSeen } from './seen.ts'
 
 /** How far the arrow keys move the boundary between the rail and the page. */
 const KEY_STEP = 8
@@ -140,8 +141,9 @@ export const App = (props: { store?: SessionStore; lens?: Lens }) => {
     })
   })
   // Both readings stay mounted, so switching back finds the place and the open steps it left.
+  const seen = createSeen(() => store.state().sessionId)
   return (
-    <>
+    <SeenContext.Provider value={seen}>
       <header id="status" aria-live="polite" style={stripRoom(stripWidth())}>
         <button
           id="rail-fold"
@@ -202,6 +204,6 @@ export const App = (props: { store?: SessionStore; lens?: Lens }) => {
           <ContextPane store={store} />
         </aside>
       </div>
-    </>
+    </SeenContext.Provider>
   )
 }

@@ -187,14 +187,25 @@ export const TodoViewSchema = Schema.Struct({
 })
 
 /**
- * The stats a status line shows, already rounded from the log. Missing numbers
- * are an em dash, so an old log never reads as zero use or a zero cache hit.
+ * The usage a page draws, already rounded from the log, with the shares its bar
+ * and dial need. A number the log cannot state is absent, so it never reads as zero.
  */
-export const StatsViewSchema = Schema.Struct({
-  tokensPerSecond: Schema.String,
-  tokens: Schema.String,
-  cache: Schema.String,
-  context: Schema.String,
+export const UsageViewSchema = Schema.Struct({
+  total: Schema.String,
+  input: Schema.String,
+  output: Schema.String,
+  turns: Schema.Int,
+  cache: Schema.optionalKey(Schema.String),
+  speed: Schema.optionalKey(Schema.Struct({ text: Schema.String, value: Schema.Number })),
+  context: Schema.optionalKey(
+    Schema.Struct({
+      used: Schema.String,
+      window: Schema.String,
+      left: Schema.String,
+      share: Schema.Number,
+      fire: Schema.Number,
+    }),
+  ),
 })
 
 /** What one session can say about itself right now, folded from its own log and its live work. */
@@ -225,8 +236,8 @@ export const RunStateViewSchema = Schema.Struct({
   effort: Schema.String,
   /** The effort words the provider takes, as a page offers them; empty declares none. */
   efforts: Schema.Array(Schema.String),
-  /** The token and context stats, when the log carries enough to state them. */
-  stats: Schema.optionalKey(StatsViewSchema),
+  /** Tokens, speed and context, as the Run pane and the composer's ring draw them. */
+  usage: Schema.optionalKey(UsageViewSchema),
 })
 
 export type RunStateView = typeof RunStateViewSchema.Type

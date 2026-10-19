@@ -1,5 +1,4 @@
 import type { Conversation, ConversationBlock } from '@jozo-harness/ui-view'
-import type { RunStateView } from '../src/shared/rpc.ts'
 import type { WebState } from '../src/ui/state.ts'
 
 /** How long ago a session started, the way a rail usually says it. */
@@ -44,16 +43,6 @@ export const childSessionsOf = (
     ),
   ),
 ]
-
-/** The token and context numbers the strip shows, in the same order /status prints them. */
-export const statsTextOf = (stats: NonNullable<RunStateView['stats']>): string =>
-  stats.tokensPerSecond +
-  ' tok/s · ' +
-  stats.tokens +
-  ' · cache ' +
-  stats.cache +
-  ' · ctx ' +
-  stats.context
 
 /** What the status strip says the page is doing. */
 export const hintOf = (state: WebState): string => {

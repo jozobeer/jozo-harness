@@ -5,21 +5,25 @@ import type { Pane } from '../../src/ui/state.ts'
 import { THEMES, type Theme } from '../../src/ui/theme.ts'
 import type { TurnView } from '../../src/ui/trajectory.ts'
 import { childSessionsOf, elapsedOf } from '../lib.ts'
-import { levelOf } from '../pour.ts'
 import type { SessionStore } from '../store.ts'
 import { Review } from './review.tsx'
 import { Inspector } from './inspector.tsx'
 import { Button } from './ui/button.tsx'
 import { Icon } from './ui/icon.tsx'
+import { GoalMark, roundsOf } from './ui/goal-mark.tsx'
 import { Mug } from './ui/mug.tsx'
+import { Usage } from './usage.tsx'
 
 const Goal = (props: { goal: RunStateView['goal'] }) => (
   <Show when={props.goal} fallback={<div class="run-empty">no goal</div>}>
     {(goal) => (
-      <div class="run-goal pour" style={{ '--level': levelOf(goal().rounds, goal().maxRounds) }}>
+      <div class="run-goal">
         <span class="run-objective">{goal().objective}</span>
-        <span class={'run-phase ' + goal().phase}>{goal().phase}</span>
-        <span class="run-rounds">{String(goal().rounds) + '/' + String(goal().maxRounds)}</span>
+        <span class={'run-phase ' + goal().phase}>
+          <GoalMark phase={goal().phase} />
+          {goal().phase}
+        </span>
+        <span class="run-rounds">{roundsOf(goal().rounds, goal().maxRounds)}</span>
       </div>
     )}
   </Show>
@@ -102,6 +106,7 @@ const ChildLinks = (props: { store: SessionStore; blocks: ReadonlyArray<Conversa
                 data-session-id={id}
                 onClick={() => props.store.moveTo(id)}
               >
+                <Icon name="subagent" />
                 {'subagent · ' + id.slice(0, 8)}
               </button>
             </li>
@@ -126,6 +131,7 @@ const LiveSubagents = (props: { store: SessionStore; subagents: RunStateView['su
               data-session-id={child.id}
               onClick={() => props.store.moveTo(child.id)}
             >
+              <Icon name="subagent" />
               <span class="run-child-state">{child.status}</span>
               <span class="run-child-id">{child.id.slice(0, 8)}</span>
               <Show when={working()}>
@@ -160,6 +166,7 @@ const Jobs = (props: { store: SessionStore; jobs: RunStateView['jobs'] }) => (
             type="button"
             onClick={() => props.store.openJob(job.id)}
           >
+            <Icon name="job" />
             <span class="run-job-state">{job.running ? 'running' : 'done'}</span>
             <span class="run-job-id">{job.id}</span>
             <span class="run-job-command">{job.command}</span>
@@ -195,6 +202,7 @@ const Run = (props: { store: SessionStore }) => {
         {(state) => (
           <>
             <Goal goal={state().goal} />
+            <Usage usage={state().usage} />
             <Todos todos={state().todos} counts={state().todoCounts} />
             <Skills skills={state().skills} />
             <PromptSections sections={state().promptSections} />
@@ -370,10 +378,10 @@ const Job = (props: { store: SessionStore; pane: Extract<Pane, { kind: 'job' }> 
 )
 
 const PANES = [
-  { kind: 'changes', label: 'changes' },
-  { kind: 'run', label: 'run' },
-  { kind: 'settings', label: 'settings' },
-  { kind: 'trajectory', label: 'turns' },
+  { kind: 'changes', label: 'changes', icon: 'changes' },
+  { kind: 'run', label: 'run', icon: 'run' },
+  { kind: 'settings', label: 'settings', icon: 'settings' },
+  { kind: 'trajectory', label: 'turns', icon: 'turns' },
 ] as const
 
 type Tab = (typeof PANES)[number]['kind']
@@ -422,6 +430,7 @@ export const ContextPane = (props: { store: SessionStore }) => {
                 type="button"
                 onClick={() => toggle(entry.kind)}
               >
+                <Icon name={entry.icon} />
                 {entry.label}
               </button>
             )}
@@ -446,7 +455,7 @@ export const ContextPane = (props: { store: SessionStore }) => {
           aria-label="hide the pane"
           onClick={() => props.store.showPane(undefined)}
         >
-          ×
+          <Icon name="close" />
         </button>
       </header>
       <div

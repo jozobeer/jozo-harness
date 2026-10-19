@@ -2,8 +2,9 @@
  * One rule for colour, poured like a glass of beer. Gold is the human's turn
  * and the agent's work in progress; what waits on the reader foams (bubbles
  * rise through it) and is drawn as a glass whichever the theme, while work in
- * progress fills a mug that has no foam yet. Hop green is the moment something
- * finished well, and it settles to a quiet mark; red is what failed and stays.
+ * progress fills a mug that has no foam yet. Hop green is a finish the reader
+ * has not seen yet, and it settles to a quiet mark once they have; red is what
+ * failed and stays.
  * What is merely selected wears steel.
  */
 :root {
@@ -26,12 +27,13 @@
   --accent: #ffd24a;
   --accent-fill: #ffd24a;
   --accent-ink: #1a1300;
-  /* Work in progress: the pale level it pours, and the weight of the line along its foot. */
+  /* Work in progress: the pale level a running call pours in the Timeline. */
   --pour: color-mix(in srgb, #ffd24a 14%, transparent);
-  --pour-line-w: 2px;
   /* What is selected: a session, a tab, a theme. */
   --select: #8aa0b4;
   --select-soft: #252c34;
+  /* How fast the model writes: the speed dial's ring, a blue of its own. */
+  --speed: #5aa9e6;
   --user: #fbfaf6;
   --tool: #9cc97a;
   --error: #ec6a5e;
@@ -92,9 +94,9 @@
     --accent-fill: #f7b500;
     --accent-ink: #1a1300;
     --pour: color-mix(in srgb, #f7b500 18%, #ffffff);
-    --pour-line-w: 3px;
     --select: #3d5a73;
     --select-soft: #e3eaf0;
+    --speed: #2a72b8;
     --user: #16191d;
     --tool: #2b7327;
     --error: #b3261e;
@@ -122,9 +124,9 @@
   --accent-fill: #f7b500;
   --accent-ink: #1a1300;
   --pour: color-mix(in srgb, #f7b500 18%, #ffffff);
-  --pour-line-w: 3px;
   --select: #3d5a73;
   --select-soft: #e3eaf0;
+  --speed: #2a72b8;
   --user: #16191d;
   --tool: #2b7327;
   --error: #b3261e;
@@ -480,27 +482,21 @@ body {
 }
 
 .run-phase {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
   justify-self: start;
   color: var(--dim);
   font-size: var(--text-xs);
-}
-
-.run-phase::before {
-  content: '';
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-right: 6px;
-  border-radius: 50%;
-  background: currentcolor;
 }
 
 .run-phase.active {
   color: var(--accent);
 }
 
+/* A held goal is not work in progress, so it leaves the gold. */
 .run-phase.paused {
-  color: var(--warn);
+  color: var(--dim);
 }
 
 .run-phase.blocked {
@@ -508,7 +504,7 @@ body {
 }
 
 .run-phase.complete {
-  color: var(--select);
+  color: var(--tool);
 }
 
 .run-rounds {
@@ -1413,36 +1409,6 @@ details[open] > summary.tool-head .tool-state::after {
   background: var(--bg);
 }
 
-/*
- * Work with a known end pours: a pale gold level rises under it and a gold line
- * runs along its foot. --level is how full it is, from 0 to 1.
- */
-.pour {
-  position: relative;
-  isolation: isolate;
-}
-
-/*
- * One pseudo-element draws both the level and the line along its foot, so a
- * thing that already spends ::before on something of its own (the process
- * line's disclosure caret) can still pour.
- */
-.pour::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  z-index: -1;
-  width: calc(var(--level, 0.5) * 100%);
-  border-radius: inherit;
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-  background: var(--pour);
-  box-shadow: inset 0 calc(-1 * var(--pour-line-w)) 0 var(--accent-fill);
-  pointer-events: none;
-}
-
 /* The takeover sits above the composer: the one thing to read before typing. */
 .takeover,
 #takeover .takeover-card {
@@ -1934,32 +1900,26 @@ footer {
   display: flex;
   flex: 1;
   gap: var(--s2);
-  align-items: baseline;
+  align-items: center;
   min-width: 0;
 }
 
 .goal-phase {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
   flex: none;
   color: var(--dim);
   font-size: var(--text-xs);
-}
-
-.goal-phase::before {
-  content: '';
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-right: 6px;
-  border-radius: 50%;
-  background: currentcolor;
 }
 
 .goal-phase.active {
   color: var(--accent);
 }
 
+/* A held goal is not work in progress, so it leaves the gold. */
 .goal-phase.paused {
-  color: var(--warn);
+  color: var(--dim);
 }
 
 .goal-phase.blocked {
@@ -1967,7 +1927,7 @@ footer {
 }
 
 .goal-phase.complete {
-  color: var(--select);
+  color: var(--tool);
 }
 
 .goal-objective {

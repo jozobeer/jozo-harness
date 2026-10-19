@@ -9,10 +9,11 @@ import {
   type TraceTurn,
 } from '../../src/ui/trace.ts'
 import { Linkify } from './linkify.tsx'
-import { Icon } from './ui/icon.tsx'
+import { EndMark } from './ui/end-mark.tsx'
+import { Icon, toolIconOf } from './ui/icon.tsx'
 import { Mug } from './ui/mug.tsx'
 import { spanOf } from '../edits.ts'
-import { justFinished } from '../pour.ts'
+import { useSeen } from '../seen.ts'
 import type { SessionStore } from '../store.ts'
 
 /**
@@ -87,6 +88,7 @@ const ToolImage = (props: { image: TraceImage }) => {
 const Tool = (props: { tool: TraceTool }) => (
   <details class={'tool-card ' + props.tool.status} open={props.tool.status === 'error'}>
     <summary class="tool-line">
+      <Icon name={toolIconOf(props.tool.name)} class="tool-icon" />
       <span class="tool-name">{props.tool.name}</span>
       <span class="tool-summary">
         <Linkify text={summaryBodyOf(props.tool.name, props.tool.summary)} stop />
@@ -124,6 +126,7 @@ const skillNameOf = (args: string): string => {
 const Skill = (props: { tool: TraceTool }) => (
   <details class={'tool-card skill-card ' + props.tool.status} open={props.tool.status === 'error'}>
     <summary class="tool-line">
+      <Icon name="skill" class="tool-icon" />
       <span class="skill-label">skill</span>
       <span class="skill-what">
         <span class="skill-name">{skillNameOf(props.tool.args)}</span>
@@ -183,16 +186,14 @@ const Step = (props: { step: TraceStep; last: boolean }) => (
 const plural = (count: number, word: string): string =>
   String(count) + ' ' + word + (count === 1 ? '' : 's')
 
-/** The dot a turn rests on once it ended: how it ended, green a moment if it ended well. */
-const dotClass = (outcome: string, finished: boolean): string =>
-  'process-dot ' + outcome + (finished && outcome === 'completed' ? ' finished' : '')
-
 /** The process folded to one line: how long, how much, and what went wrong. */
-const ProcessLine = (props: { turn: TraceTurn; now: number }) => {
+const ProcessLine = (props: { turn: TraceTurn; now: number; sessionId: string }) => {
   const tools = () => toolsOf(props.turn)
   const failed = () => tools().filter((tool) => tool.status === 'error').length
   const running = () => props.turn.endedAt === undefined
-  const finished = justFinished(running)
+  const seen = useSeen()
+  // A turn that ended well stays green until the reader has had its session open and left.
+  const fresh = (): boolean => seen.fresh(props.sessionId, props.turn.endedAt ?? Infinity)
   const current = () => tools().findLast((tool) => tool.status === 'running')
   // The line stays put for the whole turn; between calls the model is thinking.
   const doing = (): string => {
@@ -203,7 +204,10 @@ const ProcessLine = (props: { turn: TraceTurn; now: number }) => {
   }
   return (
     <summary class="process-line">
-      <Show when={running()} fallback={<span class={dotClass(props.turn.outcome, finished())} />}>
+      <Show
+        when={running()}
+        fallback={<EndMark outcome={props.turn.outcome} fresh={fresh()} class="process-mark" />}
+      >
         <Mug state="filling" since={props.turn.startedAt} />
       </Show>
       <span class="process-state">{running() ? 'Working' : 'Worked'}</span>
@@ -259,7 +263,11 @@ const Turn = (props: { turn: TraceTurn; live: string; now: number; store: Sessio
       </Show>
       <Show when={props.turn.steps.length > 0 || running()}>
         <details class="process">
-          <ProcessLine turn={props.turn} now={props.now} />
+          <ProcessLine
+            turn={props.turn}
+            now={props.now}
+            sessionId={props.store.state().sessionId}
+          />
           <ol class="steps">
             <Index each={props.turn.steps}>
               {(step, index) => (
