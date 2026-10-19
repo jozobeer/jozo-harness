@@ -7,13 +7,25 @@
 - 実行者: `bun run scripts/ab/run.ts`（リポジトリのルートから）。タスクは `jzh:scripts/ab/tasks.ts`、計数は `jzh:scripts/ab/metrics.ts`、dsh の経路は `jzh:scripts/ab/dsh-provider.patch.yml`。
 - モデルは両ハーネスとも Ollama Cloud の `deepseek-v4.1-flash`（jozo-harness は自前の OpenAI 互換 adapter、dsh は pi-ai 経由で同じ baseURL・同じモデル名）。jozo-harness は `~/.config/jzh/secrets.env` の鍵を自分で読み、dsh は harness が同じ鍵を環境に渡す。
 - 1 セル（ハーネス × タスク）を 3 回繰り返した。合計 24 走、タイムアウトは短いタスクが 300 秒/走、`fix-rules` が 1,200 秒/走。
-- compaction の発火点は両ハーネスとも 16,000 トークンにそろえた（jozo-harness は `jzh:scripts/ab/run.ts` の patch で window 20,000 / headroom 4,000、dsh は patch で window 52,768 / headroom 4,000。dsh は出力予約 32,768 も差し引く）。そろえる前は jozo-harness が 62,464（既定 window 128,000）、dsh が 163,840 で、長いタスクでは設定の違いだけで jozo-harness が先に圧縮していた。短いタスクのリクエストは最大で jozo-harness 5,174 / dsh 10,352 トークンで、どちらの線にも届かない。
+- compaction の発火点は両ハーネスとも 16,000 トークンにそろえた（jozo-harness は `jzh:scripts/ab/run.ts` の patch で window 20,000 / headroom 4,000、dsh は patch で window 52,768 / headroom 4,000。dsh は出力予約 32,768 も差し引く）。そろえる前は jozo-harness が 62,464（当時の既定 window 128,000）、dsh が 163,840 で、長いタスクでは設定の違いだけで jozo-harness が先に圧縮していた。短いタスクのリクエストは最大で jozo-harness 5,174 / dsh 10,352 トークンで、どちらの線にも届かない。
 - タスク:
   1. `fix-add` — `src/math.ts` の `add` が引き算になっているので足し算に直す。
   2. `write-notes` — `# Notes` 見出しと `status: ready` の行を持つ `notes.md` を作る。
   3. `rename-function` — `fetchValue` を `readValue` に、`src/` 全体で改名する。
   4. `fix-rules` — `src/rules/` の 48 ファイルのうち、ヘッダの説明と食い違う 12 個のルール関数を直す（`jzh:scripts/ab/rules-task.ts`）。判定はワークスペースのルールを乱数入力で実行し、判定側の参照実装と比べる。
 - 計数の定義: tool calls は `tool/call` の数、failed edits は edit の結果がエラーだった数、re-reads は同じセッションで既に読んだパスをもう一度 read した数、turns は `turn/start` の数、compactions は要約を書いた回数（jozo-harness は `compaction/checkpoint`、dsh は `compaction/summary`）。
+
+## 正規化した軸（2026-10-19 追記）
+
+この A/B は endpoint と compaction の線をそろえた。そろえた軸は比較の前提であり、「差が無いことの証拠」ではない。軸の定義と記録方法は [DSH パリティ監査の軸](2026-10-19-parity-audit-axes.md) に固定した。以下の 2026-10-15 までの節にある「既定の窓 128,000 / 線 62,464」は当時の profile の値である。現在の既定は窓 1,048,576、線 589,824 である。
+
+| 軸 | 当時の production | この A/B の値 | この A/B で言えなくなること |
+|---|---|---|---|
+| endpoint | local daemon が答えれば `http://127.0.0.1:11434/v1`、答えなければ `https://ollama.com/v1` | 両ハーネスとも `https://ollama.com/v1` | prompt cache の差、endpoint 由来の latency の差 |
+| compaction line | 62,464（窓 128,000、headroom 65,536） | 16,000（jozo-harness は窓 20,000 / headroom 4,000、dsh は窓 52,768 / 予約 32,768 / headroom 4,000） | 当時の production の窓での compaction の回数・位置の差 |
+| model metadata | モデル定義を宣言せず、窓 128,000 の既定に落ちていた | jozo-harness は窓 20,000、dsh は 52,768 / 32,768 | モデル定義の窓に由来する差 |
+
+このため、結果の節の「ハーネス由来の系統差は観測されなかった」は、endpoint と compaction の線をそろえた範囲の主張である。cache と production の線については何も言っていない。production の既定のまま走らせた A/B セルはまだ無い。次回は、local daemon が答える状態で両ハーネスの endpoint を local daemon にし、dsh は窓・compaction 行を patch しない版（未作成）、jozo-harness は `JZH_AB_SHIPPED_WINDOW=1` で 1 セル以上走らせ、`cacheReadTokens`、compaction の件数、step 数を記録する。タスクは `find-disagreement` を使う（約 87,780 推定トークンで、現在の production の線 589,824 には届かないので compaction は 0 件の記録になる）。
 
 ## 結果: 短いタスク（3 回の幅と平均）
 
@@ -70,7 +82,7 @@ dsh-3:  8586 9105 11417 14954 C 16636 C 13623 C … 15640 C 14305 C 15136
 - **空回りの仕組み（jozo-harness）**: jozo-harness は末尾 12 メッセージを残し（`DEFAULT_COMPACT_KEEP_LAST`）、その手前の 8 件前後だけを要約する。要約は前の要約を含めて書き直されるので、jozo-harness-1 では 3,708 字から 9,395 字へ育つ。システムプロンプト + 要約 + 末尾 12 件で約 15,000 になり、線の下に戻れない。保持がメッセージ数で決まり、圧縮後の大きさを線の下に収める目標を持たないことが原因である。
 - **dsh の方が多い理由は未確認**。dsh の初回リクエストは 8,586 トークンで jozo-harness（3,880）の 2 倍あり、線までの余裕が小さいことは数字から言えるが、それが回数の差をどれだけ説明するかは切り分けていない。
 - **tool calls と re-reads はばらつきに埋もれている**。dsh は 55〜112、re-reads 12〜44 と幅が大きく、平均の差は走間の幅より小さい。
-- 16,000 は長さを縮めた線である。実際の窓（jozo-harness 62,464 / dsh 163,840）では、線に対して保持分と要約が小さくなるので空回りは起きにくいと見込むが、測っていない。
+- 16,000 は長さを縮めた線である。当時の実際の窓（jozo-harness 62,464 / dsh 163,840）では、線に対して保持分と要約が小さくなるので空回りは起きにくいと見込むが、測っていない。
 
 ## 空回りを直した後の再測（2026-10-15、同じ fix-rules × n=3）
 
@@ -129,7 +141,7 @@ jozo-harness-3: 3895 4347 5710 14418 C(5708) 9292 15099 C(8570) 10345 14233 C(99
 
 ## 出荷した窓での実測（2026-10-15）
 
-既定の窓（128,000、headroom 65,536）の線は 62,464 である。A/B は線を 16,000 に縮めて比較しているので、実窓での compaction は未確認だった。線を越えさせるタスクを 2 つ足して測った。
+当時の既定の窓（128,000、headroom 65,536）の線は 62,464 である。A/B は線を 16,000 に縮めて比較しているので、実窓での compaction は未確認だった。線を越えさせるタスクを 2 つ足して測った。
 
 - `read-report`: data/ の 24 KB × 16 を読ませる。**線に届かなかった**。モデルは最初の 8 本を全文で読み、残りは `offset` で末尾だけ読んだ（要約に必要なのは末尾の行だと判断したため）。リクエストは最大 53,253 トークンで、compaction は 0 回。読み物タスクは、線を越えさせる目的には使えない。
 - `long-prompt`: 315 KB のプロンプト 1 発（約 78,750 推定トークン）。`JZH_AB_HARNESS=jozo-harness JZH_AB_TASKS=long-prompt JZH_AB_SHIPPED_WINDOW=1 bun run scripts/ab/run.ts` で 1 走。結果は done、tool calls 2、**compaction 2 回**。リクエストの並び（括弧は要約の字数）:
@@ -171,6 +183,6 @@ JZH_AB_HARNESS=jozo-harness JZH_AB_TASKS=long-prompt JZH_AB_SHIPPED_WINDOW=1 bun
 ## 限界
 
 - n=3、モデル 1 つ。どのタスクも 1 turn で終わり、edit の失敗は起きなかった。多 turn と subagent は測っていない。
-- 長いタスクは発火点を 16,000 に縮めて測った。**2026-10-15 追記**: 出荷した窓（128,000、線 62,464）でも 1 走だけ測った（下の節）。縮めた線での n=3 が主で、実窓は n=1 である。
+- 長いタスクは発火点を 16,000 に縮めて測った。**2026-10-15 追記**: 当時の出荷した窓（128,000、線 62,464）でも 1 走だけ測った（下の節）。縮めた線での n=3 が主で、実窓は n=1 である。
 - ツールセットは両ハーネスで同じではない（dsh は `present`・`herdr` なども持つ）。プロンプトと作業ディレクトリだけを揃えた比較である。
 - モデルの出力は非決定的で、幅は上の表のとおり。平均の差を主張するには走数を増やす必要がある。

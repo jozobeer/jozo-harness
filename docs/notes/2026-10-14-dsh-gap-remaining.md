@@ -64,6 +64,7 @@
 ## 6. 挙動の実測（実施済み）
 
 - [x] **同一タスクの A/B**。harness は `jzh:scripts/ab/run.ts` にあり、3 タスク × 2 ハーネス × 3 回（計 18 走）を同じモデルで走らせ、ツール呼び出し・失敗 edit・読み直し・turn をログから数える。両ログの request/header が `deepseek-v4.1-flash` を記録していることを確認した（dsh は `jzh:scripts/ab/dsh-provider.patch.yml` の pi-ai 経路で同じ baseURL・同じモデル名に載せ、DSH_HOME は走ごとの workspace 内に置く）。結果: 6 セルすべて 3/3 完了、どの走も 1 turn、失敗 edit 0。tool calls は fix-add 3-4（jozo-harness 平均 3.3 / dsh 3.7）、write-notes 2-3（2.3）/ 2-4（3.0）、rename-function 7-14（10.3）/ 8-12（10.0）で、ハーネス間の平均差より各ハーネス内の走間の幅が大きい。読み直しは fix-add が両方 1（read → edit → read の確認）、rename-function が 0-2 で、型は同じ。つまりこの 3 タスク・n=3 ではハーネス由来の系統差は観測されない。計数の途中経過: 最初の集計は dsh の read 引数が `file_path` なのに `path` だけを見て re-reads を 0 と数えていた（計測の不具合）ので、両綴りを読むよう直して `jzh:scripts/ab/metrics.test.ts` に dsh 綴りの回帰を足し、同じ 18 走のログを数え直した。記録と再実行手順、限界は [A/B の記録](2026-10-14-ab-measurement.md)。
+  - **2026-10-19 追記**: この A/B は endpoint と compaction の線を正規化している。正規化した軸を「差が無いことの証拠」に使わず、production の既定のまま走らせたセルを別に持つ規則を [DSH パリティ監査の軸](2026-10-19-parity-audit-axes.md) に固定した。production のセルはまだ無いので、cache と実窓の compaction は未測定である。
 
 ## 未確認
 

@@ -37,7 +37,9 @@ const ONLY_HARNESS = process.env.JZH_AB_HARNESS?.split(',').map((name) => name.t
 /**
  * jozo-harness compacts at the smaller of window × 0.8 and window − headroom: 16,000
  * tokens here, the same line dsh-provider.patch.yml gives dsh. A run that asks for the
- * profile's own budget skips the patch, so the line is the shipped one.
+ * profile's own budget skips the patch, so the line is the shipped one. The 16,000 line
+ * is a normalized axis, not evidence that the shipped line behaves the same; keep one
+ * cell at each harness's production defaults (docs/notes/2026-10-19-parity-audit-axes.md).
  */
 const JZH_COMPACT = { contextWindow: 20_000, headroomTokens: 4_000 }
 const SHIPPED_WINDOW = process.env.JZH_AB_SHIPPED_WINDOW === '1'
