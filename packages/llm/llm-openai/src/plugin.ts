@@ -16,6 +16,12 @@ export const llmOpenAiConfig = Schema.Struct({
    * `jzh models` lists from.
    */
   localBaseUrl: Schema.optionalKey(Schema.String),
+  /**
+   * Headers every request sends, for an endpoint that names the client or wants
+   * routing affinity. The value is static, so a per-conversation id cannot be
+   * derived here.
+   */
+  headers: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   /** Idle budget for one provider attempt, in milliseconds. */
   streamIdleTimeoutMs: Schema.optionalKey(Schema.Int),
   /** The routed model's context window in tokens, for compaction pressure. */
@@ -73,6 +79,7 @@ export const makeLlmOpenAiPlugin = (
         // keeps the name the page and the settings use.
         ...(local ? { modelName: localOllamaModelName } : {}),
         fetch: send,
+        ...(config.headers === undefined ? {} : { headers: config.headers }),
         capabilities: {
           toolChoice: false,
           reasoningEffort: config.reasoningEfforts ?? WIRE_EFFORTS,

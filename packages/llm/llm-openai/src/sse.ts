@@ -9,6 +9,8 @@ interface OpenAiToolCallDelta {
 interface OpenAiDelta {
   readonly content?: string | null
   readonly reasoning?: string | null
+  /** DeepSeek-style endpoints put the thinking under this name instead. */
+  readonly reasoning_content?: string | null
   readonly tool_calls?: ReadonlyArray<OpenAiToolCallDelta>
 }
 
@@ -93,6 +95,18 @@ const hasText = (value: string | null | undefined): value is string =>
   typeof value === 'string' && value !== ''
 
 /**
+ * The thinking text one delta carries. OpenAI and Ollama name it `reasoning`
+ * while DeepSeek-compatible endpoints (DeepSeek, GLM, Kimi) name it
+ * `reasoning_content`; a chunk that carries both is read once.
+ */
+const reasoningOf = (delta: OpenAiDelta): string | undefined => {
+  for (const value of [delta.reasoning, delta.reasoning_content]) {
+    if (hasText(value)) return value
+  }
+  return undefined
+}
+
+/**
  * Decodes the OpenAI-compatible SSE stream into the jozo-harness chunk vocabulary.
  *
  * OpenRouter-style providers put `usage` in a chunk with `choices: []` that
@@ -137,7 +151,8 @@ export class OpenAiStreamDecoder {
 
   private takeDelta(delta: OpenAiDelta): Array<StreamChunk> {
     const chunks: Array<StreamChunk> = []
-    if (hasText(delta.reasoning)) chunks.push(...this.emitDelta('reasoning', delta.reasoning))
+    const reasoning = reasoningOf(delta)
+    if (reasoning !== undefined) chunks.push(...this.emitDelta('reasoning', reasoning))
     if (hasText(delta.content)) chunks.push(...this.emitDelta('text', delta.content))
     for (const call of delta.tool_calls ?? []) chunks.push(...this.takeToolCall(call))
     return chunks

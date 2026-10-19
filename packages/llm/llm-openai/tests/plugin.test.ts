@@ -50,13 +50,15 @@ describe('llmOpenAiPlugin', () => {
   const capture = () => {
     const bodies: Array<string> = []
     const urls: Array<string> = []
+    const headers: Array<Headers> = []
     const send = ((url: string, init?: RequestInit) => {
       urls.push(String(url))
       if (!String(url).endsWith('/chat/completions')) return Promise.resolve(new Response('{}'))
       bodies.push(typeof init?.body === 'string' ? init.body : '')
+      headers.push(new Headers(init?.headers))
       return Promise.resolve(new Response('data: [DONE]\n\n', { status: 200 }))
     }) as unknown as typeof fetch
-    return { bodies, urls, send }
+    return { bodies, headers, urls, send }
   }
 
   test('builds an adapter from its profile config', async () => {
@@ -87,6 +89,33 @@ describe('llmOpenAiPlugin', () => {
     )
 
     expect(error.code).toBe('config')
+  })
+
+  test('the headers a row names reach the provider', async () => {
+    const { headers, send } = capture()
+    const keyEnv = 'JZH_LLM_OPENCODE_TEST_KEY'
+    process.env[keyEnv] = 'test-key'
+    try {
+      // A Console row names the client and a routing session; the adapter
+      // adds its bearer token on top.
+      const onConsole = await adapterWith(
+        {
+          baseUrl: 'https://opencode.ai/inference/openai/v1',
+          apiKeyEnv: keyEnv,
+          localBaseUrl: '',
+          headers: { 'User-Agent': 'jzh/1.0', 'x-opencode-session': 's-1' },
+        },
+        makeLlmOpenAiPlugin(send),
+      )
+
+      await Effect.runPromise(Stream.runCollect(onConsole.stream(request)))
+    } finally {
+      delete process.env[keyEnv]
+    }
+
+    expect(headers[0]?.get('user-agent')).toBe('jzh/1.0')
+    expect(headers[0]?.get('x-opencode-session')).toBe('s-1')
+    expect(headers[0]?.get('authorization')).toBe('Bearer test-key')
   })
 
   test('a row with a local daemon sends there without probing, under the name the daemon knows', async () => {

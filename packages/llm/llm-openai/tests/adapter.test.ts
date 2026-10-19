@@ -156,6 +156,34 @@ describe('openAiAdapter', () => {
     expect([...chunks].some((chunk) => chunk.type === 'finish')).toBe(true)
   })
 
+  test('sends the row headers as written and keeps its own auth and content type', async () => {
+    const headers: Array<Headers> = []
+    const streaming = openAiAdapter({
+      baseUrl: 'https://opencode.ai/inference/openai/v1',
+      apiKey: () => 'key',
+      // OpenCode asks for a client user agent and a routing session; the row
+      // supplies both. A header it names itself stays the adapter's.
+      headers: { 'User-Agent': 'jzh/1.0', 'x-opencode-session': 's-1', authorization: 'stale' },
+      capabilities: {
+        toolChoice: false,
+        reasoningEffort: null,
+        images: 'none',
+        promptCacheControl: false,
+      },
+      fetch: ((_url: string, init: RequestInit) => {
+        headers.push(new Headers(init.headers))
+        return Promise.resolve(new Response('data: [DONE]\n\n', { status: 200 }))
+      }) as unknown as typeof fetch,
+    })
+
+    await Effect.runPromise(Stream.runCollect(streaming.stream(request)))
+
+    expect(headers[0]?.get('user-agent')).toBe('jzh/1.0')
+    expect(headers[0]?.get('x-opencode-session')).toBe('s-1')
+    expect(headers[0]?.get('authorization')).toBe('Bearer key')
+    expect(headers[0]?.get('content-type')).toBe('application/json')
+  })
+
   test('a route that does not allow anonymous calls still fails without a key', async () => {
     const streaming = openAiAdapter({
       baseUrl: 'https://example.test/v1',
@@ -181,6 +209,25 @@ describe('openAiAdapter', () => {
     )
     expect(error).toBeInstanceOf(LlmFailure)
     expect(error.code).toBe('AUTH')
+  })
+
+  test('a Console free-tier rejection is AUTH and keeps the provider reason', async () => {
+    const error = await Effect.runPromise(
+      Effect.flip(
+        collect(
+          new Response(
+            '{"error":{"message":"Free models are only available from OpenCode itself","type":"FreeTierError"}}',
+            { status: 403 },
+          ),
+        ),
+      ),
+    )
+
+    // A 403 is an auth-class failure whatever the provider calls it, and the
+    // body is what tells a person the free tier is the reason.
+    expect(error.code).toBe('AUTH')
+    expect(error.message).toContain('FreeTierError')
+    expect(error.message).toContain('only available from OpenCode itself')
   })
 
   test('a context-length rejection becomes a CONTEXT_WINDOW_EXCEEDED LlmFailure', async () => {

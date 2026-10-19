@@ -18,6 +18,11 @@ export interface OpenAiAdapterOptions {
   readonly allowAnonymous?: boolean
   /** How this endpoint names a route's model; absent sends the route's own name. */
   readonly modelName?: (model: string) => string
+  /**
+   * Headers every attempt sends as written, for endpoints that name the client
+   * or want routing affinity. The adapter's own auth and content type win.
+   */
+  readonly headers?: Readonly<Record<string, string>>
   readonly capabilities: LlmCapabilities
   /** Idle budget for one attempt. Defaults to five minutes. */
   readonly streamIdleTimeoutMs?: number
@@ -121,6 +126,17 @@ const idleGuardOf = (timeoutMs: number): IdleGuard => {
   return { signal: controller.signal, timedOut: () => expired, arm, disarm }
 }
 
+/** The headers one attempt sends: the row's, then the two the adapter owns. */
+const headersOf = (
+  apiKey: string | undefined,
+  extra: Readonly<Record<string, string>> | undefined,
+): Headers => {
+  const headers = new Headers(extra)
+  if (keyed(apiKey)) headers.set('Authorization', `Bearer ${apiKey}`)
+  headers.set('Content-Type', 'application/json')
+  return headers
+}
+
 const readFailureOf = (cause: unknown, guard: IdleGuard): LlmFailure =>
   guard.timedOut()
     ? new LlmFailure({
@@ -183,10 +199,7 @@ export function openAiAdapter(options: OpenAiAdapterOptions): LlmAdapter {
             try: () =>
               send(url, {
                 method: 'POST',
-                headers: {
-                  ...(keyed(apiKey) ? { Authorization: `Bearer ${apiKey}` } : {}),
-                  'Content-Type': 'application/json',
-                },
+                headers: headersOf(apiKey, options.headers),
                 body,
                 signal: guard.signal,
               }),
