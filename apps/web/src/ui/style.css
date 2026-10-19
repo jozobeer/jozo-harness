@@ -2,9 +2,9 @@
  * One rule for colour, poured like a glass of beer. Gold is the human's turn
  * and the agent's work in progress; what waits on the reader foams (bubbles
  * rise through it) and is drawn as a glass whichever the theme, while work in
- * progress pours (a pale gold level rises under it, a gold line runs along its
- * foot). Hop green is the moment something finished well, and it settles to a
- * quiet mark; red is what failed and stays. What is merely selected wears steel.
+ * progress fills a mug that has no foam yet. Hop green is the moment something
+ * finished well, and it settles to a quiet mark; red is what failed and stays.
+ * What is merely selected wears steel.
  */
 :root {
   color-scheme: dark;
@@ -42,7 +42,6 @@
   --foam: #fffdf6;
   --beer: #f6c032;
   --beer-rim: #d99a00;
-  --beer-mark: #eda514;
   --beer-ink: #2a1d02;
   --beer-dim: #6b5310;
   --beer-bubble: rgb(255 255 255 / 85%);
@@ -1415,9 +1414,8 @@ details[open] > summary.tool-head .tool-state::after {
 }
 
 /*
- * Work in progress pours: a pale gold level rises under it and a gold line runs
- * along its foot. --level is how full it is, from 0 to 1. A .rising element has
- * no end it knows of, so its level climbs with time instead (set with the motion).
+ * Work with a known end pours: a pale gold level rises under it and a gold line
+ * runs along its foot. --level is how full it is, from 0 to 1.
  */
 .pour {
   position: relative;

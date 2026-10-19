@@ -10,6 +10,7 @@ import type { SessionStore } from '../store.ts'
 import { Review } from './review.tsx'
 import { Inspector } from './inspector.tsx'
 import { Button } from './ui/button.tsx'
+import { Mug } from './ui/mug.tsx'
 
 const Goal = (props: { goal: RunStateView['goal'] }) => (
   <Show when={props.goal} fallback={<div class="run-empty">no goal</div>}>
@@ -23,15 +24,11 @@ const Goal = (props: { goal: RunStateView['goal'] }) => (
   </Show>
 )
 
+/** The marks of a todo that is not in progress; the one in progress fills a mug. */
 const todoMarks: Readonly<Record<string, string>> = {
   pending: '[ ]',
-  in_progress: '[~]',
   completed: '[x]',
 }
-
-/** A todo's class: the one in progress pours, with no end it knows of. */
-const todoClass = (status: string): string =>
-  'run-todo ' + status + (status === 'in_progress' ? ' pour rising' : '')
 
 const Todos = (props: { todos: RunStateView['todos']; counts: RunStateView['todoCounts'] }) => (
   <Show when={props.todos.length > 0}>
@@ -44,8 +41,12 @@ const Todos = (props: { todos: RunStateView['todos']; counts: RunStateView['todo
     <ul class="run-todos">
       <For each={props.todos}>
         {(todo) => (
-          <li class={todoClass(todo.status)}>
-            <span class="run-todo-mark">{todoMarks[todo.status] ?? '[ ]'}</span>
+          <li class={'run-todo ' + todo.status}>
+            <span class="run-todo-mark">
+              <Show when={todo.status === 'in_progress'} fallback={todoMarks[todo.status] ?? '[ ]'}>
+                <Mug state="filling" />
+              </Show>
+            </span>
             <span class="run-todo-content">{todo.content}</span>
           </li>
         )}

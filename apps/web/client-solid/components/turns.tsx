@@ -9,8 +9,9 @@ import {
   type TraceTurn,
 } from '../../src/ui/trace.ts'
 import { Linkify } from './linkify.tsx'
+import { Mug } from './ui/mug.tsx'
 import { spanOf } from '../edits.ts'
-import { justFinished, pourFrom } from '../pour.ts'
+import { justFinished } from '../pour.ts'
 import type { SessionStore } from '../store.ts'
 
 /**
@@ -181,11 +182,9 @@ const Step = (props: { step: TraceStep; last: boolean }) => (
 const plural = (count: number, word: string): string =>
   String(count) + ' ' + word + (count === 1 ? '' : 's')
 
-/** The dot's class: a ring while the turn runs, then how it ended, green a moment if it ended well. */
-const dotClass = (running: boolean, outcome: string, finished: boolean): string =>
-  'process-dot ' +
-  (running ? 'running' : outcome) +
-  (finished && outcome === 'completed' ? ' finished' : '')
+/** The dot a turn rests on once it ended: how it ended, green a moment if it ended well. */
+const dotClass = (outcome: string, finished: boolean): string =>
+  'process-dot ' + outcome + (finished && outcome === 'completed' ? ' finished' : '')
 
 /** The process folded to one line: how long, how much, and what went wrong. */
 const ProcessLine = (props: { turn: TraceTurn; now: number }) => {
@@ -202,11 +201,10 @@ const ProcessLine = (props: { turn: TraceTurn; now: number }) => {
       : tool.name + ' ' + summaryBodyOf(tool.name, tool.summary)
   }
   return (
-    <summary
-      class={'process-line' + (running() ? ' pour rising' : '')}
-      style={{ '--pour-from': pourFrom(props.turn.startedAt, Date.now()) }}
-    >
-      <span class={dotClass(running(), props.turn.outcome, finished())} />
+    <summary class="process-line">
+      <Show when={running()} fallback={<span class={dotClass(props.turn.outcome, finished())} />}>
+        <Mug state="filling" since={props.turn.startedAt} />
+      </Show>
       <span class="process-state">{running() ? 'Working' : 'Worked'}</span>
       <span class="process-took">
         {spanOf((props.turn.endedAt ?? props.now) - props.turn.startedAt)}

@@ -29,6 +29,7 @@ import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY, keepPaths, pathsFrom } from '../re
 import type { BrowseAnswer, SessionStore } from '../store.ts'
 import { Button } from './ui/button.tsx'
 import { Fizz } from './ui/fizz.tsx'
+import { Mug } from './ui/mug.tsx'
 
 /** The clock the rows read; one tick a second. */
 const createNow = () => {
@@ -130,6 +131,18 @@ const Search = (props: { query: string; onQuery: (query: string) => void }) => {
  * right-clicking offers the menu that renames, pins, archives, or deletes it;
  * a double-click puts the name itself in reach.
  */
+/** How a row stands at a glance: a mug filling while it works, full while it waits on you, else a dot. */
+const SessionMark = (props: { entry: BoardEntry }) => (
+  <Switch fallback={<span class="session-mark" />}>
+    <Match when={props.entry.status === 'running'}>
+      <Mug state="filling" since={props.entry.since} />
+    </Match>
+    <Match when={props.entry.status === 'waiting'}>
+      <Mug state="full" />
+    </Match>
+  </Switch>
+)
+
 const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) => {
   const id = () => props.entry.summary.id
   const pinned = () => props.entry.summary.pinned === true
@@ -242,7 +255,7 @@ const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) 
             askRename()
           }}
         >
-          <span class="session-mark" />
+          <SessionMark entry={props.entry} />
           <span class="session-name">{titleOf(props.entry)}</span>
           <span class="session-detail">{props.detail}</span>
         </button>
