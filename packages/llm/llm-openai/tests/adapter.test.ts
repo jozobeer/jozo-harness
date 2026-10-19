@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { describe, expect, test } from 'vitest'
-import { LlmFailure, type LlmRequest } from '@jozo-harness/llm'
-import { Effect, Stream } from 'effect'
+import { LlmFailure, type LlmRequest, type StreamChunk } from '@jozo-harness/llm'
+import { Effect, Fiber, Stream } from 'effect'
 import { openAiAdapter } from '../src/index.ts'
 
 const request: LlmRequest = {
@@ -38,6 +38,26 @@ const bodyOf = (init: RequestInit): string =>
   typeof init.body === 'string' ? init.body : (JSON.stringify(init.body) ?? '')
 
 const collect = (response: Response) => Stream.runCollect(adapter(response).stream(request))
+
+const encoder = new TextEncoder()
+
+/** One SSE event, encoded the way an OpenAI-compatible provider writes it. */
+const sseLine = (payload: string): Uint8Array => encoder.encode(`data: ${payload}\n\n`)
+
+/** An adapter whose fetch is the test's own, with the capabilities every case shares. */
+const adapterWith = (fetchImpl: typeof fetch, streamIdleTimeoutMs?: number) =>
+  openAiAdapter({
+    baseUrl: 'https://example.test/v1',
+    apiKey: () => 'key',
+    capabilities: {
+      toolChoice: false,
+      reasoningEffort: null,
+      images: 'none',
+      promptCacheControl: false,
+    },
+    ...(streamIdleTimeoutMs === undefined ? {} : { streamIdleTimeoutMs }),
+    fetch: fetchImpl,
+  })
 
 describe('openAiAdapter', () => {
   test('encodes messages, tools, and stream options, then decodes the SSE body', async () => {
@@ -204,11 +224,16 @@ describe('openAiAdapter', () => {
         promptCacheControl: false,
       },
       fetch: (() =>
-        Promise.resolve({
-          ok: true,
-          status: 200,
-          text: () => Promise.reject(new Error('body gone')),
-        })) as unknown as typeof fetch,
+        Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.error(new Error('body gone'))
+              },
+            }),
+            { status: 200 },
+          ),
+        )) as unknown as typeof fetch,
     })
 
     const error = await Effect.runPromise(Effect.flip(Stream.runCollect(streaming.stream(request))))
@@ -238,5 +263,168 @@ describe('openAiAdapter', () => {
     const error = await Effect.runPromise(Effect.flip(Stream.runCollect(streaming.stream(request))))
 
     expect(error.message).toContain('503')
+  })
+
+  test('delivers a text delta before the provider finishes the response', async () => {
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined
+    const body = new ReadableStream<Uint8Array>({
+      start(value) {
+        controller = value
+      },
+    })
+    const seen: Array<StreamChunk> = []
+    let announceText: () => void = () => {}
+    const textArrived = new Promise<void>((resolve) => {
+      announceText = resolve
+    })
+    const enqueue = (payload: string) => controller?.enqueue(sseLine(payload))
+    const respond = (() =>
+      Promise.resolve(new Response(body, { status: 200 }))) as unknown as typeof fetch
+
+    const arrivedEarly = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const consuming = yield* Stream.runForEach(
+            adapterWith(respond).stream(request),
+            (chunk) =>
+              Effect.sync(() => {
+                seen.push(chunk)
+                if (chunk.type === 'text-delta') announceText()
+              }),
+          ).pipe(Effect.forkScoped)
+
+          enqueue('{"choices":[{"delta":{"content":"hel"}}]}')
+          const early = yield* Effect.promise(() =>
+            Promise.race([
+              textArrived.then(() => true),
+              new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 500)),
+            ]),
+          )
+          enqueue('{"choices":[{"delta":{"content":"lo"},"finish_reason":"stop"}]}')
+          enqueue('[DONE]')
+          controller?.close()
+          yield* Fiber.join(consuming)
+          return early
+        }),
+      ),
+    )
+
+    expect(arrivedEarly).toBe(true)
+    expect(seen.flatMap((chunk) => (chunk.type === 'text-delta' ? [chunk.text] : []))).toEqual([
+      'hel',
+      'lo',
+    ])
+    expect(seen.at(-1)).toEqual({ type: 'finish', kind: 'stop' })
+  })
+
+  test('keeps a response alive while chunks keep arriving past the idle budget', async () => {
+    const send = ((_url: string, init: RequestInit) => {
+      let step = 0
+      return Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              const timer = setInterval(() => {
+                if (step < 8) {
+                  controller.enqueue(
+                    sseLine('{"choices":[{"delta":{"content":"x"},"finish_reason":null}]}'),
+                  )
+                } else if (step === 8) {
+                  controller.enqueue(sseLine('{"choices":[{"delta":{},"finish_reason":"stop"}]}'))
+                } else {
+                  clearInterval(timer)
+                  controller.close()
+                }
+                step += 1
+              }, 40)
+              init.signal?.addEventListener(
+                'abort',
+                () => {
+                  clearInterval(timer)
+                  controller.error(init.signal?.reason ?? new Error('aborted'))
+                },
+                { once: true },
+              )
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+    }) as unknown as typeof fetch
+
+    const chunks = await Effect.runPromise(
+      Stream.runCollect(adapterWith(send, 200).stream(request)),
+    )
+
+    // The provider takes longer than the idle budget overall; only the gaps matter.
+    expect([...chunks].at(-1)).toEqual({ type: 'finish', kind: 'stop' })
+    expect(chunks.length).toBeGreaterThan(8)
+  })
+
+  test('a body that stops sending bytes fails as a TIMEOUT', async () => {
+    const stalled = ((_url: string, init: RequestInit) =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              init.signal?.addEventListener(
+                'abort',
+                () => controller.error(init.signal?.reason ?? new Error('aborted')),
+                { once: true },
+              )
+            },
+          }),
+          { status: 200 },
+        ),
+      )) as unknown as typeof fetch
+
+    const error = await Effect.runPromise(
+      Effect.flip(Stream.runCollect(adapterWith(stalled, 40).stream(request))),
+    )
+
+    expect(error).toBeInstanceOf(LlmFailure)
+    expect(error.code).toBe('TIMEOUT')
+  })
+
+  test('a request that never answers fails as a TIMEOUT', async () => {
+    const hanging = ((_url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener(
+          'abort',
+          () => reject(init.signal?.reason ?? new Error('aborted')),
+          { once: true },
+        )
+      })) as unknown as typeof fetch
+
+    const error = await Effect.runPromise(
+      Effect.flip(Stream.runCollect(adapterWith(hanging, 40).stream(request))),
+    )
+
+    expect(error).toBeInstanceOf(LlmFailure)
+    expect(error.code).toBe('TIMEOUT')
+  })
+
+  test('a response without a body fails as a TRANSPORT error', async () => {
+    const bodyless = (() =>
+      Promise.resolve({ ok: true, status: 200, body: null })) as unknown as typeof fetch
+
+    const error = await Effect.runPromise(
+      Effect.flip(Stream.runCollect(adapterWith(bodyless).stream(request))),
+    )
+
+    expect(error).toBeInstanceOf(LlmFailure)
+    expect(error.code).toBe('TRANSPORT')
+  })
+
+  test('a body that ends without [DONE] still flushes a held finish', async () => {
+    const body = new Response(
+      'data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}\n\n' +
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+      { status: 200 },
+    )
+
+    const chunks = await Effect.runPromise(collect(body))
+
+    expect([...chunks].at(-1)).toEqual({ type: 'finish', kind: 'stop' })
   })
 })
