@@ -1,4 +1,15 @@
-import { For, Match, Show, Switch, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
+import {
+  For,
+  Match,
+  Show,
+  Switch,
+  createEffect,
+  createSignal,
+  on,
+  onCleanup,
+  onMount,
+  type JSX,
+} from 'solid-js'
 import { plainText } from '@jozo-harness/ui-view'
 import type { SubmitMode } from '@jozo-harness/ui-protocol'
 import type { CommandView } from '../../src/shared/rpc.ts'
@@ -606,8 +617,33 @@ const BusyEnter = (props: {
   </Show>
 )
 
-/** Below this width the seat's chips would wrap under the input, so they fold into +. */
+/** Below this width the seat folds into + whatever it holds: a phone keeps the row for typing. */
 const COMPACT_WIDTH = 560
+
+/**
+ * How far the row would run past its edge with every chip on one line. The seat
+ * is read at its own width for the moment, then handed back to the row.
+ */
+const overflowOf = (row: HTMLElement): number => {
+  const seat = row.querySelector<HTMLElement>('#seat')
+  if (seat === null) return 0
+  const kept = seat.style.cssText
+  seat.style.cssText = kept + ';flex:none;width:max-content'
+  const over = row.scrollWidth - row.clientWidth
+  seat.style.cssText = kept
+  return Math.max(0, over)
+}
+
+/** What the seat shows, so a longer model name or a new chip is measured again. */
+const seatFactsOf = (state: ReturnType<SessionStore['state']>): string =>
+  [
+    state.run?.model,
+    state.run?.effort,
+    state.settings?.model,
+    state.settings?.effort,
+    state.info.model,
+    state.conversation.running,
+  ].join('|')
 
 /** The input, and what sits above it: waiting input and the thing to answer. */
 export const Composer = (props: {
@@ -618,8 +654,19 @@ export const Composer = (props: {
   onBusyEnter?: (mode: SubmitMode) => void
 }) => {
   let textarea: HTMLTextAreaElement | undefined
-  let form: HTMLFormElement | undefined
+  let row: HTMLDivElement | undefined
   const [compact, setCompact] = createSignal(false)
+  /** The row's width, and the width its chips need on one line, read while the seat sat in it. */
+  let width = 0
+  let need = 0
+  /** The seat folds into + once its chips would not fit beside the buttons on one line. */
+  const fit = (): void => {
+    // A row never measured, or hidden, says nothing about what fits; the seat stays.
+    if (width === 0) return
+    if (row !== undefined && !compact()) need = width + overflowOf(row)
+    setCompact(width < Math.max(COMPACT_WIDTH, need))
+  }
+  createEffect(on([compact, () => seatFactsOf(props.store.state())], fit, { defer: true }))
   /** The slash word the popup belongs to; undefined closes it. */
   const [token, setToken] = createSignal<CommandToken | undefined>()
   /** The @word the file popup belongs to; undefined closes it. */
@@ -644,7 +691,10 @@ export const Composer = (props: {
       props.store.send({ kind: 'approve', callId: approval.callId, approved: key === 'y' })
     }
     document.addEventListener('keydown', onKey)
-    const stopWidth = watchWidth(form, (width) => setCompact(width < COMPACT_WIDTH))
+    const stopWidth = watchWidth(row, (next) => {
+      width = next
+      fit()
+    })
     onCleanup(() => {
       document.removeEventListener('keydown', onKey)
       stopWidth?.()
@@ -847,9 +897,6 @@ export const Composer = (props: {
       </div>
       <form
         id="composer"
-        ref={(node) => {
-          form = node
-        }}
         onSubmit={(event) => {
           event.preventDefault()
           send()
@@ -912,7 +959,12 @@ export const Composer = (props: {
             }
           }}
         />
-        <div class="actions">
+        <div
+          class="actions"
+          ref={(node) => {
+            row = node
+          }}
+        >
           <Plus store={props.store} onStart={start} seat={compact() ? seat : undefined} />
           <Show when={!compact()}>{seat()}</Show>
           {/* While something waits on the reader, the card's button is the one in amber. */}

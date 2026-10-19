@@ -1230,6 +1230,54 @@ describe('the Solid page', () => {
     }
   })
 
+  test('a row too short for its chips on one line folds them behind +, however wide it is', () => {
+    let width = 700
+    const observers: Array<() => void> = []
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        private readonly report: () => void
+        constructor(
+          callback: (entries: ReadonlyArray<{ contentRect: { width: number } }>) => void,
+        ) {
+          this.report = () => callback([{ contentRect: { width } }])
+        }
+        observe() {
+          observers.push(this.report)
+          this.report()
+        }
+        disconnect() {}
+      },
+    )
+    // jsdom lays nothing out: the row is as wide as reported, and its chips need 760px.
+    const scroll = vi
+      .spyOn(HTMLElement.prototype, 'scrollWidth', 'get')
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains('actions') ? 760 : 0
+      })
+    const client = vi
+      .spyOn(HTMLElement.prototype, 'clientWidth', 'get')
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains('actions') ? width : 0
+      })
+    try {
+      const { store } = makeStore({
+        sessionId: 'a',
+        info: { cwd: '/work', model: 'stub/model', turns: 1 },
+      })
+      const { container } = render(() => <Composer store={store} />)
+      expect(container.querySelector('.actions > #seat')).toBeNull()
+
+      width = 800
+      for (const report of observers) report()
+      expect(container.querySelector('.actions > #seat')).not.toBeNull()
+    } finally {
+      scroll.mockRestore()
+      client.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+
   test('an effort the endpoint does not name still shows, so the seat never lies', () => {
     const { store } = makeStore({
       sessionId: 'a',
