@@ -6,6 +6,8 @@ export interface Job {
   readonly id: string
   readonly command: string
   readonly startedAt: number
+  /** When the job stopped, in ms; unset while it still runs. */
+  endedAt?: number
   running: boolean
   output: string
 }
@@ -142,6 +144,7 @@ export const makeJobs = (options: JobsOptions = {}): Effect.Effect<JobsShape> =>
       collect(entry, child.stderr)
       void child.exited.then((exitCode) => {
         job.running = false
+        job.endedAt = Date.now()
         settle(entry, 'exited', exitCode)
         notify(entry)
       })
@@ -219,6 +222,7 @@ export const makeJobs = (options: JobsOptions = {}): Effect.Effect<JobsShape> =>
           const entry = yield* entryOf(id)
           entry.process.kill()
           entry.job.running = false
+          entry.job.endedAt = Date.now()
           settle(entry, 'killed')
         }),
       list: () => [...jobs.values()].map((entry) => entry.job),

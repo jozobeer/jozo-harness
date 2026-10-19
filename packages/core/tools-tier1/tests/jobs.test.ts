@@ -169,11 +169,18 @@ describe('jobs', () => {
         const jobs = yield* makeJobs({ record: (record) => records.push(record) })
         const running = yield* jobs.start('true', '/tmp')
         const read = yield* jobs.read(running.id, { waitMs: 5_000 })
-        return { id: running.id, running: read.running }
+        return {
+          id: running.id,
+          running: read.running,
+          startedAt: running.startedAt,
+          endedAt: running.endedAt,
+        }
       }),
     )
 
     expect(observed.running).toBe(false)
+    // A settled job carries when it stopped, so the Run pane can show how long it took.
+    expect(observed.endedAt).toBeGreaterThanOrEqual(observed.startedAt)
     expect(records[0]).toMatchObject({
       type: 'started',
       id: observed.id,

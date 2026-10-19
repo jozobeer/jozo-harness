@@ -117,81 +117,158 @@ const ChildLinks = (props: { store: SessionStore; blocks: ReadonlyArray<Conversa
   )
 }
 
-/** The children the core holds now, with what each does and how long it has run. */
-const LiveSubagents = (props: { store: SessionStore; subagents: RunStateView['subagents'] }) => (
-  <ul class="run-children">
-    <For each={props.subagents}>
-      {(child) => {
-        const working = () => child.status === 'running' || child.status === 'cancelling'
-        return (
-          <li class={'run-child-row ' + child.status} data-subagent-id={child.id}>
-            <button
-              class="run-child"
-              type="button"
-              data-session-id={child.id}
-              onClick={() => props.store.moveTo(child.id)}
-            >
-              <Icon name="subagent" />
-              <span class="run-child-state">{child.status}</span>
-              <span class="run-child-id">{child.id.slice(0, 8)}</span>
-              <Show when={working()}>
-                <span class="run-child-elapsed">{elapsedOf(child.startedAt, Date.now())}</span>
-              </Show>
-            </button>
-            <Show when={working()}>
-              <button
-                class="run-child-stop"
-                type="button"
-                data-stop-subagent={child.id}
-                onClick={() => props.store.stopSubagent(child.id)}
-              >
-                stop
-              </button>
-            </Show>
-          </li>
-        )
-      }}
-    </For>
-  </ul>
+/** The heading of a work section: what it holds and how much of it still works. */
+const WorkHeading = (props: { title: string; live: number; done: number }) => (
+  <div class="run-section">
+    <span class="run-section-title">{props.title}</span>
+    <span class="run-work-counts">
+      {String(props.live) + ' running / ' + String(props.done) + ' done'}
+    </span>
+  </div>
 )
 
-/** The background jobs the session started, with what each still does and its newest line. */
-const Jobs = (props: { store: SessionStore; jobs: RunStateView['jobs'] }) => (
-  <ul class="run-jobs">
-    <For each={props.jobs}>
-      {(job) => (
-        <li class={'run-job-row ' + (job.running ? 'running' : 'done')} data-job-id={job.id}>
-          <button
-            class={'run-job ' + (job.running ? 'running' : 'done')}
-            type="button"
-            onClick={() => props.store.openJob(job.id)}
-          >
-            <Icon name="job" />
-            <span class="run-job-state">{job.running ? 'running' : 'done'}</span>
-            <span class="run-job-id">{job.id}</span>
-            <span class="run-job-command">{job.command}</span>
-            <Show when={job.running}>
-              <span class="run-job-elapsed">{elapsedOf(job.startedAt, Date.now())}</span>
-            </Show>
-          </button>
-          <Show when={job.tail !== ''}>
-            <span class="run-job-tail">{job.tail}</span>
-          </Show>
-          <Show when={job.running}>
-            <button
-              class="run-job-stop"
-              type="button"
-              data-stop-job={job.id}
-              onClick={() => props.store.stopJob(job.id)}
-            >
-              stop
-            </button>
-          </Show>
-        </li>
-      )}
-    </For>
-  </ul>
-)
+/** Whether a child still works; only such a child offers a stop. */
+const isWorking = (child: RunStateView['subagents'][number]): boolean =>
+  child.status === 'running' || child.status === 'cancelling'
+
+/** What a child's state says as activity, next to the lifecycle word the row also shows. */
+const activityOf = (status: string): string =>
+  status === 'running' ? 'working' : status === 'cancelling' ? 'stopping' : 'idle'
+
+/**
+ * A stop that fires on the second press. The first press arms it, so a row
+ * opened by mistake does not end work that was still wanted.
+ */
+const StopButton = (props: {
+  class: string
+  target: { kind: 'job' | 'subagent'; id: string }
+  onStop: () => void
+}) => {
+  const [armed, setArmed] = createSignal(false)
+  return (
+    <button
+      class={props.class + (armed() ? ' armed' : '')}
+      type="button"
+      aria-label={armed() ? 'press again to stop' : 'stop'}
+      {...(props.target.kind === 'job'
+        ? { 'data-stop-job': props.target.id }
+        : { 'data-stop-subagent': props.target.id })}
+      onClick={() => {
+        if (!armed()) {
+          setArmed(true)
+          return
+        }
+        props.onStop()
+      }}
+    >
+      {armed() ? 'press again' : 'stop'}
+    </button>
+  )
+}
+
+/** One child: its role, what it does now, and how long it has taken. */
+const SubagentRow = (props: { store: SessionStore; child: RunStateView['subagents'][number] }) => {
+  const duration = () => elapsedOf(props.child.startedAt, props.child.endedAt ?? Date.now())
+  return (
+    <li class={'run-child-row ' + props.child.status} data-subagent-id={props.child.id}>
+      <button
+        class="run-child"
+        type="button"
+        data-session-id={props.child.id}
+        onClick={() => props.store.moveTo(props.child.id)}
+      >
+        <span class={'run-child-dot ' + props.child.status} aria-hidden="true" />
+        <span class="run-child-preset">{props.child.preset ?? 'subagent'}</span>
+        <span class="run-child-state">{props.child.status}</span>
+        <span class="run-child-id">{props.child.id.slice(0, 8)}</span>
+        <span class="run-child-activity">{activityOf(props.child.status)}</span>
+        <span class="run-child-elapsed">{duration()}</span>
+      </button>
+      <Show when={isWorking(props.child)}>
+        <StopButton
+          class="run-child-stop"
+          target={{ kind: 'subagent', id: props.child.id }}
+          onStop={() => props.store.stopSubagent(props.child.id)}
+        />
+      </Show>
+    </li>
+  )
+}
+
+/** The children the core holds: live ones first, then the settled ones. */
+const Subagents = (props: { store: SessionStore; subagents: RunStateView['subagents'] }) => {
+  const live = () => props.subagents.filter(isWorking)
+  const done = () =>
+    props.subagents.filter((child) => !isWorking(child)).sort((a, b) => b.startedAt - a.startedAt)
+  return (
+    <section class="run-work run-work-subagents">
+      <WorkHeading title="subagents" live={live().length} done={done().length} />
+      <ul class="run-children">
+        <For each={[...live(), ...done()]}>
+          {(child) => <SubagentRow store={props.store} child={child} />}
+        </For>
+      </ul>
+    </section>
+  )
+}
+
+/** One job: what it runs, where it stands, and how long it took. */
+const JobRow = (props: { store: SessionStore; job: RunStateView['jobs'][number] }) => {
+  const running = () => props.job.running
+  const duration = () => elapsedOf(props.job.startedAt, props.job.endedAt ?? Date.now())
+  return (
+    <li class={'run-job-row ' + (running() ? 'running' : 'done')} data-job-id={props.job.id}>
+      <button
+        class={'run-job ' + (running() ? 'running' : 'done')}
+        type="button"
+        onClick={() => props.store.openJob(props.job.id)}
+      >
+        <span class={'run-job-dot ' + (running() ? 'running' : 'done')} aria-hidden="true" />
+        <span class="run-job-command">{props.job.command}</span>
+        <span class="run-job-state">{running() ? 'running' : 'finished'}</span>
+        <span class="run-job-elapsed">{duration()}</span>
+      </button>
+      <Show when={props.job.tail !== ''}>
+        <span class="run-job-tail">{props.job.tail}</span>
+      </Show>
+      <Show when={running()}>
+        <StopButton
+          class="run-job-stop"
+          target={{ kind: 'job', id: props.job.id }}
+          onStop={() => props.store.stopJob(props.job.id)}
+        />
+      </Show>
+    </li>
+  )
+}
+
+/** The jobs the session started: live ones first, settled ones folded behind their count. */
+const Jobs = (props: { store: SessionStore; jobs: RunStateView['jobs'] }) => {
+  const live = () => props.jobs.filter((job) => job.running)
+  const done = () =>
+    props.jobs.filter((job) => !job.running).sort((a, b) => b.startedAt - a.startedAt)
+  return (
+    <section class="run-work run-work-jobs">
+      <WorkHeading title="jobs" live={live().length} done={done().length} />
+      <Show when={live().length > 0}>
+        <ul class="run-jobs run-jobs-live">
+          <For each={live()}>{(job) => <JobRow store={props.store} job={job} />}</For>
+        </ul>
+      </Show>
+      <Show when={done().length > 0}>
+        <details class="run-work-done" data-jobs-done>
+          <summary class="run-work-done-head">
+            <span class="run-section-title">finished</span>
+            <span class="run-work-counts">{String(done().length)}</span>
+          </summary>
+          <ul class="run-jobs run-jobs-done">
+            <For each={done()}>{(job) => <JobRow store={props.store} job={job} />}</For>
+          </ul>
+        </details>
+      </Show>
+    </section>
+  )
+}
 
 const Run = (props: { store: SessionStore }) => {
   const run = () => props.store.state().run
@@ -232,7 +309,7 @@ const Run = (props: { store: SessionStore }) => {
                 <ChildLinks store={props.store} blocks={props.store.state().conversation.blocks} />
               }
             >
-              <LiveSubagents store={props.store} subagents={state().subagents} />
+              <Subagents store={props.store} subagents={state().subagents} />
             </Show>
           </>
         )}

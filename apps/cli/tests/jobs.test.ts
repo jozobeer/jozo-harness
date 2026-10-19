@@ -61,6 +61,14 @@ describe('the Run pane job list', () => {
     ])
   })
 
+  test('a settled job carries when it stopped, so its row can show how long it took', () => {
+    const settled = jobsOf(stubJobs([job({ running: false, endedAt: 1_700_000_005_000 })]))
+    const running = jobsOf(stubJobs([job()]))
+
+    expect(settled[0]?.endedAt).toBe(1_700_000_005_000)
+    expect(running[0]?.endedAt).toBeUndefined()
+  })
+
   test('a job that produced nothing has no tail', () => {
     expect(tailOf('')).toBe('')
     expect(tailOf('  \n\n')).toBe('')

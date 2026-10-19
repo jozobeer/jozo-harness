@@ -10,12 +10,18 @@ const childAgent = (
   startedAt: number,
   seen: Array<string>,
   parent = 's1',
+  preset?: string,
+  endedAt?: number,
 ): Agent =>
   ({
     id,
     status,
     parent,
-    session: { header: { createdAt: startedAt } },
+    options: preset === undefined ? {} : { preset },
+    session: {
+      header: { createdAt: startedAt },
+      events: () => (endedAt === undefined ? [] : [{ seq: 1, time: endedAt, type: 'turn/end' }]),
+    },
     cancel: (cause: string) =>
       Effect.sync(() => {
         seen.push(id + ' ' + cause)
@@ -43,6 +49,19 @@ describe('the live subagent list', () => {
       { id: 'child-2', status: 'idle', startedAt: 1_700_000_010_000 },
     ])
     expect(subagentsOf([])).toEqual([])
+  })
+
+  test('a settled child says which preset it ran under and when it stopped', () => {
+    const seen: Array<string> = []
+    const children = [
+      childAgent('child-1', 'idle', 10, seen, 's1', 'reviewer', 20),
+      childAgent('child-2', 'disposed', 30, seen),
+    ]
+
+    expect(subagentsOf(children)).toEqual([
+      { id: 'child-1', status: 'idle', startedAt: 10, preset: 'reviewer', endedAt: 20 },
+      { id: 'child-2', status: 'disposed', startedAt: 30 },
+    ])
   })
 
   test('stopping a child this session started cancels it as the user asked', async () => {
