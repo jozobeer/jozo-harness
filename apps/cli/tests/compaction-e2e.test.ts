@@ -256,6 +256,23 @@ describe('compaction through the command', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('the routed model row decides when a message is compacted', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-compact-'))
+    const small = 'w'.repeat(100)
+
+    // The route is stub/model; no single contextWindow is set, so only the row
+    // named for that model can put this conversation over the line.
+    const { opened } = await runTasks(
+      root,
+      [small, 'second'],
+      'models:\n  model:\n    contextWindow: 100\n    maxTokens: 50\nheadroomTokens: 0',
+    )
+
+    expect(compacted(opened.events)).toBe(true)
+
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('a request right after a summary is under the line', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-compact-'))
     // 16,000 tokens of window and no headroom: the line sits at 12,800.

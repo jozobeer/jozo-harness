@@ -223,21 +223,40 @@ export const repairInterruptedRun = (agent: Agent): Effect.Effect<void> =>
       .pipe(Effect.orDie)
   })
 
+/** The model part of a `provider/model` route. */
+export const modelOfRoute = (route: string): string => splitRoute(route).model
+
+/** The first value that is set, or the fallback when none is. */
+const firstOf = <T>(fallback: T, values: ReadonlyArray<T | undefined>): T => {
+  for (const value of values) if (value !== undefined) return value
+  return fallback
+}
+
 /**
- * The budget the loop measures requests against: the profile's word where it has
- * one, the adapter's where it knows, and the loop's default where neither does.
+ * The budget the loop measures requests against: the routed model's row where it
+ * has one, the profile's single word where it has one, the adapter's where it
+ * knows, and the loop's default where none does. A model the registry does not
+ * name keeps the single values, so a route switched at runtime only inherits an
+ * output reservation written for that exact model.
  */
 export const tokenBudgetOf = (
   config: AgentLoopConfig,
   capabilities: LlmCapabilities,
-): TokenBudget => ({
-  contextWindow:
-    config.contextWindow ?? capabilities.contextWindow ?? DEFAULT_CONTEXT_WINDOW_TOKENS,
-  thresholdRatio: config.thresholdRatio ?? DEFAULT_COMPACT_THRESHOLD_RATIO,
-  headroomTokens: config.headroomTokens ?? DEFAULT_COMPACT_HEADROOM_TOKENS,
-  reserveTokens: config.maxTokens ?? 0,
-  imageTokens: capabilities.imageTokens ?? IMAGE_REFERENCE_TOKENS,
-})
+  model: string = '',
+): TokenBudget => {
+  const routed = config.models?.[model]
+  return {
+    contextWindow: firstOf(DEFAULT_CONTEXT_WINDOW_TOKENS, [
+      routed?.contextWindow,
+      config.contextWindow,
+      capabilities.contextWindow,
+    ]),
+    thresholdRatio: firstOf(DEFAULT_COMPACT_THRESHOLD_RATIO, [config.thresholdRatio]),
+    headroomTokens: firstOf(DEFAULT_COMPACT_HEADROOM_TOKENS, [config.headroomTokens]),
+    reserveTokens: firstOf(0, [routed?.maxTokens, config.maxTokens]),
+    imageTokens: firstOf(IMAGE_REFERENCE_TOKENS, [capabilities.imageTokens]),
+  }
+}
 
 const agentLoopEffect = (
   config: AgentLoopConfig = {},
@@ -247,12 +266,15 @@ const agentLoopEffect = (
     const tools = yield* Tools
     const promptService = yield* SystemPrompt
     const llm = yield* Llm
-    const budget = tokenBudgetOf(config, llm.capabilities)
-    const compact: CompactOptions = {
+    // The route is switchable while a session runs, so the budget is read per fold
+    // rather than once when the layer is built.
+    const budgetFor = (agent: Agent): TokenBudget =>
+      tokenBudgetOf(config, llm.capabilities, modelOfRoute(agent.options.route))
+    const compactFor = (budget: TokenBudget): CompactOptions => ({
       retainTokens:
         config.retainTokens ?? Math.floor(messageBudgetOf(budget) * DEFAULT_COMPACT_RETAIN_RATIO),
       maxBytes: config.maxBytes ?? DEFAULT_COMPACT_MAX_BYTES,
-    }
+    })
     // A parallel batch fans out to this many calls at most.
     const maxParallelToolCalls = maxParallelCallsOf(config)
 
@@ -425,6 +447,7 @@ const agentLoopEffect = (
     const checkpointFor = (
       envelope: Omit<AgentRequest, 'messages'>,
       events: ReadonlyArray<SessionEvent>,
+      compact: CompactOptions,
     ): Effect.Effect<CompactionCheckpoint | undefined> =>
       Effect.gen(function* () {
         const range = summarizableMessages(events, compact)
@@ -447,13 +470,15 @@ const agentLoopEffect = (
     ): Effect.Effect<boolean> =>
       Effect.gen(function* () {
         const events = agent.session.events()
+        const budget = budgetFor(agent)
+        const compact = compactFor(budget)
         const meter = meterOf(events, budget)
         if (!force && !meter.compacts) return false
         if (force) {
           const first = pruneFor(events, compact)
           if (first !== undefined) yield* append(agent, 'compaction/prune', first)
         }
-        const checkpoint = yield* checkpointFor(envelope, agent.session.events())
+        const checkpoint = yield* checkpointFor(envelope, agent.session.events(), compact)
         if (checkpoint !== undefined) yield* append(agent, 'compaction/checkpoint', checkpoint)
         const prune = pruneFor(agent.session.events(), compact)
         if (prune !== undefined) yield* append(agent, 'compaction/prune', prune)
@@ -463,6 +488,7 @@ const agentLoopEffect = (
     /** The request envelope of this step, before the history is folded into it. */
     const envelopeOf = (agent: Agent, build: PromptBuild): Omit<AgentRequest, 'messages'> => {
       const route = splitRoute(agent.options.route)
+      const budget = budgetFor(agent)
       return {
         provider: route.provider,
         model: route.model,
@@ -473,7 +499,7 @@ const agentLoopEffect = (
           ...(agent.options.reasoningEffort === undefined
             ? {}
             : { reasoning_effort: agent.options.reasoningEffort }),
-          ...(config.maxTokens === undefined ? {} : { max_tokens: config.maxTokens }),
+          ...(budget.reserveTokens === 0 ? {} : { max_tokens: budget.reserveTokens }),
         },
         tools: build.tools,
       }
@@ -844,6 +870,20 @@ export const agentLoopConfigSchema = Schema.Struct({
   maxBytes: Schema.optionalKey(Schema.Int),
   /** The routed model's context window in tokens. Defaults to the adapter's, or 128000. */
   contextWindow: Schema.optionalKey(Schema.Int),
+  /**
+   * Per-model windows and output reservations, keyed by the model part of the
+   * route. An entry overrides the single `contextWindow` and `maxTokens` values
+   * for that route only, so switching models does not carry another model's limit.
+   */
+  models: Schema.optionalKey(
+    Schema.Record(
+      Schema.String,
+      Schema.Struct({
+        contextWindow: Schema.optionalKey(Schema.Int),
+        maxTokens: Schema.optionalKey(Schema.Int),
+      }),
+    ),
+  ),
   /** Compact once the estimate reaches this share of the window. Defaults to 0.8. */
   thresholdRatio: Schema.optionalKey(Schema.Number),
   /** Tokens kept free under the window. Defaults to 65536. */

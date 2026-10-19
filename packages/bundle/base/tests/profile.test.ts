@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'vitest'
-import { Effect } from 'effect'
+import { Effect, Schema } from 'effect'
 import { loadBundledProfile } from '../src/index.ts'
+import { agentLoopConfigSchema, tokenBudgetOf } from '@jozo-harness/agent-loop'
+import type { LlmCapabilities } from '@jozo-harness/llm'
 import { mergeRows, parseProfile, renderConfig } from '@jozo-harness/kernel'
+import { thresholdOf } from '@jozo-harness/session'
 
 describe('base profile', () => {
   test('parses into the S1 plugin rows in order', async () => {
@@ -24,6 +27,24 @@ describe('base profile', () => {
     ])
     expect(profile.plugins.map((row) => row.name)).toContain('@jozo-harness/agent-loop')
     expect(renderConfig(profile.plugins)).toContain('id=session-jsonl')
+  })
+
+  test('budgets the default route from the window its agent-loop row names', async () => {
+    const profile = await Effect.runPromise(parseProfile(await loadBundledProfile()))
+    const loopRow = profile.plugins.find((row) => row.name === '@jozo-harness/agent-loop')
+    const loopConfig = Schema.decodeUnknownSync(agentLoopConfigSchema)(loopRow?.config ?? {})
+    const capabilities: LlmCapabilities = {
+      toolChoice: false,
+      reasoningEffort: null,
+      images: 'none',
+      promptCacheControl: false,
+    }
+
+    const budget = tokenBudgetOf(loopConfig, capabilities, 'deepseek-v4.1-flash:cloud')
+
+    expect(budget.contextWindow).toBe(1_048_576)
+    expect(budget.reserveTokens).toBe(393_216)
+    expect(thresholdOf(budget)).toBe(589_824)
   })
 
   test('a profile patch overrides one row by id without reordering it', async () => {
