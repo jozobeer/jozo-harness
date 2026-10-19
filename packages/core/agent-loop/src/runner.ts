@@ -193,6 +193,37 @@ const recordedTurnEnd = (session: Session, turn: number): boolean =>
   session.events().some((event) => event.type === 'turn/end' && event.data.turn === turn)
 
 /**
+ * Writes down what a run that is no longer alive left open: a call with no
+ * result, and the step and turn that never ended. A UI calls this when it opens a
+ * session, so a card or a running marker from the dead run is not drawn again; the
+ * runner calls it before its next turn, so a resumed log starts balanced either way.
+ */
+export const repairInterruptedRun = (agent: Agent): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const events = agent.session.events()
+    const { turn, step } = openBoundary(events)
+    for (const call of openCalls(events)) {
+      yield* agent.session
+        .append('tool/result', {
+          callId: call.callId,
+          isError: true,
+          content: [{ type: 'text' as const, text: interruptedText(call.name, call.started) }],
+        })
+        .pipe(
+          Effect.orDie,
+          Effect.catchCause(() => Effect.void),
+        )
+    }
+    if (turn === undefined) return
+    if (step !== undefined) {
+      yield* agent.session.append('step/end', { step }).pipe(Effect.orDie)
+    }
+    yield* agent.session
+      .append('turn/end', { turn, reason: { kind: 'interrupted' } })
+      .pipe(Effect.orDie)
+  })
+
+/**
  * The budget the loop measures requests against: the profile's word where it has
  * one, the adapter's where it knows, and the loop's default where neither does.
  */
@@ -685,23 +716,6 @@ const agentLoopEffect = (
         (call) => didNotFinish(agent, call.id, call.name, true),
         { discard: true },
       )
-
-    /**
-     * The log a run resumes from can end inside a turn: a process killed between a
-     * call and its answer, or a question the reader never answered. The next turn
-     * writes down what did not finish, closes the step and turn the dead run left
-     * open, and so keeps turn numbering and history balanced before it asks again.
-     */
-    const repairInterruptedRun = (agent: Agent): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        const { turn, step } = openBoundary(agent.session.events())
-        for (const call of openCalls(agent.session.events())) {
-          yield* didNotFinish(agent, call.callId, call.name, call.started)
-        }
-        if (turn === undefined) return
-        if (step !== undefined) yield* append(agent, 'step/end', { step })
-        yield* append(agent, 'turn/end', { turn, reason: { kind: 'interrupted' } })
-      })
 
     const executeCalls = (agent: Agent, calls: ReadonlyArray<ToolCall>): Effect.Effect<void> =>
       Effect.gen(function* () {

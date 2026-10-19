@@ -368,6 +368,44 @@ describe('ui host', () => {
     )
   })
 
+  test('a log that died inside a turn is closed when the host opens it', async () => {
+    const input = makeInput()
+    // The run that asked for approval was killed before it could write the
+    // answer or close its turn. Without a repair, every page that opens this
+    // log draws the approval card and the running marker again.
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* input.append('turn/start', { turn: 1 })
+        yield* input.append('step/start', { step: 1 })
+        yield* input.append('assistant/message', {
+          provider: 'fake',
+          model: 'model',
+          content: [{ type: 'tool-call', id: 'c1', name: 'bash', arguments: '{}' }],
+          stream: [],
+        })
+        yield* input.append('tool/call', { callId: 'c1', name: 'bash', arguments: '{}' })
+        yield* input.append('safety/approval/requested', {
+          callId: 'c1',
+          tool: 'bash',
+          reason: 'outside the preset',
+        })
+      }),
+    )
+    await withHost(input, () =>
+      Effect.gen(function* () {
+        yield* Effect.void
+        const events = input.session.events()
+        const result = events.find((event) => event.type === 'tool/result')
+        expect(result?.type === 'tool/result' ? result.data.isError : false).toBe(true)
+        expect(events.filter((event) => event.type === 'step/end')).toHaveLength(1)
+        const end = events.find((event) => event.type === 'turn/end')
+        expect(end?.type === 'turn/end' ? end.data.reason : undefined).toEqual({
+          kind: 'interrupted',
+        })
+      }),
+    )
+  })
+
   test('a missing approval is denied instead of hanging', async () => {
     const input = makeInput()
     await withHost(input, (host) =>
