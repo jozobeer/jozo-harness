@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import type { Duplex } from 'node:stream'
 import { WebSocket, WebSocketServer, type RawData } from 'ws'
@@ -32,13 +32,16 @@ import { branchOf } from './git-branch.ts'
 import type { SettingsPort } from './settings.ts'
 import { staticResponse } from './static.ts'
 import { makeStoreEvents, type StoreEvents } from './store-events.ts'
+import type { TailnetAddresses } from './tailnet.ts'
 import type { WorkspacesPort } from './workspaces.ts'
 
 export const UI_PATH = '/ui'
 
-/** Where to open the page: the loopback address, and the published one when it has one. */
+/** Where to open the page: loopback, each detected tailnet address, and the published one. */
 export interface ReadyUrls {
   readonly local: string
+  /** The tailnet addresses, each with its own code; empty when none was detected. */
+  readonly tailnet: ReadonlyArray<string>
   readonly public?: string
 }
 
@@ -62,6 +65,12 @@ export interface ServeWebOptions {
    * loopback ones in the gate, and its address becomes the second ready URL.
    */
   readonly publicUrl?: PublicOrigin
+  /**
+   * The addresses Tailscale named for this machine. They join the gate, and
+   * the IPv4 address becomes a second listener at the same port; each name is
+   * a ready URL with its own code. Absent keeps the server on loopback.
+   */
+  readonly tailnet?: TailnetAddresses
   readonly onReady: (urls: ReadyUrls) => void
   /** Completes to stop the server, as SIGINT does. */
   readonly interrupt?: Effect.Effect<void>
@@ -220,6 +229,69 @@ const payloadOf = (data: RawData): Uint8Array | string => {
 const pathOf = (request: IncomingMessage): string =>
   new URL(request.url ?? '/', 'http://127.0.0.1').pathname
 
+/** Starts one listener at the requested port, answering the port it actually bound. */
+const listenAt = (server: Server, port: number, host: string): Promise<number> =>
+  new Promise<number>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(port, host, () => {
+      const address = server.address()
+      resolve(typeof address === 'object' && address !== null ? address.port : port)
+    })
+  })
+
+/**
+ * The ready URLs for the detected tailnet names. The address is the one the
+ * listener bound, so the MagicDNS name carries the same port and each name
+ * earns a code of its own.
+ */
+const tailnetUrlsAt = (
+  port: number,
+  tailnet: TailnetAddresses,
+  issue: () => string,
+): ReadonlyArray<string> =>
+  [tailnet.ip, tailnet.dns]
+    .filter((address): address is string => address !== undefined)
+    .map((address) => 'http://' + address.toLowerCase() + ':' + String(port) + '/?code=' + issue())
+
+/** No ready URL for an address nobody bound, so a printed link is one that answers. */
+const tailnetReadyUrls = (
+  tailnet: TailnetAddresses | undefined,
+  port: number,
+  issue: () => string,
+): ReadonlyArray<string> => (tailnet === undefined ? [] : tailnetUrlsAt(port, tailnet, issue))
+
+/**
+ * Binds the detected tailnet address on the port loopback took. A failed bind
+ * (the interface went away between detection and listen) closes the extra
+ * listener and leaves the run on loopback.
+ */
+const listenTailnet = (
+  server: Server,
+  ip: string,
+  port: number,
+  tailnet: TailnetAddresses | undefined,
+): Effect.Effect<TailnetAddresses | undefined> =>
+  Effect.promise(() =>
+    listenAt(server, port, ip).then(
+      () => tailnet,
+      () => {
+        server.close()
+        return undefined
+      },
+    ),
+  )
+
+/** The tailnet the gate may admit: only an address with a listener under it. */
+const tailnetBinding = (
+  server: Server | undefined,
+  ip: string | undefined,
+  port: number,
+  tailnet: TailnetAddresses | undefined,
+): Effect.Effect<TailnetAddresses | undefined> =>
+  server === undefined || ip === undefined
+    ? Effect.succeed<TailnetAddresses | undefined>(undefined)
+    : listenTailnet(server, ip, port, tailnet)
+
 const endWith = (response: ServerResponse, status: number, body: string): void => {
   response.writeHead(status, { 'content-type': 'text/plain; charset=utf-8' })
   response.end(body)
@@ -271,12 +343,13 @@ const respondTo = async (
   staticRoot: string,
   port: number,
   publicOrigin: PublicOrigin | undefined,
+  tailnet: TailnetAddresses | undefined,
   token: string,
   codes: CodeExchange,
 ): Promise<void> => {
   // A page served under another name could read this one through a rebinding
   // proxy; the name the request asked for must be one this server answers to.
-  if (!hostAllowed(request.headers.host, port, publicOrigin)) {
+  if (!hostAllowed(request.headers.host, port, publicOrigin, tailnet)) {
     endWith(response, 403, 'forbidden')
     return
   }
@@ -313,9 +386,10 @@ const refuseUpgrade = (socket: Duplex, status: number, message: string): void =>
 
 /**
  * Serves the sessions of one profile: the browser app and the RPC socket.
- * Binds to loopback; the ready URL carries a one-time code that the first page
- * load trades for a strict HttpOnly cookie, and a foreign Host or Origin is
- * refused before the handshake.
+ * Binds to loopback, and to this machine's detected tailnet address when there
+ * is one; the ready URL carries a one-time code that the first page load trades
+ * for a strict HttpOnly cookie, and a foreign Host or Origin is refused before
+ * the handshake.
  */
 export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
   Effect.scoped(
@@ -332,32 +406,38 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
       const token = randomBytes(32).toString('hex')
       const codes = codeExchange(() => Date.now())
       const publicOrigin = options.publicUrl
-      // The chosen port is known only once the listener is up; requests arrive after.
+      // The chosen port is known only once the listeners are up; requests arrive after.
       let boundPort = options.port
-
-      const server = createServer((request, response) => {
+      // A detected address joins the gate only once a listener waits there; a
+      // bind that fails leaves the run on loopback rather than printing a dead URL.
+      let tailnet: TailnetAddresses | undefined
+      const requestHandler = (request: IncomingMessage, response: ServerResponse): void => {
         void respondTo(
           request,
           response,
           options.staticRoot,
           boundPort,
           publicOrigin,
+          tailnet,
           token,
           codes,
         ).catch(() => {
           response.destroy()
         })
-      })
+      }
+      const server = createServer(requestHandler)
+      const detectedIp = options.tailnet?.ip
+      const tailnetServer = detectedIp === undefined ? undefined : createServer(requestHandler)
       const sockets = new WebSocketServer({ noServer: true })
 
       /** Why this handshake is refused; undefined when the gate lets it through. */
       const refusalOf = (
         request: IncomingMessage,
       ): { readonly status: number; readonly message: string } | undefined => {
-        if (!hostAllowed(request.headers.host, boundPort, publicOrigin)) {
+        if (!hostAllowed(request.headers.host, boundPort, publicOrigin, tailnet)) {
           return { status: 403, message: 'forbidden host' }
         }
-        if (!originAllowed(request.headers.origin, boundPort, publicOrigin)) {
+        if (!originAllowed(request.headers.origin, boundPort, publicOrigin, tailnet)) {
           return { status: 403, message: 'forbidden origin' }
         }
         // A page repeats the cookie; a script may name the token or redeem a fresh
@@ -381,7 +461,7 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
         })
       }
 
-      server.on('upgrade', (request, socket, head) => {
+      const onUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
         if (pathOf(request) !== UI_PATH) {
           socket.destroy()
           return
@@ -392,28 +472,23 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
           return
         }
         sockets.handleUpgrade(request, socket, head, (client) => attachUi(client))
-      })
+      }
+      server.on('upgrade', onUpgrade)
+      tailnetServer?.on('upgrade', onUpgrade)
 
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
           for (const client of sockets.clients) client.terminate()
           sockets.close()
-          // A keep-alive connection would hold the listener open past the scope.
-          server.closeAllConnections()
-          server.close()
+          // A keep-alive connection would hold a listener open past the scope.
+          for (const listener of [server, tailnetServer]) {
+            listener?.closeAllConnections()
+            listener?.close()
+          }
         }),
       )
-      const port = yield* Effect.promise(
-        () =>
-          new Promise<number>((resolve, reject) => {
-            server.once('error', reject)
-            server.listen(options.port, '127.0.0.1', () => {
-              const address = server.address()
-              resolve(typeof address === 'object' && address !== null ? address.port : options.port)
-            })
-          }),
-      )
-      boundPort = port
+      boundPort = yield* Effect.promise(() => listenAt(server, options.port, '127.0.0.1'))
+      tailnet = yield* tailnetBinding(tailnetServer, detectedIp, boundPort, options.tailnet)
       // Our schemas need no decoding services, but Effect types a stream RPC's
       // service requirement as `unknown`; the layer is pinned to what it is.
       const rpc: Layer.Layer<never> = RpcServer.layer(UiRpcs).pipe(
@@ -423,14 +498,16 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
         Layer.provide(Layer.succeed(RpcServer.Protocol, protocol)),
       ) as unknown as Layer.Layer<never>
       yield* Effect.forkScoped(Layer.launch(rpc))
-      const local = 'http://127.0.0.1:' + String(port) + '/?code=' + codes.issue()
+      const local = 'http://127.0.0.1:' + String(boundPort) + '/?code=' + codes.issue()
       // Each address gets its own code: opening the page on one must not spend
       // the link printed for the other.
-      options.onReady(
-        publicOrigin === undefined
-          ? { local }
-          : { local, public: publicOrigin.origin + '/?code=' + codes.issue() },
-      )
+      options.onReady({
+        local,
+        tailnet: tailnetReadyUrls(tailnet, boundPort, () => codes.issue()),
+        ...(publicOrigin === undefined
+          ? {}
+          : { public: publicOrigin.origin + '/?code=' + codes.issue() }),
+      })
       return options.interrupt === undefined
         ? yield* Effect.never
         : yield* options.interrupt.pipe(Effect.as(130))

@@ -1,10 +1,12 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
+import type { TailnetAddresses } from './tailnet.ts'
 
 /**
- * The gate in front of the web socket. The server binds to loopback and has no
- * account to ask for, so three things stand in for one: the request must name
- * this server in Host (a rebinding page names its own), a browser's Origin must
- * be the page this server served, and the socket must repeat the token, either
+ * The gate in front of the web socket. The server binds to loopback, and to
+ * this machine's tailnet address when Tailscale named one, and has no account
+ * to ask for, so three things stand in for one: the request must name this
+ * server in Host (a rebinding page names its own), a browser's Origin must be
+ * the page this server served, and the socket must repeat the token, either
  * from the HttpOnly cookie the startup code traded for or from `?token=` for
  * scripts. The ready URL carries only the one-time code, so a copied link stops
  * working once it has opened a page.
@@ -22,21 +24,42 @@ export interface PublicOrigin {
   readonly origin: string
 }
 
-/** The names a page may use to reach a server bound to loopback, at its port. */
-const hostsAt = (port: number, publicOrigin: PublicOrigin | undefined): ReadonlyArray<string> => [
+/**
+ * The detected tailnet names at this port. Only the addresses Tailscale named
+ * for this machine: a range or a suffix would admit a machine nobody checked.
+ */
+const tailnetAt = (port: number, tailnet: TailnetAddresses | undefined): ReadonlyArray<string> =>
+  tailnet === undefined
+    ? []
+    : [tailnet.ip, tailnet.dns]
+        .filter((address): address is string => address !== undefined)
+        .map((address) => address.toLowerCase() + ':' + String(port))
+
+/** The names a page may use to reach the server, at its port. */
+const hostsAt = (
+  port: number,
+  publicOrigin: PublicOrigin | undefined,
+  tailnet: TailnetAddresses | undefined,
+): ReadonlyArray<string> => [
   '127.0.0.1:' + String(port),
   'localhost:' + String(port),
   // The listener is IPv4 loopback, but a local forwarder on the IPv6 loopback
   // names this machine too; both spellings are loopback, neither is a pattern.
   '[::1]:' + String(port),
+  ...tailnetAt(port, tailnet),
   ...(publicOrigin === undefined ? [] : [publicOrigin.host.toLowerCase()]),
 ]
 
-/** The origins those names give a page: http on loopback, https for the published one. */
-const originsAt = (port: number, publicOrigin: PublicOrigin | undefined): ReadonlyArray<string> => [
+/** The origins those names give a page: http on loopback and the tailnet, https for the published one. */
+const originsAt = (
+  port: number,
+  publicOrigin: PublicOrigin | undefined,
+  tailnet: TailnetAddresses | undefined,
+): ReadonlyArray<string> => [
   'http://127.0.0.1:' + String(port),
   'http://localhost:' + String(port),
   'http://[::1]:' + String(port),
+  ...tailnetAt(port, tailnet).map((name) => 'http://' + name),
   ...(publicOrigin === undefined ? [] : [publicOrigin.origin.toLowerCase()]),
 ]
 
@@ -121,12 +144,14 @@ export const cookieOf = (header: string | undefined, name: string): string | und
 export const authCookie = (token: string, secure: boolean): string =>
   COOKIE_NAME + '=' + token + '; Path=/; HttpOnly; SameSite=Strict' + (secure ? '; Secure' : '')
 
-/** True only for a loopback name, or the published origin's host, at this port. */
+/** True only for a loopback name, a detected tailnet name, or the published host, at this port. */
 export const hostAllowed = (
   host: string | undefined,
   port: number,
   publicOrigin?: PublicOrigin,
-): boolean => host !== undefined && hostsAt(port, publicOrigin).includes(host.toLowerCase())
+  tailnet?: TailnetAddresses,
+): boolean =>
+  host !== undefined && hostsAt(port, publicOrigin, tailnet).includes(host.toLowerCase())
 
 /**
  * True for the page's own origin and for a client that names none. A browser
@@ -137,7 +162,9 @@ export const originAllowed = (
   origin: string | undefined,
   port: number,
   publicOrigin?: PublicOrigin,
-): boolean => origin === undefined || originsAt(port, publicOrigin).includes(origin.toLowerCase())
+  tailnet?: TailnetAddresses,
+): boolean =>
+  origin === undefined || originsAt(port, publicOrigin, tailnet).includes(origin.toLowerCase())
 
 /** Compares the token in constant time, so a reply says only match or no match. */
 export const tokenMatches = (given: string | undefined, expected: string): boolean => {

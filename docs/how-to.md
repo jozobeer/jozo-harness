@@ -48,7 +48,22 @@ plugins:
 
 ### tailnet の別端末から開く
 
-`jzh web` の bind は `127.0.0.1` のままだ。tailnet の別端末から開くときは、Tailscale の `serve` に https を終端させ、公開する origin を `--public-url` で明示する。Serve は元の `Host` をそのまま渡すので、`--public-url` の Host と Origin だけが loopback に追加で通る。他の host は従来どおり 403 で、許可をワイルドカードにはしない。
+`jzh web` は起動時に Tailscale を検出する。`tailscale status --json` からこのマシンの tailnet IPv4 と MagicDNS 名が取れたときは、`127.0.0.1` に加えてその IPv4 でも同じポートを listen する。`0.0.0.0` や `::` では受けない。Tailscale が無い・落ちている・CLI が PATH に無い・応答が遅いときは検出なしとして、従来どおり loopback だけで動く。
+
+検出できた run の起動メッセージは次のようになる。`--public-url` を付けたときは最後の行も出る。
+
+```
+jzh web: local   http://127.0.0.1:4310/?code=...
+jzh web: tailnet http://100.x.y.z:4310/?code=...
+jzh web: tailnet http://<machine>.<tailnet>.ts.net:4310/?code=...
+jzh web: public  https://<machine>.<tailnet>.ts.net/?code=...
+```
+
+各行は別の短命 code を持つので、片方を開いても他の URL は使える。tailnet の行は IP と MagicDNS の 2 つで、どちらも listen しているポートを URL に含める。同じ tailnet の別端末からこの行を開くと、ページが表示され socket もつながる。名前が取れない tailnet では IP の行だけ、IP が取れないときは loopback の 1 行だけになる。
+
+ブラウザは MagicDNS 名を `Host` に載せるので、許可には IP だけでなく名前も要る。通すのは検出した IP と名前の完全一致（小文字化）で、どちらも listen ポートを付けた形だけである。ポートを省いた Host、別の tailnet ノードの名前、名前の後ろに何かを足した host は 403 になる。
+
+ポート無しの `https://<machine>.<tailnet>.ts.net` で開きたいときは、これまでどおり Tailscale の `serve` に https を終端させ、公開する origin を `--public-url` で明示する。Serve は元の `Host` をそのまま渡すので、`--public-url` の Host と Origin だけが loopback に追加で通る。
 
 ```sh
 # MagicDNS と HTTPS 証明書が有効になっていることが前提
@@ -56,14 +71,7 @@ tailscale serve --bg 4310
 jzh web --port 4310 --public-url https://<machine>.<tailnet>.ts.net
 ```
 
-起動メッセージは 2 行になる。2 行目（public）の URL を別端末で開く。
-
-```
-jzh web: local  http://127.0.0.1:4310/?code=...
-jzh web: public https://<machine>.<tailnet>.ts.net/?code=...
-```
-
-local と public はそれぞれ別の短命 code を持つので、片方を開いても他方の URL は使える。`--port 0` は Serve の向き先が定まらないため、固定 port を使う。`--public-url` を付けないときの出力は従来どおり 1 行で、到達範囲も loopback だけになる。
+この URL は 443 の https なのでポートを持たない。`--port 0` は Serve の向き先が定まらないため、この使い方では固定 port を使う。`--public-url` の有無にかかわらず、tailnet の直 URL はポート付きの `http://` で出る。
 
 起動 URL はその run を開ける credential である。code は 60 秒・1 回限りで、開けば `HttpOnly; SameSite=Strict` の cookie に変わり URL からは消える。**開く前の URL をチャットや issue に貼らない。** `--public-url` は https origin だけを受け付け、パス・query・fragment・userinfo が付いた値と `jzh web` 以外での指定は起動前にエラーになる。
 

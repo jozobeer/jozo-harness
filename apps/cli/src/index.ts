@@ -139,16 +139,20 @@ import { fileURLToPath } from 'node:url'
 import { makeUiHost, type UiHost } from '@jozo-harness/ui-host'
 import {
   WebError,
+  detectTailnet,
   listDirectories,
   pageIsThere,
   serveWeb,
+  tailnetExec,
   type CommandView,
   type InitialSession,
   type OpenSession,
   type PublicOrigin,
+  type ReadyUrls,
   type RunStateView,
   type SessionFactory,
   type SettingsPort,
+  type TailnetAddresses,
   type WorkspacesPort,
 } from '@jozo-harness/web'
 import { Llm } from '@jozo-harness/llm'
@@ -1159,6 +1163,21 @@ const workspacesPortOf = (
 })
 
 /**
+ * One labeled line per address, labels padded to the longest present so the
+ * URLs line up. A two-address run keeps the spacing it printed before the
+ * tailnet was detected.
+ */
+export const readyLinesOf = (urls: ReadyUrls): ReadonlyArray<string> => {
+  const lines = [
+    { label: 'local', url: urls.local },
+    ...urls.tailnet.map((url) => ({ label: 'tailnet', url })),
+    ...(urls.public === undefined ? [] : [{ label: 'public', url: urls.public }]),
+  ]
+  const width = Math.max(...lines.map((line) => line.label.length))
+  return lines.map((line) => line.label.padEnd(width) + ' ' + line.url)
+}
+
+/**
  * Starts the browser UI; it runs until interrupted. A plain run opens no
  * session: looking at the page is not a request for one, so the first is built
  * when the human starts working (`open` with no id). `--resume` does ask for
@@ -1181,6 +1200,9 @@ const serveWebUi = (
       options.stderr('jzh web: the browser app is not built: run pnpm run build:web\n')
       return 1
     }
+    // Tailscale can be installed as an app with no CLI on PATH; a lookup that
+    // fails or times out leaves the run on loopback, as it was before.
+    const tailnet: TailnetAddresses = yield* detectTailnet(tailnetExec)
     const choice: RunChoice = { route, effort }
     // The blank page has no session to ask yet, so the run keeps one registry
     // for itself: the very first line typed completes against the built-ins.
@@ -1203,15 +1225,15 @@ const serveWebUi = (
           port: work.port,
           staticRoot,
           ...(work.publicUrl === undefined ? {} : { publicUrl: work.publicUrl }),
+          ...(tailnet.ip === undefined ? {} : { tailnet }),
           onReady: (urls) => {
-            // One line while the page is loopback-only; two when a proxy also
-            // publishes it, so the address to open on another device is explicit.
-            if (urls.public === undefined) {
+            // One unlabeled line while the page is loopback-only; one labeled
+            // line per address when a tailnet or a proxy also reaches it.
+            if (urls.tailnet.length === 0 && urls.public === undefined) {
               options.stderr('jzh web: ' + urls.local + '\n')
               return
             }
-            options.stderr('jzh web: local  ' + urls.local + '\n')
-            options.stderr('jzh web: public ' + urls.public + '\n')
+            for (const line of readyLinesOf(urls)) options.stderr('jzh web: ' + line + '\n')
           },
           ...(options.interrupt === undefined ? {} : { interrupt: options.interrupt }),
         })
