@@ -9,6 +9,7 @@ import {
   type TraceTurn,
 } from '../../src/ui/trace.ts'
 import { Linkify } from './linkify.tsx'
+import { Icon } from './ui/icon.tsx'
 import { Mug } from './ui/mug.tsx'
 import { spanOf } from '../edits.ts'
 import { justFinished } from '../pour.ts'
@@ -215,6 +216,7 @@ const ProcessLine = (props: { turn: TraceTurn; now: number }) => {
       <Show when={failed() > 0}>
         <span class="process-failed">{plural(failed(), 'failure')}</span>
       </Show>
+      <Icon name="chevron-down" class="process-chevron" />
       <Show when={running()}>
         <span class="process-now">{doing()}</span>
       </Show>

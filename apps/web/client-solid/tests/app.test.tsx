@@ -117,6 +117,10 @@ const takeBackClipboard = (): void => {
   Reflect.deleteProperty(navigator, 'clipboard')
 }
 
+/** The accessible label of the mark a selector picks, or nothing when it is absent. */
+const labelOf = (root: ParentNode, selector: string): string | null | undefined =>
+  root.querySelector(selector)?.getAttribute('aria-label')
+
 describe('the Solid page', () => {
   test('the board puts a session that waits first, and answers it in place', () => {
     const asking = [
@@ -466,6 +470,8 @@ describe('the Solid page', () => {
       -2,
     )
     expect(container.querySelector('.process-dot')).toBeNull()
+    // The fold's mark closes the line, after what the turn has done.
+    expect(container.querySelector('.process-line > .process-chevron')).not.toBeNull()
 
     setState((current) => ({
       ...current,
@@ -1304,8 +1310,9 @@ describe('the Solid page', () => {
         todos: [
           { content: 'write the test', status: 'completed' },
           { content: 'fix the code', status: 'in_progress' },
+          { content: 'wait for review', status: 'pending' },
         ],
-        todoCounts: { pending: 0, inProgress: 1, completed: 1 },
+        todoCounts: { pending: 1, inProgress: 1, completed: 1 },
         skills: ['code-complete'],
         promptSections: ['identity', 'agents-md:1'],
         queued: [],
@@ -1327,7 +1334,12 @@ describe('the Solid page', () => {
     expect(
       container.querySelector('.run-todo.in_progress .mug.filling:not(.rising)'),
     ).not.toBeNull()
-    expect(container.querySelector('.run-todo-counts')?.textContent).toBe('1/2 complete')
+    expect(container.querySelector('.run-todo.completed .icon mask')).not.toBeNull()
+    // The icon is drawn, so its meaning has to reach a reader who cannot see it.
+    expect(labelOf(container, '.run-todo.pending .run-todo-mark')).toBe('not started')
+    expect(labelOf(container, '.run-todo.in_progress .run-todo-mark')).toBe('in progress')
+    expect(labelOf(container, '.run-todo.completed .run-todo-mark')).toBe('completed')
+    expect(container.querySelector('.run-todo-counts')?.textContent).toBe('1/3 complete')
     expect(container.querySelector('.run-skill')?.textContent).toBe('code-complete')
     expect(container.querySelectorAll('.run-prompt-section')).toHaveLength(2)
     expect(container.querySelector('.run-prompt-section')?.textContent).toBe('identity')
@@ -2021,19 +2033,25 @@ describe('the recent workspaces', () => {
 
     const { container } = render(() => <Board store={store} />)
 
-    const groups = [...container.querySelectorAll('.recent-group')]
-    expect(groups[0]?.querySelectorAll('button.session')).toHaveLength(1)
-    expect(groups[0]?.querySelector('button.recent-fold')?.getAttribute('aria-expanded')).toBe(
-      'true',
-    )
-    expect(groups[1]?.querySelectorAll('button.session')).toHaveLength(0)
-    expect(groups[1]?.querySelector('button.recent-fold')?.getAttribute('aria-expanded')).toBe(
-      'false',
-    )
+    const alpha = '.recent-group[data-cwd="/work/alpha"] '
+    const beta = '.recent-group[data-cwd="/work/beta"] '
+    expect(container.querySelectorAll(alpha + '.fold:not([inert]) button.session')).toHaveLength(1)
+    expect(
+      container.querySelector(alpha + 'button.recent-fold[aria-expanded="true"]'),
+    ).not.toBeNull()
+    // A folded folder keeps its rows drawn for the fold to close over, out of reach.
+    const fold = container.querySelector(beta + '.fold')
+    expect(
+      container.querySelectorAll(beta + '.fold[data-open="false"] button.session'),
+    ).toHaveLength(1)
+    expect(fold).toHaveProperty('inert', true)
+    const head = container.querySelector(beta + 'button.recent-fold')
+    expect(head).toHaveProperty('ariaExpanded', 'false')
 
-    fireEvent.click(groups[1]?.querySelector('button.recent-fold') as Element)
+    fireEvent.click(head as Element)
 
-    expect(groups[1]?.querySelectorAll('button.session')).toHaveLength(1)
+    expect(fold).toHaveProperty('inert', false)
+    expect(container.querySelector(beta + '.fold[data-open="true"]')).toBe(fold)
     expect(localStorage.getItem(RECENT_FOLDED_KEY)).not.toContain('/work/beta')
   })
 })
