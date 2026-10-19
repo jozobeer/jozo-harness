@@ -1,4 +1,5 @@
 import type { Agent } from '@jozo-harness/agent'
+import { repairInterruptedRun } from '@jozo-harness/agent-loop'
 import type { HookRegistry } from '@jozo-harness/kernel'
 import {
   parseCommand,
@@ -32,6 +33,10 @@ export interface MakeUiHostOptions {
  */
 export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, never, Scope.Scope> =>
   Effect.gen(function* () {
+    // A log this run resumed from may end inside a turn whose process is gone.
+    // Closing it here keeps the page from drawing a dead approval card or a
+    // running marker that no answer can clear.
+    yield* repairInterruptedRun(options.agent)
     const subscribers = new Set<Queue.Queue<UiEvent>>()
     const approvals = new Map<string, Deferred.Deferred<boolean>>()
     const asks = new Map<string, Deferred.Deferred<string>>()
