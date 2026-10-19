@@ -91,13 +91,23 @@
   }
 }
 
-/* A level with no end it knows of: quick at first, slower as it fills, never quite full. */
-@keyframes jzh-pour {
+/*
+ * A mug with no end it knows of: quick at first, slower as it fills, never to
+ * the brim, which is where the mug that waits on the reader stands.
+ */
+@keyframes jzh-mug-fill {
   from {
-    width: 6%;
+    transform: translateY(8.5px);
   }
   to {
-    width: 92%;
+    transform: translateY(1.4px);
+  }
+}
+
+/* The surface rolls one wavelength a beat, so the pour shows even at 16px. */
+@keyframes jzh-mug-wave {
+  to {
+    transform: translateX(-8px);
   }
 }
 
@@ -133,11 +143,15 @@
 
   /*
    * --pour-from is how long the work has run already, as a negative delay, so a
-   * reload picks up the level. Ten minutes to the brim: work here runs for
+   * reload picks up the level. Ten minutes to the top: work here runs for
    * minutes, and the level should still be climbing while it does.
    */
-  .pour.rising::after {
-    animation: jzh-pour 600s cubic-bezier(0.1, 0.6, 0.3, 1) var(--pour-from, 0s) both;
+  .mug.rising .mug-level {
+    animation: jzh-mug-fill 600s cubic-bezier(0.1, 0.6, 0.3, 1) var(--pour-from, 0s) both;
+  }
+
+  .mug.filling .mug-wave {
+    animation: jzh-mug-wave 1.1s linear infinite;
   }
 
   .process-dot,
@@ -230,13 +244,62 @@
     background: var(--rest);
   }
 
-  .process-dot.finished {
-    background: var(--tool);
+  /*
+   * Work in progress fills a mug; what waits on the reader is the same mug, full
+   * and wearing foam. Without motion a mug stays half full, like a todo's, which
+   * knows no start to rise from.
+   */
+  .mug {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    overflow: visible;
   }
 
-  .process-dot.running {
-    border: 2px solid var(--accent-fill);
-    background: none;
+  .mug-level {
+    transform: translateY(4.5px);
+  }
+
+  .mug.full .mug-level {
+    transform: translateY(1px);
+  }
+
+  .mug-beer {
+    fill: var(--beer);
+  }
+
+  .mug-surface {
+    fill: none;
+    stroke: #ffe9a6;
+    stroke-width: 0.9;
+  }
+
+  .mug-outline {
+    fill: none;
+    stroke: var(--dim);
+    stroke-width: 1.3;
+    stroke-linejoin: round;
+  }
+
+  .mug-foam {
+    fill: var(--foam);
+    stroke: var(--beer-rim);
+    stroke-width: 0.8;
+  }
+
+  .mug-bubble {
+    fill: var(--foam);
+    opacity: 0.85;
+  }
+
+  /* Preflight makes an svg a block; inline again, the mug centres on the todo's first line. */
+  .run-todo-mark .mug {
+    display: inline-block;
+    vertical-align: middle;
+  }
+
+  .process-dot.finished {
+    background: var(--tool);
   }
 
   .process-dot.error,
@@ -260,7 +323,7 @@
 
   .process-now {
     flex-basis: 100%;
-    padding-left: calc(0.8em + 28px);
+    padding-left: calc(0.8em + 36px);
     overflow: hidden;
     font-family: var(--mono);
     font-size: var(--text-xs);
@@ -703,25 +766,17 @@
   }
 
   #session-list .session {
-    grid-template-columns: 12px minmax(0, 1fr) auto;
+    grid-template-columns: 16px minmax(0, 1fr) auto;
     gap: 0 8px;
     align-items: center;
   }
 
   .session-mark {
+    justify-self: center;
     width: 8px;
     height: 8px;
     border-radius: 50%;
     background: var(--line-strong);
-  }
-
-  .session.running .session-mark {
-    border: 2px solid var(--accent-fill);
-    background: none;
-  }
-
-  .session.waiting .session-mark {
-    background: var(--accent-fill);
   }
 
   .session.idle .session-mark {
@@ -1020,8 +1075,9 @@
     color: var(--beer-ink);
   }
 
-  .board-card .session.waiting .session-mark {
-    background: var(--beer-mark);
+  /* On foam the mug is drawn in the glass's ink, like everything else on the card. */
+  .board-card .mug-outline {
+    stroke: var(--beer-ink);
   }
 
   .board-asked {

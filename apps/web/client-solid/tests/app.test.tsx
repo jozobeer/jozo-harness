@@ -164,6 +164,9 @@ describe('the Solid page', () => {
     expect(rows[0]?.textContent).toContain('ccccdddd')
     expect(rows[1]?.classList.contains('active')).toBe(true)
     expect(container.querySelector('.board-asked')?.textContent).toBe('Approve bash? network')
+    // What waits on you is the mug full and foaming; a session at rest keeps its dot.
+    expect(container.querySelector('.board-card .mug.full .mug-foam')).not.toBeNull()
+    expect(rows[1]?.querySelector('.session-mark')).not.toBeNull()
 
     const allow = [...container.querySelectorAll('.board-card button')].find(
       (button) => button.textContent === 'Allow',
@@ -346,6 +349,7 @@ describe('the Solid page', () => {
     const row = container.querySelector('.recent-group .session-row')
     expect(row).not.toBeNull()
     expect(row?.querySelector('button.session')?.classList.contains('running')).toBe(true)
+    expect(row?.querySelector('.mug.filling.rising')).not.toBeNull()
     // The row keeps the when, not a call count that moves every second.
     expect(row?.querySelector('.session-detail')?.textContent).toBe('now')
   })
@@ -437,6 +441,42 @@ describe('the Solid page', () => {
     const card = container.querySelector('.tool-card') as HTMLDetailsElement
     fireEvent.click(card.querySelector('.tool-summary a') as Element)
     expect(card.open).toBe(false)
+  })
+
+  test('a running turn fills a mug from when it began, and rests on a dot once it ends', () => {
+    const now = Date.now()
+    const events = [
+      { seq: 1, time: now - 2_000, type: 'turn/start', data: { turn: 1 } },
+      { seq: 2, time: now - 1_000, type: 'step/start', data: { step: 1 } },
+    ]
+    const { store, setState } = makeStore({
+      conversation: {
+        ...emptyConversation,
+        blocks: [{ kind: 'user', text: 'hello' }],
+        running: true,
+      },
+      trace: traceOf(events),
+    })
+
+    const { container } = render(() => <Conversation store={store} />)
+    const mug = container.querySelector<SVGElement>('.process-line .mug')
+    expect(mug?.classList.contains('filling')).toBe(true)
+    // The level starts from the two seconds the turn has run, so a reload keeps it.
+    expect(Number.parseFloat(mug?.style.getPropertyValue('--pour-from') ?? '')).toBeLessThanOrEqual(
+      -2,
+    )
+    expect(container.querySelector('.process-dot')).toBeNull()
+
+    setState((current) => ({
+      ...current,
+      conversation: { ...current.conversation, running: false },
+      trace: traceOf([
+        ...events,
+        { seq: 3, time: now, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+      ]),
+    }))
+    expect(container.querySelector('.process-line .mug')).toBeNull()
+    expect(container.querySelector('.process-dot.completed')).not.toBeNull()
   })
 
   test('a running turn keeps one line from its first moment, and fills it as calls come and go', () => {
@@ -1283,6 +1323,10 @@ describe('the Solid page', () => {
     expect(container.querySelector('.run-todo.in_progress .run-todo-content')?.textContent).toBe(
       'fix the code',
     )
+    // The step in progress fills a mug that knows no start, so it holds half full.
+    expect(
+      container.querySelector('.run-todo.in_progress .mug.filling:not(.rising)'),
+    ).not.toBeNull()
     expect(container.querySelector('.run-todo-counts')?.textContent).toBe('1/2 complete')
     expect(container.querySelector('.run-skill')?.textContent).toBe('code-complete')
     expect(container.querySelectorAll('.run-prompt-section')).toHaveLength(2)
