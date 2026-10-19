@@ -1208,6 +1208,21 @@ describe('the Solid page', () => {
     expect(rule).toMatch(/overflow-wrap:\s*anywhere/)
   })
 
+  test('the model list wraps a route instead of hiding it behind an ellipsis', () => {
+    const sheet = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../src/ui/style.css'),
+      'utf8',
+    )
+    const start = sheet.indexOf('.model-option {')
+    expect(start).toBeGreaterThan(-1)
+    const rule = sheet.slice(start, sheet.indexOf('}', start))
+    // A route is how a human tells one model from another, so the list keeps
+    // the whole name even when it wraps, as the chip already does.
+    expect(rule).not.toContain('text-overflow')
+    expect(rule).not.toContain('white-space: nowrap')
+    expect(rule).toMatch(/overflow-wrap:\s*anywhere/)
+  })
+
   test('the seat offers the effort words the endpoint takes, beside the model chip', () => {
     const { store, calls } = makeStore({
       sessionId: 'a',
