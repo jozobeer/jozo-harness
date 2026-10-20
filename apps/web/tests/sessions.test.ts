@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'vitest'
 import type { UiHost } from '@jozo-harness/ui-protocol'
-import { Effect, Stream } from 'effect'
+import { Deferred, Effect, Fiber, Stream } from 'effect'
 import { WebError } from '../src/server/errors.ts'
 import {
   makeSessionRegistry,
   type InitialSession,
+  type OpenSession,
   type SessionFactory,
 } from '../src/server/sessions.ts'
 import type { JobDetailView, RunStateView, SessionSummary } from '../src/shared/rpc.ts'
@@ -91,6 +92,18 @@ const runStateOf = (): RunStateView => ({
 
 const jobOutput = (): Effect.Effect<JobDetailView, WebError> =>
   Effect.fail(new WebError({ message: 'no such job' }))
+
+/** One open session with a fresh host, so two results can be told apart. */
+const sessionFor = (id: string): OpenSession => ({
+  summary: summaryOf(id),
+  host: hostOf(),
+  commands: () => [],
+  runState: runStateOf,
+  jobOutput,
+  stopJob: () => Effect.void,
+  stopSubagent: () => Effect.void,
+  busy: () => false,
+})
 
 const initial = (id: string): InitialSession => ({
   session: {
@@ -274,6 +287,82 @@ describe('the session registry', () => {
     // Closing forgets the session, so asking again builds a new core.
     expect(seen.asked).toEqual(['a', 'a'])
     expect(seen.replaced).toBe(true)
+  })
+
+  test('two pages opening one session share the core the first page is building', async () => {
+    const asked: Array<string | undefined> = []
+    const started = Deferred.makeUnsafe<void>()
+    const release = Deferred.makeUnsafe<void>()
+    const factory: SessionFactory = {
+      list: () => Effect.succeed([]),
+      open: (id) =>
+        Effect.gen(function* () {
+          asked.push(id)
+          yield* Deferred.succeed(started, undefined)
+          yield* Deferred.await(release)
+          return sessionFor(id ?? 'new')
+        }),
+    }
+    const seen = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* makeSessionRegistry({ factory })
+          const first = yield* Effect.forkScoped(registry.open('shared', undefined))
+          yield* Deferred.await(started)
+          let secondStarted = false
+          const second = yield* Effect.forkScoped(
+            Effect.gen(function* () {
+              secondStarted = true
+              return yield* registry.open('shared', undefined)
+            }),
+          )
+          yield* Effect.yieldNow
+          const overlapped = secondStarted && asked.length === 1
+          yield* Deferred.succeed(release, undefined)
+          const opened = yield* Effect.all([Fiber.join(first), Fiber.join(second)])
+          return {
+            overlapped,
+            asked: [...asked],
+            same: opened[0].host === opened[1].host,
+            held: registry.openedIds(),
+          }
+        }),
+      ),
+    )
+    expect(seen.overlapped).toBe(true)
+    expect(seen.asked).toEqual(['shared'])
+    expect(seen.same).toBe(true)
+    expect(seen.held).toEqual(['shared'])
+  })
+
+  test('a failed open lets the next page build the session', async () => {
+    let fail = true
+    const asked: Array<string | undefined> = []
+    const factory: SessionFactory = {
+      list: () => Effect.succeed([]),
+      open: (id) =>
+        Effect.gen(function* () {
+          asked.push(id)
+          if (fail) return yield* Effect.fail(new WebError({ message: 'not yet' }))
+          return sessionFor(id ?? 'new')
+        }),
+    }
+    const seen = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* makeSessionRegistry({ factory })
+          const first = yield* registry
+            .open('a', undefined)
+            .pipe(Effect.catch((error) => Effect.succeed(error.message)))
+          fail = false
+          const second = yield* registry.open('a', undefined)
+          return { first, id: second.summary.id, asked: [...asked] }
+        }),
+      ),
+    )
+    expect(seen.first).toBe('not yet')
+    expect(seen.id).toBe('a')
+    expect(seen.asked).toEqual(['a', 'a'])
   })
 
   test('closing a session nobody opened does nothing', async () => {
