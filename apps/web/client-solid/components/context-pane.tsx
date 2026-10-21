@@ -1,4 +1,4 @@
-import { For, Match, Show, Switch, createEffect, createSignal, onCleanup } from 'solid-js'
+import { For, Match, Show, Switch, createEffect, createSignal, onCleanup, onMount } from 'solid-js'
 import type { ConversationBlock } from '@jozo-harness/ui-view'
 import type { RunStateView, SettingsView } from '../../src/shared/rpc.ts'
 import type { Pane } from '../../src/ui/state.ts'
@@ -476,6 +476,7 @@ const paneFor = (kind: Tab): Pane => (kind === 'changes' ? { kind, path: undefin
 /** The right column: what the session runs toward, is set to, did, or one job. */
 export const ContextPane = (props: { store: SessionStore }) => {
   const pane = () => props.store.state().pane
+  let strip: HTMLElement | undefined
   /** What the body shows while the sheet slides out; undefined once it has. */
   const [kept, setKept] = createSignal<Pane | undefined>(undefined)
 
@@ -495,10 +496,29 @@ export const ContextPane = (props: { store: SessionStore }) => {
   const closing = (): boolean => pane() === undefined && kept() !== undefined
   const active = (kind: Tab): boolean => pane()?.kind === kind
   const toggle = (kind: Tab): void => props.store.showPane(active(kind) ? undefined : paneFor(kind))
+
+  // The labels differ in width, so the underline reads the chosen tab's place
+  // instead of assuming an equal share of the strip.
+  const place = () => {
+    const current = pane()
+    if (strip === undefined) return
+    const picked = strip.querySelector<HTMLElement>('.tab.active')
+    strip.style.setProperty('--tab-w', `${picked?.offsetWidth ?? 0}px`)
+    strip.style.setProperty('--tab-x', `${current === undefined ? 0 : (picked?.offsetLeft ?? 0)}px`)
+  }
+
+  createEffect(place)
+  onMount(() => {
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(place)
+    if (strip !== undefined) observer.observe(strip)
+    onCleanup(() => observer.disconnect())
+  })
+
   return (
     <>
       <header class="context-head">
-        <nav class="tabs" aria-label="What the pane shows">
+        <nav class="tabs" aria-label="What the pane shows" ref={(element) => (strip = element)}>
           <For each={PANES}>
             {(entry) => (
               <button

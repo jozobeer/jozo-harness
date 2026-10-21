@@ -2048,6 +2048,30 @@ describe('the Solid page', () => {
     }
   })
 
+  test('the tab strip hands the underline the place of the tab it shows', () => {
+    vi.spyOn(HTMLElement.prototype, 'offsetLeft', 'get').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this.id === 'run' ? 62 : 2
+    })
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(() => 40)
+    try {
+      const { store, setState } = makeStore({ pane: { kind: 'changes', path: undefined } })
+      const { container } = render(() => <ContextPane store={store} />)
+      const strip = container.querySelector('.tabs') as HTMLElement
+
+      expect(strip.style.getPropertyValue('--tab-x')).toBe('2px')
+      expect(strip.style.getPropertyValue('--tab-w')).toBe('40px')
+
+      setState((current) => ({ ...current, pane: { kind: 'run' } }))
+
+      expect(strip.style.getPropertyValue('--tab-x')).toBe('62px')
+      expect(strip.style.getPropertyValue('--tab-w')).toBe('40px')
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
   test('the pill slides only while motion is welcome, and stays put under reduce', () => {
     const sheet = readFileSync(
       join(dirname(fileURLToPath(import.meta.url)), '../style.css'),
