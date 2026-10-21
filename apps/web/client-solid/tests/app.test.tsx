@@ -1,5 +1,5 @@
-import { fireEvent, render } from '@solidjs/testing-library'
-import { beforeEach, describe, expect, test, vi } from 'vitest'
+import { cleanup, fireEvent, render } from '@solidjs/testing-library'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { createRoot, createSignal } from 'solid-js'
 import type { SubmitMode, UiCommand } from '@jozo-harness/ui-protocol'
 import { emptyConversation } from '@jozo-harness/ui-view'
@@ -35,6 +35,10 @@ import { BUSY_ENTER_KEY } from '../submission.ts'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+// The folder dialog is portaled to the body, out of the container the render owns,
+// so each test hands its DOM back instead of leaving a dialog for the next one.
+afterEach(cleanup)
 
 /** One call a component made, in the order it made them. */
 type Call =
@@ -127,6 +131,13 @@ const labelOf = (root: ParentNode, selector: string): string | null | undefined 
 /** The text a selector picks, or nothing when it is absent. */
 const textOf = (root: ParentNode, selector: string): string | null | undefined =>
   root.querySelector(selector)?.textContent
+
+/** The Add workspace dialog, wherever the page put it. */
+const dialogOf = (): HTMLElement => {
+  const node = document.querySelector('.workspace-dialog')
+  if (!(node instanceof HTMLElement)) throw new Error('the Add workspace dialog is not on the page')
+  return node
+}
 
 describe('the Solid page', () => {
   test('the board marks how each session ended, green until the reader has seen it', () => {
@@ -2661,25 +2672,36 @@ describe('the workspace picker', () => {
     }
   })
 
-  test('Add workspace picks a folder instead of typing a path', () => {
+  test('Add workspace picks a folder in a dialog in front of the page', async () => {
     const { store, calls, browses } = makeStore({
       workspaces: { cwd: '/work/server', items: [listed('/work/beta', 20)] },
     })
 
     const { container } = render(() => <Board store={store} />)
+    const opener = container.querySelector('.workspace-add-open') as HTMLButtonElement
 
-    fireEvent.click(container.querySelector('.workspace-add-open') as Element)
+    fireEvent.click(opener)
     expect(calls).toContainEqual({ kind: 'browseDirectories', path: '' })
-    expect(container.querySelector('.workspace-browse-path')?.textContent).toContain('Reading')
+
+    // The dialog stands on the page, not inside the rail the button lives in.
+    const dialog = dialogOf()
+    expect(dialog.closest('.workspace-pick')).toBeNull()
+    expect(dialog.getAttribute('role')).toBe('dialog')
+    expect(dialog.getAttribute('aria-modal')).toBe('true')
+    expect(document.getElementById(dialog.getAttribute('aria-labelledby') ?? '')?.textContent).toBe(
+      'Add workspace',
+    )
+    await vi.waitFor(() => expect(document.activeElement).toBe(dialog))
+    expect(dialog.querySelector('.workspace-browse-path')?.textContent).toContain('Reading')
 
     browses[0]?.reply({
       kind: 'listed',
       view: { path: '/work', parent: '/', items: ['/work/alpha', '/work/beta'] },
     })
 
-    const folders = [...container.querySelectorAll('.workspace-browse-folder')]
+    const folders = [...dialog.querySelectorAll('.workspace-browse-folder')]
     expect(folders.map((folder) => folder.textContent)).toEqual(['alpha', 'beta'])
-    expect(container.querySelector('.workspace-browse-path')?.textContent).toContain('/work')
+    expect(dialog.querySelector('.workspace-browse-path')?.textContent).toContain('/work')
 
     fireEvent.click(folders[0] as Element)
     expect(calls.at(-1)).toEqual({ kind: 'browseDirectories', path: '/work/alpha' })
@@ -2688,9 +2710,10 @@ describe('the workspace picker', () => {
       view: { path: '/work/alpha', parent: '/work', items: [] },
     })
 
-    fireEvent.click(container.querySelector('.workspace-browse-use') as Element)
+    fireEvent.click(dialog.querySelector('.workspace-browse-use') as Element)
     expect(calls).toContainEqual({ kind: 'addWorkspace', cwd: '/work/alpha' })
-    expect(container.querySelector('[role="dialog"]')).toBeNull()
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    await vi.waitFor(() => expect(document.activeElement).toBe(opener))
   })
 
   test('a folder the dialog cannot read says why and adds nothing', () => {
@@ -2703,11 +2726,90 @@ describe('the workspace picker', () => {
     fireEvent.click(container.querySelector('.workspace-add-open') as Element)
     browses[0]?.reply({ kind: 'refused', message: 'cannot read this directory' })
 
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+    expect(dialogOf().querySelector('[role="alert"]')?.textContent).toContain(
       'cannot read this directory',
     )
-    expect(container.querySelector('.workspace-browse-use')).toBeNull()
+    expect(dialogOf().querySelector('.workspace-browse-use')).toBeNull()
     expect(calls.filter((call) => call.kind === 'addWorkspace')).toEqual([])
+  })
+
+  test('Escape closes the Add workspace dialog and hands focus back', async () => {
+    const { store, calls, browses } = makeStore({
+      workspaces: { cwd: '/work/server', items: [listed('/work/beta', 20)] },
+    })
+
+    const { container } = render(() => <Board store={store} />)
+    const opener = container.querySelector('.workspace-add-open') as HTMLButtonElement
+
+    fireEvent.click(opener)
+    browses[0]?.reply({
+      kind: 'listed',
+      view: { path: '/work', parent: '/', items: ['/work/alpha'] },
+    })
+
+    fireEvent.keyDown(dialogOf(), { key: 'Escape' })
+
+    expect(document.querySelector('.workspace-dialog')).toBeNull()
+    await vi.waitFor(() => expect(document.activeElement).toBe(opener))
+    expect(calls.filter((call) => call.kind === 'addWorkspace')).toEqual([])
+  })
+
+  test('a press beside the Add workspace dialog closes it, a press inside does not', async () => {
+    const { store, calls, browses } = makeStore({
+      workspaces: { cwd: '/work/server', items: [listed('/work/beta', 20)] },
+    })
+
+    const { container } = render(() => <Board store={store} />)
+    const opener = container.querySelector('.workspace-add-open') as HTMLButtonElement
+
+    fireEvent.click(opener)
+    browses[0]?.reply({
+      kind: 'listed',
+      view: { path: '/work', parent: '/', items: ['/work/alpha'] },
+    })
+
+    const dialog = dialogOf()
+    fireEvent.pointerDown(dialog)
+    expect(document.querySelector('.workspace-dialog')).not.toBeNull()
+
+    const backdrop = document.querySelector('.workspace-dialog-backdrop')
+    expect(backdrop).not.toBeNull()
+    fireEvent.pointerDown(backdrop as Element)
+
+    expect(document.querySelector('.workspace-dialog')).toBeNull()
+    await vi.waitFor(() => expect(document.activeElement).toBe(opener))
+    expect(calls.filter((call) => call.kind === 'addWorkspace')).toEqual([])
+  })
+
+  test('Tab stays inside the Add workspace dialog', () => {
+    const { store, browses } = makeStore({
+      workspaces: { cwd: '/work/server', items: [listed('/work/beta', 20)] },
+    })
+
+    const { container } = render(() => <Board store={store} />)
+
+    fireEvent.click(container.querySelector('.workspace-add-open') as Element)
+
+    // While the folders are still arriving the dialog itself holds the keys.
+    const dialog = dialogOf()
+    dialog.focus()
+    expect(fireEvent.keyDown(dialog, { key: 'Tab' })).toBe(false)
+    expect(document.activeElement).toBe(dialog)
+
+    browses[0]?.reply({
+      kind: 'listed',
+      view: { path: '/work', parent: '/', items: ['/work/alpha'] },
+    })
+
+    const up = dialog.querySelector('.workspace-browse-up') as HTMLButtonElement
+    const cancel = dialog.querySelector('.workspace-browse-cancel') as HTMLButtonElement
+
+    up.focus()
+    expect(fireEvent.keyDown(up, { key: 'Tab', shiftKey: true })).toBe(false)
+    expect(document.activeElement).toBe(cancel)
+
+    expect(fireEvent.keyDown(cancel, { key: 'Tab' })).toBe(false)
+    expect(document.activeElement).toBe(up)
   })
 })
 

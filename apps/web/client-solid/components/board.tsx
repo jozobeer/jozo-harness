@@ -9,6 +9,7 @@ import {
   onMount,
   type JSX,
 } from 'solid-js'
+import { Portal } from 'solid-js/web'
 import { plainText } from '@jozo-harness/ui-view'
 import { Linkify } from './linkify.tsx'
 import type { DirectoryView, SessionAction, SessionSummary } from '../../src/shared/rpc.ts'
@@ -539,8 +540,9 @@ const RecentFolder = (props: {
 
 /**
  * The folder a new session starts in. The list arrives newest use first, so the
- * first option is the last folder used; Add workspace opens a folder browser,
- * registers the folder chosen there, and the picker reads the list again.
+ * first option is the last folder used; Add workspace opens a folder dialog in
+ * front of the page, registers the folder chosen there, and the picker reads the
+ * list again.
  */
 const WorkspacePicker = (props: { store: SessionStore }) => {
   const [choice, setChoice] = createSignal('')
@@ -549,6 +551,8 @@ const WorkspacePicker = (props: { store: SessionStore }) => {
   const [browseProblem, setBrowseProblem] = createSignal('')
   // Each click on a folder makes the answer to the one before it stale.
   let asked = 0
+  let addButton: HTMLButtonElement | undefined
+  let dialog: HTMLDivElement | undefined
   const listed = () => props.store.state().workspaces
   const folders = () => listed()?.items ?? []
   const value = (): string => {
@@ -576,11 +580,51 @@ const WorkspacePicker = (props: { store: SessionStore }) => {
     setBrowseProblem('')
     setFolder(undefined)
     browse('')
+    // The page behind the dialog gives up the keys once the dialog is drawn.
+    queueMicrotask(() => dialog?.focus())
   }
   const closeBrowser = (): void => {
     setBrowsing(false)
     setBrowseProblem('')
     setFolder(undefined)
+    // A dialog that vanishes leaves the keys nowhere; its button takes them back.
+    addButton?.focus()
+  }
+  /** The controls Tab can reach inside the dialog, in the order it reaches them. */
+  const focusables = (): ReadonlyArray<HTMLElement> => {
+    if (dialog === undefined) return []
+    return [
+      ...dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    ]
+  }
+  /** Keeps Tab inside the dialog, wrapping at the ends of its controls. */
+  const tabKey = (event: KeyboardEvent): void => {
+    if (event.key !== 'Tab') return
+    const items = focusables()
+    const first = items[0]
+    const last = items[items.length - 1]
+    if (first === undefined || last === undefined) {
+      // Loading or refused: no control to step to, so the dialog keeps the keys.
+      event.preventDefault()
+      dialog?.focus()
+      return
+    }
+    const backwards = event.shiftKey
+    const edge = backwards ? first : last
+    if (document.activeElement !== edge) return
+    event.preventDefault()
+    if (backwards) last.focus()
+    else first.focus()
+  }
+  const holdKeys = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeBrowser()
+      return
+    }
+    tabKey(event)
   }
   const addFolder = (): void => {
     const cwd = folder()?.path
@@ -618,66 +662,103 @@ const WorkspacePicker = (props: { store: SessionStore }) => {
         <Icon name="plus" />
         New session
       </Button>
-      <Button class="workspace-add-open" variant="quiet" type="button" onClick={openBrowser}>
+      <Button
+        class="workspace-add-open"
+        variant="quiet"
+        type="button"
+        ref={(node) => {
+          addButton = node
+        }}
+        onClick={openBrowser}
+      >
         <Icon name="folder" />
         Add workspace
       </Button>
       <Show when={browsing()}>
-        <div class="workspace-browse" role="dialog" aria-label="Add workspace">
-          <p class="workspace-browse-path" title={folder()?.path}>
-            {folder()?.path ?? 'Reading folders…'}
-          </p>
-          <Show when={browseProblem() !== ''}>
-            <p class="workspace-browse-error" role="alert">
-              {browseProblem()}
-            </p>
-          </Show>
-          <Show when={folder()}>
-            {(view) => (
-              <>
-                <div class="workspace-browse-list">
-                  <Show when={view().parent !== null}>
-                    <button
-                      class="workspace-browse-up"
-                      type="button"
-                      onClick={() => browse(view().parent ?? '')}
-                    >
-                      ↑ Up
-                    </button>
-                  </Show>
-                  <For each={view().items}>
-                    {(path) => (
-                      <button
-                        class="workspace-browse-folder"
+        <Portal>
+          <div
+            class="workspace-dialog-backdrop"
+            onPointerDown={(event) => {
+              // Only the backdrop itself: a press that starts inside the dialog
+              // and ends outside it is a slip, not a dismissal.
+              if (event.target === event.currentTarget) closeBrowser()
+            }}
+          >
+            <div
+              class="workspace-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="workspace-dialog-title"
+              tabindex="-1"
+              ref={(node) => {
+                dialog = node
+              }}
+              onKeyDown={holdKeys}
+            >
+              <h2 class="workspace-dialog-title" id="workspace-dialog-title">
+                Add workspace
+              </h2>
+              <p class="workspace-browse-path" title={folder()?.path}>
+                {folder()?.path ?? 'Reading folders…'}
+              </p>
+              <Show when={browseProblem() !== ''}>
+                <p class="workspace-browse-error" role="alert">
+                  {browseProblem()}
+                </p>
+              </Show>
+              <Show when={folder()}>
+                {(view) => (
+                  <>
+                    <div class="workspace-browse-list">
+                      <Show when={view().parent !== null}>
+                        <button
+                          class="workspace-browse-up"
+                          type="button"
+                          onClick={() => browse(view().parent ?? '')}
+                        >
+                          ↑ Up
+                        </button>
+                      </Show>
+                      <For each={view().items}>
+                        {(path) => (
+                          <button
+                            class="workspace-browse-folder"
+                            type="button"
+                            title={path}
+                            onClick={() => browse(path)}
+                          >
+                            {basenameOf(path)}
+                          </button>
+                        )}
+                      </For>
+                      <Show when={view().items.length === 0}>
+                        <p class="workspace-browse-empty">No folders here</p>
+                      </Show>
+                    </div>
+                    <div class="workspace-browse-actions">
+                      <Button
+                        class="workspace-browse-use"
+                        variant="primary"
                         type="button"
-                        title={path}
-                        onClick={() => browse(path)}
+                        onClick={addFolder}
                       >
-                        {basenameOf(path)}
-                      </button>
-                    )}
-                  </For>
-                  <Show when={view().items.length === 0}>
-                    <p class="workspace-browse-empty">No folders here</p>
-                  </Show>
-                </div>
-                <div class="workspace-browse-actions">
-                  <Button
-                    class="workspace-browse-use"
-                    variant="primary"
-                    type="button"
-                    onClick={addFolder}
-                  >
-                    Use this folder
-                  </Button>
-                  <Button variant="quiet" type="button" onClick={closeBrowser}>
-                    Cancel
-                  </Button>
-                </div>
-              </>
-            )}
-          </Show>
-        </div>
+                        Use this folder
+                      </Button>
+                      <Button
+                        class="workspace-browse-cancel"
+                        variant="quiet"
+                        type="button"
+                        onClick={closeBrowser}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </Show>
+            </div>
+          </div>
+        </Portal>
       </Show>
     </div>
   )
