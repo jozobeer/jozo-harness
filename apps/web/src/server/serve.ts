@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomBytes } from 'node:crypto'
 import type { Duplex } from 'node:stream'
 import { WebSocket, WebSocketServer, type RawData } from 'ws'
-import { Effect, Layer, Stream } from 'effect'
+import { Effect, Layer, Option, Stream } from 'effect'
 import { RpcSerialization, RpcServer } from 'effect/rpc'
 import { sendCommand } from '@jozo-harness/ui-protocol'
 import { UiRpcs, type CommandView } from '../shared/rpc.ts'
@@ -27,6 +27,7 @@ import {
   type SessionFactory,
   type SessionRegistry,
 } from './sessions.ts'
+import { answerArtifact, artifactRootOf } from './artifacts.ts'
 import { searchWorkspaceFiles } from './files.ts'
 import { branchOf } from './git-branch.ts'
 import type { SettingsPort } from './settings.ts'
@@ -341,6 +342,7 @@ const respondTo = async (
   request: IncomingMessage,
   response: ServerResponse,
   staticRoot: string,
+  artifactRoot: string | undefined,
   port: number,
   publicOrigin: PublicOrigin | undefined,
   tailnet: TailnetAddresses | undefined,
@@ -355,6 +357,17 @@ const respondTo = async (
   }
   if (exchangeCode(request, response, token, codes, secureExchange(request, publicOrigin))) return
   const path = pathOf(request)
+  if (
+    await answerArtifact(request, response, path, {
+      root: artifactRoot,
+      port,
+      publicOrigin,
+      tailnet,
+      token,
+      codes,
+    })
+  )
+    return
   if (path === UI_PATH) {
     endWith(response, 426, 'websocket required')
     return
@@ -406,6 +419,13 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
       const token = randomBytes(32).toString('hex')
       const codes = codeExchange(() => Date.now())
       const publicOrigin = options.publicUrl
+      // The sessions root names the jzh home the artifacts sit beside; settings
+      // that cannot be read leave the route answering as if the file were gone.
+      const view = yield* options.settings.read().pipe(Effect.option)
+      const artifactRoot = Option.match(view, {
+        onNone: () => undefined,
+        onSome: (read) => artifactRootOf(read.sessionRoot),
+      })
       // The chosen port is known only once the listeners are up; requests arrive after.
       let boundPort = options.port
       // A detected address joins the gate only once a listener waits there; a
@@ -416,6 +436,7 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
           request,
           response,
           options.staticRoot,
+          artifactRoot,
           boundPort,
           publicOrigin,
           tailnet,

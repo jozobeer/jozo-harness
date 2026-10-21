@@ -520,6 +520,70 @@ describe('the web transport', () => {
     await rm(outside, { recursive: true, force: true })
   })
 
+  test('a page reads the html an artifact names, and asks without a cookie are refused', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-artifact-'))
+    const home = await mkdtemp(join(tmpdir(), 'jozo-harness-web-artifact-home-'))
+    const sessionRoot = join(home, 'sessions')
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    await writeFileDeep(join(home, 'artifacts', 'a', 'report.html'), '<h1>report</h1>')
+    const web = makeWeb('a')
+    const base = makeSettings()
+    const settings = {
+      ...base,
+      port: {
+        ...base.port,
+        read: () => Effect.succeed({ ...settingsView, sessionRoot }),
+      } satisfies SettingsPort,
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const page = started.origin + '/artifact/a/report'
+          const served = yield* Effect.promise(() =>
+            fetch(page, { headers: { cookie: started.cookie } }),
+          )
+          const text = yield* Effect.promise(() => served.text())
+          const anonymous = yield* Effect.promise(() => fetch(page))
+          const traversal = yield* Effect.promise(() =>
+            fetch(started.origin + '/artifact/a/..%2fsecret', {
+              headers: { cookie: started.cookie },
+            }),
+          )
+          const unknown = yield* Effect.promise(() =>
+            fetch(started.origin + '/artifact/a/missing', { headers: { cookie: started.cookie } }),
+          )
+          const foreignHost = yield* Effect.promise(() => httpGet(page, 'evil.example'))
+          yield* Deferred.succeed(started.stop, undefined)
+          return {
+            status: served.status,
+            type: served.headers.get('content-type'),
+            policy: served.headers.get('content-security-policy'),
+            nosniff: served.headers.get('x-content-type-options'),
+            text,
+            anonymous: anonymous.status,
+            traversal: traversal.status,
+            unknown: unknown.status,
+            foreignHost: foreignHost.status,
+          }
+        }),
+      ),
+    )
+
+    expect(observed.status).toBe(200)
+    expect(observed.type).toBe('text/html; charset=utf-8')
+    expect(observed.policy).toBe('sandbox allow-scripts')
+    expect(observed.nosniff).toBe('nosniff')
+    expect(observed.text).toContain('<h1>report</h1>')
+    expect(observed.anonymous).toBe(401)
+    expect(observed.traversal).toBe(400)
+    expect(observed.unknown).toBe(404)
+    expect(observed.foreignHost).toBe(403)
+    await rm(root, { recursive: true, force: true })
+    await rm(home, { recursive: true, force: true })
+  })
+
   test('two tabs subscribe to the same conversation', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-tabs-'))
     await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
