@@ -256,6 +256,46 @@ describe('agent loop', () => {
     expect(reason(events)).toEqual([{ kind: 'completed' }])
   })
 
+  test('records the code of a failed tool call in the log', async () => {
+    const broken: ToolDefinition<{}, { readonly ok: boolean }> = {
+      name: 'broken',
+      description: 'Fails',
+      parameters: Schema.Struct({}),
+      output: {
+        schema: Schema.Struct({ ok: Schema.Boolean }),
+        render: () => [{ type: 'text', text: 'ok' }],
+      },
+      execute: () => Effect.fail(new ToolError({ code: 'execution', message: 'disk is gone' })),
+    }
+    const events = await scenario(
+      [
+        chunks([
+          {
+            type: 'block-end',
+            index: 0,
+            block: { type: 'tool-call', id: 'c1', name: 'broken', arguments: '{}' },
+          },
+          { type: 'finish', kind: 'tool-calls' },
+        ]),
+        chunks(textTurn('failed')),
+      ],
+      (ctx) =>
+        Effect.gen(function* () {
+          yield* ctx.tools.register(broken)
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+    )
+
+    const result = events.session.events().find((event) => event.type === 'tool/result')
+    expect(result?.type === 'tool/result' ? result.data.error : undefined).toEqual({
+      name: 'ToolError',
+      code: 'execution',
+    })
+  })
+
   test('does not send a request whose log is not durable', async () => {
     let requests = 0
     const counted =

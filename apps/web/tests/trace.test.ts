@@ -49,6 +49,7 @@ describe('the trace', () => {
           isError: true,
           summary: 'denied',
           content: [],
+          error: { name: 'ToolError', code: 'denied' },
           diffs: [
             {
               path: 'a.ts',
@@ -76,14 +77,21 @@ describe('the trace', () => {
     expect(
       turn === undefined
         ? []
-        : toolsOf(turn).map((tool) => [tool.status, tool.result, tool.endedAt, tool.diffs]),
+        : toolsOf(turn).map((tool) => [
+            tool.status,
+            tool.result,
+            tool.endedAt,
+            tool.diffs,
+            tool.errorCode,
+          ]),
     ).toEqual([
-      ['done', 'lines: 1 → 2', 15, []],
+      ['done', 'lines: 1 → 2', 15, [], ''],
       [
         'error',
         'denied',
         17,
         [{ path: 'a.ts', oldStart: 4, newStart: 4, removed: ['old'], added: ['new'] }],
+        'denied',
       ],
     ])
   })

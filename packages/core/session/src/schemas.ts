@@ -5,7 +5,7 @@ import {
   LlmFailureSchema,
   LlmUsageSchema,
 } from '@jozo-harness/llm'
-import { FileDiffSchema } from '@jozo-harness/tools'
+import { FileDiffSchema, ToolErrorInfoSchema } from '@jozo-harness/tools'
 import { Schema } from 'effect'
 import { USER_MESSAGE_SOURCES, type TurnEndReason } from './events.ts'
 import { registerLogOnlySessionEvents } from './projections.ts'
@@ -151,6 +151,7 @@ const catalog = new Map<string, Schema.Schema<unknown>>([
       content: Schema.Array(ContentBlockSchema),
       summary: Schema.optionalKey(Schema.String),
       diffs: Schema.optionalKey(Schema.Array(FileDiffSchema)),
+      error: Schema.optionalKey(ToolErrorInfoSchema),
     }),
   ],
   [

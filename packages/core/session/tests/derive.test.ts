@@ -49,6 +49,26 @@ describe('deriveMessages', () => {
     ])
   })
 
+  test('a logged failure keeps its code out of the model history', () => {
+    const events = [
+      headerEvent(),
+      event(2, 'tool/result', {
+        callId: 'call-1',
+        isError: true,
+        content: [{ type: 'text', text: 'timed out after 10ms' }],
+        error: { name: 'TimeoutError', code: 'timeout' },
+      }),
+    ]
+
+    expect(deriveMessages(events)).toEqual([
+      {
+        role: 'tool',
+        toolCallId: 'call-1',
+        content: [{ type: 'text', text: 'timed out after 10ms' }],
+      },
+    ])
+  })
+
   test('an extra projection owns its event type and rewrites the history so far', () => {
     const events = [
       headerEvent(),

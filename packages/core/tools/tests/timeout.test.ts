@@ -40,6 +40,7 @@ describe('tool call timeout', () => {
 
     expect(result?.isError).toBe(true)
     expect(JSON.stringify(result?.content)).toContain('timed out after')
+    expect(result?.error).toEqual({ name: 'TimeoutError', code: 'timeout' })
   })
 
   test('a call inside its limit succeeds', async () => {

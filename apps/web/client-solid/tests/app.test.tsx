@@ -486,6 +486,39 @@ describe('the Solid page', () => {
     expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'changes', path: 'a.ts' } })
   })
 
+  test('a failed card names the code the log kept', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const { store } = makeStore({
+      conversation: { ...emptyConversation, blocks: [{ kind: 'user', text: 'go' }] },
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'step/start', { step: 1 }),
+        at(3, 'tool/call', {
+          callId: 'c1',
+          name: 'bash',
+          arguments: '{}',
+          summary: 'bash sleep 10',
+        }),
+        at(4, 'tool/result', {
+          callId: 'c1',
+          isError: true,
+          summary: 'timed out after 10000ms',
+          content: [{ type: 'text', text: 'timed out after 10000ms' }],
+          error: { name: 'TimeoutError', code: 'timeout' },
+        }),
+        at(5, 'step/end', { step: 1 }),
+        at(6, 'assistant/message', { content: [{ type: 'text', text: 'done' }] }),
+        at(7, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      ]),
+    })
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    expect(container.querySelector('.tool-card .tool-error')?.textContent).toBe(
+      'timeout: the call ran past its limit',
+    )
+  })
+
   test('the changes pane lists a file with its counts and draws the diff in hunks', () => {
     const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
     const content = Array.from({ length: 20 }, (_, n) => 'line ' + String(n)).join('\n')
