@@ -387,6 +387,8 @@ const installTier1 = (
             arguments: argumentsJson,
             context: nested,
           }),
+        // A nested call is part of what the session did, so it goes in the same log.
+        append: (type, data) => agent.session.append(type, data),
         ...(sandbox === undefined ? {} : { sandbox }),
       },
     )) {

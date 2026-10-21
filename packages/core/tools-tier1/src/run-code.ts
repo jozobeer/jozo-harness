@@ -4,6 +4,13 @@ import { createInterface } from 'node:readline'
 import { Readable } from 'node:stream'
 import { spawn, type Child } from '@jozo-harness/process'
 import {
+  registerLogOnlySessionEvents,
+  registerSessionEventSchemas,
+  type SessionEventMap,
+  type SessionEventSchemaMap,
+} from '@jozo-harness/session'
+import {
+  resultSummary,
   ToolError,
   type ToolDefinition,
   type ToolExecutionResult,
@@ -27,6 +34,59 @@ export const RUN_CODE_OUTPUT_LIMIT = 16_000
 /** What the child's own messages look like on stdout. A line without the prefix is program output. */
 const RECORD = '\u001e'
 
+/** A nested call a program made, as the log records it when the call starts. */
+export interface PtcDispatchStartData {
+  /** The `run_code` call's id plus the program's call number, so a nested id never collides with a direct one. */
+  readonly callId: string
+  readonly name: string
+  /** The JSON the program passed, before the tool decoded it. */
+  readonly arguments: string
+}
+
+/** A nested call that settled, in the vocabulary a direct `tool/result` uses. */
+export interface PtcDispatchData extends PtcDispatchStartData {
+  readonly isError: boolean
+  /** The one line a reader sees, rendered from the result's content. */
+  readonly summary: string
+}
+
+declare module '@jozo-harness/session/events' {
+  interface SessionEventMap {
+    'tool/ptc-dispatch-start': PtcDispatchStartData
+    'tool/ptc-dispatch': PtcDispatchData
+  }
+}
+
+const PtcDispatchStartSchema = Schema.Struct({
+  callId: Schema.String,
+  name: Schema.String,
+  arguments: Schema.String,
+})
+
+const PtcDispatchSchema = Schema.Struct({
+  callId: Schema.String,
+  name: Schema.String,
+  arguments: Schema.String,
+  isError: Schema.Boolean,
+  summary: Schema.String,
+})
+
+/** Schemas for the nested-call events this module writes. */
+export const ptcDispatchEventSchemas: SessionEventSchemaMap = new Map<
+  string,
+  Schema.Schema<unknown>
+>([
+  ['tool/ptc-dispatch-start', PtcDispatchStartSchema],
+  ['tool/ptc-dispatch', PtcDispatchSchema],
+])
+
+registerSessionEventSchemas(ptcDispatchEventSchemas)
+// The model reads a nested result from the program's return value, never as its own message.
+registerLogOnlySessionEvents(['tool/ptc-dispatch-start', 'tool/ptc-dispatch'])
+
+/** What a program may write about a nested call: its start and its settlement. */
+export type PtcDispatchEventType = 'tool/ptc-dispatch-start' | 'tool/ptc-dispatch'
+
 /** The host a program runs against: what it may call, and how a call reaches the registry. */
 export interface RunCodeHost {
   /** The declarations of the tools the program may call. `run_code` itself never appears. */
@@ -37,6 +97,11 @@ export interface RunCodeHost {
     argumentsJson: string,
     context: ToolRunContext,
   ) => Effect.Effect<ToolExecutionResult>
+  /** Writes one nested-call event, so what a program did survives the process that did it. */
+  readonly append: <K extends PtcDispatchEventType>(
+    type: K,
+    data: SessionEventMap[K],
+  ) => Effect.Effect<void, unknown>
   /** The sandbox the child runs under. Absent leaves the child unconfined. */
   readonly sandbox?: SandboxShape
 }
@@ -213,9 +278,27 @@ const runSession = async (
 
   const answer = async (message: ProtocolCall): Promise<void> => {
     calls.push(message.name)
-    const nested = { ...context, callId: context.callId + '.' + String(message.id) }
-    const result = await Effect.runPromise(
-      host.call(message.name, JSON.stringify(message.args ?? {}), nested),
+    const callId = context.callId + '.' + String(message.id)
+    const argumentsJson = JSON.stringify(message.args ?? {})
+    // The start is durable before the call runs, so a program that dies mid-call
+    // leaves evidence of what it had begun rather than nothing.
+    await Effect.runPromise(
+      host.append('tool/ptc-dispatch-start', {
+        callId,
+        name: message.name,
+        arguments: argumentsJson,
+      }),
+    )
+    const nested = { ...context, callId }
+    const result = await Effect.runPromise(host.call(message.name, argumentsJson, nested))
+    await Effect.runPromise(
+      host.append('tool/ptc-dispatch', {
+        callId,
+        name: message.name,
+        arguments: argumentsJson,
+        isError: result.isError,
+        summary: resultSummary(result.content),
+      }),
     )
     child.stdin.write(
       JSON.stringify({
