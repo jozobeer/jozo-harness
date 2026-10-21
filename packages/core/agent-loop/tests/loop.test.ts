@@ -1314,3 +1314,97 @@ describe('agent loop', () => {
     expect(reason(events)).toEqual([{ kind: 'completed' }, { kind: 'completed' }])
   })
 })
+
+describe('tool context', () => {
+  const okTool = (
+    name: string,
+    fragment?: string,
+  ): ToolDefinition<{}, { readonly ok: boolean }> => ({
+    name,
+    description: 'Adds a fragment for the next request',
+    parameters: Schema.Struct({}),
+    output: {
+      schema: Schema.Struct({ ok: Schema.Boolean }),
+      render: () => [{ type: 'text', text: 'ok' }],
+    },
+    execute: (_args, exec) =>
+      Effect.sync(() => {
+        if (fragment !== undefined) exec.addContext?.(fragment)
+        return { ok: true }
+      }),
+  })
+
+  const toolTurn = (id: string, name: string): ReadonlyArray<StreamChunk> => [
+    { type: 'block-end', index: 0, block: { type: 'tool-call', id, name, arguments: '{}' } },
+    { type: 'finish', kind: 'tool-calls' },
+  ]
+
+  const userTexts = (request: AgentRequest | undefined): ReadonlyArray<string> =>
+    (request?.messages ?? []).flatMap((message) =>
+      message.role === 'user'
+        ? message.content.flatMap((block) => (block.type === 'text' ? [block.text] : []))
+        : [],
+    )
+
+  const capture = (requests: Array<AgentRequest>, ctx: Ctx) =>
+    ctx.hooks.on('agent/request', (request, next) =>
+      Effect.map(next(), (adjusted) => {
+        requests.push(adjusted ?? request)
+        return adjusted
+      }),
+    )
+
+  test('a fragment a tool adds reaches the next request after its result', async () => {
+    const fragment = 'the team left a note'
+    const requests: Array<AgentRequest> = []
+    await scenario([chunks(toolTurn('c1', 'note')), chunks(textTurn('done'))], (ctx) =>
+      Effect.gen(function* () {
+        yield* ctx.tools.register(okTool('note', fragment))
+        yield* capture(requests, ctx)
+        const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+        yield* agent.followup({ text: 'go', source: 'user' })
+        yield* agent.whenIdle
+      }),
+    )
+
+    expect(userTexts(requests[1])).toEqual(['go', fragment])
+    expect(requests[1]?.messages.at(-1)?.role).toBe('user')
+    expect(requests[1]?.messages.at(-2)?.role).toBe('tool')
+  })
+
+  test('a tool that adds nothing leaves the next request unchanged', async () => {
+    const requests: Array<AgentRequest> = []
+    await scenario([chunks(toolTurn('c1', 'quiet')), chunks(textTurn('done'))], (ctx) =>
+      Effect.gen(function* () {
+        yield* ctx.tools.register(okTool('quiet'))
+        yield* capture(requests, ctx)
+        const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+        yield* agent.followup({ text: 'go', source: 'user' })
+        yield* agent.whenIdle
+      }),
+    )
+
+    expect(userTexts(requests[1])).toEqual(['go'])
+    expect(requests[1]?.messages.at(-1)?.role).toBe('tool')
+  })
+
+  test('a fragment is carried by one request and not the one after it', async () => {
+    const fragment = 'one step only'
+    const requests: Array<AgentRequest> = []
+    await scenario(
+      [chunks(toolTurn('c1', 'note')), chunks(toolTurn('c2', 'quiet')), chunks(textTurn('done'))],
+      (ctx) =>
+        Effect.gen(function* () {
+          yield* ctx.tools.register(okTool('note', fragment))
+          yield* ctx.tools.register(okTool('quiet'))
+          yield* capture(requests, ctx)
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+        }),
+    )
+
+    expect(userTexts(requests[1])).toEqual(['go', fragment])
+    expect(userTexts(requests[2])).toEqual(['go'])
+  })
+})

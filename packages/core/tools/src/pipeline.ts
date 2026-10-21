@@ -183,6 +183,7 @@ export const executeTool = (
 ): Effect.Effect<ToolCallOutcome> =>
   Effect.gen(function* () {
     const collected: Array<FileDiff> = []
+    const fragments: Array<string> = []
     let concluded = false
     const result = yield* Effect.gen(function* () {
       const parsed = yield* Effect.match(parseArguments(tool, request.arguments), {
@@ -208,6 +209,9 @@ export const executeTool = (
           concludeTurn: () => {
             concluded = true
           },
+          // The fragments belong to this call too, so a concurrent call keeps
+          // its own text for the request that follows the step.
+          addContext: (text) => fragments.push(text),
         },
       }
 
@@ -225,7 +229,8 @@ export const executeTool = (
       // turns the call into an error also takes the conclusion away.
       const marked =
         concluded && !settled.isError ? { ...settled, concludesTurn: true as const } : settled
-      return collected.length === 0 ? marked : { ...marked, diffs: collected }
+      const carried = fragments.length === 0 ? marked : { ...marked, context: [...fragments] }
+      return collected.length === 0 ? carried : { ...carried, diffs: collected }
     }).pipe(
       Effect.catchCause((cause) => {
         const failure = describeFailure(cause)

@@ -326,6 +326,21 @@ export const checkpointHelpersFor = (
   return { summarize, checkpointFor }
 }
 
+/** One call as the loop carries it: the record it earns and the text for the next request. */
+type CallOutcome = {
+  readonly result: SessionEventMap['tool/result']
+  readonly context: ReadonlyArray<string>
+}
+
+/** What a step's calls add to the next request: one user message, duplicates dropped. */
+const contextMessageOf = (fragments: ReadonlyArray<string>): RequestMessage | undefined => {
+  const unique = [...new Set(fragments.map((text) => text.trim()))].filter(
+    (text) => text.length > 0,
+  )
+  if (unique.length === 0) return undefined
+  return { role: 'user', content: [{ type: 'text', text: unique.join('\n\n') }] }
+}
+
 const agentLoopEffect = (
   config: AgentLoopConfig = {},
 ): Effect.Effect<AgentRunner, never, Hooks | Tools | SystemPrompt | Llm> =>
@@ -536,11 +551,20 @@ const agentLoopEffect = (
       }
     }
 
-    const requestOf = (agent: Agent, build: PromptBuild): AgentRequest => ({
-      ...envelopeOf(agent, build),
-      // The log is what was sent: recorded compaction is part of the fold.
-      messages: deriveMessages(agent.session.events()),
-    })
+    const requestOf = (
+      agent: Agent,
+      build: PromptBuild,
+      context: ReadonlyArray<string>,
+    ): AgentRequest => {
+      // The log is what was sent: recorded compaction is part of the fold. A
+      // fragment a tool added follows the tool results for this step alone.
+      const messages = deriveMessages(agent.session.events())
+      const fragment = contextMessageOf(context)
+      return {
+        ...envelopeOf(agent, build),
+        messages: fragment === undefined ? messages : [...messages, fragment],
+      }
+    }
 
     /**
      * The request after a fold that made the surface smaller, and nothing when the
@@ -653,6 +677,7 @@ const agentLoopEffect = (
       agent: Agent,
       input: ReadonlyArray<UserMessage>,
       opening: boolean,
+      context: ReadonlyArray<string>,
     ): Effect.Effect<StepOutcome> =>
       Effect.gen(function* () {
         const build = yield* promptService
@@ -669,7 +694,7 @@ const agentLoopEffect = (
         yield* recordCompaction(agent, envelope)
         const rebuild = (): Effect.Effect<AgentRequest> =>
           Effect.gen(function* () {
-            const base = requestOf(agent, build)
+            const base = requestOf(agent, build, context)
             const rebuilt = (yield* hooks.waterfall('agent/request', base)) ?? base
             yield* recordRequestHeader(agent, rebuilt)
             return rebuilt
@@ -679,7 +704,7 @@ const agentLoopEffect = (
       })
 
     /** Runs one call and returns the record it earns; nothing is appended yet. */
-    const runOne = (agent: Agent, call: ToolCall): Effect.Effect<SessionEventMap['tool/result']> =>
+    const runOne = (agent: Agent, call: ToolCall): Effect.Effect<CallOutcome> =>
       Effect.gen(function* () {
         const spill = spillOf(agent)
         const outcome = yield* tools.call({
@@ -707,16 +732,19 @@ const agentLoopEffect = (
         // the result: every UI reads the same line out of the log instead of
         // guessing one from the raw content.
         return {
-          callId: call.id,
-          isError: shown.isError,
-          content: shown.content,
-          summary: tools.presentResult(call.name, call.arguments, {
+          result: {
+            callId: call.id,
             isError: shown.isError,
-            summary: resultSummary(shown.content),
-          }).summary,
-          ...(shown.diffs === undefined ? {} : { diffs: shown.diffs }),
-          ...(shown.error === undefined ? {} : { error: shown.error }),
-          ...(shown.concludesTurn === true ? { concludesTurn: true as const } : {}),
+            content: shown.content,
+            summary: tools.presentResult(call.name, call.arguments, {
+              isError: shown.isError,
+              summary: resultSummary(shown.content),
+            }).summary,
+            ...(shown.diffs === undefined ? {} : { diffs: shown.diffs }),
+            ...(shown.error === undefined ? {} : { error: shown.error }),
+            ...(shown.concludesTurn === true ? { concludesTurn: true as const } : {}),
+          },
+          context: shown.context ?? [],
         }
       })
 
@@ -757,15 +785,22 @@ const agentLoopEffect = (
       agent: Agent,
       batch: CallBatch<ToolCall>,
       pending: Map<string, ToolCall>,
-    ): Effect.Effect<boolean> =>
+    ): Effect.Effect<{ readonly concluded: boolean; readonly context: ReadonlyArray<string> }> =>
       Effect.gen(function* () {
         // The fan-out is bounded, and the collection keeps the call order while
         // the calls themselves finish in whatever order they take.
-        const results = yield* Effect.forEach(batch.calls, (call) => runOne(agent, call), {
+        const outcomes = yield* Effect.forEach(batch.calls, (call) => runOne(agent, call), {
           concurrency: batch.parallel ? maxParallelToolCalls : 1,
         })
-        yield* commitResults(agent, results, pending)
-        return results.some((result) => result.concludesTurn === true)
+        yield* commitResults(
+          agent,
+          outcomes.map((outcome) => outcome.result),
+          pending,
+        )
+        return {
+          concluded: outcomes.some((outcome) => outcome.result.concludesTurn === true),
+          context: outcomes.flatMap((outcome) => outcome.context),
+        }
       })
 
     /** What a call gets when the run that made it never finished it. */
@@ -791,10 +826,14 @@ const agentLoopEffect = (
         { discard: true },
       )
 
-    /** Whether any call of this step asked the turn to end here. */
-    const executeCalls = (agent: Agent, calls: ReadonlyArray<ToolCall>): Effect.Effect<boolean> =>
+    /** Whether any call of this step asked the turn to end here, and what it added next. */
+    const executeCalls = (
+      agent: Agent,
+      calls: ReadonlyArray<ToolCall>,
+    ): Effect.Effect<{ readonly concluded: boolean; readonly context: ReadonlyArray<string> }> =>
       Effect.gen(function* () {
         const pending = new Map<string, ToolCall>()
+        const context: Array<string> = []
         let concluded = false
         yield* Effect.onExit(
           Effect.gen(function* () {
@@ -808,12 +847,14 @@ const agentLoopEffect = (
               // The call is durable before its tool runs, so a crash leaves the
               // pair the next open repairs, never an effect without its call.
               yield* checkpoint(agent)
-              if (yield* runBatch(agent, batch, pending)) concluded = true
+              const run = yield* runBatch(agent, batch, pending)
+              if (run.concluded) concluded = true
+              context.push(...run.context)
             }
           }),
           () => failPending(agent, pending),
         )
-        return concluded
+        return { concluded, context }
       })
 
     const runSteps = (
@@ -824,11 +865,12 @@ const agentLoopEffect = (
       const loop = (
         pending: ReadonlyArray<UserMessage>,
         opening: boolean,
+        context: ReadonlyArray<string>,
       ): Effect.Effect<boolean> =>
         Effect.gen(function* () {
           const step = countEvents(agent.session, 'step/start') + 1
           yield* append(agent, 'step/start', { step })
-          const outcome = yield* requestStep(agent, pending, opening)
+          const outcome = yield* requestStep(agent, pending, opening, context)
           if (!outcome.ok) {
             yield* append(agent, 'step/end', { step })
             yield* append(agent, 'turn/end', {
@@ -848,17 +890,19 @@ const agentLoopEffect = (
           if (calls.length === 0) {
             yield* append(agent, 'step/end', { step })
             if (agent.inbox.nextStep.length === 0) return true
-            return yield* loop(yield* agent.inbox.claim(false).pipe(Effect.orDie), false)
+            return yield* loop(yield* agent.inbox.claim(false).pipe(Effect.orDie), false, [])
           }
-          const concluded = yield* executeCalls(agent, calls)
+          const run = yield* executeCalls(agent, calls)
           yield* append(agent, 'step/end', { step })
           // A tool that settled the conversation ends the turn here, so a steer
           // queued meanwhile opens the next one instead of joining this step.
-          if (concluded) return true
-          // Input queued while the tools ran (steer, inject) joins the next request.
-          return yield* loop(yield* agent.inbox.claim(false).pipe(Effect.orDie), false)
+          if (run.concluded) return true
+          // Input queued while the tools ran (steer, inject) joins the next request,
+          // as does the text this step's tools added. Only this step's text is
+          // passed on, so a fragment reaches one request and no more.
+          return yield* loop(yield* agent.inbox.claim(false).pipe(Effect.orDie), false, run.context)
         })
-      return loop(input, true)
+      return loop(input, true, [])
     }
 
     const runTurn = (agent: Agent): Effect.Effect<void> => {
