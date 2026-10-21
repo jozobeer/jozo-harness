@@ -18,6 +18,8 @@ export interface SettingsInputs {
     readonly profile?: string | undefined
     readonly model?: string | undefined
     readonly effort?: string | undefined
+    /** The --port; 0 is a real choice, so an omitted flag is undefined. */
+    readonly port?: number | undefined
   }
   readonly settings: JozoHarnessConfig
   readonly settingsPath: string
@@ -34,6 +36,8 @@ export interface EffectiveSettings {
   readonly route: Resolved<string>
   /** The reasoning effort to ask for; '' leaves the choice to the provider. */
   readonly effort: Resolved<string>
+  /** The port `jzh web` listens on; 0 asks the system for a free one. */
+  readonly port: Resolved<number>
   readonly skills: Resolved<ReadonlyArray<string>>
   readonly plugins: Resolved<ReadonlyArray<PluginRow>>
 }
@@ -60,52 +64,61 @@ const fromFile = <T>(value: T | undefined, path: string, empty: T, what: string)
     ? { value: empty, source: 'default', from: what }
     : { value, source: 'settings', from: path }
 
+/** One value where a flag, then the settings file, then a default decides it. */
+const layered = <T>(
+  flag: T | undefined,
+  flagFrom: string,
+  file: T | undefined,
+  path: string,
+  fallback: readonly [T, string],
+): Resolved<T> =>
+  first(
+    [
+      [flag, 'flag', flagFrom],
+      [file, 'settings', path],
+    ],
+    fallback,
+  )
+
+/** A string setting, where an empty flag reads as no flag at all. */
+const layeredString = (
+  flag: string | undefined,
+  flagFrom: string,
+  file: string | undefined,
+  path: string,
+  fallback: readonly [string, string],
+): Resolved<string> =>
+  layered(named(flag) ? flag : undefined, flagFrom, named(file) ? file : undefined, path, fallback)
+
 /** Resolves the settings a run will use, each with the source that decided it. */
 export const resolveSettings = (inputs: SettingsInputs): EffectiveSettings => ({
-  profile: first(
-    [
-      [
-        named(inputs.flags.profile) ? inputs.flags.profile : undefined,
-        'flag',
-        'the --profile on the command line',
-      ],
-      [
-        named(inputs.settings.profile) ? inputs.settings.profile : undefined,
-        'settings',
-        inputs.settingsPath,
-      ],
-    ],
+  profile: layeredString(
+    inputs.flags.profile,
+    'the --profile on the command line',
+    inputs.settings.profile,
+    inputs.settingsPath,
     [inputs.fallbackProfile, 'the profile named on the command line'],
   ),
-  route: first(
-    [
-      [
-        named(inputs.flags.model) ? inputs.flags.model : undefined,
-        'flag',
-        'the --model on the command line',
-      ],
-      [
-        named(inputs.settings.model) ? inputs.settings.model : undefined,
-        'settings',
-        inputs.settingsPath,
-      ],
-    ],
+  route: layeredString(
+    inputs.flags.model,
+    'the --model on the command line',
+    inputs.settings.model,
+    inputs.settingsPath,
     [inputs.fallbackRoute, 'the model named on the command line'],
   ),
-  effort: first(
-    [
-      [
-        named(inputs.flags.effort) ? inputs.flags.effort : undefined,
-        'flag',
-        'the --effort on the command line',
-      ],
-      [
-        named(inputs.settings.effort) ? inputs.settings.effort : undefined,
-        'settings',
-        inputs.settingsPath,
-      ],
-    ],
+  effort: layeredString(
+    inputs.flags.effort,
+    'the --effort on the command line',
+    inputs.settings.effort,
+    inputs.settingsPath,
     [inputs.fallbackEffort ?? '', 'no effort is named, so the provider chooses'],
+  ),
+  port: layered(
+    inputs.flags.port,
+    'the --port on the command line',
+    inputs.settings.port,
+    inputs.settingsPath,
+    [0, 'no port is named, so the system picks a free one'],
   ),
   skills: fromFile(
     inputs.settings.skills,

@@ -3,7 +3,12 @@ import { Effect } from 'effect'
 
 /** One change to the settings file, told as text in and text out. */
 export type SettingsEdit =
-  | { readonly kind: 'set-scalar'; readonly key: string; readonly value: string }
+  | {
+      readonly kind: 'set-scalar'
+      readonly key: string
+      /** A number is written bare, since the key reads it as a number. */
+      readonly value: string | number
+    }
   | { readonly kind: 'add-skill'; readonly dir: string }
   | { readonly kind: 'remove-skill'; readonly dir: string }
   | { readonly kind: 'add-row'; readonly id: string; readonly name: string }
@@ -50,6 +55,9 @@ const scalar = (value: string): string =>
   /^[A-Za-z0-9._/~-]+$/.test(value) && readScalar(value) === value
     ? value
     : "'" + value.replace(/'/g, "''") + "'"
+
+const scalarText = (value: string | number): string =>
+  typeof value === 'number' ? String(value) : scalar(value)
 
 const readScalar = (raw: string): string | undefined => {
   try {
@@ -287,7 +295,7 @@ const apply = (
 ): Effect.Effect<Array<string>, EditError> => {
   switch (edit.kind) {
     case 'set-scalar': {
-      const written = edit.key + ': ' + scalar(edit.value)
+      const written = edit.key + ': ' + scalarText(edit.value)
       const at = lines.findIndex((line) => new RegExp('^' + edit.key + '\\s*:').test(line))
       return Effect.succeed(at === -1 ? [...lines, written] : replaceAt(lines, at, written))
     }

@@ -82,6 +82,27 @@ describe('what is in effect, and why', () => {
     expect(resolved.effort.source).toBe('default')
   })
 
+  test('the port comes from the flag, the file, or 0, in that order', () => {
+    expect(resolve().port).toEqual({
+      value: 0,
+      source: 'default',
+      from: 'no port is named, so the system picks a free one',
+    })
+
+    expect(resolve({ settings: { port: 4310 } }).port).toEqual({
+      value: 4310,
+      source: 'settings',
+      from: '/home/me/.config/jzh/config.yaml',
+    })
+
+    // 0 in the flag is a choice, not an absent flag, so it wins over the file.
+    expect(resolve({ flags: { port: 0 }, settings: { port: 4310 } }).port).toEqual({
+      value: 0,
+      source: 'flag',
+      from: 'the --port on the command line',
+    })
+  })
+
   test('a settings file may hold lists, and then it is their source', () => {
     const resolved = resolve({
       settings: {

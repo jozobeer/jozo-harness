@@ -18,7 +18,7 @@ export interface ConfigIo {
 
 const USAGE =
   'jzh config                       the settings file, its keys, and their values\n' +
-  'jzh config set K V               write one value (model, effort, profile, plugins.<id>.<key>)\n' +
+  'jzh config set K V               write one value (model, effort, profile, port, plugins.<id>.<key>)\n' +
   'jzh config add skills <dir>      add a directory the skill tool reads\n' +
   'jzh config add plugins <name>    add a plugin row (--id names the row)\n' +
   'jzh config remove skills <dir>   drop a directory\n' +
@@ -30,9 +30,13 @@ const SCALAR_KEYS: ReadonlyArray<string> = [
   'model',
   'effort',
   'profile',
+  'port',
   'search',
   'deepseekToolsBaseUrl',
 ]
+
+/** Keys the file holds as numbers, so an edit writes 4310 rather than '4310'. */
+const NUMBER_KEYS: ReadonlyArray<string> = ['port']
 const LIST_KEYS: ReadonlyArray<string> = ['skills']
 const KNOWN_KEYS: ReadonlyArray<string> = SETTINGS_KEYS.map((note) => note.name)
 
@@ -95,11 +99,20 @@ const searchProblem = (value: string): string | undefined =>
 const baseUrlProblem = (value: string): string | undefined =>
   /^https?:\/\//.test(value) ? undefined : 'deepseekToolsBaseUrl takes an http(s) URL'
 
+/** A bare decimal from 0 to 65535; the file writes it as a YAML number. */
+const portProblem = (value: string): string | undefined => {
+  const port = Number(value)
+  return /^\d+$/.test(value) && port <= 65535
+    ? undefined
+    : 'port takes a whole number between 0 and 65535'
+}
+
 /** The scalar keys whose value the settings file can check without asking a provider. */
 const SCALAR_PROBLEMS: Readonly<Record<string, (value: string) => string | undefined>> = {
   model: modelProblem,
   // Which words an endpoint takes is the endpoint's to say, so the file takes any of them.
   effort: () => undefined,
+  port: portProblem,
   search: searchProblem,
   deepseekToolsBaseUrl: baseUrlProblem,
 }
@@ -362,10 +375,11 @@ const setValue = async (
   }
   const problem = await refusal(key, value)
   if (problem !== undefined) return refused(io, problem)
+  const scalarValue: string | number = NUMBER_KEYS.includes(key) ? Number(value) : value
   return await applyAndReport({
     io,
     paths,
-    edit: { kind: 'set-scalar', key, value },
+    edit: { kind: 'set-scalar', key, value: scalarValue },
     key,
     unchanged: key + ' is already ' + value + ' in ' + paths.config,
     changed: (block) => 'wrote ' + key + ' in ' + paths.config + '\n' + block,

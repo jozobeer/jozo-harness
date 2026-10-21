@@ -68,10 +68,10 @@ jzh web: public  https://<machine>.<tailnet>.ts.net/?code=...
 ```sh
 # MagicDNS と HTTPS 証明書が有効になっていることが前提
 tailscale serve --bg 4310
-jzh web --port 4310 --public-url https://<machine>.<tailnet>.ts.net
+jzh web --public-url https://<machine>.<tailnet>.ts.net
 ```
 
-この URL は 443 の https なのでポートを持たない。`--port 0` は Serve の向き先が定まらないため、この使い方では固定 port を使う。`--public-url` の有無にかかわらず、tailnet の直 URL はポート付きの `http://` で出る。
+`~/.config/jzh/config.yaml` に `port: 4310` を書いておけば `--port` は要らない（`jzh config set port 4310` でも同じ）。この URL は 443 の https なのでポートを持たない。`--port 0` は Serve の向き先が定まらないため、この使い方では固定 port を使う。`--public-url` の有無にかかわらず、tailnet の直 URL はポート付きの `http://` で出る。
 
 起動 URL はその run を開ける credential である。code は 60 秒・1 回限りで、開けば `HttpOnly; SameSite=Strict` の cookie に変わり URL からは消える。**開く前の URL をチャットや issue に貼らない。** `--public-url` は https origin だけを受け付け、パス・query・fragment・userinfo が付いた値と `jzh web` 以外での指定は起動前にエラーになる。
 

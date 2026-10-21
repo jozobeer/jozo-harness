@@ -97,6 +97,7 @@ const loadInputs = (parsed: ParsedArgs, io: MainIo): Effect.Effect<CommandInputs
         profile: parsed.profileFlag,
         model: parsed.modelFlag,
         effort: parsed.effortFlag,
+        port: parsed.portFlag,
       },
       settings,
       settingsPath,
@@ -220,9 +221,10 @@ const optional = <K extends keyof CommandOptions>(
 const workSelection = (
   parsed: ParsedArgs,
   io: MainIo,
+  port: number,
 ): Present<'task'> | Present<'tui'> | Present<'web'> | Present<'lines'> | Record<never, never> => {
   if (parsed.task !== undefined) return { task: parsed.task }
-  if (parsed.web) return { web: { port: parsed.port, publicUrl: parsed.publicUrl } }
+  if (parsed.web) return { web: { port, publicUrl: parsed.publicUrl } }
   const tui = io.tui
   if (tui !== undefined && !parsed.json && (parsed.tui || io.tty === true)) return { tui }
   return io.lines === undefined ? {} : { lines: io.lines }
@@ -243,7 +245,8 @@ const commandOptions = (parsed: ParsedArgs, io: MainIo, inputs: CommandInputs): 
   ...optional('extraRows', inputs.settings.plugins),
   ...optional('skills', inputs.settings.skills),
   ...optional('search', inputs.search),
-  ...workSelection(parsed, io),
+  // The port is resolved from --port and the settings file before a web run serves.
+  ...workSelection(parsed, io, inputs.surface.effective.port.value),
   ...optional('resume', parsed.resume),
   ...(parsed.allowPresetChange ? { allowPresetChange: true } : {}),
   ...(parsed.subagents ? { subagents: true } : {}),

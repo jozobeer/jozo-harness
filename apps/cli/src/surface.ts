@@ -98,6 +98,15 @@ export const SETTINGS_KEYS: ReadonlyArray<SettingsNote> = [
     example: ['profile: headless'],
   },
   {
+    name: 'port',
+    summary: 'the port jzh web listens on; --port wins over it, and 0 asks for a free one',
+    value: (settings) =>
+      settings?.port === undefined
+        ? 'not set, so the system picks a free port'
+        : String(settings.port),
+    example: ['port: 4310'],
+  },
+  {
     name: 'search',
     summary: 'the web_search provider: brave (default when BRAVE_API_KEY is set) or deepseek',
     value: (settings) => settings?.search ?? 'not set, so brave when BRAVE_API_KEY is set',
@@ -221,6 +230,7 @@ export const renderEffective = (
       setting('profile', effective.profile),
       setting('route', effective.route),
       setting('effort', effective.effort),
+      setting('port', effective.port),
       setting('skills', effective.skills),
       setting('plugins', effective.plugins),
       ...(credential === undefined ? [] : [credentialLine(credential)]),
