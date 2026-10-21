@@ -2024,6 +2024,47 @@ describe('the Solid page', () => {
     ])
   })
 
+  test('the strip hands the pill the place of the option it pressed', () => {
+    vi.spyOn(HTMLElement.prototype, 'offsetLeft', 'get').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this.dataset.lens === 'timeline' ? 62 : 2
+    })
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(() => 60)
+    try {
+      const [lens, setLens] = createSignal<Lens>('answers')
+      const { container } = render(() => <LensSwitch lens={lens()} onChoose={setLens} />)
+      const strip = container.querySelector('.lens') as HTMLElement
+
+      expect(strip.style.getPropertyValue('--pick-x')).toBe('2px')
+      expect(strip.style.getPropertyValue('--pick-w')).toBe('60px')
+
+      fireEvent.click(container.querySelector('button[data-lens="timeline"]') as Element)
+
+      expect(strip.style.getPropertyValue('--pick-x')).toBe('62px')
+      expect(strip.style.getPropertyValue('--pick-w')).toBe('60px')
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
+  test('the pill slides only while motion is welcome, and stays put under reduce', () => {
+    const sheet = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../style.css'),
+      'utf8',
+    )
+    const motion = sheet.indexOf('@media (prefers-reduced-motion: no-preference)')
+    expect(motion).toBeGreaterThan(-1)
+    const end = sheet.indexOf('\n}', motion)
+    const quiet = sheet.slice(0, motion) + sheet.slice(end)
+    expect(sheet.slice(motion, end)).toMatch(
+      /\.lens::before \{[^}]*transition:[^}]*transform 160ms ease-out/,
+    )
+    expect(quiet).not.toMatch(/\.lens::before \{[^}]*transition/)
+    // The pill still reads its place without the transition; reduce only drops the motion.
+    expect(quiet).toMatch(/\.lens \{[^}]*position: relative/)
+  })
+
   test('the row menu renames a session where it sits, and keeps the line when Enter lands', () => {
     const { store, calls } = makeStore({
       sessions: [{ id: 'aaaabbbb', cwd: '/one/work', createdAt: 1, updatedAt: 1, title: 'first' }],
