@@ -11,6 +11,15 @@ export interface TraceImage {
   readonly name: string
 }
 
+/** One file change a tool recorded while it ran. */
+export interface TraceDiff {
+  readonly path: string
+  readonly oldStart: number
+  readonly newStart: number
+  readonly removed: ReadonlyArray<string>
+  readonly added: ReadonlyArray<string>
+}
+
 /** One tool call: what was asked, when, and what came back. */
 export interface TraceTool {
   readonly callId: string
@@ -26,6 +35,8 @@ export interface TraceTool {
   readonly output: string
   /** The images the result carried; empty for a text-only result. */
   readonly images: ReadonlyArray<TraceImage>
+  /** The file changes the call recorded; empty for an old log or a read. */
+  readonly diffs: ReadonlyArray<TraceDiff>
 }
 
 /** One model call and the tools it asked for. */
@@ -88,6 +99,29 @@ const imagesOf = (content: unknown): ReadonlyArray<TraceImage> =>
           name: textOf(part, 'name'),
         }))
         .filter((image) => image.data !== '')
+    : []
+
+/** The lines a diff carries, keeping only strings. */
+const stringsOf = (value: unknown): ReadonlyArray<string> =>
+  Array.isArray(value) ? value.filter((line): line is string => typeof line === 'string') : []
+
+/** The file changes a result recorded, dropping anything the log did not write whole. */
+const diffsOf = (value: unknown): ReadonlyArray<TraceDiff> =>
+  Array.isArray(value)
+    ? value.flatMap((diff) => {
+        const path = textOf(diff, 'path')
+        return path === ''
+          ? []
+          : [
+              {
+                path,
+                oldStart: numberOf(diff, 'oldStart'),
+                newStart: numberOf(diff, 'newStart'),
+                removed: stringsOf(fieldOf(diff, 'removed')),
+                added: stringsOf(fieldOf(diff, 'added')),
+              },
+            ]
+      })
     : []
 
 /** The text parts of a content list joined, for one part type. */
@@ -208,6 +242,7 @@ const toolOf = (event: UiSessionEvent): TraceTool => ({
   result: '',
   output: '',
   images: [],
+  diffs: [],
 })
 
 /** True while the last entry is a turn still running; a load written outside one is not. */
@@ -264,6 +299,7 @@ const settleTool = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => {
     result: textOf(event.data, 'summary'),
     output: partsOf(fieldOf(event.data, 'content'), 'text'),
     images: imagesOf(fieldOf(event.data, 'content')),
+    diffs: diffsOf(fieldOf(event.data, 'diffs')),
   })
   const settled = inLastStep(turns, (step) => ({
     ...step,

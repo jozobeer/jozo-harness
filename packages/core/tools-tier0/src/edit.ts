@@ -7,6 +7,7 @@ import { guardEdit, look, type ObservedFiles } from './observed-files.ts'
 import { readForEdit, restoreLineEndings } from './text.ts'
 import { changedLines } from './present.ts'
 import { resolveInside } from './workspace.ts'
+import { editDiffs } from './diff.ts'
 
 const Parameters = Schema.Struct({
   path: Schema.String.annotate({
@@ -111,6 +112,9 @@ export const makeEditTool = (
         })
         const written = yield* look(path)
         if (written !== undefined) observed.observe(context.sessionId, path, written)
+        for (const diff of editDiffs(path, source.text, args.oldString, args.newString)) {
+          context.changes?.record(diff)
+        }
         return { path, replacements: all ? found : 1 }
       }),
   }

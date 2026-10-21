@@ -6,7 +6,8 @@ import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
 import { deniedFor, escalates, escalationFields, modeOfCall } from './escalation.ts'
 import { guardWrite, look, type ObservedFiles } from './observed-files.ts'
 import { resolveInside } from './workspace.ts'
-import { normalizeNewlines } from './text.ts'
+import { normalizeNewlines, readForEdit } from './text.ts'
+import { writeDiffs } from './diff.ts'
 
 const Parameters = Schema.Struct({
   path: Schema.String.annotate({
@@ -63,6 +64,12 @@ export const makeWriteTool = (
           Effect.mapError((error) => deniedFor(error.message, mode, 'operation', canEscalate)),
         )
         yield* guardWrite(observed, context.sessionId, path)
+        // Read the old text only for the diff: a file that cannot be read as
+        // text (binary, gone) still gets written, just without a diff.
+        const before = yield* readForEdit(path).pipe(
+          Effect.map((read) => read.text),
+          Effect.orElseSucceed(() => undefined),
+        )
         const content = normalizeNewlines(args.content)
         yield* Effect.tryPromise({
           try: async () => {
@@ -73,6 +80,7 @@ export const makeWriteTool = (
         })
         const written = yield* look(path)
         if (written !== undefined) observed.observe(context.sessionId, path, written)
+        for (const diff of writeDiffs(path, before, content)) context.changes?.record(diff)
         return { path, bytes: new TextEncoder().encode(content).length }
       }),
   }

@@ -1,6 +1,7 @@
 import { Data } from 'effect'
 import type { Effect, Schema } from 'effect'
 import type { ContentBlock } from '@jozo-harness/llm'
+import type { DiffRecorder, FileDiff } from './diffs.ts'
 import type { SpillWriter } from './spill.ts'
 
 export type ToolErrorCode =
@@ -33,6 +34,12 @@ export interface ToolRunContext {
    * when nothing will store the text, and then the tool says how to narrow instead.
    */
   readonly spill?: SpillWriter
+  /**
+   * Where the tool records the file changes this call made. The pipeline owns
+   * the collector, so a call's diffs reach the log without the tool knowing how
+   * they are stored. Absent when nothing will record them.
+   */
+  readonly changes?: DiffRecorder
 }
 
 /** One call as the policy hooks and guards see it. `args` is already decoded. */
@@ -50,6 +57,8 @@ export interface ToolExecutionResult {
   readonly isError: boolean
   readonly content: ReadonlyArray<ContentBlock>
   readonly value?: unknown
+  /** What the call changed in the files it wrote, as it ran. */
+  readonly diffs?: ReadonlyArray<FileDiff>
 }
 
 export interface ToolCallView {

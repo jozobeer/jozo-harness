@@ -1,4 +1,5 @@
 import type { Emit } from '@jozo-harness/kernel'
+import type { FileDiff } from '@jozo-harness/tools'
 import type {
   AssistantStreamRecord,
   ContentBlock,
@@ -117,6 +118,12 @@ export interface SessionEventMap {
     readonly content: ReadonlyArray<ContentBlock>
     /** The one line a UI shows for the result, rendered by the pipeline. */
     readonly summary?: string
+    /**
+     * The file changes the call made, computed while it ran. Log-only: the
+     * model history is built from `content` alone, so a diff never reaches the
+     * prompt.
+     */
+    readonly diffs?: ReadonlyArray<FileDiff>
   }
   'job/started': JobStartedData
   'job/ended': JobEndedData

@@ -121,6 +121,61 @@ describe('write tool', () => {
     await rm(dir, { recursive: true, force: true })
   })
 
+  test('records the old lines an overwrite replaced', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-write-'))
+    await writeFileDeep(join(dir, 'notes.txt'), 'one\ntwo\nthree\n')
+    const call = makeSession(dir)
+
+    await Effect.runPromise(call('read', { path: 'notes.txt' }))
+    const result = await Effect.runPromise(
+      call('write', { path: 'notes.txt', content: 'one\nTWO\nthree\n' }),
+    )
+
+    expect(result?.diffs).toEqual([
+      {
+        path: join(dir, 'notes.txt'),
+        oldStart: 2,
+        newStart: 2,
+        removed: ['two'],
+        added: ['TWO'],
+      },
+    ])
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('records a new file as lines added to an empty old side', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-write-'))
+    const call = makeSession(dir)
+
+    const result = await Effect.runPromise(
+      call('write', { path: 'fresh.txt', content: 'one\ntwo\n' }),
+    )
+
+    expect(result?.diffs).toEqual([
+      {
+        path: join(dir, 'fresh.txt'),
+        oldStart: 1,
+        newStart: 1,
+        removed: [],
+        added: ['one', 'two'],
+      },
+    ])
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('records nothing when an overwrite leaves the file as it was', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-write-'))
+    await writeFileDeep(join(dir, 'notes.txt'), 'same\n')
+    const call = makeSession(dir)
+
+    await Effect.runPromise(call('read', { path: 'notes.txt' }))
+    const result = await Effect.runPromise(call('write', { path: 'notes.txt', content: 'same\n' }))
+
+    expect(result?.isError).toBe(false)
+    expect(result?.diffs).toBeUndefined()
+    await rm(dir, { recursive: true, force: true })
+  })
+
   test('refuses a file that changed after it was read, and leaves it alone', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-write-'))
     await writeFileDeep(join(dir, 'notes.txt'), 'the original\n')

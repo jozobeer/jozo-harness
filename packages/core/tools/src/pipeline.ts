@@ -10,6 +10,7 @@ import {
   type ToolExecutionResult,
   type ToolGuard,
 } from './types.ts'
+import type { FileDiff } from './diffs.ts'
 
 type AnyTool = ToolDefinition<any, any>
 
@@ -142,6 +143,7 @@ export const executeTool = (
   guards: ReadonlyArray<ToolGuard>,
 ): Effect.Effect<ToolCallOutcome> =>
   Effect.gen(function* () {
+    const collected: Array<FileDiff> = []
     const result = yield* Effect.gen(function* () {
       const parsed = yield* Effect.match(parseArguments(tool, request.arguments), {
         onFailure: (error: ToolError) => ({ ok: false as const, message: error.message }),
@@ -154,7 +156,9 @@ export const executeTool = (
         tool: tool.name,
         arguments: request.arguments,
         args: parsed.args,
-        context: request.context,
+        // The recorder belongs to this call, so a concurrent call never mixes
+        // its files into this result.
+        context: { ...request.context, changes: { record: (diff) => collected.push(diff) } },
       }
 
       const policy = yield* checkPolicy(
@@ -166,7 +170,8 @@ export const executeTool = (
 
       const executed = yield* runWithBody(hooks, tool, exec)
       const posted = yield* hooks.waterfall('tools/post-execute', exec, executed)
-      return finalize(tool, exec, posted ?? executed)
+      const settled = finalize(tool, exec, posted ?? executed)
+      return collected.length === 0 ? settled : { ...settled, diffs: collected }
     }).pipe(Effect.catchCause((cause) => Effect.succeed(errorResult(describeCause(cause)))))
 
     yield* hooks.emit('tools/result', result)

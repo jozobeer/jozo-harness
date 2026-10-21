@@ -180,7 +180,7 @@ type SessionEvent = { [K in keyof SessionEventMap]: {
 | `user/message` | `source` で、人の入力・`agent.inject()`・runtime context を区別する |
 | `assistant/message` | 組み立てた content、usage、`replayState`、タイムスタンプ付きの生 stream |
 | `assistant/attempt` | 失敗・retry・cancel した試行。history に入らない |
-| `tool/call` / `tool/result` | `tool/call` は実行前に記録する。引数は生の JSON 文字列のまま |
+| `tool/call` / `tool/result` | `tool/call` は実行前に記録する。引数は生の JSON 文字列のまま。`tool/result` は `edit` / `write` が実行時に計算した `diffs`（前後の行と行番号）を optional に持ち、Changes ペインはこれを優先して描く。`diffs` は model history に入らない |
 
 `approval/*`、`sandbox/mode`、`compaction/*`、`todo/write` などは、担当するプラグインが S2 以降で宣言マージによって追加する。
 

@@ -670,6 +670,7 @@ const agentLoopEffect = (
             isError: shown.isError,
             summary: resultSummary(shown.content),
           }).summary,
+          ...(shown.diffs === undefined ? {} : { diffs: shown.diffs }),
         }
       })
 

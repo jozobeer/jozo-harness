@@ -16,7 +16,7 @@ exit 0
 {"seq":15,"time":0,"type":"step/start","data":{"step":2}}
 {"seq":16,"time":0,"type":"assistant/message","data":{"provider":"replay","model":"model","content":[{"type":"tool-call","id":"c2","name":"write","arguments":"{\"path\":\"notes.txt\",\"content\":\"one\\ntwo\\nthree\\n\"}"}],"stream":[{"type":"tool-call-chunks","time0":0,"index":2,"dt":[],"id":"c2","name":"write","args":["{\"path\":\"notes.txt\",\"content\":\"one\\ntwo\\nthree\\n\"}"]},{"type":"chunk","time":0,"chunk":{"type":"finish","kind":"tool-calls"}}]}}
 {"seq":17,"time":0,"type":"tool/call","data":{"callId":"c2","name":"write","arguments":"{\"path\":\"notes.txt\",\"content\":\"one\\ntwo\\nthree\\n\"}","summary":"write notes.txt"}}
-{"seq":18,"time":0,"type":"tool/result","data":{"callId":"c2","isError":false,"content":[{"type":"text","text":"wrote <workspace>/notes.txt (14 bytes)"}],"summary":"wrote <workspace>/notes.txt (14 bytes)"}}
+{"seq":18,"time":0,"type":"tool/result","data":{"callId":"c2","isError":false,"content":[{"type":"text","text":"wrote <workspace>/notes.txt (14 bytes)"}],"summary":"wrote <workspace>/notes.txt (14 bytes)","diffs":[{"path":"<workspace>/notes.txt","oldStart":3,"newStart":3,"removed":[],"added":["three"]}]}}
 {"seq":19,"time":0,"type":"step/end","data":{"step":2}}
 {"seq":20,"time":0,"type":"step/start","data":{"step":3}}
 {"seq":21,"time":0,"type":"assistant/message","data":{"provider":"replay","model":"model","content":[{"type":"text","text":"the notes now hold three lines"}],"stream":[{"type":"chunk","time":0,"chunk":{"type":"block-start","index":1,"blockType":"text"}},{"type":"text-chunks","time0":0,"index":1,"dt":[],"texts":["the notes now hold three lines"]},{"type":"chunk","time":0,"chunk":{"type":"finish","kind":"stop"}}]}}

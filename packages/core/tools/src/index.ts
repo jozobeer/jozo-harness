@@ -1,3 +1,4 @@
+export * from './diffs.ts'
 export * from './hooks.ts'
 export * from './pipeline.ts'
 export * from './plugin.ts'

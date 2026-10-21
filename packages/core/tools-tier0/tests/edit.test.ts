@@ -70,6 +70,39 @@ describe('edit tool', () => {
     await rm(dir, { recursive: true, force: true })
   })
 
+  test('records where each replacement stood, so the log carries the change itself', async () => {
+    const { dir, call } = await withReadFile('one\ntwo\nthree\n')
+
+    const result = await Effect.runPromise(
+      call('edit', { path: 'a.txt', oldString: 'two', newString: 'TWO' }),
+    )
+
+    expect(result?.diffs).toEqual([
+      {
+        path: join(dir, 'a.txt'),
+        oldStart: 2,
+        newStart: 2,
+        removed: ['two'],
+        added: ['TWO'],
+      },
+    ])
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('records every occurrence of an all replacement as its own change', async () => {
+    const { dir, call } = await withReadFile('a\na\n')
+
+    const result = await Effect.runPromise(
+      call('edit', { path: 'a.txt', oldString: 'a', newString: 'x\ny', all: true }),
+    )
+
+    expect(result?.diffs).toEqual([
+      { path: join(dir, 'a.txt'), oldStart: 1, newStart: 1, removed: ['a'], added: ['x', 'y'] },
+      { path: join(dir, 'a.txt'), oldStart: 2, newStart: 3, removed: ['a'], added: ['x', 'y'] },
+    ])
+    await rm(dir, { recursive: true, force: true })
+  })
+
   test('refuses text that is missing or ambiguous, leaving the file alone', async () => {
     const { dir, call } = await withReadFile('a\na\n')
 
