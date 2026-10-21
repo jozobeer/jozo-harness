@@ -7,6 +7,7 @@ import {
   statsLineTextOf,
   statsViewOf,
   type CommandsShape,
+  type CompactionCheckpoint,
   type CompactOptions,
   type Session,
   type SessionHeader,
@@ -133,6 +134,11 @@ const goalLogOf = (session: Session): GoalLog => ({
 export interface BuiltinCommandOptions {
   /** The budget the loop compacts with; absent leaves the context stat unknown. */
   readonly budget?: TokenBudget
+  /**
+   * The loop's summary call, handed in so a human-asked fold can record the
+   * checkpoint it earns. Absent leaves `/compact` pruning only.
+   */
+  readonly compactNow?: () => Effect.Effect<CompactionCheckpoint | undefined>
 }
 
 /** The commands every jozo-harness session answers. */
@@ -189,6 +195,13 @@ export const installBuiltinCommands = (
           const prune = pruneFor(context.session.events(), MANUAL_COMPACT)
           if (prune === undefined) return { ok: true, text: 'nothing to compact' }
           yield* context.session.append('compaction/prune', prune).pipe(Effect.orDie)
+          // The summary rides on the fold when the loop can ask for one; nothing it
+          // cannot say leaves the prune to bound the request on its own.
+          const checkpoint =
+            options.compactNow === undefined ? undefined : yield* options.compactNow()
+          if (checkpoint !== undefined) {
+            yield* context.session.append('compaction/checkpoint', checkpoint).pipe(Effect.orDie)
+          }
           return {
             ok: true,
             text:

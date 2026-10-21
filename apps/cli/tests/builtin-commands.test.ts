@@ -1,7 +1,12 @@
 import { Effect } from 'effect'
 import { describe, expect, test } from 'vitest'
-import { makeCommands, makeSession } from '@jozo-harness/session'
-import { installBuiltinCommands } from '../src/commands.ts'
+import {
+  makeCommands,
+  makeSession,
+  type CompactionCheckpoint,
+  type Session,
+} from '@jozo-harness/session'
+import { installBuiltinCommands, type BuiltinCommandOptions } from '../src/commands.ts'
 
 const header = () =>
   ({
@@ -11,7 +16,7 @@ const header = () =>
     data: { formatVersion: 1, createdAt: 0, cwd: '/work' },
   }) as const
 
-const build = () =>
+const build = (options: BuiltinCommandOptions = {}) =>
   Effect.gen(function* () {
     const session = yield* makeSession({
       id: 's-1',
@@ -20,9 +25,31 @@ const build = () =>
       now: () => 1,
     })
     const commands = makeCommands()
-    yield* installBuiltinCommands(commands)
+    yield* installBuiltinCommands(commands, options)
     return { session, commands }
   })
+
+const seed = (session: Session) =>
+  Effect.gen(function* () {
+    yield* session.append('user/message', { text: 'x'.repeat(40_000), source: 'user' })
+    yield* session.append('assistant/message', {
+      provider: 'stub',
+      model: 'model',
+      content: [{ type: 'text', text: 'the newest word' }],
+      stream: [],
+    })
+  })
+
+const checkpoint: CompactionCheckpoint = {
+  shadowedSeqs: [2],
+  shadowedRange: { start: 2, end: 2 },
+  summary: 'the earlier span, condensed',
+  provider: 'stub',
+  model: 'model',
+}
+
+const compacted = (session: Session) =>
+  session.events().filter((event) => event.type === 'compaction/checkpoint')
 
 const switches = () => {
   const models: Array<string> = []
@@ -71,17 +98,7 @@ describe('the built-in commands a session can switch with', () => {
 
   test('/compact prunes the oversized history now and says what it freed', async () => {
     const { commands, session } = await Effect.runPromise(build())
-    await Effect.runPromise(
-      session.append('user/message', { text: 'x'.repeat(40_000), source: 'user' }),
-    )
-    await Effect.runPromise(
-      session.append('assistant/message', {
-        provider: 'stub',
-        model: 'model',
-        content: [{ type: 'text', text: 'the newest word' }],
-        stream: [],
-      }),
-    )
+    await Effect.runPromise(seed(session))
 
     const outcome = await Effect.runPromise(commands.run('/compact', session))
 
@@ -95,5 +112,49 @@ describe('the built-in commands a session can switch with', () => {
       ok: true,
       text: 'nothing to compact',
     })
+  })
+
+  test('/compact records the checkpoint the summary call earned', async () => {
+    let calls = 0
+    const compactNow = () => {
+      calls += 1
+      return Effect.succeed<CompactionCheckpoint | undefined>(checkpoint)
+    }
+    const { commands, session } = await Effect.runPromise(build({ compactNow }))
+    await Effect.runPromise(seed(session))
+
+    await Effect.runPromise(commands.run('/compact', session))
+
+    expect(calls).toBe(1)
+    const recorded = compacted(session)
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0]?.type === 'compaction/checkpoint' ? recorded[0].data : undefined).toEqual(
+      checkpoint,
+    )
+    // The prune still lands before the checkpoint it bounds.
+    const types = session.events().map((event) => event.type)
+    expect(types.indexOf('compaction/prune')).toBeLessThan(types.indexOf('compaction/checkpoint'))
+  })
+
+  test('/compact leaves the log without a checkpoint when the summary call has no word', async () => {
+    const { commands, session } = await Effect.runPromise(
+      build({ compactNow: () => Effect.succeed(undefined) }),
+    )
+    await Effect.runPromise(seed(session))
+
+    await Effect.runPromise(commands.run('/compact', session))
+
+    expect(session.events().filter((event) => event.type === 'compaction/prune')).toHaveLength(1)
+    expect(compacted(session)).toHaveLength(0)
+  })
+
+  test('/compact prunes alone when no summary call was handed in', async () => {
+    const { commands, session } = await Effect.runPromise(build())
+    await Effect.runPromise(seed(session))
+
+    await Effect.runPromise(commands.run('/compact', session))
+
+    expect(session.events().filter((event) => event.type === 'compaction/prune')).toHaveLength(1)
+    expect(compacted(session)).toHaveLength(0)
   })
 })
