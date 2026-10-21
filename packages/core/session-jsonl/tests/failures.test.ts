@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'vitest'
-import { appendFile, chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Effect } from 'effect'
@@ -27,11 +27,33 @@ afterAll(async () => {
 })
 
 describe('jsonlSessions failures', () => {
-  test('flush completes and does nothing', async () => {
-    const { persistence } = isolated()
+  test('flush leaves the appended events readable', async () => {
+    const { root, persistence } = isolated()
     const created = await Effect.runPromise(persistence.create(header()))
+    await Effect.runPromise(
+      created.sink.append({
+        seq: 2,
+        time: 101,
+        type: 'user/message',
+        data: { text: 'hi', source: 'user' },
+      }),
+    )
 
     await Effect.runPromise(created.sink.flush())
+
+    const lines = (await readFile(fileOf(root, created.id), 'utf8')).trim().split('\n')
+    expect(lines).toHaveLength(2)
+  })
+
+  test('flush reports a session directory that is gone', async () => {
+    const { root, persistence } = isolated()
+    const created = await Effect.runPromise(persistence.create(header()))
+    await rm(join(root, created.id), { recursive: true, force: true })
+
+    const error = await Effect.runPromise(Effect.flip(created.sink.flush()))
+
+    expect(error.code).toBe('persistence')
+    expect(error.message).toContain('cannot flush')
   })
 
   test('append reports a session directory that is gone', async () => {

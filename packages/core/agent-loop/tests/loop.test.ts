@@ -63,7 +63,9 @@ const adapter = (scripts: ReadonlyArray<Script>): LlmAdapter => {
   }
 }
 
-const sessionPersistence = (): SessionPersistence => {
+const sessionPersistence = (
+  flush: () => Effect.Effect<void, SessionError> = () => Effect.void,
+): SessionPersistence => {
   const stored = new Map<SessionId, { events: Array<SessionEvent> }>()
   const opened = (id: SessionId): OpenedSession => {
     const record = stored.get(id)
@@ -73,7 +75,7 @@ const sessionPersistence = (): SessionPersistence => {
         Effect.sync(() => {
           record.events.push(event)
         }),
-      flush: () => Effect.void,
+      flush,
     }
     return { id, events: [...record.events], sink }
   }
@@ -105,6 +107,7 @@ interface Ctx {
 const scenario = <A>(
   scripts: ReadonlyArray<Script>,
   body: (ctx: Ctx) => Effect.Effect<A, AgentError | ToolError, Scope.Scope>,
+  persistence: SessionPersistence = sessionPersistence(),
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -119,7 +122,7 @@ const scenario = <A>(
       )
       const runner = yield* AgentLoop.pipe(Effect.provide(Layer.provide(agentLoopLayer, services)))
       const app = Layer.provideMerge(
-        Layer.provide(agentsLayer(runner), sessionsLayer(sessionPersistence(), { now: () => 1 })),
+        Layer.provide(agentsLayer(runner), sessionsLayer(persistence, { now: () => 1 })),
         Layer.succeed(Hooks, hooks),
       )
       return yield* Effect.provide(
@@ -251,6 +254,95 @@ describe('agent loop', () => {
     expect(eventTypes).toContain('tool/result')
     expect(eventTypes.indexOf('tool/call')).toBeLessThan(eventTypes.indexOf('tool/result'))
     expect(reason(events)).toEqual([{ kind: 'completed' }])
+  })
+
+  test('does not send a request whose log is not durable', async () => {
+    let requests = 0
+    const counted =
+      (script: Script): Script =>
+      () => {
+        requests += 1
+        return script()
+      }
+    const events = await scenario(
+      [counted(chunks(textTurn('never sent')))],
+      (ctx) =>
+        Effect.gen(function* () {
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+      sessionPersistence(() =>
+        Effect.fail(new SessionError({ code: 'persistence', message: 'log is not durable' })),
+      ),
+    )
+
+    expect(requests).toBe(0)
+    expect(reason(events)).toEqual([
+      {
+        kind: 'error',
+        failure: { _tag: 'LlmFailure', code: 'PROVIDER', message: 'the turn failed' },
+      },
+    ])
+  })
+
+  test('does not run a tool whose call is not durable', async () => {
+    let executed = 0
+    const poke: ToolDefinition<{}, { readonly ok: boolean }> = {
+      name: 'poke',
+      description: 'Counts a side effect',
+      parameters: Schema.Struct({}),
+      output: {
+        schema: Schema.Struct({ ok: Schema.Boolean }),
+        render: () => [{ type: 'text', text: 'poked' }],
+      },
+      execute: () =>
+        Effect.sync(() => {
+          executed += 1
+          return { ok: true }
+        }),
+    }
+    let flushes = 0
+    const failSecond = () =>
+      Effect.suspend(() => {
+        flushes += 1
+        return flushes === 1
+          ? Effect.void
+          : Effect.fail(new SessionError({ code: 'persistence', message: 'log is not durable' }))
+      })
+    const events = await scenario(
+      [
+        chunks([
+          {
+            type: 'block-end',
+            index: 0,
+            block: { type: 'tool-call', id: 'c1', name: 'poke', arguments: '{}' },
+          },
+          { type: 'finish', kind: 'tool-calls' },
+        ]),
+      ],
+      (ctx) =>
+        Effect.gen(function* () {
+          yield* ctx.tools.register(poke)
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+      sessionPersistence(failSecond),
+    )
+
+    // The request is allowed once the log is durable; the call is appended after it.
+    expect(flushes).toBe(2)
+    expect(executed).toBe(0)
+    expect(types(events)).toContain('tool/call')
+    expect(reason(events)).toEqual([
+      {
+        kind: 'error',
+        failure: { _tag: 'LlmFailure', code: 'PROVIDER', message: 'the turn failed' },
+      },
+    ])
   })
 
   test('a concluding tool ends the turn without another step', async () => {
