@@ -1,8 +1,9 @@
 import { forkSeed } from '@jozo-harness/session'
 import { childAnswerOf } from './child-answer.ts'
+import type { StructuredOutputs } from './structured-output.ts'
 import { delegationRefusal, eventsOfAgent } from './delegation.ts'
 import { Schema, Effect } from 'effect'
-import type { AgentsShape } from '@jozo-harness/agent'
+import type { Agent, AgentsShape } from '@jozo-harness/agent'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
 
 const Parameters = Schema.Struct({
@@ -34,6 +35,12 @@ const Parameters = Schema.Struct({
         'The named agent preset the child runs under. It has to be one the profile allows, and leaving it out takes the profile default.',
     }),
   ),
+  outputSchema: Schema.optionalKey(
+    Schema.JsonObject.annotate({
+      description:
+        'A JSON Schema the child has to answer with through structured_output. The result then carries the checked value; a child that never reports fails the call.',
+    }),
+  ),
 })
 
 /** The route a child runs on: the one asked for, checked, or this agent's own. */
@@ -54,6 +61,8 @@ export type SubagentArgs = Schema.Schema.Type<typeof Parameters>
 export interface SubagentValue {
   readonly sessionId: string
   readonly text: string
+  /** Present when the caller asked for an outputSchema and the child reported in it. */
+  readonly structured?: { readonly value: unknown }
 }
 
 /**
@@ -73,6 +82,11 @@ export interface SubagentHost {
     readonly allowed: ReadonlyArray<string>
     readonly default?: string
   }
+  /**
+   * Where a child's structured report is kept between the call that asks for it
+   * and the answer the parent reads. A host without it refuses outputSchema.
+   */
+  readonly outputs?: StructuredOutputs
 }
 
 /** The preset a child runs under: the allowed one it was given, or the host's default. */
@@ -90,6 +104,97 @@ const presetFor = (
   return asked
 }
 
+/** Starts the child the arguments describe, with the route and preset already checked. */
+const startChild = (
+  agents: AgentsShape,
+  args: SubagentArgs,
+  context: { readonly sessionId: string; readonly cwd: string },
+  route: string,
+  preset: string | undefined,
+): Effect.Effect<Agent, ToolError> =>
+  agents
+    .create({
+      cwd: args.cwd ?? context.cwd,
+      options: { route, ...(preset === undefined ? {} : { preset }) },
+      seed: args.context === 'fresh' ? [] : forkSeed(eventsOfAgent(agents, context.sessionId)),
+      parent: context.sessionId,
+    })
+    .pipe(
+      Effect.mapError(
+        () => new ToolError({ code: 'execution', message: 'cannot start a child agent' }),
+      ),
+    )
+
+/** Refuses a structured request this host cannot honour before a child starts. */
+const structuredRefusal = (
+  args: SubagentArgs,
+  outputs: StructuredOutputs | undefined,
+): ToolError | undefined => {
+  if (args.outputSchema === undefined) return undefined
+  if (outputs === undefined) {
+    return new ToolError({
+      code: 'execution',
+      message: 'this host cannot take a structured report',
+    })
+  }
+  if (args.task === undefined) {
+    return new ToolError({
+      code: 'invalid-arguments',
+      message: 'an outputSchema needs a task, because an idle child has nothing to report',
+    })
+  }
+  return undefined
+}
+
+/** The task the child reads, with the shape it owes spelled out when one was asked for. */
+const taskFor = (task: string, schema: Schema.JsonObject | undefined): string =>
+  schema === undefined
+    ? task
+    : task +
+      '\n\nWhen the task is done, call structured_output with a value that matches this JSON Schema:\n' +
+      JSON.stringify(schema)
+
+/** Sets the schema on the child's slot when the caller asked for one. */
+const expectReport = (
+  outputs: StructuredOutputs | undefined,
+  schema: Schema.JsonObject | undefined,
+  childId: string,
+): ToolError | undefined => {
+  if (outputs === undefined || schema === undefined) return undefined
+  return outputs.expect(childId, schema)
+}
+
+/** Runs the task and turns what the child reported into the value the parent reads. */
+const runTask = (
+  child: Agent,
+  task: string,
+  schema: Schema.JsonObject | undefined,
+  outputs: StructuredOutputs | undefined,
+): Effect.Effect<SubagentValue, ToolError> =>
+  Effect.gen(function* () {
+    yield* child
+      .followup({ text: taskFor(task, schema), source: 'user' })
+      .pipe(
+        Effect.mapError(
+          () => new ToolError({ code: 'execution', message: 'the child agent took no message' }),
+        ),
+      )
+    yield* child.whenIdle
+    const text = childAnswerOf(child)
+    if (schema === undefined) return { sessionId: child.id, text }
+    const report = outputs?.take(child.id)
+    if (report !== undefined) return { sessionId: child.id, text, structured: report }
+    return yield* Effect.fail(
+      new ToolError({
+        code: 'execution',
+        message:
+          'the child finished without a structured report: ' +
+          child.id +
+          (text === '' ? '' : ' (it said: ' + text + ')'),
+      }),
+    )
+  })
+
 export const makeSubagentTool = (
   host: SubagentHost,
 ): ToolDefinition<SubagentArgs, SubagentValue> => {
@@ -100,7 +205,11 @@ export const makeSubagentTool = (
       "Starts a child agent with one task and returns what it said, or starts it with no task and leaves it idle for send_message. The child runs on this agent's route unless another one is named, and starts from this conversation (fork) or from nothing (fresh).",
     parameters: Parameters,
     output: {
-      schema: Schema.Struct({ sessionId: Schema.String, text: Schema.String }),
+      schema: Schema.Struct({
+        sessionId: Schema.String,
+        text: Schema.String,
+        structured: Schema.optionalKey(Schema.Struct({ value: Schema.Unknown })),
+      }),
       // The session id rides along, so the parent can send the child more work or wait for it.
       render: (_args, value) => [
         {
@@ -109,6 +218,9 @@ export const makeSubagentTool = (
             (value.text === ''
               ? '(the child is idle; send it work with send_message)'
               : value.text) +
+            (value.structured === undefined
+              ? ''
+              : '\n\n[structured report: ' + JSON.stringify(value.structured.value) + ']') +
             '\n\n[child session: ' +
             value.sessionId +
             ']',
@@ -123,30 +235,14 @@ export const makeSubagentTool = (
         if (route instanceof ToolError) return yield* Effect.fail(route)
         const preset = presetFor(args.preset, host.presets)
         if (preset instanceof ToolError) return yield* Effect.fail(preset)
-        const child = yield* agents
-          .create({
-            cwd: args.cwd ?? context.cwd,
-            options: { route, ...(preset === undefined ? {} : { preset }) },
-            seed:
-              args.context === 'fresh' ? [] : forkSeed(eventsOfAgent(agents, context.sessionId)),
-            parent: context.sessionId,
-          })
-          .pipe(
-            Effect.mapError(
-              () => new ToolError({ code: 'execution', message: 'cannot start a child agent' }),
-            ),
-          )
+        const outputs = host.outputs
+        const unhonoured = structuredRefusal(args, outputs)
+        if (unhonoured !== undefined) return yield* Effect.fail(unhonoured)
+        const child = yield* startChild(agents, args, context, route, preset)
+        const refusedReport = expectReport(outputs, args.outputSchema, child.id)
+        if (refusedReport !== undefined) return yield* Effect.fail(refusedReport)
         if (args.task === undefined) return { sessionId: child.id, text: '' }
-        yield* child
-          .followup({ text: args.task, source: 'user' })
-          .pipe(
-            Effect.mapError(
-              () =>
-                new ToolError({ code: 'execution', message: 'the child agent took no message' }),
-            ),
-          )
-        yield* child.whenIdle
-        return { sessionId: child.id, text: childAnswerOf(child) }
+        return yield* runTask(child, args.task, args.outputSchema, outputs)
       }),
   }
 }

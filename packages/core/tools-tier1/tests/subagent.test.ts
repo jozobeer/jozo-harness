@@ -10,7 +10,7 @@ import {
 } from '@jozo-harness/tools'
 import { Context, Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
-import { makeSubagentTool } from '../src/index.ts'
+import { makeStructuredOutputs, makeSubagentTool, type StructuredOutputs } from '../src/index.ts'
 
 const childEvents = (text: string): Array<SessionEvent> =>
   [
@@ -40,6 +40,8 @@ interface Created {
 interface FakeAgentsOptions {
   readonly depth?: number
   readonly events?: ReadonlyArray<SessionEvent>
+  readonly outputs?: StructuredOutputs
+  readonly report?: unknown
 }
 
 const fakeAgents = (
@@ -73,6 +75,9 @@ const fakeAgents = (
           Effect.sync(() => {
             const last = seen[seen.length - 1]
             if (last !== undefined) seen[seen.length - 1] = { ...last, task: message.text }
+            if (options.outputs !== undefined && options.report !== undefined) {
+              options.outputs.report('child-1', options.report)
+            }
           }),
         whenIdle: Effect.void,
       } as unknown as Agent
@@ -289,4 +294,91 @@ describe('subagent tool', () => {
     // forkSeed drops the trailing instruction and keeps what the caller had done.
     expect(seen[0]?.seed?.map((event) => event.type)).toEqual(['assistant/message'])
   })
+})
+test('a child answers through structured_output and the parent gets the checked value', async () => {
+  const seen: Array<Created> = []
+  const outputs = makeStructuredOutputs()
+  const result = await Effect.runPromise(
+    call(
+      makeSubagentTool({
+        agents: fakeAgents(seen, 'done', { outputs, report: { summary: 'done', score: 3 } }),
+        route: 'stub/model',
+        outputs,
+      }),
+      {
+        task: 'look around',
+        outputSchema: {
+          type: 'object',
+          properties: { summary: { type: 'string' }, score: { type: 'integer' } },
+          required: ['summary'],
+        },
+      },
+    ),
+  )
+
+  expect(result?.isError).toBe(false)
+  expect(result?.value).toEqual({
+    sessionId: 'child-1',
+    text: 'done',
+    structured: { value: { summary: 'done', score: 3 } },
+  })
+  // The child cannot see the schema in the declaration, so the task carries it.
+  expect(seen[0]?.task).toContain('structured_output')
+  expect(seen[0]?.task).toContain('"summary"')
+  expect(JSON.stringify(result?.content)).toContain('structured report')
+})
+
+test('a child that never reports fails the call instead of passing as done', async () => {
+  const seen: Array<Created> = []
+  const outputs = makeStructuredOutputs()
+  const result = await Effect.runPromise(
+    call(
+      makeSubagentTool({
+        agents: fakeAgents(seen, 'I think it is fine', { outputs }),
+        route: 'stub/model',
+        outputs,
+      }),
+      {
+        task: 'look around',
+        outputSchema: { type: 'object', properties: { ok: { type: 'boolean' } } },
+      },
+    ),
+  )
+
+  expect(result?.isError).toBe(true)
+  expect(JSON.stringify(result?.content)).toContain('without a structured report')
+  expect(JSON.stringify(result?.content)).toContain('I think it is fine')
+})
+
+test('a host that cannot take reports refuses the schema before a child starts', async () => {
+  const seen: Array<Created> = []
+  const result = await Effect.runPromise(
+    call(makeSubagentTool({ agents: fakeAgents(seen, 'ok'), route: 'stub/model' }), {
+      task: 'look around',
+      outputSchema: { type: 'object', properties: {} },
+    }),
+  )
+
+  expect(result?.isError).toBe(true)
+  expect(JSON.stringify(result?.content)).toContain('cannot take a structured report')
+  expect(seen).toEqual([])
+})
+
+test('a schema needs a task, because an idle child has nothing to report', async () => {
+  const seen: Array<Created> = []
+  const outputs = makeStructuredOutputs()
+  const result = await Effect.runPromise(
+    call(
+      makeSubagentTool({
+        agents: fakeAgents(seen, '', { outputs }),
+        route: 'stub/model',
+        outputs,
+      }),
+      { outputSchema: { type: 'object', properties: {} } },
+    ),
+  )
+
+  expect(result?.isError).toBe(true)
+  expect(JSON.stringify(result?.content)).toContain('needs a task')
+  expect(seen).toEqual([])
 })

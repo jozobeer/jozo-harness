@@ -14,6 +14,8 @@ import {
   makeJobs,
   makePluginTool,
   makeScheduleTool,
+  makeStructuredOutputs,
+  makeStructuredOutputTool,
   makeSubagentTool,
   makeTeamTool,
   makeWebSearchTool,
@@ -45,6 +47,7 @@ describe('tier 1 tool schemas', () => {
       ...jobTools(jobs),
       makeWorkingDirectoryTool({ root: () => root, change: () => Effect.void }),
       makeSubagentTool({ agents, route: 'stub/model' }),
+      makeStructuredOutputTool(makeStructuredOutputs()),
       ...agentTools(agents),
       makeScheduleTool({
         events: () => [],
