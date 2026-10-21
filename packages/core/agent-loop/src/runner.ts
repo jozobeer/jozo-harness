@@ -797,6 +797,26 @@ const agentLoopEffect = (
           outcomes.map((outcome) => outcome.result),
           pending,
         )
+        // The log records what this step's tools added for the next request, in
+        // the order they added it. The source is one word from the log's own list:
+        // "inject" already covers text that enters the conversation from something
+        // other than the user, which is what a tool's note is, and a tool-specific
+        // word would split a log read by source.
+        yield* Effect.forEach(
+          outcomes,
+          (outcome) =>
+            Effect.forEach(
+              outcome.context,
+              (text) =>
+                append(agent, 'tool/context', {
+                  callId: outcome.result.callId,
+                  text,
+                  source: 'inject',
+                }),
+              { discard: true },
+            ),
+          { discard: true },
+        )
         return {
           concluded: outcomes.some((outcome) => outcome.result.concludesTurn === true),
           context: outcomes.flatMap((outcome) => outcome.context),

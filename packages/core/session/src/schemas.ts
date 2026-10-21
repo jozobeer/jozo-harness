@@ -155,6 +155,14 @@ const catalog = new Map<string, Schema.Schema<unknown>>([
     }),
   ],
   [
+    'tool/context',
+    Schema.Struct({
+      callId: Schema.String,
+      text: Schema.String,
+      source: Schema.Literals(USER_MESSAGE_SOURCES),
+    }),
+  ],
+  [
     'job/started',
     Schema.Struct({
       id: Schema.String,
@@ -189,6 +197,7 @@ registerLogOnlySessionEvents([
   'llm/retry',
   'llm/retry-started',
   'tool/call',
+  'tool/context',
   'job/started',
   'job/ended',
 ])

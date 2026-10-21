@@ -97,6 +97,25 @@ describe('run_code', () => {
     expect(textOf(outcome.content)).toContain('return: "hi"')
   })
 
+  test('a nested tool that adds context carries it to the outer result in call order', async () => {
+    const notes: ReadonlyArray<ReadonlyArray<string>> = [['first note'], ['second note']]
+    let calls = 0
+    const tool = makeRunCodeTool(
+      host(() => {
+        const note = notes[calls] ?? []
+        calls += 1
+        return Effect.succeed({ ...ok('done', {}), context: note })
+      }),
+    )
+
+    const outcome = await run(
+      tool,
+      "await tools.echo({ text: 'one' })\nawait tools.echo({ text: 'two' })\nreturn 'done'",
+    )
+
+    expect(outcome.context).toEqual(['first note', 'second note'])
+  })
+
   test('a nested failure reaches the program as a thrown error', async () => {
     const tool = makeRunCodeTool(host(() => Effect.succeed(failed('denied: no'))))
 
