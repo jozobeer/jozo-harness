@@ -32,6 +32,8 @@ export interface TraceTool {
   readonly status: TraceToolStatus
   /** The result's one-line summary; '' until it arrives. */
   readonly result: string
+  /** The code a failed call logged; '' when it succeeded or its outcome is unknown. */
+  readonly errorCode: string
   readonly output: string
   /** The images the result carried; empty for a text-only result. */
   readonly images: ReadonlyArray<TraceImage>
@@ -240,6 +242,7 @@ const toolOf = (event: UiSessionEvent): TraceTool => ({
   endedAt: undefined,
   status: 'running',
   result: '',
+  errorCode: '',
   output: '',
   images: [],
   diffs: [],
@@ -297,6 +300,7 @@ const settleTool = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => {
     endedAt: event.time,
     status: fieldOf(event.data, 'isError') === true ? 'error' : 'done',
     result: textOf(event.data, 'summary'),
+    errorCode: textOf(fieldOf(event.data, 'error'), 'code'),
     output: partsOf(fieldOf(event.data, 'content'), 'text'),
     images: imagesOf(fieldOf(event.data, 'content')),
     diffs: diffsOf(fieldOf(event.data, 'diffs')),

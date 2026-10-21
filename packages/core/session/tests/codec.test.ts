@@ -78,6 +78,17 @@ describe('decodeSessionEvent', () => {
     expect(await decode(throughJson(sessionEvent))).toEqual(sessionEvent)
   })
 
+  test('round-trips the code of a failed call', async () => {
+    const sessionEvent = event(2, 'tool/result', {
+      callId: 'c1',
+      isError: true,
+      content: [{ type: 'text', text: 'timed out after 10ms' }],
+      error: { name: 'TimeoutError', code: 'timeout' },
+    })
+
+    expect(await decode(throughJson(sessionEvent))).toEqual(sessionEvent)
+  })
+
   test('reads a result written before diffs existed', async () => {
     const sessionEvent = event(2, 'tool/result', {
       callId: 'c1',

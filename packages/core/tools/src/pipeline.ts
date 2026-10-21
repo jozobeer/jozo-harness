@@ -6,6 +6,8 @@ import {
   type ToolCallOutcome,
   type ToolCallRequest,
   type ToolDefinition,
+  type ToolErrorCode,
+  type ToolErrorInfo,
   type ToolExecution,
   type ToolExecutionResult,
   type ToolGuard,
@@ -14,14 +16,40 @@ import type { FileDiff } from './diffs.ts'
 
 type AnyTool = ToolDefinition<any, any>
 
-export const errorResult = (message: string): ToolExecutionResult => ({
-  isError: true,
-  content: [{ type: 'text', text: message }],
+/** Names a failure the pipeline decided, so its result keeps a code to route on. */
+export const toolErrorInfo = (code: ToolErrorCode, reason?: string): ToolErrorInfo => ({
+  name: 'ToolError',
+  code,
+  ...(reason === undefined ? {} : { reason }),
 })
 
-const describeCause = (cause: Cause.Cause<unknown>): string => {
+export const errorResult = (message: string, error: ToolErrorInfo): ToolExecutionResult => ({
+  isError: true,
+  content: [{ type: 'text', text: message }],
+  error,
+})
+
+/**
+ * Reads a cause as the log keeps it: the message the model sees, and the kind
+ * of failure. The code comes from the error itself, so a timeout or a tool's
+ * own denial is not flattened into the text.
+ */
+const describeFailure = (
+  cause: Cause.Cause<unknown>,
+): { readonly message: string; readonly error: ToolErrorInfo } => {
   const first = Cause.prettyErrors(cause)[0]
-  return first?.message ?? 'tool execution failed'
+  const message = first?.message ?? 'tool execution failed'
+  const failure = Cause.findErrorOption(cause)
+  if (Option.isSome(failure)) {
+    const error = failure.value
+    if (error instanceof ToolError) {
+      return { message, error: { name: 'ToolError', code: error.code } }
+    }
+    if (Cause.isTimeoutError(error)) {
+      return { message, error: { name: 'TimeoutError', code: 'timeout' } }
+    }
+  }
+  return { message, error: { name: first?.name ?? 'UnknownError', code: 'execution' } }
 }
 
 const formatViolations = SchemaIssue.makeFormatterStandardSchemaV1()
@@ -82,7 +110,10 @@ const runBody = (tool: AnyTool, exec: ToolExecution): Effect.Effect<ToolExecutio
       content: tool.output.render(exec.args, value),
       value,
     })),
-    Effect.catchCause((cause) => Effect.succeed(errorResult(describeCause(cause)))),
+    Effect.catchCause((cause) => {
+      const failure = describeFailure(cause)
+      return Effect.succeed(errorResult(failure.message, failure.error))
+    }),
   )
 
 /**
@@ -112,12 +143,20 @@ const checkPolicy = (
   decision: PreExecuteDecision | undefined,
 ): Effect.Effect<ToolExecutionResult | undefined> =>
   Effect.gen(function* () {
-    if (decision?.kind === 'deny') return errorResult(`denied: ${decision.reason}`)
-    if (decision?.kind === 'ask') return errorResult(`approval required: ${decision.reason}`)
+    if (decision?.kind === 'deny')
+      return errorResult(`denied: ${decision.reason}`, toolErrorInfo('denied', decision.reason))
+    if (decision?.kind === 'ask')
+      return errorResult(
+        `approval required: ${decision.reason}`,
+        toolErrorInfo('denied', decision.reason),
+      )
     for (const guard of guards) {
       const guardDecision = yield* guard.check(exec)
       if (guardDecision.kind === 'deny')
-        return errorResult(`denied by ${guard.name}: ${guardDecision.reason}`)
+        return errorResult(
+          `denied by ${guard.name}: ${guardDecision.reason}`,
+          toolErrorInfo('denied', guardDecision.reason),
+        )
     }
     return undefined
   })
@@ -147,10 +186,12 @@ export const executeTool = (
     let concluded = false
     const result = yield* Effect.gen(function* () {
       const parsed = yield* Effect.match(parseArguments(tool, request.arguments), {
-        onFailure: (error: ToolError) => ({ ok: false as const, message: error.message }),
+        onFailure: (error: ToolError) => ({ ok: false as const, error }),
         onSuccess: (args: unknown) => ({ ok: true as const, args }),
       })
-      if (!parsed.ok) return errorResult(parsed.message)
+      if (!parsed.ok) {
+        return errorResult(parsed.error.message, toolErrorInfo(parsed.error.code))
+      }
 
       const exec: ToolExecution = {
         callId: request.callId,
@@ -185,7 +226,12 @@ export const executeTool = (
       const marked =
         concluded && !settled.isError ? { ...settled, concludesTurn: true as const } : settled
       return collected.length === 0 ? marked : { ...marked, diffs: collected }
-    }).pipe(Effect.catchCause((cause) => Effect.succeed(errorResult(describeCause(cause)))))
+    }).pipe(
+      Effect.catchCause((cause) => {
+        const failure = describeFailure(cause)
+        return Effect.succeed(errorResult(failure.message, failure.error))
+      }),
+    )
 
     yield* hooks.emit('tools/result', result)
     return result

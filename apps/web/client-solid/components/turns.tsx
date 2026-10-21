@@ -85,6 +85,20 @@ const ToolImage = (props: { image: TraceImage }) => {
   )
 }
 
+/** The one line a failed card adds for the code the log kept, before the raw output. */
+const errorLineOf = (code: string): string => {
+  switch (code) {
+    case 'timeout':
+      return 'timeout: the call ran past its limit'
+    case 'denied':
+      return 'denied: policy or approval refused the call'
+    case 'invalid-arguments':
+      return 'invalid arguments: the tool never ran'
+    default:
+      return code
+  }
+}
+
 const Tool = (props: { tool: TraceTool }) => (
   <details class={'tool-card ' + props.tool.status} open={props.tool.status === 'error'}>
     <summary class="tool-line">
@@ -100,6 +114,9 @@ const Tool = (props: { tool: TraceTool }) => (
         {props.tool.endedAt === undefined ? '…' : spanOf(props.tool.endedAt - props.tool.startedAt)}
       </span>
     </summary>
+    <Show when={props.tool.errorCode !== ''}>
+      <p class="tool-error">{errorLineOf(props.tool.errorCode)}</p>
+    </Show>
     <Show when={props.tool.output !== ''}>
       <pre class="tool-output">
         <Linkify text={plainText(props.tool.output)} />

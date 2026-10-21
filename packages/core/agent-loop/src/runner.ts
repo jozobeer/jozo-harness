@@ -692,6 +692,7 @@ const agentLoopEffect = (
             summary: resultSummary(shown.content),
           }).summary,
           ...(shown.diffs === undefined ? {} : { diffs: shown.diffs }),
+          ...(shown.error === undefined ? {} : { error: shown.error }),
           ...(shown.concludesTurn === true ? { concludesTurn: true as const } : {}),
         }
       })

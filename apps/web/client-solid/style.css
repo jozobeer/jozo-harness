@@ -490,6 +490,12 @@
     font-size: var(--text-xs);
   }
 
+  .tool-card .tool-error {
+    margin: 4px 0 4px 4.1em;
+    color: var(--error);
+    font-size: var(--text-xs);
+  }
+
   .answer {
     font-size: var(--text-base);
     line-height: 1.7;

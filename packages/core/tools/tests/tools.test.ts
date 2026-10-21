@@ -128,6 +128,7 @@ describe('call pipeline', () => {
 
     expect(outcome.isError).toBe(true)
     expect(JSON.stringify(outcome.content)).toContain('missing')
+    expect(outcome.error).toEqual({ name: 'ToolError', code: 'unknown-tool' })
   })
 
   test('invalid arguments become an error outcome without executing', async () => {
@@ -153,6 +154,7 @@ describe('call pipeline', () => {
 
     expect(outcome.isError).toBe(true)
     expect(executed).toBe(0)
+    expect(outcome.error).toEqual({ name: 'ToolError', code: 'invalid-arguments' })
   })
 
   test('an argument error names the parameter that is missing', async () => {
@@ -212,6 +214,27 @@ describe('call pipeline', () => {
 
     expect(outcome.isError).toBe(true)
     expect(JSON.stringify(outcome.content)).toContain('tool exploded')
+    expect(outcome.error).toEqual({ name: 'Error', code: 'execution' })
+  })
+
+  test('a failed call carries the code of the tool error', async () => {
+    const tools = makeTools(makeHooks())
+    const broken: EchoTool = {
+      ...echo,
+      execute: () => Effect.fail(new ToolError({ code: 'execution', message: 'disk is gone' })),
+    }
+
+    const outcome = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* tools.register(broken)
+          return yield* tools.call(request(JSON.stringify({ text: 'x' })))
+        }),
+      ),
+    )
+
+    expect(outcome.isError).toBe(true)
+    expect(outcome.error).toEqual({ name: 'ToolError', code: 'execution' })
   })
 })
 
@@ -294,6 +317,7 @@ describe('policy', () => {
 
     expect(outcome.isError).toBe(true)
     expect(JSON.stringify(outcome.content)).toContain('policy says no')
+    expect(outcome.error).toEqual({ name: 'ToolError', code: 'denied', reason: 'policy says no' })
     expect(executed).toBe(0)
     expect(seen).toEqual([outcome])
   })
@@ -315,6 +339,7 @@ describe('policy', () => {
 
     expect(outcome.isError).toBe(true)
     expect(JSON.stringify(outcome.content)).toContain('needs a human')
+    expect(outcome.error).toEqual({ name: 'ToolError', code: 'denied', reason: 'needs a human' })
   })
 
   test('a guard cannot be bypassed by a prepended allow', async () => {
@@ -338,6 +363,7 @@ describe('policy', () => {
 
     expect(outcome.isError).toBe(true)
     expect(JSON.stringify(outcome.content)).toContain('guarded')
+    expect(outcome.error).toEqual({ name: 'ToolError', code: 'denied', reason: 'guarded' })
   })
 
   test('an abstaining guard lets execution continue', async () => {

@@ -1,5 +1,5 @@
 import type { Emit } from '@jozo-harness/kernel'
-import type { FileDiff } from '@jozo-harness/tools'
+import type { FileDiff, ToolErrorInfo } from '@jozo-harness/tools'
 import type {
   AssistantStreamRecord,
   ContentBlock,
@@ -136,6 +136,12 @@ export interface SessionEventMap {
      * prompt.
      */
     readonly diffs?: ReadonlyArray<FileDiff>
+    /**
+     * Why the call failed, as a code rather than only text. Log-only for the
+     * same reason as `diffs`: the model history reads `content` alone. Absent
+     * when the call never finished, since an unknown outcome is not a failure.
+     */
+    readonly error?: ToolErrorInfo
     /**
      * The call ended the turn it ran in. The model history ignores it; the loop
      * reads it to close the turn without another request.

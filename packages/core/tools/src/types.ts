@@ -1,21 +1,44 @@
-import { Data } from 'effect'
-import type { Effect, Schema } from 'effect'
+import { Data, Schema } from 'effect'
+import type { Effect } from 'effect'
 import type { ContentBlock } from '@jozo-harness/llm'
 import type { DiffRecorder, FileDiff } from './diffs.ts'
 import type { SpillWriter } from './spill.ts'
 
-export type ToolErrorCode =
-  | 'invalid-arguments'
-  | 'unknown-tool'
-  | 'denied'
-  | 'duplicate-tool'
-  | 'execution'
+/** The codes a tool body gives its own failure. The log schema shares this vocabulary. */
+export const TOOL_ERROR_CODES = [
+  'invalid-arguments',
+  'unknown-tool',
+  'denied',
+  'duplicate-tool',
+  'execution',
+] as const
+
+export type ToolErrorCode = (typeof TOOL_ERROR_CODES)[number]
 
 /** A tool failure. The pipeline turns every failure into a model-visible error result. */
 export class ToolError extends Data.TaggedError('ToolError')<{
   readonly code: ToolErrorCode
   readonly message: string
 }> {}
+
+/**
+ * How a call failed, recorded beside the model-facing text. `timeout` belongs to
+ * the pipeline's deadline rather than a tool body, so it stays out of
+ * {@link ToolErrorCode}.
+ */
+export interface ToolErrorInfo {
+  /** The error that failed the call: `ToolError`, `TimeoutError`, or a defect's name. */
+  readonly name: string
+  readonly code: ToolErrorCode | 'timeout'
+  /** A short reason the message also carries, for a reader that shows the code alone. */
+  readonly reason?: string
+}
+
+export const ToolErrorInfoSchema: Schema.Schema<ToolErrorInfo> = Schema.Struct({
+  name: Schema.String,
+  code: Schema.Literals([...TOOL_ERROR_CODES, 'timeout']),
+  reason: Schema.optionalKey(Schema.String),
+})
 
 /** What a tool may use besides its Effect context. Cancel arrives as a Fiber interrupt. */
 export interface ToolRunContext {
@@ -65,6 +88,11 @@ export interface ToolExecutionResult {
   readonly value?: unknown
   /** What the call changed in the files it wrote, as it ran. */
   readonly diffs?: ReadonlyArray<FileDiff>
+  /**
+   * Why the call failed. A reader routes on the code instead of parsing the
+   * text; a call whose outcome is unknown, rather than failed, carries none.
+   */
+  readonly error?: ToolErrorInfo
   /**
    * The tool asked the loop to end the turn here. Only a successful result can
    * carry it: a failure still needs the next request to see what went wrong.

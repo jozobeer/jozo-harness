@@ -2,7 +2,7 @@ import { Hooks, type HookRegistry } from '@jozo-harness/kernel'
 import type { ToolSchema } from '@jozo-harness/llm'
 import { Context, Effect, Layer, Option, Schema } from 'effect'
 import type { Scope } from 'effect'
-import { errorResult, executeTool, tryDecodeArguments } from './pipeline.ts'
+import { errorResult, executeTool, toolErrorInfo, tryDecodeArguments } from './pipeline.ts'
 import { callSummary } from './summary.ts'
 import {
   ToolError,
@@ -96,9 +96,15 @@ export function makeTools(hooks: HookRegistry): ToolRegistry {
 
     call: (request) => {
       const tool = registered.get(request.tool)
-      if (tool === undefined) return Effect.succeed(errorResult(`unknown tool: ${request.tool}`))
+      if (tool === undefined) {
+        return Effect.succeed(
+          errorResult(`unknown tool: ${request.tool}`, toolErrorInfo('unknown-tool')),
+        )
+      }
       if (!allowed(request.tool)) {
-        return Effect.succeed(errorResult('tool not allowed here: ' + request.tool))
+        return Effect.succeed(
+          errorResult('tool not allowed here: ' + request.tool, toolErrorInfo('denied')),
+        )
       }
       return executeTool(hooks, tool, request, [...guards])
     },
