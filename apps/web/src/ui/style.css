@@ -1436,6 +1436,28 @@ details[open] > summary.tool-head .tool-state::after {
   border-color: color-mix(in srgb, var(--error) 45%, var(--line));
 }
 
+.tool-page {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--s1) 0;
+}
+
+.tool-page-frame {
+  width: 100%;
+  height: 240px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+}
+
+.tool-page-open {
+  align-self: flex-start;
+  color: var(--select);
+  font-size: var(--text-xs);
+  text-underline-offset: 2px;
+}
+
 .tool-image {
   margin: var(--s1) 0;
 }
