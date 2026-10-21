@@ -62,8 +62,8 @@ describe('exit_plan_mode', () => {
 
     expect(left).toEqual(['left'])
     expect(result?.value).toMatchObject({ left: true })
-    // Approval has nothing left to ask the model: the call closes the turn.
-    expect(result?.concludesTurn).toBe(true)
+    // The turn goes on so the model can act on the plan it just had approved.
+    expect(result?.concludesTurn).toBeUndefined()
     expect(textOf(result)).toContain('plan mode is over')
     expect(textOf(result)).toContain('1. read the code')
     // The question is the call, and the user is offered the two ways out.
