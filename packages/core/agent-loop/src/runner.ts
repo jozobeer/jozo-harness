@@ -13,6 +13,7 @@ import {
   encodeLlmFailure,
   type ContentBlock,
   type FinishKind,
+  type LlmAdapter,
   type LlmCapabilities,
   type RequestMessage,
   type StreamChunk,
@@ -259,6 +260,72 @@ export const tokenBudgetOf = (
   }
 }
 
+/**
+ * The auxiliary summary call and the checkpoint it earns, built for one routed
+ * model so `/compact` can fold a span from outside the loop. The loop reuses the
+ * same pair through its own route.
+ */
+export const checkpointHelpersFor = (
+  llm: LlmAdapter,
+): {
+  readonly summarize: (
+    envelope: Omit<AgentRequest, 'messages'>,
+    messages: ReadonlyArray<RequestMessage>,
+  ) => Effect.Effect<string>
+  readonly checkpointFor: (
+    envelope: Omit<AgentRequest, 'messages'>,
+    events: ReadonlyArray<SessionEvent>,
+    compact: CompactOptions,
+  ) => Effect.Effect<CompactionCheckpoint | undefined>
+} => {
+  /**
+   * The one auxiliary call that turns the summarized span into words. It reuses
+   * the routed model and the conversation prefix, appends its instruction, and
+   * answers with text only. Anything but a usable summary leaves the log without
+   * a checkpoint: the prune below still bounds the request.
+   */
+  const summarize = (
+    envelope: Omit<AgentRequest, 'messages'>,
+    messages: ReadonlyArray<RequestMessage>,
+  ): Effect.Effect<string> =>
+    llm
+      .stream({
+        provider: envelope.provider,
+        model: envelope.model,
+        params: envelope.params,
+        tools: [],
+        messages: [
+          ...messages,
+          { role: 'user', content: [{ type: 'text', text: COMPACT_SUMMARY_INSTRUCTION }] },
+        ],
+      })
+      .pipe(
+        Stream.runFold(
+          () => '',
+          (text: string, chunk: StreamChunk) =>
+            chunk.type === 'text-delta' ? text + chunk.text : text,
+        ),
+        Effect.map((text) => text.trim()),
+        Effect.catchCause(() => Effect.succeed('')),
+      )
+
+  /** The checkpoint this span earns, or nothing when there is no word for it. */
+  const checkpointFor = (
+    envelope: Omit<AgentRequest, 'messages'>,
+    events: ReadonlyArray<SessionEvent>,
+    compact: CompactOptions,
+  ): Effect.Effect<CompactionCheckpoint | undefined> =>
+    Effect.gen(function* () {
+      const range = summarizableMessages(events, compact)
+      if (range.length === 0) return undefined
+      const bound = messagesWithPrune(range, pruneFor(events, compact))
+      const summary = yield* summarize(envelope, bound)
+      return checkpointOf(range, summary, envelope)
+    })
+
+  return { summarize, checkpointFor }
+}
+
 const agentLoopEffect = (
   config: AgentLoopConfig = {},
 ): Effect.Effect<AgentRunner, never, Hooks | Tools | SystemPrompt | Llm> =>
@@ -267,6 +334,7 @@ const agentLoopEffect = (
     const tools = yield* Tools
     const promptService = yield* SystemPrompt
     const llm = yield* Llm
+    const { checkpointFor } = checkpointHelpersFor(llm)
     // The route is switchable while a session runs, so the budget is read per fold
     // rather than once when the layer is built.
     const budgetFor = (agent: Agent): TokenBudget =>
@@ -420,51 +488,6 @@ const agentLoopEffect = (
      * ones. The price is the token pressure of the request, so a conversation with
      * room left is sent as it is and only one past the threshold is pruned.
      */
-    /**
-     * The one auxiliary call that turns the summarized span into words. It reuses
-     * the routed model and the conversation prefix, appends its instruction, and
-     * answers with text only. Anything but a usable summary leaves the log without
-     * a checkpoint: the prune below still bounds the request.
-     */
-    const summarize = (
-      envelope: Omit<AgentRequest, 'messages'>,
-      messages: ReadonlyArray<RequestMessage>,
-    ): Effect.Effect<string> =>
-      llm
-        .stream({
-          provider: envelope.provider,
-          model: envelope.model,
-          params: envelope.params,
-          tools: [],
-          messages: [
-            ...messages,
-            { role: 'user', content: [{ type: 'text', text: COMPACT_SUMMARY_INSTRUCTION }] },
-          ],
-        })
-        .pipe(
-          Stream.runFold(
-            () => '',
-            (text: string, chunk: StreamChunk) =>
-              chunk.type === 'text-delta' ? text + chunk.text : text,
-          ),
-          Effect.map((text) => text.trim()),
-          Effect.catchCause(() => Effect.succeed('')),
-        )
-
-    /** The checkpoint this span earns, or nothing when there is no word for it. */
-    const checkpointFor = (
-      envelope: Omit<AgentRequest, 'messages'>,
-      events: ReadonlyArray<SessionEvent>,
-      compact: CompactOptions,
-    ): Effect.Effect<CompactionCheckpoint | undefined> =>
-      Effect.gen(function* () {
-        const range = summarizableMessages(events, compact)
-        if (range.length === 0) return undefined
-        const bound = messagesWithPrune(range, pruneFor(events, compact))
-        const summary = yield* summarize(envelope, bound)
-        return checkpointOf(range, summary, envelope)
-      })
-
     /**
      * Folds the history when the meter says it is past the line, or when a provider
      * refused the request and the loop needs the surface to shrink before one more
