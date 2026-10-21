@@ -93,6 +93,8 @@ import {
   makeSubagentTool,
   makeWorkingDirectoryTool,
   makeExitPlanModeTool,
+  makeStructuredOutputs,
+  makeStructuredOutputTool,
   makeGoalTool,
   makeRalphTool,
   DELEGATION_CONTEXT_ORDER,
@@ -470,8 +472,10 @@ const tier1ToolList = (
     // The tools are shared with every child, so a call reads and writes the log
     // of the session that made it, not the root session this run opened.
     const sessionOf = (sessionId: string) => agents.get(sessionId)?.session
+    const outputs = makeStructuredOutputs()
     list.push(
-      makeSubagentTool({ agents, route }),
+      makeSubagentTool({ agents, route, outputs }),
+      makeStructuredOutputTool(outputs),
       ...agentTools(agents),
       makeWorkflowTool({ agents, route }),
       makeTeamTool({
