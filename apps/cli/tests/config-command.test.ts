@@ -102,6 +102,34 @@ describe('jzh config', () => {
     })
   })
 
+  test('sets the port as a number the settings schema accepts', async () => {
+    await withHome(async (env, path) => {
+      const sink = collector()
+
+      const code = await runConfig(['set', 'port', '4310'], sink.io, env)
+
+      expect(sink.errs.join('')).toBe('')
+      expect(code).toBe(0)
+      expect(readFileSync(path, 'utf8')).toContain('port: 4310\n')
+      expect(readFileSync(path, 'utf8')).not.toContain("port: '4310'")
+      const settings = await Effect.runPromise(loadConfigFile(path))
+      expect(settings.port).toBe(4310)
+    })
+  })
+
+  test('refuses a port outside 0..65535', async () => {
+    await withHome(async (env) => {
+      for (const value of ['70000', '-1', '1.5']) {
+        const sink = collector()
+
+        const code = await runConfig(['set', 'port', value], sink.io, env)
+
+        expect(code).toBe(2)
+        expect(sink.errs.join('')).toContain('port takes a whole number between 0 and 65535')
+      }
+    })
+  })
+
   test('sets the search provider and its endpoint', async () => {
     await withHome(async (env, path) => {
       const sink = collector()
@@ -154,7 +182,7 @@ describe('jzh config', () => {
 
       expect(code).toBe(2)
       expect(sink.errs.join('')).toContain(
-        'model, effort, profile, search, deepseekToolsBaseUrl, skills, plugins',
+        'model, effort, profile, port, search, deepseekToolsBaseUrl, skills, plugins',
       )
     })
   })
@@ -212,7 +240,7 @@ describe('jzh config', () => {
       expect(code).toBe(0)
       expect(sink.out.join('')).toContain(path)
       const text = readFileSync(path, 'utf8')
-      for (const key of ['model', 'profile', 'skills', 'plugins']) {
+      for (const key of ['model', 'profile', 'port', 'skills', 'plugins']) {
         expect(text).toContain('# ' + key + ':')
       }
       const settings = await Effect.runPromise(loadConfigFile(path))

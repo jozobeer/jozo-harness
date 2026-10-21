@@ -24,6 +24,7 @@ describe('parseConfigText', () => {
         [
           'model: my-cloud/some-model',
           'profile: repl',
+          'port: 4310',
           'search: deepseek',
           'deepseekToolsBaseUrl: https://example.com/v1/tools',
           'skills:',
@@ -40,11 +41,26 @@ describe('parseConfigText', () => {
 
     expect(config.model).toBe('my-cloud/some-model')
     expect(config.profile).toBe('repl')
+    expect(config.port).toBe(4310)
     expect(config.search).toBe('deepseek')
     expect(config.deepseekToolsBaseUrl).toBe('https://example.com/v1/tools')
     expect(config.skills).toEqual(['/tmp/skills'])
     expect(config.plugins?.length).toBe(1)
     expect(config.plugins?.[0]?.id).toBe('safety')
+  })
+
+  test('refuses a port outside 0..65535 or not a whole number', async () => {
+    const messageOf = async (text: string): Promise<string> =>
+      await Effect.runPromise(
+        Effect.match(parseConfigText(text), {
+          onFailure: (error) => error.message,
+          onSuccess: () => 'parsed',
+        }),
+      )
+
+    expect(await messageOf('port: 70000')).toContain('between 0 and 65535')
+    expect(await messageOf('port: -1')).toContain('between 0 and 65535')
+    expect(await messageOf('port: 1.5')).toContain('integer')
   })
 
   test('reports invalid YAML as a config error', async () => {

@@ -53,7 +53,7 @@ describe('parseArgs', () => {
       'https://myhost.tailnet.ts.net',
     ])
     expect(parsed.web).toBe(true)
-    expect(parsed.port).toBe(4310)
+    expect(parsed.portFlag).toBe(4310)
     expect(parsed.publicUrl).toEqual({
       host: 'myhost.tailnet.ts.net',
       origin: 'https://myhost.tailnet.ts.net',
@@ -95,6 +95,9 @@ describe('parseArgs', () => {
     // No effort anywhere: the provider chooses.
     expect(parsed.effort).toBe('')
     expect(parsed.effortFlag).toBeUndefined()
+    // No port anywhere, and 0 is a port someone may ask for.
+    expect(parsed.portFlag).toBeUndefined()
+    expect(parseArgs(['web', '--port', '0']).portFlag).toBe(0)
   })
 })
 
@@ -144,6 +147,29 @@ describe('main', () => {
     expect(text).toContain(
       'effort: not set — default (no effort is named, so the provider chooses)',
     )
+  })
+
+  test('--dump-config resolves the web port and names what decided it', async () => {
+    const dir = join(import.meta.dirname, '.tmp')
+    await mkdir(dir, { recursive: true })
+    const path = join(dir, `port-${crypto.randomUUID()}.yaml`)
+    await writeFileDeep(path, 'port: 4310\n')
+    const run = async (argv: ReadonlyArray<string>): Promise<string> => {
+      const out: Array<string> = []
+      const code = await Effect.runPromise(
+        main([...argv, '--dump-config', '--config', path], {
+          stdout: (text) => out.push(text),
+          stderr: () => undefined,
+          cwd: '/work',
+        }),
+      )
+      expect(code).toBe(0)
+      return out.join('')
+    }
+
+    expect(await run([])).toContain('port: 4310 — settings (' + path + ')')
+    expect(await run(['--port', '0'])).toContain('port: 0 — flag (the --port on the command line)')
+    await rm(path, { force: true })
   })
 
   test('--patch overlays one row by id', async () => {

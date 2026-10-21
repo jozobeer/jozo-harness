@@ -22,6 +22,7 @@ plugin ごとの config キー、フラグ、環境変数の一覧は `jzh --dum
 | `model` | `provider/model` | 使うルート。`--model` > この値 > 行の `config.model`。ブラウザ UI の席の選択はこの run の中だけのもので、これから開くセッションもその route で始まる（設定ファイルには書かない） |
 | `effort` | provider が読む語 | 推論の強さ。`--effort` > この値 > 行の `config.effort`。未設定なら provider の既定。ブラウザ UI の席は、セッションを開く前ならこの run で次に開くセッションの出発点を選び、開いた後ならそのセッションだけを切り替える（どちらも設定ファイルには書かない） |
 | `profile` | profile 名 | 層2で重ねる profile。既定は `headless`。`--profile` > この値 |
+| `port` | 0〜65535 の整数 | `jzh web` が listen するポート。`--port` > この値 > 0（空きポート）。`jzh web` 以外では使わない |
 | `search` | `brave` / `deepseek` | `web_search` の provider。未設定は `BRAVE_API_KEY` があるときだけ brave。`deepseek` は `DEEPSEEK_API_KEY` を DeepSeek Search API に送る |
 | `deepseekToolsBaseUrl` | URL | DeepSeek Search / Fetch API の base。既定は `https://api.deepseek.com/v1/tools`。provider は `/search` を足す |
 | `skills` | 文字列の配列 | `<name>/SKILL.md` を持つディレクトリを追加する。```/x``` は展開する |
@@ -121,7 +122,7 @@ route は `opencode/<model>`、wire に送る model は `<model>` そのもの�
 | `--config <file.yml>` | 設定ファイルのパス |
 | `--resume <sessionId>` | 過去のセッションを開く |
 | `--allow-preset-change` | tool の減少や profile の変更があっても再開する（C6） |
-| `--port <N>` | `jzh web` のポート。0 は空きポート |
+| `--port <N>` | `jzh web` のポート。設定ファイルの `port` より優先する。0 は空きポート |
 | `--public-url <https origin>` | `jzh web` を proxy 越しに公開する origin。許可する Host / Origin と起動メッセージの URL を決める。`jzh web` 以外ではエラー |
 | `--json` | セッションイベントを JSON 行で出す |
 | `--tui` | パイプ越しでも端末 UI を開く |
@@ -165,7 +166,7 @@ route は `opencode/<model>`、wire に送る model は `<model>` そのもの�
 | 設定 | `~/.config/jzh/config.yaml` | `--config`、`XDG_CONFIG_HOME` |
 | 秘密 | `~/.config/jzh/secrets.env`（モード 600） | `jzh auth add` / `set` / `remove` / `list` |
 | セッションログ | `~/.jzh/sessions/<id>/session.v1.jsonl` | `@jozo-harness/session-jsonl` 行の `root` |
-| Web UI | `127.0.0.1`。Tailscale を検出したときは tailnet IPv4 でも同じポートを listen する（`0.0.0.0` / `::` では受けない） | `--port`、公開は `--public-url` |
+| Web UI | `127.0.0.1`。Tailscale を検出したときは tailnet IPv4 でも同じポートを listen する（`0.0.0.0` / `::` では受けない） | `--port`、設定ファイルの `port`。公開は `--public-url` |
 
 ## 設定できないもの
 

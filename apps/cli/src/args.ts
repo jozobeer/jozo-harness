@@ -17,8 +17,8 @@ export interface ParsedArgs {
   readonly search?: string | undefined
   /** `jzh sessions --all`: list the sessions nobody said anything in too. */
   readonly all: boolean
-  /** Port for `jzh web`; 0 asks the system for a free one. */
-  readonly port: number
+  /** The raw --port; 0 is a real choice, so an omitted flag is undefined. */
+  readonly portFlag: number | undefined
   /** The https origin `jzh web` is published under; undefined keeps it loopback-only. */
   readonly publicUrl: PublicOrigin | undefined
   readonly resume: string | undefined
@@ -108,12 +108,12 @@ const scan = (argv: ReadonlyArray<string>): ScannedArgs => {
 const first = (values: ReadonlyMap<string, Array<string>>, flag: string): string | undefined =>
   values.get(flag)?.[0]
 
-const portOf = (raw: string | undefined, errors: Array<string>): number => {
-  if (raw === undefined) return 0
+const portOf = (raw: string | undefined, errors: Array<string>): number | undefined => {
+  if (raw === undefined) return undefined
   const port = Number(raw)
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     errors.push('--port needs a whole number between 0 and 65535')
-    return 0
+    return undefined
   }
   return port
 }
@@ -189,14 +189,14 @@ const wordsOf = (words: ReadonlyArray<string>): Words => {
 /** Parses `jzh` arguments. Positional words join into the one-shot task. */
 export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
   const { values, words, errors } = scan(argv)
-  const port = portOf(first(values, '--port'), errors)
+  const portFlag = portOf(first(values, '--port'), errors)
   const selected = wordsOf(words)
   return {
     ...selected,
     profile: first(values, '--profile') ?? 'headless',
     profileFlag: first(values, '--profile'),
     patches: values.get('--patch') ?? [],
-    port,
+    portFlag,
     publicUrl: publicOriginOf(first(values, '--public-url'), selected.web, errors),
     resume: first(values, '--resume'),
     allowPresetChange: values.has('--allow-preset-change'),
