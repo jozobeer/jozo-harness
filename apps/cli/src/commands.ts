@@ -139,6 +139,11 @@ export interface BuiltinCommandOptions {
    * checkpoint it earns. Absent leaves `/compact` pruning only.
    */
   readonly compactNow?: () => Effect.Effect<CompactionCheckpoint | undefined>
+  /**
+   * Whether a turn holds the agent right now. Folding the history under a running
+   * turn would rewrite the request it is about to send, so the command refuses.
+   */
+  readonly isBusy?: () => boolean
 }
 
 /** The commands every jozo-harness session answers. */
@@ -192,6 +197,11 @@ export const installBuiltinCommands = (
       summary: 'fold the oversized parts of this history now',
       run: (_input, context) =>
         Effect.gen(function* () {
+          // A fold mid-turn would edit the log the running step already read; the
+          // human is told to ask again once the turn is done.
+          if (options.isBusy?.() === true) {
+            return { ok: false, text: 'a turn is running; /compact after it' }
+          }
           const prune = pruneFor(context.session.events(), MANUAL_COMPACT)
           if (prune === undefined) return { ok: true, text: 'nothing to compact' }
           yield* context.session.append('compaction/prune', prune).pipe(Effect.orDie)

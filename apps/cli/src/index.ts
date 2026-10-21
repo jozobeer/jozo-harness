@@ -43,6 +43,7 @@ import { ToolError, type ToolExecution } from '@jozo-harness/tools'
 import { Tools, type ToolRegistry } from '@jozo-harness/tools'
 import {
   currentPreset,
+  DEFAULT_COMPACT_MAX_BYTES,
   makeCommands,
   presetChange,
   presetProblem,
@@ -56,6 +57,7 @@ import {
 import { Tier0Tools, type Tier0ToolBuilder, type WorktreeHost } from '@jozo-harness/tools-tier0'
 import {
   agentLoopConfigSchema,
+  checkpointHelpersFor,
   installRetry,
   modelOfRoute,
   tokenBudgetOf,
@@ -1438,6 +1440,12 @@ const summaryOf = (agent: Agent): SessionSummary => {
   }
 }
 
+/** The provider half of a route; a route without a slash is the provider itself. */
+const providerOfRoute = (route: string): string => {
+  const index = route.indexOf('/')
+  return index < 0 ? route : route.slice(0, index)
+}
+
 /** The scoped body that builds one session: its layer, agent, tools, and UI host. */
 const buildSession = (
   options: CommandOptions,
@@ -1487,7 +1495,30 @@ const buildSession = (
     // What a human can type at this session is not the model's business; both the
     // REPL and a UI run it through the same registry and the log keeps the record.
     const commands = makeCommands()
-    yield* installBuiltinCommands(commands, { budget })
+    // A human-asked fold asks the loop's own summary call, over the route the next
+    // step would take, so the checkpoint it records names the model it was made with.
+    const { checkpointFor } = checkpointHelpersFor(Context.get(context, Llm))
+    yield* installBuiltinCommands(commands, {
+      budget,
+      compactNow: () =>
+        checkpointFor(
+          {
+            provider: providerOfRoute(agent.options.route),
+            model: modelOfRoute(agent.options.route),
+            params: {
+              ...(agent.options.reasoningEffort === undefined
+                ? {}
+                : { reasoning_effort: agent.options.reasoningEffort }),
+              ...(budget.reserveTokens === 0 ? {} : { max_tokens: budget.reserveTokens }),
+            },
+            // The summary call takes no tools; only the route and params reach it.
+            tools: [],
+          },
+          agent.session.events(),
+          { retainTokens: 0, maxBytes: DEFAULT_COMPACT_MAX_BYTES },
+        ),
+      isBusy: () => agent.status === 'running' || agent.status === 'cancelling',
+    })
     // The catalog is read once for the page's completion list and again by the tool
     // and the host, who read the roots themselves so a changed file is never stale.
     const skills = skillsOf(sessionOptions)
