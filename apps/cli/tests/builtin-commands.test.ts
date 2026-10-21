@@ -148,6 +148,21 @@ describe('the built-in commands a session can switch with', () => {
     expect(compacted(session)).toHaveLength(0)
   })
 
+  test('/compact keeps the prune when the summary call dies before it answers', async () => {
+    const { commands, session } = await Effect.runPromise(
+      build({ compactNow: () => Effect.die(new Error('the summarizer is gone')) }),
+    )
+    await Effect.runPromise(seed(session))
+
+    // The fold cannot be completed, so the human is told; the prune it already wrote
+    // stays in the log and no checkpoint claims a summary that was never given.
+    const outcome = await Effect.runPromise(commands.run('/compact', session))
+
+    expect(outcome).toEqual({ ok: false, text: 'the summarizer is gone' })
+    expect(session.events().filter((event) => event.type === 'compaction/prune')).toHaveLength(1)
+    expect(compacted(session)).toHaveLength(0)
+  })
+
   test('/compact refuses while a turn holds the agent, and folds nothing', async () => {
     const { commands, session } = await Effect.runPromise(build({ isBusy: () => true }))
     await Effect.runPromise(seed(session))
