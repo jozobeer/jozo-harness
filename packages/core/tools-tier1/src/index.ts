@@ -1,5 +1,6 @@
 export * from './todo.ts'
 export * from './ask.ts'
+export * from './artifact.ts'
 
 import type { AskShape } from '@jozo-harness/safety'
 import type { ToolDefinition } from '@jozo-harness/tools'

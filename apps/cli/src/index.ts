@@ -103,6 +103,7 @@ import {
   DELEGATION_CONTEXT_ORDER,
   TEAM_IDENTITY_CONTEXT_ORDER,
   delegationLine,
+  ArtifactTools,
   teamIdentityLine,
   teamIdentityOf,
   makeScheduleTool,
@@ -828,6 +829,20 @@ const planModeFromProfile = (
 }
 
 /**
+ * The artifact row is opt-in, and its page belongs beside the sessions root, so it
+ * takes the jzh home this run resolved rather than one of its own.
+ */
+const installArtifact = (tools: ToolRegistry, wiring: ProfileWiring) =>
+  Effect.gen(function* () {
+    if (!hasRow(wiring.rows, '@jozo-harness/artifact')) return
+    const home = wiring.options.jzhHome
+    if (home === undefined) return
+    for (const tool of Context.get(wiring.context, ArtifactTools)(home)) {
+      yield* tools.register(tool)
+    }
+  })
+
+/**
  * Installs what the profile's rows ask for and reports the composition the session
  * runs with: the profiles it was launched from and every tool it was given. The
  * snapshot is taken before any restriction narrows the registry, because plan mode
@@ -889,6 +904,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
       yield* installDelegationContext(wiring)
       yield* installTeamIdentityContext(wiring)
     }
+    yield* installArtifact(tools, wiring)
     // A failed provider attempt is retried for the codes the loop row lists; the
     // loop only decides what to do when a listener answers, so this is the wiring
     // that makes the retry path part of a run.

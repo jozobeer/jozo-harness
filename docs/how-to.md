@@ -75,6 +75,18 @@ jzh web --public-url https://<machine>.<tailnet>.ts.net
 
 起動 URL はその run を開ける credential である。code は 60 秒・1 回限りで、開けば `HttpOnly; SameSite=Strict` の cookie に変わり URL からは消える。**開く前の URL をチャットや issue に貼らない。** `--public-url` は https origin だけを受け付け、パス・query・fragment・userinfo が付いた値と `jzh web` 以外での指定は起動前にエラーになる。
 
+### モデルに HTML ページを書かせる
+
+`artifact` tool は opt-in である。使う run だけ、設定ファイルか `--patch` の行で有効にする。
+
+```yaml
+plugins:
+  - id: artifact
+    name: '@jozo-harness/artifact'
+```
+
+モデルが `artifact` に `{ name, html }` を渡すと、run の jzh home の `artifacts/<sessionId>/<name>.html` に書き、会話には `page: /artifact/<sessionId>/<name>` の 1 行を返す。同じ名前で書き直すとページは差し替わる。jzh web を起動しているときだけ、その URL を開ける。既定の profile に入れないのは、全セッションの tool 一覧を太らせないためである。
+
 ### モデルを選ぶ（走っているセッションと、これから開くセッション）
 
 composer のモデルのチップを押すと、その endpoint が持つモデルの一覧が開く。選ぶと**そのセッションの route が変わり**、同時に**この run でこれから開くセッションもその route で始まる**。効くのは次のリクエストから（turn の途中なら次の step、待っていれば次の turn）。いま効いているモデルには印が付く。
