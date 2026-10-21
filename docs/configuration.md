@@ -109,7 +109,7 @@ route は `opencode/<model>`、wire に送る model は `<model>` そのもの�
 | `model` | どの行でも | `provider/model`。`--model` と設定ファイルの `model` が無いときにルートになる |
 | `effort` | どの行でも | provider に渡す reasoning effort。`--effort` と設定ファイルの `effort` が無いときに効く |
 | `maxSpillBytes` | どの行でも | tool の出力がこの大きさを超えたら、ファイルに退避して参照と要点だけをモデルに返す。退避先は jzh home の `spill/<sessionId>/`（0700、7日で掃除）、jzh home が無ければ一時ディレクトリ。`read` の結果は対象外で、注記のパスを `read` の offset/limit で読み直せる |
-| `planMode` | `@jozo-harness/safety` の行 | `true` でワークスペースを変える tool を外す。モデルは `exit_plan_mode` で計画を出し、ユーザーが承認したときだけ解除される |
+| `planMode` | `@jozo-harness/safety` の行 | `true` でワークスペースを変える tool を外す。モデルは `exit_plan_mode` で計画を出し、ユーザーが承認したときだけ解除される。解除は `plan/mode` としてログに残るので、`--resume` したセッションは解除済みで始まる |
 
 ## コマンドライン
 
