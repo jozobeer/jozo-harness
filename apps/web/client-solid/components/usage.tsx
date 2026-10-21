@@ -32,6 +32,12 @@ const arcTo = (value: number): string => {
   return `M${x1} ${y1}A46.5 46.5 0 ${large} 1 ${x2} ${y2}`
 }
 
+/** The ring's whole arc, so a new reading changes only how much of it is drawn. */
+const ARC = arcTo(TOP)
+
+/** The share of the fixed arc a speed fills, as a dash at its start. */
+const fillOf = (value: number): string => String(Math.min(Math.max(value, 0), TOP) / TOP) + ' 1'
+
 /** Every 10 a fine tick, every 50 a longer one, every 100 the longest. */
 const tickOf = (value: number) => {
   const major = value % 100 === 0
@@ -63,9 +69,9 @@ export const SpeedDial = (props: { speed: UsageView['speed'] }) => {
       aria-label={'speed of the last turn: ' + text() + ' tokens per second'}
     >
       <path class="dial-face" d={FACE} />
-      <path class="dial-track" d={arcTo(TOP)} />
+      <path class="dial-track" d={ARC} />
       <Show when={value() > 0}>
-        <path class="dial-fill" d={arcTo(value())} />
+        <path class="dial-fill" d={ARC} pathLength="1" stroke-dasharray={fillOf(value())} />
       </Show>
       <For each={TICKS}>
         {(tick) => {
