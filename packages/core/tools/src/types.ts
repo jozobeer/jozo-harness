@@ -69,6 +69,13 @@ export interface ToolRunContext {
    * caller does not own a turn, as with a direct call in a test.
    */
   readonly concludeTurn?: () => void
+  /**
+   * Adds a fragment the next request should see as a user message. The pipeline
+   * collects the fragments on this call's result, so text a tool found reaches
+   * the model after the tool result rather than inside it. Absent when nothing
+   * will carry the text.
+   */
+  readonly addContext?: (text: string) => void
 }
 
 /** One call as the policy hooks and guards see it. `args` is already decoded. */
@@ -98,6 +105,8 @@ export interface ToolExecutionResult {
    * carry it: a failure still needs the next request to see what went wrong.
    */
   readonly concludesTurn?: true
+  /** The fragments the call added for the next request, in the order it added them. */
+  readonly context?: ReadonlyArray<string>
 }
 
 export interface ToolCallView {
