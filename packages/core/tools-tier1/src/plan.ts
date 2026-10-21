@@ -56,6 +56,9 @@ export const makeExitPlanModeTool = (
         return { left: false, plan: args.plan, answer }
       }
       planMode.leave()
+      // Approval completes the exchange: there is nothing left to ask the model,
+      // and the turn can close on this result instead of one more request.
+      context.concludeTurn?.()
       return { left: true, plan: args.plan, answer }
     }),
 })

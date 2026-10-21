@@ -215,6 +215,54 @@ describe('call pipeline', () => {
   })
 })
 
+describe('turn conclusion', () => {
+  test('a tool that concludes the turn marks its successful result', async () => {
+    const tools = makeTools(makeHooks())
+    const closer: EchoTool = {
+      ...echo,
+      execute: (args, exec) => {
+        exec.concludeTurn?.()
+        return Effect.succeed({ text: args.text })
+      },
+    }
+
+    const outcome = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* tools.register(closer)
+          return yield* tools.call(request(JSON.stringify({ text: 'done' })))
+        }),
+      ),
+    )
+
+    expect(outcome.isError).toBe(false)
+    expect(outcome.concludesTurn).toBe(true)
+  })
+
+  test('a failing tool never concludes the turn', async () => {
+    const tools = makeTools(makeHooks())
+    const broken: EchoTool = {
+      ...echo,
+      execute: (_args, exec) => {
+        exec.concludeTurn?.()
+        return Effect.fail(new ToolError({ code: 'execution', message: 'broke after concluding' }))
+      },
+    }
+
+    const outcome = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* tools.register(broken)
+          return yield* tools.call(request(JSON.stringify({ text: 'x' })))
+        }),
+      ),
+    )
+
+    expect(outcome.isError).toBe(true)
+    expect(outcome.concludesTurn).toBeUndefined()
+  })
+})
+
 describe('policy', () => {
   test('a pre-execute deny blocks execution and still emits the result', async () => {
     const hooks = makeHooks()

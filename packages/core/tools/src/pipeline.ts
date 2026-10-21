@@ -144,6 +144,7 @@ export const executeTool = (
 ): Effect.Effect<ToolCallOutcome> =>
   Effect.gen(function* () {
     const collected: Array<FileDiff> = []
+    let concluded = false
     const result = yield* Effect.gen(function* () {
       const parsed = yield* Effect.match(parseArguments(tool, request.arguments), {
         onFailure: (error: ToolError) => ({ ok: false as const, message: error.message }),
@@ -156,9 +157,17 @@ export const executeTool = (
         tool: tool.name,
         arguments: request.arguments,
         args: parsed.args,
-        // The recorder belongs to this call, so a concurrent call never mixes
-        // its files into this result.
-        context: { ...request.context, changes: { record: (diff) => collected.push(diff) } },
+        // The recorder and the conclusion belong to this call, so a concurrent
+        // call never mixes its files or its wish to stop into this result. A
+        // nested call gets its own pair, which keeps its conclusion from
+        // closing the turn around the program that made it.
+        context: {
+          ...request.context,
+          changes: { record: (diff) => collected.push(diff) },
+          concludeTurn: () => {
+            concluded = true
+          },
+        },
       }
 
       const policy = yield* checkPolicy(
@@ -171,7 +180,11 @@ export const executeTool = (
       const executed = yield* runWithBody(hooks, tool, exec)
       const posted = yield* hooks.waterfall('tools/post-execute', exec, executed)
       const settled = finalize(tool, exec, posted ?? executed)
-      return collected.length === 0 ? settled : { ...settled, diffs: collected }
+      // The mark is read after post-execute and finalize, so a listener that
+      // turns the call into an error also takes the conclusion away.
+      const marked =
+        concluded && !settled.isError ? { ...settled, concludesTurn: true as const } : settled
+      return collected.length === 0 ? marked : { ...marked, diffs: collected }
     }).pipe(Effect.catchCause((cause) => Effect.succeed(errorResult(describeCause(cause)))))
 
     yield* hooks.emit('tools/result', result)
