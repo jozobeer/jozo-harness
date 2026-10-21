@@ -25,6 +25,7 @@ import {
   rootOf,
   lastSkillCatalog,
   titleOf,
+  type Session,
   type SessionId,
   type SessionSummary,
 } from '@jozo-harness/session'
@@ -123,6 +124,7 @@ import {
   Sandbox,
   approvalServiceLayer,
   askServiceLayer,
+  currentPlanMode,
   installAsk,
   makePlanMode,
   recordingAnswerer,
@@ -797,6 +799,33 @@ const sandboxOf = (wiring: ProfileWiring): SandboxShape | undefined =>
     : undefined
 
 /**
+ * Plan mode hides every tool that could change the workspace, until the model
+ * offers a plan and the user lets it go. A resumed session takes the mode the log
+ * last recorded, so a plan approved before the restart is not asked again.
+ */
+const planModeFromProfile = (
+  rows: ReadonlyArray<PluginRow>,
+  session: Session,
+): PlanModeShape | undefined => {
+  const requested = rows.some(
+    (row) => row.name === '@jozo-harness/safety' && planModeOf(row.config),
+  )
+  if (!requested) return undefined
+  const recorded = currentPlanMode(session.events())
+  return makePlanMode({
+    ...(recorded === undefined ? {} : { recorded }),
+    record: (mode) =>
+      session
+        .append('plan/mode', { mode })
+        .pipe(
+          Effect.mapError(
+            () => new ToolError({ code: 'execution', message: 'cannot record plan mode' }),
+          ),
+        ),
+  })
+}
+
+/**
  * Installs what the profile's rows ask for and reports the composition the session
  * runs with: the profiles it was launched from and every tool it was given. The
  * snapshot is taken before any restriction narrows the registry, because plan mode
@@ -805,13 +834,7 @@ const sandboxOf = (wiring: ProfileWiring): SandboxShape | undefined =>
 const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolError, Scope.Scope> =>
   Effect.gen(function* () {
     const tools = Context.get(wiring.context, Tools)
-    // Plan mode hides every tool that could change the workspace, until the model
-    // offers a plan and the user lets it go.
-    const planMode = wiring.rows.some(
-      (row) => row.name === '@jozo-harness/safety' && planModeOf(row.config),
-    )
-      ? makePlanMode()
-      : undefined
+    const planMode = planModeFromProfile(wiring.rows, wiring.agent.session)
     if (hasRow(wiring.rows, '@jozo-harness/tools-tier0')) {
       const sessions = Context.get(wiring.context, Agents)
       // A worktree call is shared with every child, so it moves the log of the

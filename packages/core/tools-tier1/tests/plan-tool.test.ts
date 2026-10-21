@@ -43,9 +43,10 @@ const answerer = (answer: string, asked: Array<AskRequested>): AskShape =>
 
 const planMode = (left: Array<string>): PlanModeShape =>
   ({
-    leave: () => {
-      left.push('left')
-    },
+    leave: () =>
+      Effect.sync(() => {
+        left.push('left')
+      }),
     active: () => left.length === 0,
   }) as unknown as PlanModeShape
 

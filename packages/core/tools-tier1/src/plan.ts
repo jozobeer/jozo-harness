@@ -55,7 +55,8 @@ export const makeExitPlanModeTool = (
       if (answer.trim().toLowerCase() !== PLAN_APPROVAL) {
         return { left: false, plan: args.plan, answer }
       }
-      planMode.leave()
+      // The approval only counts once the log has it, so a resumed run cannot ask again.
+      yield* planMode.leave()
       // The turn carries on: the approval only changes which tools the next
       // request may name, and the model has the plan to work from already.
       return { left: true, plan: args.plan, answer }

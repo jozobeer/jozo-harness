@@ -4,7 +4,7 @@ import { kernelPlugin, type Plugin } from '@jozo-harness/kernel'
 import { Llm, type LlmAdapter, type StreamChunk } from '@jozo-harness/llm'
 import { askPlugin, safetyPlugin } from '@jozo-harness/safety'
 import { sessionPlugin } from '@jozo-harness/session'
-import { sessionJsonlPlugin } from '@jozo-harness/session-jsonl'
+import { jsonlSessions, sessionJsonlPlugin } from '@jozo-harness/session-jsonl'
 import { systemPromptPlugin } from '@jozo-harness/system-prompt'
 import { tier0Plugin } from '@jozo-harness/tools-tier0'
 import { tier1Plugin } from '@jozo-harness/tools-tier1'
@@ -210,5 +210,84 @@ describe('plan mode through the command', () => {
 
     await rm(root, { recursive: true, force: true })
     await rm(workspace, { recursive: true, force: true })
+  })
+
+  test('a resume after an approved plan starts with the workspace tools', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-plan-'))
+    const offered: Array<ReadonlyArray<string>> = []
+    let step = 0
+    const stub: Plugin<{}, Llm, never> = {
+      name: 'stub-llm',
+      config: Schema.Struct({}),
+      provides: [Llm],
+      requires: [],
+      layer: () =>
+        Layer.succeed(Llm, {
+          name: 'stub',
+          capabilities: {
+            toolChoice: false,
+            reasoningEffort: null,
+            images: 'none',
+            promptCacheControl: false,
+          },
+          stream: (request) => {
+            offered.push((request.tools ?? []).map((schema) => schema.name))
+            step += 1
+            return Stream.fromIterable(
+              step === 1
+                ? toolTurn('exit_plan_mode', { plan: '1. write out.txt' })
+                : textTurn('done'),
+            )
+          },
+        } satisfies LlmAdapter),
+    }
+    const plugins = [
+      kernelPlugin,
+      sessionJsonlPlugin,
+      sessionPlugin,
+      toolsPlugin,
+      systemPromptPlugin,
+      safetyPlugin,
+      askPlugin,
+      tier0Plugin,
+      tier1Plugin,
+      stub,
+      agentPlugin,
+      agentLoopPlugin,
+    ] as ReadonlyArray<Plugin<any, any, any>>
+    const runOnce = (options: { readonly task: string; readonly resume?: string }) =>
+      Effect.runPromise(
+        runCommand({
+          profiles: [profile(root, true)],
+          plugins,
+          cwd: '/tmp',
+          route: 'stub/model',
+          task: options.task,
+          answer: () => Effect.succeed('approve'),
+          ...(options.resume === undefined ? {} : { resume: options.resume }),
+          stdout: () => undefined,
+          stderr: () => undefined,
+        }),
+      )
+
+    // First run: plan mode ends with an approval, then the process exits.
+    expect(await runOnce({ task: 'plan, then do it' })).toBe(0)
+    const listed = await Effect.runPromise(jsonlSessions({ root }).list())
+    const id = listed[0]?.id ?? ''
+    const firstOffered = offered.length
+
+    // A resumed run has the approved plan behind it, so the workspace tools are
+    // offered from its very first request.
+    expect(await runOnce({ task: 'carry on', resume: id })).toBe(0)
+    expect(offered[firstOffered]).toContain('write')
+    expect(offered[firstOffered]).not.toContain('exit_plan_mode')
+
+    const opened = await Effect.runPromise(jsonlSessions({ root }).open(id))
+    const modes = opened.events.flatMap((event) =>
+      event.type === 'plan/mode' ? [event.data.mode] : [],
+    )
+    expect(modes).toEqual(['execute'])
+
+    await rm(root, { recursive: true, force: true })
   })
 })
