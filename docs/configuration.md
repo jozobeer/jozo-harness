@@ -67,6 +67,8 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 | `@jozo-harness/agent-loop` | `models` — ルートのモデル名（`provider/model` の model 部分）をキーに、`contextWindow` と `maxTokens` をモデルごとに持つ（同じ行の単一値より優先する）、`contextWindow` — ルートしたモデルの context window（トークン）。`models` のそのモデルの値、この値、adapter の値、128000 の順に使う、`thresholdRatio` — 推定が窓のこの割合に達したら compaction する（既定 0.8）、`headroomTokens` — 発火点と窓の間に必ず空けるトークン（既定 65536）、`maxTokens` — 1 リクエストが答えのために予約するトークン。`models` にそのモデルの値があればそちらを使う。provider へ `max_tokens` として送り、発火点から先に引く（既定は無し＝予約しない）、`retainTokens` — 末尾で内容を置き換えない範囲を、推定トークンで表した目標（既定は窓の 16%。最新の 1 件は大きさによらず残る）、`maxBytes` — これを超える text block を、保持の外でスタブに置き換える（バイト、既定 32000）、`maxParallelToolCalls` — 並列に走らせる tool call の上限（既定 10。0 以下でも 1 件ずつ） |
 | `@jozo-harness/mcp` | `command`（必須）、`prefix` |
 
+`@jozo-harness/artifact` はキーを持たない。行を足すと、そのセッションのモデルに `artifact` tool が渡り、モデルは 1 枚の HTML ページを `<jzh home>/artifacts/<sessionId>/<name>.html` に書ける。配信は jzh web の `/artifact/<sessionId>/<name>` が行う。同梱 profile に入れていないのは、ページを書かないセッションの tool 一覧を太らせないためである（既定では入らない）。
+
 同梱の `base` profile は `root` に `~/.jzh/sessions`、`preset` に `workspace-write`、`baseUrl` に `https://ollama.com/v1`、`localBaseUrl` に `http://127.0.0.1:11434/v1`、`apiKeyEnv` に `OLLAMA_API_KEY` を置いている。`localBaseUrl` があるので送信は常に local daemon へ行き、`baseUrl` は `jzh models` の一覧取得に使う。`agent-loop` 行は既定ルート `deepseek-v4.1-flash` の窓を 1048576、出力予約を 393216 とし、発火点を 589824 にする。`models` のキーは route の model 名であり、local daemon へ送るときだけ付く `:cloud` は含めない。route に local daemon の名前（`deepseek-v4.1-flash:cloud`）を明示した場合のために、同じ値を持つキーも置いている。
 
 発火点は `min(窓 × thresholdRatio, 窓 − maxTokens − headroomTokens)` である。既定ルートでは 1M の窓から 589824 になり、60k 程度のセッションは compaction しない。`--model` で別のモデルに変えたときは `models` のそのモデルの値を使い、名前が無ければ単一の `contextWindow` と `maxTokens` に落ちる。窓が分からないモデルでは 128000 を使う。
@@ -166,6 +168,7 @@ route は `opencode/<model>`、wire に送る model は `<model>` そのもの�
 | 設定 | `~/.config/jzh/config.yaml` | `--config`、`XDG_CONFIG_HOME` |
 | 秘密 | `~/.config/jzh/secrets.env`（モード 600） | `jzh auth add` / `set` / `remove` / `list` |
 | セッションログ | `~/.jzh/sessions/<id>/session.v1.jsonl` | `@jozo-harness/session-jsonl` 行の `root` |
+| 公開ページ | `<jzh home>/artifacts/<sessionId>/<name>.html` | `@jozo-harness/artifact` 行を足す（キーは無い） |
 | Web UI | `127.0.0.1`。Tailscale を検出したときは tailnet IPv4 でも同じポートを listen する（`0.0.0.0` / `::` では受けない） | `--port`、設定ファイルの `port`。公開は `--public-url` |
 
 ## 設定できないもの

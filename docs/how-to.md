@@ -75,9 +75,9 @@ jzh web --public-url https://<machine>.<tailnet>.ts.net
 
 起動 URL はその run を開ける credential である。code は 60 秒・1 回限りで、開けば `HttpOnly; SameSite=Strict` の cookie に変わり URL からは消える。**開く前の URL をチャットや issue に貼らない。** `--public-url` は https origin だけを受け付け、パス・query・fragment・userinfo が付いた値と `jzh web` 以外での指定は起動前にエラーになる。
 
-### モデルに HTML ページを書かせる
+### モデルにページを書かせる
 
-`artifact` tool は opt-in である。使う run だけ、設定ファイルか `--patch` の行で有効にする。
+`artifact` tool は opt-in である。使う run だけ、設定ファイルか `--patch` の `plugins:` に次の行を足す（profile に書くときも同じ形である）。
 
 ```yaml
 plugins:
@@ -85,7 +85,19 @@ plugins:
     name: '@jozo-harness/artifact'
 ```
 
-モデルが `artifact` に `{ name, html }` を渡すと、run の jzh home の `artifacts/<sessionId>/<name>.html` に書き、会話には `page: /artifact/<sessionId>/<name>` の 1 行を返す。同じ名前で書き直すとページは差し替わる。jzh web を起動しているときだけ、その URL を開ける。既定の profile に入れないのは、全セッションの tool 一覧を太らせないためである。
+行を足した run では、モデルにページを頼める。
+
+```
+この調査結果を report という名前の HTML ページにまとめて。表と図を 1 枚に入れて。
+```
+
+モデルが `artifact` に `{ name, html }` を渡すと、run の jzh home の `artifacts/<sessionId>/<name>.html` に書き、結果に `page: /artifact/<sessionId>/<name>` の 1 行を返す。`name` は英数字と `.` `_` `-` だけで、`.html` は付けない。ページは CSS と JavaScript を中に持つ 1 枚の HTML にする。
+
+jzh web でそのセッションを開くと、結果の下にページが iframe で出る。iframe は `allow-scripts` だけを持つ sandbox なので、ページは jzh web の origin にも cookie にも触れない。`Open in a new tab` を押すと別タブで開く。
+
+URL は相対パスなので、同じ tailnet の別端末から jzh web の tailnet の URL を開いても、その origin の `/artifact/...` として同じページが開く（開き方は「tailnet の別端末から開く」）。ページを配信するのは jzh web なので、起動していない run では URL を開けない。
+
+同じ名前でもう一度書くと、ファイルが差し替わって URL は変わらない。開き直すと新しい中身になる。既定の profile に入れないのは、全セッションの tool 一覧を太らせないためである。
 
 ### モデルを選ぶ（走っているセッションと、これから開くセッション）
 
