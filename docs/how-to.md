@@ -352,7 +352,7 @@ jzh sessions              # 新しい順に、id・開始時刻・作業ディ�
 jzh sessions <sessionId>  # そのセッションの会話を読む
 ```
 
-続きから走らせるには `jzh --resume <sessionId>` を使う。一覧はセッションログの置き場（既定は `~/.jzh/sessions`）を見るので、置き場を変えているときは `--config` で同じ設定を指す。
+続きから走らせるには `jzh --resume <sessionId>` を使う。一覧はセッションログの置き場（既定は `~/.jzh/sessions`）を見るので、置き場を変えているときは `--config` で同じ設定を指す。プロセスが止まる前に積まれ、まだ turn が取り込んでいなかった queued と steering は、開き直したセッションがそのまま走らせる。
 
 ## 設定が効かないときに見る
 

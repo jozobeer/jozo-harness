@@ -1013,4 +1013,41 @@ describe('agent loop', () => {
     expect(stepEnd).toBeLessThan(interrupted)
     expect(interrupted).toBeLessThan(nextTurn)
   })
+
+  test('a restarted session runs every message still queued in its log', async () => {
+    const first = 'finish the migration'
+    const second = 'then run the tests'
+    const events = await scenario([chunks(textTurn('done')), chunks(textTurn('done'))], (ctx) =>
+      Effect.gen(function* () {
+        const dead = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+        // A followup both appends the message and wakes the runner. The wake
+        // does not survive the process, so a killed run leaves only the log.
+        yield* dead.session.append('agent/inbox/queued', {
+          target: 'next-turn',
+          message: { text: first, source: 'user' },
+        })
+        yield* dead.session.append('agent/inbox/queued', {
+          target: 'next-turn',
+          message: { text: second, source: 'user' },
+        })
+        const id = dead.id
+        yield* ctx.agents.dispose(id)
+        const agent = yield* ctx.agents.create({
+          cwd: '/work',
+          resume: id,
+          options: { route: 'fake/model' },
+        })
+        yield* agent.whenIdle
+        return agent
+      }),
+    )
+
+    const texts = events.session
+      .events()
+      .flatMap((event) =>
+        event.type === 'user/message' && event.data.source === 'user' ? [event.data.text] : [],
+      )
+    expect(texts).toEqual([first, second])
+    expect(reason(events)).toEqual([{ kind: 'completed' }, { kind: 'completed' }])
+  })
 })
