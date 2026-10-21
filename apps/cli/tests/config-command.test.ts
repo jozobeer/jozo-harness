@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { Effect } from 'effect'
 import { mkdtemp, rm } from 'node:fs/promises'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { runConfig } from '../src/config-command.ts'
@@ -69,6 +69,22 @@ describe('jzh config', () => {
       expect(sink.out.join('')).toContain('model: my-cloud/some-model')
       const settings = await Effect.runPromise(loadConfigFile(path))
       expect(settings.model).toBe('my-cloud/some-model')
+    })
+  })
+
+  test('replaces the file through a rename on every write', async () => {
+    await withHome(async (env, path) => {
+      const sink = collector()
+      await runConfig(['set', 'profile', 'repl'], sink.io, env)
+      const before = statSync(path).ino
+
+      const code = await runConfig(['set', 'model', 'my-cloud/next'], sink.io, env)
+
+      const settings = await Effect.runPromise(loadConfigFile(path))
+      expect(code).toBe(0)
+      expect(statSync(path).ino).not.toBe(before)
+      expect(settings.profile).toBe('repl')
+      expect(settings.model).toBe('my-cloud/next')
     })
   })
 
