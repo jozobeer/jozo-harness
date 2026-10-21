@@ -1,5 +1,5 @@
 import type { UiHost } from '@jozo-harness/ui-protocol'
-import { Effect, Exit, Scope } from 'effect'
+import { Deferred, Effect, Exit, Scope } from 'effect'
 import type { CommandView, JobDetailView, RunStateView, SessionSummary } from '../shared/rpc.ts'
 import type { WebError } from './errors.ts'
 
@@ -83,18 +83,19 @@ export const makeSessionRegistry = (input: {
     const opened = new Map<string, OpenEntry>(
       input.initial === undefined ? [] : [[input.initial.session.summary.id, input.initial]],
     )
+    // A session whose core is still being built. The map is filled before the
+    // build yields, so a second page cannot pass the lookup and start another.
+    const inflight = new Map<string, Deferred.Deferred<OpenSession, WebError>>()
     let initialId = input.initial?.session.summary.id ?? ''
     // The scope this registry lives in: every session it opens is closed with it.
     const own = yield* Scope.Scope
 
-    const openInOwnScope = (
+    /** Builds one core and remembers it. The server's scope closes the core when it stops. */
+    const build = (
       id: string | undefined,
       cwd: string | undefined,
-    ): Effect.Effect<OpenSession, WebError> =>
+    ): Effect.Effect<OpenSession, WebError, Scope.Scope> =>
       Effect.gen(function* () {
-        const known = id === undefined ? undefined : opened.get(id)
-        if (known !== undefined) return known.session
-        // One scope per session: the server's own scope closes it when the server stops.
         const scope = yield* Scope.make()
         yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
         const session = yield* input.factory
@@ -105,6 +106,53 @@ export const makeSessionRegistry = (input: {
           close: () => Scope.close(scope, Exit.void),
         })
         return session
+      })
+
+    /**
+     * Forgets this build before waking the pages waiting on it. A page that
+     * retries from the wake must not find the old gate, and a failed build must
+     * not leave one that never starts another core.
+     */
+    const settle = (
+      id: string,
+      gate: Deferred.Deferred<OpenSession, WebError>,
+      exit: Exit.Exit<OpenSession, WebError>,
+    ): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        inflight.delete(id)
+        if (Exit.isSuccess(exit)) {
+          yield* Deferred.succeed(gate, exit.value)
+          return
+        }
+        yield* Deferred.failCause(gate, exit.cause)
+      })
+
+    /**
+     * Starts one build and lets later pages wait on its gate. The claim happens
+     * before the build yields, so two opens of one id cannot both pass the lookup.
+     */
+    const openOnce = (
+      id: string | undefined,
+      cwd: string | undefined,
+    ): Effect.Effect<OpenSession, WebError, Scope.Scope> => {
+      if (id === undefined) return build(id, cwd)
+      const gate = Deferred.makeUnsafe<OpenSession, WebError>()
+      inflight.set(id, gate)
+      return build(id, cwd).pipe(Effect.onExit((exit) => settle(id, gate, exit)))
+    }
+
+    const openInOwnScope = (
+      id: string | undefined,
+      cwd: string | undefined,
+    ): Effect.Effect<OpenSession, WebError> =>
+      Effect.gen(function* () {
+        if (id !== undefined) {
+          const known = opened.get(id)
+          if (known !== undefined) return known.session
+          const pending = inflight.get(id)
+          if (pending !== undefined) return yield* Deferred.await(pending)
+        }
+        return yield* openOnce(id, cwd)
       }).pipe(Effect.provideService(Scope.Scope, own))
 
     const close = (id: string): Effect.Effect<void> =>
