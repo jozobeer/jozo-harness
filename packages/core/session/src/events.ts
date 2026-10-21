@@ -124,6 +124,11 @@ export interface SessionEventMap {
      * prompt.
      */
     readonly diffs?: ReadonlyArray<FileDiff>
+    /**
+     * The call ended the turn it ran in. The model history ignores it; the loop
+     * reads it to close the turn without another request.
+     */
+    readonly concludesTurn?: true
   }
   'job/started': JobStartedData
   'job/ended': JobEndedData

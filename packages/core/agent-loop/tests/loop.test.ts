@@ -253,6 +253,100 @@ describe('agent loop', () => {
     expect(reason(events)).toEqual([{ kind: 'completed' }])
   })
 
+  test('a concluding tool ends the turn without another step', async () => {
+    const finish: ToolDefinition<{}, { readonly ok: boolean }> = {
+      name: 'finish',
+      description: 'Ends the turn from its result',
+      parameters: Schema.Struct({}),
+      output: {
+        schema: Schema.Struct({ ok: Schema.Boolean }),
+        render: () => [{ type: 'text', text: 'finished' }],
+      },
+      execute: (_args, context) => {
+        context.concludeTurn?.()
+        return Effect.succeed({ ok: true })
+      },
+    }
+    const events = await scenario(
+      [
+        chunks([
+          {
+            type: 'block-end',
+            index: 0,
+            block: { type: 'tool-call', id: 'c1', name: 'finish', arguments: '{}' },
+          },
+          { type: 'finish', kind: 'tool-calls' },
+        ]),
+        chunks(textTurn('the model is asked again')),
+      ],
+      (ctx) =>
+        Effect.gen(function* () {
+          yield* ctx.tools.register(finish)
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+    )
+
+    const stored = events.session.events()
+    expect(types(events).filter((type) => type === 'step/start')).toHaveLength(1)
+    expect(types(events).filter((type) => type === 'assistant/message')).toHaveLength(1)
+    const results = stored.flatMap((event) => (event.type === 'tool/result' ? [event.data] : []))
+    expect(results[0]?.concludesTurn).toBe(true)
+    expect(reason(events)).toEqual([{ kind: 'completed' }])
+  })
+
+  test('a steer queued while a concluding tool runs opens the next turn', async () => {
+    const note = crypto.randomUUID()
+    const events = await scenario(
+      [
+        chunks([
+          {
+            type: 'block-end',
+            index: 0,
+            block: { type: 'tool-call', id: 'c1', name: 'finish', arguments: '{}' },
+          },
+          { type: 'finish', kind: 'tool-calls' },
+        ]),
+        chunks(textTurn('the next turn')),
+      ],
+      (ctx) =>
+        Effect.gen(function* () {
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          const finish: ToolDefinition<{}, { readonly ok: boolean }> = {
+            name: 'finish',
+            description: 'Queues one note and ends the turn',
+            parameters: Schema.Struct({}),
+            output: {
+              schema: Schema.Struct({ ok: Schema.Boolean }),
+              render: () => [{ type: 'text', text: 'finished' }],
+            },
+            execute: (_args, context) =>
+              agent.steer({ text: note, source: 'inject' }).pipe(
+                Effect.mapError(
+                  () => new ToolError({ code: 'execution', message: 'cannot queue the note' }),
+                ),
+                Effect.tap(() => Effect.sync(() => context.concludeTurn?.())),
+                Effect.as({ ok: true }),
+              ),
+          }
+          yield* ctx.tools.register(finish)
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+    )
+
+    const stored = events.session.events()
+    const delivered = stored.flatMap((event) =>
+      event.type === 'user/message' && event.data.source === 'inject' ? [event.data.text] : [],
+    )
+    expect(types(events).filter((type) => type === 'turn/start')).toHaveLength(2)
+    expect(delivered).toEqual([note])
+    expect(events.inbox.pending).toBe(false)
+  })
+
   test('hands tools the image capability the route declared', async () => {
     const seen: Array<string | undefined> = []
     const probe: ToolDefinition<{}, { readonly carried: boolean }> = {

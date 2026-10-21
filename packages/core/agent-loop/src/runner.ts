@@ -671,6 +671,7 @@ const agentLoopEffect = (
             summary: resultSummary(shown.content),
           }).summary,
           ...(shown.diffs === undefined ? {} : { diffs: shown.diffs }),
+          ...(shown.concludesTurn === true ? { concludesTurn: true as const } : {}),
         }
       })
 
@@ -711,7 +712,7 @@ const agentLoopEffect = (
       agent: Agent,
       batch: CallBatch<ToolCall>,
       pending: Map<string, ToolCall>,
-    ): Effect.Effect<void> =>
+    ): Effect.Effect<boolean> =>
       Effect.gen(function* () {
         // The fan-out is bounded, and the collection keeps the call order while
         // the calls themselves finish in whatever order they take.
@@ -719,6 +720,7 @@ const agentLoopEffect = (
           concurrency: batch.parallel ? maxParallelToolCalls : 1,
         })
         yield* commitResults(agent, results, pending)
+        return results.some((result) => result.concludesTurn === true)
       })
 
     /** What a call gets when the run that made it never finished it. */
@@ -744,21 +746,26 @@ const agentLoopEffect = (
         { discard: true },
       )
 
-    const executeCalls = (agent: Agent, calls: ReadonlyArray<ToolCall>): Effect.Effect<void> =>
+    /** Whether any call of this step asked the turn to end here. */
+    const executeCalls = (agent: Agent, calls: ReadonlyArray<ToolCall>): Effect.Effect<boolean> =>
       Effect.gen(function* () {
         const pending = new Map<string, ToolCall>()
+        let concluded = false
         yield* Effect.onExit(
           Effect.gen(function* () {
             const batches = groupCalls(calls, (call) =>
               tools.isConcurrencySafe(call.name, call.arguments),
             )
+            // Every call of the step still runs, so the history never carries a
+            // tool call without its result; the turn ends once the last batch has.
             for (const batch of batches) {
               yield* declareBatch(agent, batch, pending)
-              yield* runBatch(agent, batch, pending)
+              if (yield* runBatch(agent, batch, pending)) concluded = true
             }
           }),
           () => failPending(agent, pending),
         )
+        return concluded
       })
 
     const runSteps = (
@@ -795,8 +802,11 @@ const agentLoopEffect = (
             if (agent.inbox.nextStep.length === 0) return true
             return yield* loop(yield* agent.inbox.claim(false).pipe(Effect.orDie), false)
           }
-          yield* executeCalls(agent, calls)
+          const concluded = yield* executeCalls(agent, calls)
           yield* append(agent, 'step/end', { step })
+          // A tool that settled the conversation ends the turn here, so a steer
+          // queued meanwhile opens the next one instead of joining this step.
+          if (concluded) return true
           // Input queued while the tools ran (steer, inject) joins the next request.
           return yield* loop(yield* agent.inbox.claim(false).pipe(Effect.orDie), false)
         })

@@ -62,6 +62,8 @@ describe('exit_plan_mode', () => {
 
     expect(left).toEqual(['left'])
     expect(result?.value).toMatchObject({ left: true })
+    // The turn goes on so the model can act on the plan it just had approved.
+    expect(result?.concludesTurn).toBeUndefined()
     expect(textOf(result)).toContain('plan mode is over')
     expect(textOf(result)).toContain('1. read the code')
     // The question is the call, and the user is offered the two ways out.
@@ -82,6 +84,7 @@ describe('exit_plan_mode', () => {
 
     expect(left).toEqual([])
     expect(result?.value).toMatchObject({ left: false, answer: 'change step 2 first' })
+    expect(result?.concludesTurn).toBeUndefined()
     expect(textOf(result)).toContain('the user kept plan mode: change step 2 first')
   })
 

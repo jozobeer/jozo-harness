@@ -40,6 +40,12 @@ export interface ToolRunContext {
    * they are stored. Absent when nothing will record them.
    */
   readonly changes?: DiffRecorder
+  /**
+   * Ends the turn after this call's step, so a tool that settles the
+   * conversation does not ask the model for one more answer. Absent when the
+   * caller does not own a turn, as with a direct call in a test.
+   */
+  readonly concludeTurn?: () => void
 }
 
 /** One call as the policy hooks and guards see it. `args` is already decoded. */
@@ -59,6 +65,11 @@ export interface ToolExecutionResult {
   readonly value?: unknown
   /** What the call changed in the files it wrote, as it ran. */
   readonly diffs?: ReadonlyArray<FileDiff>
+  /**
+   * The tool asked the loop to end the turn here. Only a successful result can
+   * carry it: a failure still needs the next request to see what went wrong.
+   */
+  readonly concludesTurn?: true
 }
 
 export interface ToolCallView {

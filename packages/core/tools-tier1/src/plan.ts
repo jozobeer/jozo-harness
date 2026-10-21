@@ -56,6 +56,8 @@ export const makeExitPlanModeTool = (
         return { left: false, plan: args.plan, answer }
       }
       planMode.leave()
+      // The turn carries on: the approval only changes which tools the next
+      // request may name, and the model has the plan to work from already.
       return { left: true, plan: args.plan, answer }
     }),
 })
