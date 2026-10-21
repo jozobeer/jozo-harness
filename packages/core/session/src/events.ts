@@ -150,6 +150,16 @@ export interface SessionEventMap {
   }
   'job/started': JobStartedData
   'job/ended': JobEndedData
+  /**
+   * A tool added this text to the next request. Log-only: the loop carries the
+   * text to one request, and the record says which call added it, in what order,
+   * and where the text came from.
+   */
+  'tool/context': {
+    readonly callId: string
+    readonly text: string
+    readonly source: UserMessageSource
+  }
 }
 
 /** A background job this run registered, recorded when it started. */

@@ -1357,19 +1357,30 @@ describe('tool context', () => {
   test('a fragment a tool adds reaches the next request after its result', async () => {
     const fragment = 'the team left a note'
     const requests: Array<AgentRequest> = []
-    await scenario([chunks(toolTurn('c1', 'note')), chunks(textTurn('done'))], (ctx) =>
-      Effect.gen(function* () {
-        yield* ctx.tools.register(okTool('note', fragment))
-        yield* capture(requests, ctx)
-        const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
-        yield* agent.followup({ text: 'go', source: 'user' })
-        yield* agent.whenIdle
-      }),
+    const events = await scenario(
+      [chunks(toolTurn('c1', 'note')), chunks(textTurn('done'))],
+      (ctx) =>
+        Effect.gen(function* () {
+          yield* ctx.tools.register(okTool('note', fragment))
+          yield* capture(requests, ctx)
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
     )
 
     expect(userTexts(requests[1])).toEqual(['go', fragment])
     expect(requests[1]?.messages.at(-1)?.role).toBe('user')
     expect(requests[1]?.messages.at(-2)?.role).toBe('tool')
+    const recorded = events.session
+      .events()
+      .flatMap((event) =>
+        event.type === 'tool/context'
+          ? [{ callId: event.data.callId, text: event.data.text, source: event.data.source }]
+          : [],
+      )
+    expect(recorded).toEqual([{ callId: 'c1', text: fragment, source: 'inject' }])
   })
 
   test('a tool that adds nothing leaves the next request unchanged', async () => {

@@ -291,6 +291,9 @@ const runSession = async (
     )
     const nested = { ...context, callId }
     const result = await Effect.runPromise(host.call(message.name, argumentsJson, nested))
+    // A nested tool's note belongs to the step the program runs in, so the outer
+    // call carries it: the fragments leave in the order the program made the calls.
+    for (const text of result.context ?? []) context.addContext?.(text)
     await Effect.runPromise(
       host.append('tool/ptc-dispatch', {
         callId,
