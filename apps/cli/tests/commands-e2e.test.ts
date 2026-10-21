@@ -13,11 +13,32 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { runCommand } from '../src/index.ts'
 
-const reply: ReadonlyArray<StreamChunk> = [
-  { type: 'text-delta', index: 0, text: 'ok' },
-  { type: 'block-end', index: 0, block: { type: 'text', text: 'ok' } },
+const textTurn = (text: string): ReadonlyArray<StreamChunk> => [
+  { type: 'text-delta', index: 0, text },
+  { type: 'block-end', index: 0, block: { type: 'text', text } },
   { type: 'finish', kind: 'stop' },
 ]
+
+const reply: ReadonlyArray<StreamChunk> = textTurn('ok')
+
+/** One message as the model was sent it: its role and its text blocks joined. */
+interface SentMessage {
+  readonly role: string
+  readonly text: string
+}
+
+const asSeen = (
+  messages: ReadonlyArray<{
+    role: string
+    content: ReadonlyArray<{ type: string; text?: string }>
+  }>,
+): ReadonlyArray<SentMessage> =>
+  messages.map((message) => ({
+    role: message.role,
+    text: message.content
+      .flatMap((block) => (block.type === 'text' ? [block.text ?? ''] : []))
+      .join('\n'),
+  }))
 
 const profile = (root: string): string =>
   [
@@ -43,27 +64,67 @@ const profile = (root: string): string =>
     "    name: '@jozo-harness/agent-loop'",
   ].join('\n')
 
-/** Runs the REPL over the given lines and reports what it printed. */
-const runLines = async (lines: ReadonlyArray<string>) => {
+/** The model that answers every request with the same words. */
+const replying = (text: string): Plugin<{}, Llm, never> => ({
+  name: 'stub-llm',
+  config: Schema.Struct({}),
+  provides: [Llm],
+  requires: [],
+  layer: () =>
+    Layer.succeed(Llm, {
+      name: 'stub',
+      capabilities: {
+        toolChoice: false,
+        reasoningEffort: null,
+        images: 'none',
+        promptCacheControl: false,
+      },
+      stream: () => Stream.fromIterable(textTurn(text)),
+    } satisfies LlmAdapter),
+})
+
+/**
+ * A model that answers the compaction engine's own call with the summary and every
+ * conversation request with 'ok', recording the latter so the request can be read.
+ */
+const summarizing = (
+  summary: string,
+  seen: Array<ReadonlyArray<SentMessage>>,
+): Plugin<{}, Llm, never> => ({
+  name: 'stub-llm',
+  config: Schema.Struct({}),
+  provides: [Llm],
+  requires: [],
+  layer: () =>
+    Layer.succeed(Llm, {
+      name: 'stub',
+      capabilities: {
+        toolChoice: false,
+        reasoningEffort: null,
+        images: 'none',
+        promptCacheControl: false,
+      },
+      stream: (request) => {
+        const messages = asSeen(request.messages)
+        // The auxiliary call carries the instruction the summary is asked for with.
+        if ((messages.at(-1)?.text ?? '').includes('compaction engine')) {
+          return Stream.fromIterable(textTurn(summary))
+        }
+        seen.push(messages)
+        return Stream.fromIterable(reply)
+      },
+    } satisfies LlmAdapter),
+})
+
+/** Runs the REPL over the given lines and reports what it printed and was sent. */
+const runLines = async (
+  lines: ReadonlyArray<string>,
+  llmOf: (seen: Array<ReadonlyArray<SentMessage>>) => Plugin<{}, Llm, never> = () => replying('ok'),
+) => {
   const root = await mkdtemp(join(tmpdir(), 'jozo-harness-cmd-'))
   const out: Array<string> = []
-  const stub: Plugin<{}, Llm, never> = {
-    name: 'stub-llm',
-    config: Schema.Struct({}),
-    provides: [Llm],
-    requires: [],
-    layer: () =>
-      Layer.succeed(Llm, {
-        name: 'stub',
-        capabilities: {
-          toolChoice: false,
-          reasoningEffort: null,
-          images: 'none',
-          promptCacheControl: false,
-        },
-        stream: () => Stream.fromIterable(reply),
-      } satisfies LlmAdapter),
-  }
+  const seen: Array<ReadonlyArray<SentMessage>> = []
+  const stub = llmOf(seen)
 
   const code = await Effect.runPromise(
     runCommand({
@@ -91,7 +152,7 @@ const runLines = async (lines: ReadonlyArray<string>) => {
   const listed = await Effect.runPromise(jsonlSessions({ root }).list())
   const opened = await Effect.runPromise(jsonlSessions({ root }).open(listed[0]?.id ?? ''))
   await rm(root, { recursive: true, force: true })
-  return { code, printed: out.join(''), events: opened.events }
+  return { code, printed: out.join(''), events: opened.events, seen }
 }
 
 describe('commands in the REPL', () => {
@@ -174,6 +235,37 @@ describe('commands in the REPL', () => {
     // The session wired the fold to the route it asks, so the log names that model.
     expect(checkpoints).toHaveLength(1)
     expect(checkpoints[0]).toMatchObject({ provider: 'stub', model: 'model', summary: 'ok' })
+  })
+
+  test('the request right after /compact is the summary and the words that followed', async () => {
+    const big = 'x'.repeat(40_000)
+    const summary = 'SUMMARY-OF-THE-FOLDED-SPAN-255'
+    const observed = await runLines([big, '/compact', 'what next?'], (seen) =>
+      summarizing(summary, seen),
+    )
+
+    const before = observed.seen[0] ?? []
+    const after = observed.seen[1] ?? []
+    const joined = after.map((message) => message.text).join('\n')
+    const bytes = (messages: ReadonlyArray<SentMessage>): number =>
+      messages.reduce((sum, message) => sum + Buffer.byteLength(message.text, 'utf8'), 0)
+    const checkpoint = observed.events.find((event) => event.type === 'compaction/checkpoint')
+
+    expect(observed.code).toBe(0)
+    expect(observed.printed).toContain('compacted')
+    // The checkpoint the fold recorded is the summary this model gave.
+    expect(checkpoint?.type === 'compaction/checkpoint' ? checkpoint.data.summary : undefined).toBe(
+      summary,
+    )
+    // The turn after the command is the request the recorded checkpoint folds: one
+    // summary in place of the span, then the words that came after it.
+    expect(observed.seen).toHaveLength(2)
+    expect(joined).toContain(summary)
+    expect(joined).toContain('what next?')
+    expect(after.some((message) => message.text === big)).toBe(false)
+    // A request the fold stood in for is smaller than the one it replaced.
+    expect(bytes(after)).toBeLessThan(bytes(before))
+    expect(observed.events.filter((event) => event.type === 'compaction/prune')).toHaveLength(1)
   })
 
   test('help lists what can be typed, and an unknown command says so', async () => {
