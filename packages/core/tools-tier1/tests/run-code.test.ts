@@ -2,6 +2,12 @@ import { HooksLive } from '@jozo-harness/kernel'
 import type { ContentBlock } from '@jozo-harness/llm'
 import { makeAsk, type SandboxShape } from '@jozo-harness/safety'
 import {
+  decodeSessionEvent,
+  makeSession,
+  type SessionEvent,
+  type SessionSink,
+} from '@jozo-harness/session'
+import {
   Tools,
   toolDeclaration,
   toolsLayer,
@@ -44,9 +50,11 @@ const host = (
   call: RunCodeHost['call'],
   sandbox?: SandboxShape,
   declarations: ReadonlyArray<ToolDefinition<any, any>> = [echo],
+  append: RunCodeHost['append'] = () => Effect.void,
 ): RunCodeHost => ({
   tools: () => declarations.map((tool) => toolDeclaration(tool)),
   call,
+  append,
   ...(sandbox === undefined ? {} : { sandbox }),
 })
 
@@ -99,6 +107,97 @@ describe('run_code', () => {
 
     expect(outcome.isError).toBe(false)
     expect(textOf(outcome.content)).toContain('caught denied: no')
+  })
+
+  test('records each nested call and its result in the log under the parent call id', async () => {
+    const appended: Array<SessionEvent> = []
+    const sink: SessionSink = {
+      append: (event) =>
+        Effect.sync(() => {
+          appended.push(event)
+        }),
+      flush: () => Effect.void,
+    }
+    const session = await Effect.runPromise(
+      makeSession({
+        id: 's-1',
+        events: [
+          {
+            seq: 1,
+            time: 1,
+            type: 'session/header',
+            data: { formatVersion: 1, createdAt: 1, cwd: process.cwd() },
+          },
+        ],
+        sink,
+        now: () => 50,
+      }),
+    )
+    const tool = makeRunCodeTool(
+      host(
+        (_name, args) =>
+          Effect.succeed(args === '{"text":"one"}' ? ok('first', {}) : failed('second failed')),
+        undefined,
+        [echo],
+        (type, data) => session.append(type, data),
+      ),
+    )
+
+    const outcome = await run(
+      tool,
+      "await tools.echo({ text: 'one' })\ntry { await tools.echo({ text: 'two' }) } catch {}\nreturn 'done'",
+    )
+
+    expect(outcome.isError).toBe(false)
+    expect(appended).toEqual([
+      {
+        seq: 2,
+        time: 50,
+        type: 'tool/ptc-dispatch-start',
+        data: { callId: 'call-1.1', name: 'echo', arguments: '{"text":"one"}' },
+      },
+      {
+        seq: 3,
+        time: 50,
+        type: 'tool/ptc-dispatch',
+        data: {
+          callId: 'call-1.1',
+          name: 'echo',
+          arguments: '{"text":"one"}',
+          isError: false,
+          summary: 'first',
+        },
+      },
+      {
+        seq: 4,
+        time: 50,
+        type: 'tool/ptc-dispatch-start',
+        data: { callId: 'call-1.2', name: 'echo', arguments: '{"text":"two"}' },
+      },
+      {
+        seq: 5,
+        time: 50,
+        type: 'tool/ptc-dispatch',
+        data: {
+          callId: 'call-1.2',
+          name: 'echo',
+          arguments: '{"text":"two"}',
+          isError: true,
+          summary: 'second failed',
+        },
+      },
+    ])
+    // Nested calls are log-only: a reader decodes them, and the model history stays put.
+    const decoded = await Effect.runPromise(
+      Effect.forEach(appended, (event) => decodeSessionEvent(event)),
+    )
+    expect(decoded.map((event) => event?.type)).toEqual([
+      'tool/ptc-dispatch-start',
+      'tool/ptc-dispatch',
+      'tool/ptc-dispatch-start',
+      'tool/ptc-dispatch',
+    ])
+    expect(session.derive()).toEqual([])
   })
 
   test('a program that throws ends as an error result', async () => {
