@@ -148,6 +148,16 @@ describe('the built-in commands a session can switch with', () => {
     expect(compacted(session)).toHaveLength(0)
   })
 
+  test('/compact refuses while a turn holds the agent, and folds nothing', async () => {
+    const { commands, session } = await Effect.runPromise(build({ isBusy: () => true }))
+    await Effect.runPromise(seed(session))
+
+    const outcome = await Effect.runPromise(commands.run('/compact', session))
+
+    expect(outcome).toEqual({ ok: false, text: 'a turn is running; /compact after it' })
+    expect(session.events().filter((event) => event.type === 'compaction/prune')).toHaveLength(0)
+  })
+
   test('/compact prunes alone when no summary call was handed in', async () => {
     const { commands, session } = await Effect.runPromise(build())
     await Effect.runPromise(seed(session))

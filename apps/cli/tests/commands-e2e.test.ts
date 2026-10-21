@@ -163,6 +163,19 @@ describe('commands in the REPL', () => {
     expect(observed.events.filter((event) => event.type === 'turn/start')).toHaveLength(0)
   })
 
+  test('/compact records the checkpoint from the same summary call the loop makes', async () => {
+    const observed = await runLines(['x'.repeat(40_000), '/compact'])
+    const checkpoints = observed.events.flatMap((event) =>
+      event.type === 'compaction/checkpoint' ? [event.data] : [],
+    )
+
+    expect(observed.code).toBe(0)
+    expect(observed.printed).toContain('compacted')
+    // The session wired the fold to the route it asks, so the log names that model.
+    expect(checkpoints).toHaveLength(1)
+    expect(checkpoints[0]).toMatchObject({ provider: 'stub', model: 'model', summary: 'ok' })
+  })
+
   test('help lists what can be typed, and an unknown command says so', async () => {
     const observed = await runLines(['/help', '/nope', 'and a message'])
 
