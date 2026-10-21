@@ -287,9 +287,28 @@ body {
 }
 
 .tabs {
+  position: relative;
   display: flex;
   flex: 1;
   gap: var(--s3);
+}
+
+/*
+ * The chosen tab is one underline the strip moves to the tab that was pressed,
+ * so unequal labels still get a bar that fits. It sits on the head's edge, where
+ * the tab's own bottom border used to paint, and takes no clicks; Solid fills in
+ * the place and width.
+ */
+.tabs::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  width: var(--tab-w, 0);
+  height: 2px;
+  background: var(--select);
+  transform: translateX(var(--tab-x, 0));
+  pointer-events: none;
 }
 
 .tab {
@@ -311,7 +330,6 @@ body {
 }
 
 .tab.active {
-  border-bottom-color: var(--select);
   color: var(--text);
 }
 
@@ -2153,14 +2171,19 @@ button.primary {
 }
 
 /*
- * A tab's underline grows into the colour of the tab that was chosen, so the
- * press reads as landing here rather than as an instant repaint. The padding
- * stays out of the transition: it changes when the pane folds, not on a press.
+ * The underline slides to the tab that was chosen, so the press reads as landing
+ * here rather than as an instant repaint. The tab's padding stays out of the
+ * transition: it changes when the pane folds, not on a press, and a reader who
+ * asked for less motion gets the bar in place at once.
  */
 @media (prefers-reduced-motion: no-preference) {
-  .tab {
+  .tabs::after {
     transition:
-      border-bottom-color 180ms ease-out,
-      color 180ms ease-out;
+      transform 180ms ease-out,
+      width 180ms ease-out;
+  }
+
+  .tab {
+    transition: color 180ms ease-out;
   }
 }
