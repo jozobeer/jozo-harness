@@ -1,5 +1,5 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { writeFileAtomic } from './atomic-write.ts'
 import { parseEnvFile } from './env-file.ts'
 
 /** 600: only the user may read the file that holds secrets. */
@@ -9,10 +9,8 @@ const readLines = (path: string): ReadonlyArray<string> =>
   existsSync(path) ? readFileSync(path, 'utf8').split('\n') : []
 
 const write = (path: string, lines: ReadonlyArray<string>): void => {
-  mkdirSync(dirname(path), { recursive: true })
   const text = lines.join('\n').replace(/\n+$/, '') + '\n'
-  writeFileSync(path, text, { mode: SECRETS_MODE })
-  chmodSync(path, SECRETS_MODE)
+  writeFileAtomic(path, text, { mode: SECRETS_MODE })
 }
 
 /** Adds or replaces one secret without disturbing the others. */

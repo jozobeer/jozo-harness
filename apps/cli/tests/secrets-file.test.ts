@@ -28,6 +28,20 @@ describe('writeSecret', () => {
     await rm(directory, { recursive: true, force: true })
   })
 
+  test('replaces the file through a rename so a reader never sees a cut', async () => {
+    const { directory, path } = await withFile('# my keys\nA=1\n')
+    const before = statSync(path).ino
+
+    writeSecret(path, 'B', '2')
+
+    expect(await readFile(path, 'utf8')).toBe('# my keys\nA=1\nB=2\n')
+    // The new inode is complete before the target names it; the old inode keeps
+    // the complete old text for a reader that already opened it.
+    expect(statSync(path).ino).not.toBe(before)
+    expect(statSync(path).mode & 0o777).toBe(0o600)
+    await rm(directory, { recursive: true, force: true })
+  })
+
   test('replaces a value in place and keeps comments', async () => {
     const { directory, path } = await withFile('# my keys\nA=1\nB=2\n')
 

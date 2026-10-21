@@ -2,9 +2,10 @@ import { loadBundledProfile, loadBundledProfileNamed } from '@jozo-harness/bundl
 import { mergeRows, parseProfile, type Plugin, type PluginRow } from '@jozo-harness/kernel'
 import { parse, stringify } from 'yaml'
 import { Effect, Schema } from 'effect'
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
+import { writeFileAtomic } from './atomic-write.ts'
 import { configPaths, type ConfigPaths } from './config.ts'
 import { loadConfigFile } from './config-file.ts'
 import { bundledPlugins } from './plugins.ts'
@@ -151,8 +152,7 @@ const settingsText = (path: string): string => (existsSync(path) ? readFileSync(
 
 const saved = (io: ConfigIo, paths: ConfigPaths, text: string): number | undefined => {
   try {
-    mkdirSync(dirname(paths.config), { recursive: true })
-    writeFileSync(paths.config, text)
+    writeFileAtomic(paths.config, text)
     return undefined
   } catch (cause) {
     io.stderr('jzh: cannot write ' + paths.config + ': ' + String(cause) + '\n')
@@ -522,8 +522,7 @@ const init = async (io: ConfigIo, paths: ConfigPaths): Promise<number> => {
     return 1
   }
   try {
-    mkdirSync(dirname(paths.config), { recursive: true })
-    writeFileSync(paths.config, template())
+    writeFileAtomic(paths.config, template())
   } catch (cause) {
     io.stderr('jzh: cannot write ' + paths.config + ': ' + String(cause) + '\n')
     return 1
