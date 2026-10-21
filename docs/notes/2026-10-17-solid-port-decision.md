@@ -7,7 +7,7 @@
 - **入口**: `jzh:apps/web/client-solid` を Vite+ の別アプリとして建て、`vite-plugin-solid` と Tailwind v4 で `apps/web/dist/solid` に束ね、`/solid/` で配る。既定の `/` は現行のまま（`jzh:package.json` の `build:web` が両方をビルドする）。
 - **橋**: `jzh:apps/web/client-solid/store.ts` が RPC のプログラムを 1 回だけ走らせ、ページからの要求はキューで渡し、値は signal に落とす。`jzh:apps/web/client-solid/bridge.ts` が Effect を走らせる唯一の場所で、ソケットが切れたら 1 秒ごとに張り直す。
 - **画面**: レール（セッション一覧・New session・store）、会話（markdown・tool カード・ask・notice・live・読み位置の保持）、composer（queue・takeover・モデルの席）、右シート（run / settings / turns / job）、テーマ 3 種。純関数は現行のものを再利用する（イベントの畳み込み・テーマ・markdown・turn の台帳・スクロール規則）。
-- **アニメーション 4 箇所**（150〜250ms、すべて CSS）: 会話のブロック到着、右シートの開閉（閉じる間は本文を 150ms 残して滑らせる）、承認・質問カードの到着、その下で composer が持ち上がる。`prefers-reduced-motion: reduce` では 4 つとも止まる。
+- **アニメーション 5 箇所**（150〜250ms、すべて CSS）: 会話のブロック到着、右シートの開閉（閉じる間は本文を 150ms 残して滑らせる）、承認・質問カードの到着、その下で composer が持ち上がる、Run ペインの速度計の弧（Issue #254 で追加）。`prefers-reduced-motion: reduce` では 5 つとも止まる。
 - **shadcn-solid**: Button を 1 ファイル コピーインし、レール・composer・takeover・シートで使う。Tailwind はトークンを `@theme` に置き、現行スタイルシートを `layer(client)` に入れて utilities が上に来るようにした（レイヤ順: theme / base / components / client / utilities）。
 - **コンポーネントテスト 5 本**（jsdom + `@solidjs/testing-library`）: レールの一覧と選択、会話の markdown・tool 出力・live、承認（ボタンと y / n）、composer の下書きと送信、シートの run 読みとタブ。
 

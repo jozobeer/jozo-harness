@@ -27,10 +27,11 @@
 }
 
 /*
- * The four places the port moves, all of them CSS: a block arriving in the
+ * The five places the port moves, all of them CSS: a block arriving in the
  * conversation, the right sheet opening and closing, the card that asks for an
- * answer, and the composer lifting under it. Every one of them is 150-250ms of
- * ease-out, and the whole set is off for a reader who asked for less motion.
+ * answer, the composer lifting under it, and the speed dial's ring growing to a
+ * new reading. Every one of them is 150-250ms of ease-out, and the whole set is
+ * off for a reader who asked for less motion.
  */
 @keyframes jzh-block-in {
   from {
@@ -146,6 +147,11 @@
     transition:
       background-color 160ms ease-out,
       color 160ms ease-out;
+  }
+
+  /* A new reading grows the ring from where the last one left it. */
+  .dial-fill {
+    transition: stroke-dasharray 180ms ease-out;
   }
 
   .fizz i {

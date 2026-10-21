@@ -2282,7 +2282,13 @@ describe('the rail', () => {
     expect(textsAt(container, '.usage-context-of')).toEqual(['540k / 1.0M'])
     expect(textsAt(container, '.usage-context.near .usage-left')).toEqual(['Compacts in 50k'])
     expect(textsAt(container, '.dial-value')).toEqual(['42'])
-    expect(container.querySelector('.dial-fill')).not.toBeNull()
+    const track = container.querySelector('.dial-track')
+    const fill = container.querySelector('.dial-fill')
+    // The ring keeps one arc and carries the speed in how much of it is drawn,
+    // so a new reading can grow the dash instead of swapping the path.
+    expect(fill?.getAttribute('d')).toBe(track?.getAttribute('d'))
+    expect(fill?.getAttribute('pathLength')).toBe('1')
+    expect(fill?.getAttribute('stroke-dasharray')).toBe('0.084 1')
     expect(textsAt(container, '.usage-note')).toEqual(['Cache 94%', '8 turns'])
 
     const strip = render(() => <Status store={store} drawer={false} onDrawer={() => undefined} />)
@@ -2346,7 +2352,22 @@ describe('the rail', () => {
     const { container } = render(() => <SpeedDial speed={{ text: '2100', value: 2100 }} />)
     const ring = (selector: string) => container.querySelector(selector)?.getAttribute('d')
     expect(ring('.dial-fill')).toBe(ring('.dial-track'))
+    expect(container.querySelector('.dial-fill')?.getAttribute('stroke-dasharray')).toBe('1 1')
     expect(container.querySelector('.dial-value.long')?.textContent).toBe('2100')
+  })
+
+  test('the dial fill eases between lengths, and only while motion is welcome', () => {
+    const sheet = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../style.css'),
+      'utf8',
+    )
+    const motion = sheet.indexOf('@media (prefers-reduced-motion: no-preference)')
+    expect(motion).toBeGreaterThan(-1)
+    const end = sheet.indexOf('\n}', motion)
+    const welcome = sheet.slice(motion, end)
+    expect(welcome).toMatch(/\.dial-fill \{[^}]*transition: stroke-dasharray 180ms ease-out/)
+    // A reader who asked for less motion gets the new length at once.
+    expect(sheet.slice(0, motion) + sheet.slice(end)).not.toMatch(/\.dial-fill \{[^}]*transition/)
   })
 
   test('the status bar says working while a session runs, without counting runners', () => {
