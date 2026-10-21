@@ -287,6 +287,13 @@ const agentLoopEffect = (
       data: SessionEventMap[K],
     ): Effect.Effect<void> => agent.session.append(type, data).pipe(Effect.orDie)
 
+    // The log is the only memory of a run, so nothing leaves the process before
+    // what it rests on is on disk: the provider request waits here, and so does a
+    // tool that is about to act outside it. A checkpoint that cannot be written
+    // dies like an append that cannot be, and the operation never starts.
+    const checkpoint = (agent: Agent): Effect.Effect<void> =>
+      agent.session.flush().pipe(Effect.orDie)
+
     const recordAttempt = (
       agent: Agent,
       request: AgentRequest,
@@ -596,6 +603,9 @@ const agentLoopEffect = (
         let attempt = 0
         let overflowRecovered = false
         while (true) {
+          // The header this request was assembled with is part of the log the
+          // provider sees, so the checkpoint sits after the rebuild named it.
+          yield* checkpoint(agent)
           const outcome = yield* streamStep(agent, current)
           if (outcome.ok) return outcome
           attempt += 1
@@ -771,6 +781,9 @@ const agentLoopEffect = (
             // tool call without its result; the turn ends once the last batch has.
             for (const batch of batches) {
               yield* declareBatch(agent, batch, pending)
+              // The call is durable before its tool runs, so a crash leaves the
+              // pair the next open repairs, never an effect without its call.
+              yield* checkpoint(agent)
               if (yield* runBatch(agent, batch, pending)) concluded = true
             }
           }),

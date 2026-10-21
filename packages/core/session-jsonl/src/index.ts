@@ -12,7 +12,15 @@ import {
 } from '@jozo-harness/session'
 import { Effect } from 'effect'
 import type { Dirent } from 'node:fs'
-import { appendFile, mkdir, readdir, readFile, stat as statFile, writeFile } from 'node:fs/promises'
+import {
+  appendFile,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  stat as statFile,
+  writeFile,
+} from 'node:fs/promises'
 import { upgradeHeaderLine } from './upgrade.ts'
 import { splitTornTail, type SplitLog } from './repair.ts'
 import { isMissing, notFound, persistenceError } from './errors.ts'
@@ -116,7 +124,23 @@ const sinkFor = (path: string, id: SessionId): SessionSink => ({
       try: () => appendFile(path, JSON.stringify(event) + '\n'),
       catch: (cause) => persistenceError(`cannot append to session ${id}`, cause),
     }),
-  flush: () => Effect.void,
+  // The log is the only memory of a run, so a checkpoint waits for what was
+  // appended to reach the device. fsync covers the whole file, not one descriptor,
+  // so syncing a fresh append handle flushes the writes `appendFile` already made.
+  flush: () =>
+    Effect.tryPromise({
+      try: async () => {
+        // Open for update rather than append: a log that was deleted under the
+        // session must fail the checkpoint, not come back as an empty file.
+        const handle = await open(path, 'r+')
+        try {
+          await handle.sync()
+        } finally {
+          await handle.close()
+        }
+      },
+      catch: (cause) => persistenceError('cannot flush session ' + id, cause),
+    }),
 })
 
 /** Stores each session as one JSONL file under `root/<id>/session.v1.jsonl`. */
