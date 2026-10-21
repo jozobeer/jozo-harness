@@ -139,14 +139,18 @@
   }
 
   /*
-   * The segment answers at once; the colour it moves to says where the press
-   * landed. The columns themselves swap instantly, so a streamed event never
-   * restarts an entry animation on the conversation.
+   * The pill slides to the pressed label; the labels keep their place. The
+   * columns themselves swap instantly, so a streamed event never restarts an
+   * entry animation on the conversation.
    */
-  .lens-option {
+  .lens::before {
     transition:
-      background-color 160ms ease-out,
-      color 160ms ease-out;
+      transform 160ms ease-out,
+      width 160ms ease-out;
+  }
+
+  .lens-option {
+    transition: color 160ms ease-out;
   }
 
   /* A new reading grows the ring from where the last one left it. */
@@ -1366,6 +1370,7 @@
   }
 
   .lens {
+    position: relative;
     display: flex;
     flex: none;
     padding: 2px;
@@ -1373,7 +1378,26 @@
     border-radius: var(--radius-sm);
   }
 
+  /*
+   * The chosen segment is one pill that the strip moves to the pressed option.
+   * It sits behind the labels and takes no clicks; Solid fills in the place
+   * and width, so unequal labels still get a pill that fits.
+   */
+  .lens::before {
+    content: '';
+    position: absolute;
+    top: 2px;
+    bottom: 2px;
+    left: 0;
+    width: var(--pick-w, 0);
+    border-radius: 3px;
+    background: var(--bg-hover);
+    transform: translateX(var(--pick-x, 0));
+    pointer-events: none;
+  }
+
   .lens-option {
+    position: relative;
     padding: 1px 10px;
     border: 0;
     border-radius: 3px;
@@ -1384,7 +1408,6 @@
   }
 
   .lens-option[aria-pressed='true'] {
-    background: var(--bg-hover);
     color: var(--text);
   }
 
