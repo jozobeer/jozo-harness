@@ -530,6 +530,72 @@ describe('the Solid page', () => {
     )
   })
 
+  test('a tool that published a page draws the page under its result line', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const { store } = makeStore({
+      conversation: { ...emptyConversation, blocks: [{ kind: 'user', text: 'go' }] },
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'step/start', { step: 1 }),
+        at(3, 'tool/call', {
+          callId: 'c1',
+          name: 'artifact',
+          arguments: '{"name":"report"}',
+          summary: 'artifact report',
+        }),
+        at(4, 'tool/result', {
+          callId: 'c1',
+          isError: false,
+          summary: 'report',
+          content: [{ type: 'text', text: 'page: /artifact/s1/report' }],
+        }),
+        at(5, 'step/end', { step: 1 }),
+        at(6, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      ]),
+    })
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    const frame = container.querySelector('.tool-card iframe')
+    expect(frame?.getAttribute('src')).toBe('/artifact/s1/report')
+    expect(frame?.getAttribute('sandbox')).toBe('allow-scripts')
+    expect(frame?.getAttribute('referrerpolicy')).toBe('no-referrer')
+    const open = container.querySelector('.tool-card a.tool-page-open')
+    expect(open?.getAttribute('href')).toBe('/artifact/s1/report')
+    expect(open?.getAttribute('target')).toBe('_blank')
+    expect(open?.getAttribute('rel')).toBe('noopener')
+    expect(open?.textContent).toBe('Open in a new tab')
+  })
+
+  test('a tool result that is not a page line draws no frame', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const { store } = makeStore({
+      conversation: { ...emptyConversation, blocks: [{ kind: 'user', text: 'go' }] },
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'step/start', { step: 1 }),
+        at(3, 'tool/call', {
+          callId: 'c1',
+          name: 'read',
+          arguments: '{"path":"a.ts"}',
+          summary: 'read a.ts',
+        }),
+        at(4, 'tool/result', {
+          callId: 'c1',
+          isError: false,
+          summary: 'lines: 1',
+          content: [{ type: 'text', text: 'page: /artifact/s1/report\nand more' }],
+        }),
+        at(5, 'step/end', { step: 1 }),
+        at(6, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      ]),
+    })
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    expect(container.querySelector('.tool-card iframe')).toBeNull()
+  })
+
   test('the changes pane lists a file with its counts and draws the diff in hunks', () => {
     const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
     const content = Array.from({ length: 20 }, (_, n) => 'line ' + String(n)).join('\n')

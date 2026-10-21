@@ -85,6 +85,32 @@ const ToolImage = (props: { image: TraceImage }) => {
   )
 }
 
+/** The one line an artifact result writes; text around it means the call published no page. */
+const PAGE_LINE = /^page: (\/artifact\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)$/
+
+/** The page a finished call published, when its whole result is that line. */
+const pageOf = (tool: TraceTool): string | undefined => {
+  if (tool.endedAt === undefined) return undefined
+  const found = PAGE_LINE.exec(tool.output.trim())
+  return found?.[1]
+}
+
+/** A published page reads in place, and opens on its own for a reader who wants it. */
+const ToolPage = (props: { page: string }) => (
+  <div class="tool-page">
+    <iframe
+      class="tool-page-frame"
+      src={props.page}
+      title="published page"
+      sandbox="allow-scripts"
+      referrerpolicy="no-referrer"
+    />
+    <a class="tool-page-open" href={props.page} target="_blank" rel="noopener">
+      Open in a new tab
+    </a>
+  </div>
+)
+
 /** The one line a failed card adds for the code the log kept, before the raw output. */
 const errorLineOf = (code: string): string => {
   switch (code) {
@@ -122,6 +148,7 @@ const Tool = (props: { tool: TraceTool }) => (
         <Linkify text={plainText(props.tool.output)} />
       </pre>
     </Show>
+    <Show when={pageOf(props.tool)}>{(page) => <ToolPage page={page()} />}</Show>
     <For each={props.tool.images}>{(image) => <ToolImage image={image} />}</For>
   </details>
 )
