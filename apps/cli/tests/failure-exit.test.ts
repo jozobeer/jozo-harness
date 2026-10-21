@@ -221,9 +221,15 @@ describe('a turn that fails', () => {
     const retries = opened.events.flatMap((event) =>
       event.type === 'llm/retry' ? [event.data] : [],
     )
+    const started = opened.events.flatMap((event) =>
+      event.type === 'llm/retry-started' ? [event.data] : [],
+    )
 
     expect({ code, stderr: err.join(''), calls }).toEqual({ code: 0, stderr: '', calls: 2 })
-    expect(retries).toEqual([{ attempt: 1, code: 'RATE_LIMIT', delayMs: 0, cause: 'transient' }])
+    expect(retries).toMatchObject([
+      { attempt: 1, code: 'RATE_LIMIT', delayMs: 0, cause: 'transient' },
+    ])
+    expect(started).toEqual([{ retryId: retries[0]?.retryId }])
     await rm(root, { recursive: true, force: true })
   })
 })

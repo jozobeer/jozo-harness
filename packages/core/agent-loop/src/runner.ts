@@ -46,6 +46,7 @@ import { SystemPrompt } from '@jozo-harness/system-prompt'
 import { applySpill, makeSpillWriter, type SpillOptions } from '@jozo-harness/tools'
 import { Tools, resultSummary } from '@jozo-harness/tools'
 import { Context, Effect, Exit, Layer, Queue, Schema, Stream } from 'effect'
+import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { groupCalls, type CallBatch } from './batch.ts'
@@ -524,16 +525,23 @@ const agentLoopEffect = (
     ): Effect.Effect<AgentRequest | undefined> =>
       Effect.gen(function* () {
         if (!(yield* recordCompaction(agent, envelope, true))) return undefined
+        const retryId = randomUUID()
         yield* append(agent, 'llm/retry', {
+          retryId,
           attempt,
           code: failure.code,
           delayMs: 0,
           cause: 'context-overflow',
         })
-        return yield* rebuild()
+        const request = yield* rebuild()
+        yield* append(agent, 'llm/retry-started', { retryId })
+        return request
       })
 
-    /** Whether the hooks ask for one more attempt; a retry waits out its delay and records itself. */
+    /**
+     * Whether the hooks ask for one more attempt. The decision is logged before the
+     * wait, so a log cut short still names the retry; the start closes the pair.
+     */
     const retryAfterFailure = (
       agent: Agent,
       failure: LlmFailure,
@@ -543,13 +551,16 @@ const agentLoopEffect = (
         const decision = yield* hooks.waterfall('agent/request-error', agent, failure, attempt)
         if (decision?.kind !== 'retry') return false
         const delayMs = decision.delayMs ?? 0
-        if (delayMs > 0) yield* Effect.sleep(delayMs)
+        const retryId = randomUUID()
         yield* append(agent, 'llm/retry', {
+          retryId,
           attempt,
           code: failure.code,
           delayMs,
           cause: 'transient',
         })
+        if (delayMs > 0) yield* Effect.sleep(delayMs)
+        yield* append(agent, 'llm/retry-started', { retryId })
         return true
       })
 

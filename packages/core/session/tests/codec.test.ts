@@ -29,6 +29,32 @@ describe('decodeSessionEvent', () => {
     expect(await decode(throughJson(sessionEvent))).toEqual(sessionEvent)
   })
 
+  test('round-trips a retry with its id and the start that follows it', async () => {
+    const retryId = crypto.randomUUID()
+    const retry = event(2, 'llm/retry', {
+      attempt: 1,
+      code: 'RATE_LIMIT',
+      delayMs: 500,
+      cause: 'transient',
+      retryId,
+    })
+    const started = event(3, 'llm/retry-started', { retryId })
+
+    expect(await decode(throughJson(retry))).toEqual(retry)
+    expect(await decode(throughJson(started))).toEqual(started)
+  })
+
+  test('decodes a retry written before retry ids existed', async () => {
+    const retry = event(2, 'llm/retry', {
+      attempt: 1,
+      code: 'RATE_LIMIT',
+      delayMs: 500,
+      cause: 'transient',
+    })
+
+    expect(await decode(throughJson(retry))).toEqual(retry)
+  })
+
   test('round-trips a turn ended by the token cap', async () => {
     const sessionEvent = event(2, 'turn/end', { turn: 1, reason: { kind: 'max-tokens' } })
     expect(await decode(throughJson(sessionEvent))).toEqual(sessionEvent)

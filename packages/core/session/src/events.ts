@@ -72,7 +72,7 @@ export interface AssistantAttemptData {
 /** Why a failed attempt was sent again. */
 export type RetryCause = 'transient' | 'context-overflow'
 
-/** One recovery step between two provider attempts: what failed and how long it waited. */
+/** One recovery step between two provider attempts: what failed and how long it waits. */
 export interface LlmRetryData {
   /** The attempt that failed, 1-based. */
   readonly attempt: number
@@ -80,6 +80,17 @@ export interface LlmRetryData {
   /** The wait before the next attempt, in milliseconds. */
   readonly delayMs: number
   readonly cause: RetryCause
+  /**
+   * Pairs this decision with the `llm/retry-started` written once the wait is
+   * over. Logs from before the field keep decoding; a retry without a matching
+   * start is one that was cut short.
+   */
+  readonly retryId?: string
+}
+
+/** The wait is over: the retry paired with this id is about to be sent. */
+export interface LlmRetryStartedData {
+  readonly retryId: string
 }
 
 /** Every event the S1 kernel and its packages log. Plugins extend this interface. */
@@ -105,6 +116,7 @@ export interface SessionEventMap {
   'assistant/message': AssistantMessageData
   'assistant/attempt': AssistantAttemptData
   'llm/retry': LlmRetryData
+  'llm/retry-started': LlmRetryStartedData
   'tool/call': {
     readonly callId: string
     readonly name: string

@@ -125,6 +125,13 @@ const catalog = new Map<string, Schema.Schema<unknown>>([
       code: Schema.Literals(LLM_FAILURE_CODES),
       delayMs: Schema.Number,
       cause: Schema.Literals(['transient', 'context-overflow']),
+      retryId: Schema.optionalKey(Schema.String),
+    }) as Schema.Schema<unknown>,
+  ],
+  [
+    'llm/retry-started',
+    Schema.Struct({
+      retryId: Schema.String,
     }) as Schema.Schema<unknown>,
   ],
   [
@@ -179,6 +186,7 @@ registerLogOnlySessionEvents([
   'request/header',
   'assistant/attempt',
   'llm/retry',
+  'llm/retry-started',
   'tool/call',
   'job/started',
   'job/ended',

@@ -786,11 +786,44 @@ describe('agent loop', () => {
         }),
     )
 
-    const retries = events.session
-      .events()
-      .flatMap((event) => (event.type === 'llm/retry' ? [event.data] : []))
-    expect(retries).toEqual([{ attempt: 1, code: 'RATE_LIMIT', delayMs: 0, cause: 'transient' }])
+    const log = events.session.events()
+    const retries = log.flatMap((event) => (event.type === 'llm/retry' ? [event.data] : []))
+    const started = log.flatMap((event) => (event.type === 'llm/retry-started' ? [event.data] : []))
+    expect(retries).toMatchObject([
+      { attempt: 1, code: 'RATE_LIMIT', delayMs: 0, cause: 'transient' },
+    ])
+    expect(retries[0]?.retryId).toEqual(expect.any(String))
+    expect(started).toEqual([{ retryId: retries[0]?.retryId }])
     expect(reason(events)).toEqual([{ kind: 'completed' }])
+  })
+
+  test('a wait cut short still leaves the retry it started in the log', async () => {
+    const events = await scenario(
+      [fails(new LlmFailure({ code: 'RATE_LIMIT', message: 'slow down' }))],
+      (ctx) =>
+        Effect.gen(function* () {
+          // Long enough that the wait is still running when the cancel lands.
+          yield* installRetry(ctx.hooks, { maxRetries: 1, initialDelayMs: 60_000, jitterRatio: 0 })
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          let retried = false
+          for (let index = 0; index < 400 && !retried; index += 1) {
+            yield* Effect.sleep(5)
+            retried = agent.session.events().some((event) => event.type === 'llm/retry')
+          }
+          expect(retried).toBe(true)
+          yield* agent.cancel('user')
+          yield* agent.whenIdle
+          return agent
+        }),
+    )
+
+    const log = events.session.events()
+    const retries = log.flatMap((event) => (event.type === 'llm/retry' ? [event.data] : []))
+    const started = log.flatMap((event) => (event.type === 'llm/retry-started' ? [event.data] : []))
+    expect(retries).toMatchObject([{ attempt: 1, code: 'RATE_LIMIT', cause: 'transient' }])
+    expect(started).toEqual([])
+    expect(reason(events)).toEqual([{ kind: 'cancelled', cause: 'user' }])
   })
 
   test('a context overflow compacts once and retries the rebuilt request', async () => {
@@ -814,9 +847,13 @@ describe('agent loop', () => {
     const retries = events.session
       .events()
       .flatMap((event) => (event.type === 'llm/retry' ? [event.data] : []))
-    expect(retries).toEqual([
+    expect(retries).toMatchObject([
       { attempt: 1, code: 'CONTEXT_WINDOW_EXCEEDED', delayMs: 0, cause: 'context-overflow' },
     ])
+    const started = events.session
+      .events()
+      .flatMap((event) => (event.type === 'llm/retry-started' ? [event.data] : []))
+    expect(started).toEqual([{ retryId: retries[0]?.retryId }])
     expect(reason(events)).toEqual([{ kind: 'completed' }])
   })
 
