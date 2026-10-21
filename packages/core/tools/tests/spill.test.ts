@@ -107,6 +107,20 @@ describe('applySpill', () => {
     expect(writes).toBe(0)
   })
 
+  test('keeps the file changes when it writes the text away', async () => {
+    const diffs = [
+      { path: '/work/a.txt', oldStart: 2, newStart: 2, removed: ['old'], added: ['new'] },
+    ]
+    const spilled = await Effect.runPromise(
+      applySpill({ ...result('x'.repeat(100)), diffs }, subject, {
+        maxSpillBytes: 10,
+        spill: () => Effect.succeed('/managed/spill/s1/c1.txt'),
+      }),
+    )
+
+    expect(spilled.diffs).toEqual(diffs)
+  })
+
   test('leaves an error result alone', async () => {
     const failed = await Effect.runPromise(
       applySpill({ isError: true, content: blocks('boom'.repeat(50)) }, subject, {

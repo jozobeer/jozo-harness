@@ -42,7 +42,25 @@ describe('the trace', () => {
         { callId: 'c2', name: 'write', arguments: '{"file_path":"a.ts"}', summary: 'write a.ts' },
         16,
       ),
-      event('tool/result', { callId: 'c2', isError: true, summary: 'denied', content: [] }, 17),
+      event(
+        'tool/result',
+        {
+          callId: 'c2',
+          isError: true,
+          summary: 'denied',
+          content: [],
+          diffs: [
+            {
+              path: 'a.ts',
+              oldStart: 4,
+              newStart: 4,
+              removed: ['old'],
+              added: ['new'],
+            },
+          ],
+        },
+        17,
+      ),
       event('step/end', { step: 1 }, 18),
       event('step/start', { step: 2 }, 19),
       said(20, { type: 'text', text: 'Done.' }),
@@ -58,10 +76,15 @@ describe('the trace', () => {
     expect(
       turn === undefined
         ? []
-        : toolsOf(turn).map((tool) => [tool.status, tool.result, tool.endedAt]),
+        : toolsOf(turn).map((tool) => [tool.status, tool.result, tool.endedAt, tool.diffs]),
     ).toEqual([
-      ['done', 'lines: 1 → 2', 15],
-      ['error', 'denied', 17],
+      ['done', 'lines: 1 → 2', 15, []],
+      [
+        'error',
+        'denied',
+        17,
+        [{ path: 'a.ts', oldStart: 4, newStart: 4, removed: ['old'], added: ['new'] }],
+      ],
     ])
   })
 

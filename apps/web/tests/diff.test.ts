@@ -17,7 +17,9 @@ const fragment = (
   turn = 1,
 ): ChangeFragment => ({ turn, tool: 'edit', result: '', removed, added })
 
-const events = (calls: ReadonlyArray<{ name: string; args: unknown; summary?: string }>) =>
+const events = (
+  calls: ReadonlyArray<{ name: string; args: unknown; summary?: string; diffs?: unknown }>,
+) =>
   traceOf(
     calls.flatMap((call, index) => {
       const seq = index * 3 + 2
@@ -39,7 +41,13 @@ const events = (calls: ReadonlyArray<{ name: string; args: unknown; summary?: st
           seq: seq + 2,
           time: seq + 2,
           type: 'tool/result',
-          data: { callId: 'c' + String(index), isError: false, summary: '', content: [] },
+          data: {
+            callId: 'c' + String(index),
+            isError: false,
+            summary: '',
+            content: [],
+            ...(call.diffs === undefined ? {} : { diffs: call.diffs }),
+          },
         },
       ]
     }),
@@ -74,6 +82,38 @@ describe('the files a session changed', () => {
       { path: 'notes.txt', edits: 2, added: 3, removed: 2 },
       { path: 'src/new.ts', edits: 1, added: 3, removed: 0 },
     ])
+  })
+
+  test('draws the file changes the log recorded at execution time', () => {
+    const turns = events([
+      {
+        name: 'write',
+        args: { path: 'notes.txt', content: 'new' },
+        diffs: [{ path: 'notes.txt', oldStart: 3, newStart: 3, removed: ['old'], added: ['new'] }],
+      },
+    ])
+
+    expect(fileChangesOf(turns, '/work')).toEqual([
+      { path: 'notes.txt', edits: 1, added: 1, removed: 1 },
+    ])
+    const changes = changesOf(turns, 'notes.txt', '/work')
+    expect(changes).toEqual([
+      {
+        turn: 1,
+        tool: 'write',
+        result: '',
+        removed: ['old'],
+        added: ['new'],
+        oldStart: 3,
+        newStart: 3,
+      },
+    ])
+    expect(hunksOf(changes)[0]?.lines[0]).toEqual({
+      kind: 'del',
+      text: 'old',
+      oldLine: 3,
+      newLine: undefined,
+    })
   })
 
   test('reads both the spellings the edit tool has used for its strings', () => {

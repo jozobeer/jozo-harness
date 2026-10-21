@@ -38,6 +38,30 @@ describe('decodeSessionEvent', () => {
     expect(await decode(throughJson(headerEvent()))).toEqual(headerEvent())
   })
 
+  test('round-trips the file changes a tool recorded', async () => {
+    const diffs = [
+      { path: '/work/a.txt', oldStart: 2, newStart: 2, removed: ['old'], added: ['new'] },
+    ]
+    const sessionEvent = event(2, 'tool/result', {
+      callId: 'c1',
+      isError: false,
+      content: [{ type: 'text', text: 'edited' }],
+      diffs,
+    })
+
+    expect(await decode(throughJson(sessionEvent))).toEqual(sessionEvent)
+  })
+
+  test('reads a result written before diffs existed', async () => {
+    const sessionEvent = event(2, 'tool/result', {
+      callId: 'c1',
+      isError: false,
+      content: [{ type: 'text', text: 'edited' }],
+    })
+
+    expect(await decode(throughJson(sessionEvent))).toEqual(sessionEvent)
+  })
+
   test('rejects a malformed envelope', async () => {
     const error = await decodeError({ seq: 'two', time: 1, type: 'user/message', data: {} })
     expect(error.code).toBe('persistence')

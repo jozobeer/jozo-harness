@@ -1,4 +1,4 @@
-import { toolsOf, writtenPath, type TraceTurn } from './trace.ts'
+import { toolsOf, writtenPath, type TraceTool, type TraceTurn } from './trace.ts'
 
 /** The rows a diff draws before it folds: more than this keeps only the head and the tail. */
 export const FOLD_AFTER = 16
@@ -11,6 +11,10 @@ export interface ChangeFragment {
   /** The lines the call took away; empty for a write. */
   readonly removed: ReadonlyArray<string>
   readonly added: ReadonlyArray<string>
+  /** Where the change stood in the old file, when the log recorded the diff. */
+  readonly oldStart?: number
+  /** Where the change stands in the new file, when the log recorded the diff. */
+  readonly newStart?: number
 }
 
 /** One file the session changed, once, however many ways its path was spelled. */
@@ -70,22 +74,48 @@ const textField = (args: Record<string, unknown>, keys: ReadonlyArray<string>): 
 
 const linesOf = (text: string): ReadonlyArray<string> => (text === '' ? [] : text.split('\n'))
 
-/** The change a writing call made, or nothing when the call is not one or its path is unreadable. */
-const fragmentOf = (turn: TraceTurn, tool: { name: string; args: string; result: string }) => {
-  const path = writtenPath(tool.name, tool.args)
-  if (path === undefined) return undefined
-  const args = argsOf(tool.args)
-  return {
-    path,
-    fragment: {
-      turn: turn.turn,
-      tool: tool.name,
-      result: tool.result,
-      // The edit tool names its strings in camelCase; an older log spells them with underscores.
-      removed: linesOf(textField(args, ['oldString', 'old_string'])),
-      added: linesOf(textField(args, ['newString', 'new_string', 'content'])),
-    },
+/** One change a call made, under the path the call named. */
+interface ChangeAt {
+  readonly path: string
+  readonly fragment: ChangeFragment
+}
+
+/**
+ * The changes a call made: the diffs it recorded while running, or, for an old
+ * log that has none, what its arguments carry. A diff is the only side that
+ * knows what an overwrite replaced and where all replacements landed.
+ */
+const changesOfTool = (turn: TraceTurn, tool: TraceTool): ReadonlyArray<ChangeAt> => {
+  if (tool.diffs.length > 0) {
+    return tool.diffs.map((diff) => ({
+      path: diff.path,
+      fragment: {
+        turn: turn.turn,
+        tool: tool.name,
+        result: tool.result,
+        removed: diff.removed,
+        added: diff.added,
+        oldStart: diff.oldStart,
+        newStart: diff.newStart,
+      },
+    }))
   }
+  const path = writtenPath(tool.name, tool.args)
+  if (path === undefined) return []
+  const args = argsOf(tool.args)
+  return [
+    {
+      path,
+      fragment: {
+        turn: turn.turn,
+        tool: tool.name,
+        result: tool.result,
+        // The edit tool names its strings in camelCase; an older log spells them with underscores.
+        removed: linesOf(textField(args, ['oldString', 'old_string'])),
+        added: linesOf(textField(args, ['newString', 'new_string', 'content'])),
+      },
+    },
+  ]
 }
 
 /** One step of a path: a name is kept, a `..` takes the last name back, and the rest is noise. */
@@ -132,15 +162,15 @@ export const fileChangesOf = (
   const files = new Map<string, { edits: number; added: number; removed: number }>()
   for (const turn of turns) {
     for (const tool of toolsOf(turn)) {
-      const change = fragmentOf(turn, tool)
-      if (change === undefined) continue
-      const path = pathInWorkspace(cwd, change.path)
-      const seen = files.get(path) ?? { edits: 0, added: 0, removed: 0 }
-      files.set(path, {
-        edits: seen.edits + 1,
-        added: seen.added + change.fragment.added.length,
-        removed: seen.removed + change.fragment.removed.length,
-      })
+      for (const change of changesOfTool(turn, tool)) {
+        const path = pathInWorkspace(cwd, change.path)
+        const seen = files.get(path) ?? { edits: 0, added: 0, removed: 0 }
+        files.set(path, {
+          edits: seen.edits + 1,
+          added: seen.added + change.fragment.added.length,
+          removed: seen.removed + change.fragment.removed.length,
+        })
+      }
     }
   }
   return [...files].map(([path, counts]) => ({ path, ...counts }))
@@ -153,12 +183,11 @@ export const changesOf = (
   cwd: string,
 ): ReadonlyArray<ChangeFragment> =>
   turns.flatMap((turn) =>
-    toolsOf(turn).flatMap((tool) => {
-      const change = fragmentOf(turn, tool)
-      return change !== undefined && pathInWorkspace(cwd, change.path) === path
-        ? [change.fragment]
-        : []
-    }),
+    toolsOf(turn).flatMap((tool) =>
+      changesOfTool(turn, tool).flatMap((change) =>
+        pathInWorkspace(cwd, change.path) === path ? [change.fragment] : [],
+      ),
+    ),
   )
 
 const headerOf = (oldStart: number, oldCount: number, newStart: number, newCount: number): string =>
@@ -185,8 +214,8 @@ export const hunksOf = (fragments: ReadonlyArray<ChangeFragment>): ReadonlyArray
     const oldCount = fragment.removed.length
     const newCount = fragment.added.length
     if (oldCount === 0 && newCount === 0) continue
-    const oldStart = oldLine
-    const newStart = newLine
+    const oldStart = fragment.oldStart ?? oldLine
+    const newStart = fragment.newStart ?? newLine
     hunks.push({
       header: headerOf(oldStart, oldCount, newStart, newCount),
       lines: [
