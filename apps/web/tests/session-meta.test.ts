@@ -1,6 +1,6 @@
 import { access, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { Effect } from 'effect'
 import { describe, expect, test } from 'vitest'
 import {
@@ -11,7 +11,12 @@ import {
   withMeta,
 } from '../src/server/session-meta.ts'
 
-const rootOf = (): Promise<string> => mkdtemp(join(tmpdir(), 'jzh-session-meta-'))
+/** A home whose sessions and artifacts sit beside each other, as the web server sees them. */
+const rootOf = async (): Promise<string> => {
+  const root = join(await mkdtemp(join(tmpdir(), 'jzh-session-meta-')), 'sessions')
+  await mkdir(root, { recursive: true })
+  return root
+}
 
 const summaryOf = (id: string, title: string) => ({
   id,
@@ -55,11 +60,15 @@ describe('the session metadata beside the logs', () => {
     const root = await rootOf()
     await mkdir(join(root, 'cccc'), { recursive: true })
     await writeFile(join(root, 'cccc', 'session.v1.jsonl'), '{}\n')
+    const pages = join(dirname(root), 'artifacts', 'cccc')
+    await mkdir(pages, { recursive: true })
+    await writeFile(join(pages, 'report.html'), '<h1>report</h1>')
     await Effect.runPromise(sessionActionOf(root, 'cccc', { kind: 'rename', title: 'gone soon' }))
 
     await Effect.runPromise(sessionActionOf(root, 'cccc', { kind: 'delete' }))
 
     await expect(access(join(root, 'cccc'))).rejects.toThrow()
+    await expect(access(pages)).rejects.toThrow()
     expect(await Effect.runPromise(readMeta(root))).toEqual({})
   })
 

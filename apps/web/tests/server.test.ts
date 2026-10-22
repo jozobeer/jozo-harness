@@ -1256,7 +1256,7 @@ describe('the web transport', () => {
     await rm(workspace, { recursive: true, force: true })
   })
 
-  test('the row menu deletes an open session, and its pages outlive the log', async () => {
+  test('the row menu deletes an open session, and its pages with it', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-menu-'))
     await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
     const home = await mkdtemp(join(tmpdir(), 'jozo-harness-web-menu-home-'))
@@ -1298,11 +1298,17 @@ describe('the web transport', () => {
             })
             const after = yield* client.sessions()
             const gone = yield* Effect.promise(async () => {
-              try {
-                await stat(join(sessionRoot, 'a'))
-                return false
-              } catch {
-                return true
+              const missing = async (path: string): Promise<boolean> => {
+                try {
+                  await stat(path)
+                  return false
+                } catch {
+                  return true
+                }
+              }
+              return {
+                log: await missing(join(sessionRoot, 'a')),
+                artifacts: await missing(join(home, 'artifacts', 'a')),
               }
             })
             const pages = yield* Effect.promise(async () => {
@@ -1330,12 +1336,12 @@ describe('the web transport', () => {
     expect(observed.listed.opened).toEqual(['a'])
     expect(observed.opened).toMatchObject({ title: 'named by hand', pinned: true })
     expect(observed.deleted).toBe(true)
-    // The log is gone from disk, and the page no longer lists it as open.
-    expect(observed.gone).toBe(true)
+    // The log and its pages are gone from disk, and the rail no longer lists it.
+    expect(observed.gone).toEqual({ log: true, artifacts: true })
     expect(observed.after.opened).toEqual([])
     expect(observed.after.initial).toBe('')
-    // A page is an artifact of its own; deleting the log leaves it served.
-    expect(observed.pages).toEqual({ own: 200, other: 200 })
+    // Deleting a session takes its pages with it; another session keeps its own.
+    expect(observed.pages).toEqual({ own: 404, other: 200 })
     // The core was released before the directory went away.
     expect(web.closed).toEqual(['a'])
     await rm(root, { recursive: true, force: true })
