@@ -11,9 +11,19 @@ Issue #300 の決定。当初は「表・コードブロック・artifact ペー
 | markdown の表 | 比較・一覧・対応（案 A と B の差、設定キーと既定値） | 本文の GFM パイプ表（#298） |
 | ```svg のフェンス | 本物の図（箱と矢印、状態遷移） | 中身を allowlist でサニタイズしてインライン SVG として描く（#310） |
 | 本文の生 `<svg>` | 同上。フェンス無しで書かれたとき | 行頭の `<svg` から `</svg>` までを1枚として描く（#311） |
-| markdown の画像 | 既存の画像ファイル・URL・base64 の data URL | `<img>`（#309） |
+| markdown の画像 | 既存の画像ファイル・URL・base64 の data URL | `<img>`（#309）。data URL は png / jpeg / gif / webp のみ、2MB まで（#300） |
 | コードブロックの図 | 小さな関係・順序（3〜5 ノードの依存、処理の流れ） | ```text の fence。`pre.code` は横スクロールする |
 | artifact の HTML ページ | 大きく視覚的な図・レイアウト・触れる図 | `artifact` tool。opt-in の plugin 行が要る |
+
+## 画像の data URL
+
+markdown の画像記法の src には、http(s) の URL と base64 の data URL を取る。data URL は `<img>` の secure static mode で描くので、ラスタ画像に限れば allowlist は要らない。
+
+- 描く MIME: `data:image/png`、`data:image/jpeg`、`data:image/gif`、`data:image/webp` の `;base64,` 形式
+- 上限: data URL の文字列が 2,000,000 bytes（2MB）。超えたら画像ではなく `alt` をラベルにしたリンクとして出す
+- 描かないもの: `data:image/svg+xml` の data URL（SVG はフェンスか生タグの allowlist 経路に寄せる）、`javascript:` などの他のスキーム。従来どおり記法のまま文字で出す
+
+実装は `apps/web/src/ui/diagram.ts` の `imageViewOf` が持ち、描く・リンクする・文字のままの3通りを返す。
 
 ## SVG の描き方
 
