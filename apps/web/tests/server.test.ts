@@ -550,7 +550,7 @@ describe('the web transport', () => {
     await rm(outside, { recursive: true, force: true })
   })
 
-  test('a page reads the html an artifact names, and asks without a cookie are refused', async () => {
+  test('a page reads inline or as a download, and asks without a cookie are refused', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-artifact-'))
     const home = await mkdtemp(join(tmpdir(), 'jozo-harness-web-artifact-home-'))
     const sessionRoot = join(home, 'sessions')
@@ -575,7 +575,12 @@ describe('the web transport', () => {
             fetch(page, { headers: { cookie: started.cookie } }),
           )
           const text = yield* Effect.promise(() => served.text())
+          const download = yield* Effect.promise(() =>
+            fetch(page + '?download=1', { headers: { cookie: started.cookie } }),
+          )
+          const downloadText = yield* Effect.promise(() => download.text())
           const anonymous = yield* Effect.promise(() => fetch(page))
+          const anonymousDownload = yield* Effect.promise(() => fetch(page + '?download=1'))
           const traversal = yield* Effect.promise(() =>
             fetch(started.origin + '/artifact/a/..%2fsecret', {
               headers: { cookie: started.cookie },
@@ -591,8 +596,13 @@ describe('the web transport', () => {
             type: served.headers.get('content-type'),
             policy: served.headers.get('content-security-policy'),
             nosniff: served.headers.get('x-content-type-options'),
+            disposition: served.headers.get('content-disposition'),
             text,
+            downloadStatus: download.status,
+            downloadDisposition: download.headers.get('content-disposition'),
+            downloadText,
             anonymous: anonymous.status,
+            anonymousDownload: anonymousDownload.status,
             traversal: traversal.status,
             unknown: unknown.status,
             foreignHost: foreignHost.status,
@@ -605,8 +615,13 @@ describe('the web transport', () => {
     expect(observed.type).toBe('text/html; charset=utf-8')
     expect(observed.policy).toBe('sandbox allow-scripts')
     expect(observed.nosniff).toBe('nosniff')
+    expect(observed.disposition).toBeNull()
     expect(observed.text).toContain('<h1>report</h1>')
+    expect(observed.downloadStatus).toBe(200)
+    expect(observed.downloadDisposition).toBe('attachment; filename="report.html"')
+    expect(observed.downloadText).toContain('<h1>report</h1>')
     expect(observed.anonymous).toBe(401)
+    expect(observed.anonymousDownload).toBe(401)
     expect(observed.traversal).toBe(400)
     expect(observed.unknown).toBe(404)
     expect(observed.foreignHost).toBe(403)
