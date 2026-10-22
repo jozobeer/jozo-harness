@@ -3,6 +3,8 @@ import { describe, expect, test } from 'vitest'
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { noneSandbox, type SandboxShape } from '@jozo-harness/safety'
+import type { ToolError } from '@jozo-harness/tools'
 import { makeArtifactTool, type ArtifactValue } from '../src/index.ts'
 
 const withHome = async (body: (home: string) => Promise<void>): Promise<void> => {
@@ -18,9 +20,14 @@ const publish = (
   home: string,
   name: string,
   html: string,
-): Promise<{ value: ArtifactValue | undefined; added: ReadonlyArray<string> }> => {
+  sandbox: SandboxShape = noneSandbox,
+): Promise<{
+  value: ArtifactValue | undefined
+  error: ToolError | undefined
+  added: ReadonlyArray<string>
+}> => {
   const added: Array<string> = []
-  const tool = makeArtifactTool(home)
+  const tool = makeArtifactTool(home, sandbox)
   return Effect.runPromise(
     Effect.match(
       tool.execute(
@@ -33,12 +40,14 @@ const publish = (
         },
       ),
       {
-        onFailure: () => ({ value: undefined, added }),
-        onSuccess: (value) => ({ value, added }),
+        onFailure: (error) => ({ value: undefined, error, added }),
+        onSuccess: (value) => ({ value, error: undefined, added }),
       },
     ),
   )
 }
+
+const withMode = (mode: SandboxShape['mode']): SandboxShape => ({ ...noneSandbox, mode })
 
 describe('artifact tool', () => {
   test('writes the page under the jzh home, beside the sessions', async () => {
@@ -54,6 +63,39 @@ describe('artifact tool', () => {
         path: join(home, 'artifacts', 's1', 'report.html'),
         url: '/artifact/s1/report',
       })
+    })
+  })
+
+  test('refuses to publish a page when the preset is read-only', async () => {
+    await withHome(async (home) => {
+      const { value, error } = await publish(
+        home,
+        'report',
+        '<h1>report</h1>',
+        withMode('read-only'),
+      )
+
+      expect(value).toBeUndefined()
+      expect(error).toMatchObject({ code: 'denied' })
+      expect(error?.message).toContain('read-only mode writes nothing')
+      await expect(stat(join(home, 'artifacts'))).rejects.toThrow()
+    })
+  })
+
+  test('publishes a page when the preset lets the run write', async () => {
+    await withHome(async (home) => {
+      const { value, error } = await publish(
+        home,
+        'report',
+        '<h1>report</h1>',
+        withMode('workspace-write'),
+      )
+
+      expect(error).toBeUndefined()
+      expect(value?.url).toBe('/artifact/s1/report')
+      expect(await readFile(join(home, 'artifacts', 's1', 'report.html'), 'utf8')).toBe(
+        '<h1>report</h1>',
+      )
     })
   })
 
