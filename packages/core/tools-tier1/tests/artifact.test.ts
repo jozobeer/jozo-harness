@@ -1,8 +1,8 @@
 import { Effect, Exit } from 'effect'
 import { describe, expect, test } from 'vitest'
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { noneSandbox, type SandboxShape } from '@jozo-harness/safety'
 import type { ToolError } from '@jozo-harness/tools'
 import { makeArtifactTool, type ArtifactValue } from '../src/index.ts'
@@ -16,11 +16,19 @@ const withHome = async (body: (home: string) => Promise<void>): Promise<void> =>
   }
 }
 
+const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47])
+
+const writeImage = async (home: string, path: string, bytes: Buffer): Promise<void> => {
+  await mkdir(dirname(join(home, path)), { recursive: true })
+  await writeFile(join(home, path), bytes)
+}
+
 const publish = (
   home: string,
   name: string,
   html: string,
   sandbox: SandboxShape = noneSandbox,
+  images?: ReadonlyArray<string>,
 ): Promise<{
   value: ArtifactValue | undefined
   error: ToolError | undefined
@@ -31,7 +39,7 @@ const publish = (
   return Effect.runPromise(
     Effect.match(
       tool.execute(
-        { name, html },
+        { name, html, ...(images === undefined ? {} : { images }) },
         {
           sessionId: 's1',
           cwd: home,
@@ -128,6 +136,75 @@ describe('artifact tool', () => {
         expect(Exit.isFailure(exit)).toBe(true)
       }
       await expect(stat(join(home, 'artifacts'))).rejects.toThrow()
+    })
+  })
+
+  test('folds the images it is given into data urls', async () => {
+    await withHome(async (home) => {
+      await writeImage(home, 'shots/logo.png', PNG)
+      const html = '<img src="shots/logo.png">'
+      const { value, error } = await publish(home, 'report', html, noneSandbox, ['shots/logo.png'])
+
+      expect(error).toBeUndefined()
+      const dataUrl = 'data:image/png;base64,' + PNG.toString('base64')
+      expect(await readFile(value!.path, 'utf8')).toBe('<img src="' + dataUrl + '">')
+    })
+  })
+
+  test('refuses an image with an unsupported extension or a missing file', async () => {
+    await withHome(async (home) => {
+      const unsupported = await publish(home, 'report', '<p>x</p>', noneSandbox, ['logo.bmp'])
+      expect(unsupported.value).toBeUndefined()
+      expect(unsupported.error).toMatchObject({ code: 'invalid-arguments' })
+      expect(unsupported.error?.message).toContain('logo.bmp')
+
+      const missing = await publish(home, 'report', '<p>x</p>', noneSandbox, ['missing.png'])
+      expect(missing.value).toBeUndefined()
+      expect(missing.error).toMatchObject({ code: 'invalid-arguments' })
+      expect(missing.error?.message).toContain('missing.png')
+
+      await expect(stat(join(home, 'artifacts'))).rejects.toThrow()
+    })
+  })
+
+  test('refuses one image over the 2MB limit', async () => {
+    await withHome(async (home) => {
+      await writeImage(home, 'big.png', Buffer.alloc(2 * 1024 * 1024 + 1))
+      const { value, error } = await publish(home, 'report', '<img src="big.png">', noneSandbox, [
+        'big.png',
+      ])
+
+      expect(value).toBeUndefined()
+      expect(error).toMatchObject({ code: 'invalid-arguments' })
+      expect(error?.message).toContain('big.png')
+      expect(error?.message).toContain('2MB')
+    })
+  })
+
+  test('refuses images over the 10MB total', async () => {
+    await withHome(async (home) => {
+      const names = Array.from({ length: 6 }, (_, index) => 'shot' + index + '.png')
+      for (const name of names) await writeImage(home, name, Buffer.alloc(2 * 1024 * 1024))
+      const html = names.map((name) => '<img src="' + name + '">').join('')
+      const { value, error } = await publish(home, 'report', html, noneSandbox, names)
+
+      expect(value).toBeUndefined()
+      expect(error).toMatchObject({ code: 'invalid-arguments' })
+      expect(error?.message).toContain('shot5.png')
+      expect(error?.message).toContain('10MB')
+    })
+  })
+
+  test('leaves only the paths in the result the model sees', async () => {
+    await withHome(async (home) => {
+      await writeImage(home, 'logo.png', PNG)
+      const tool = makeArtifactTool(join(home, 'sessions'))
+      const args = { name: 'report', html: '<img src="logo.png">', images: ['logo.png'] }
+      const { value } = await publish(home, 'report', args.html, noneSandbox, args.images)
+
+      const content = tool.output.render(args, value!)
+      expect(content).toEqual([{ type: 'text', text: 'page: /artifact/s1/report' }])
+      expect(JSON.stringify(content)).not.toContain('base64')
     })
   })
 })

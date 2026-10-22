@@ -1,9 +1,10 @@
-import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { basename, dirname, join } from 'node:path'
 import { Context, Effect, Layer, Schema } from 'effect'
 import type { Plugin } from '@jozo-harness/kernel'
 import { noneSandbox, type SandboxShape } from '@jozo-harness/safety'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
+import { mediaTypeOf } from './image.ts'
 
 const Parameters = Schema.Struct({
   name: Schema.String.annotate({
@@ -13,6 +14,12 @@ const Parameters = Schema.Struct({
   html: Schema.String.annotate({
     description: 'The whole HTML document, with its styles and scripts inline.',
   }),
+  images: Schema.optionalKey(
+    Schema.Array(Schema.String).annotate({
+      description:
+        'Image files to embed as data URLs, absolute or relative to the working directory: png, jpeg, webp, or gif.',
+    }),
+  ),
 })
 
 export type ArtifactArgs = Schema.Schema.Type<typeof Parameters>
@@ -34,6 +41,84 @@ const NAME = /^[A-Za-z0-9._-]+$/
 export const artifactRootOf = (sessionRoot: string): string =>
   join(dirname(sessionRoot), 'artifacts')
 
+/** The per-image and per-page budgets keep a page small enough to download. */
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024
+const MAX_TOTAL_BYTES = 10 * 1024 * 1024
+
+interface EmbeddedImage {
+  /** The path as the model wrote it, which is what the page's src also says. */
+  readonly given: string
+  readonly bytes: number
+  readonly dataUrl: string
+}
+
+const readImage = (cwd: string, given: string): Effect.Effect<EmbeddedImage, ToolError> =>
+  Effect.gen(function* () {
+    const mediaType = mediaTypeOf(given)
+    if (mediaType === undefined) {
+      return yield* Effect.fail(
+        new ToolError({ code: 'invalid-arguments', message: 'not a supported image: ' + given }),
+      )
+    }
+    const path = given.startsWith('/') ? given : join(cwd, given)
+    const bytes = yield* Effect.tryPromise({
+      try: () => readFile(path),
+      catch: () => new ToolError({ code: 'invalid-arguments', message: 'cannot read ' + given }),
+    })
+    if (bytes.byteLength > MAX_IMAGE_BYTES) {
+      return yield* Effect.fail(
+        new ToolError({
+          code: 'invalid-arguments',
+          message: 'image over the 2MB limit: ' + given,
+        }),
+      )
+    }
+    return {
+      given,
+      bytes: bytes.byteLength,
+      dataUrl: 'data:' + mediaType + ';base64,' + Buffer.from(bytes).toString('base64'),
+    }
+  })
+
+const readImages = (
+  cwd: string,
+  given: ReadonlyArray<string>,
+): Effect.Effect<ReadonlyArray<EmbeddedImage>, ToolError> =>
+  Effect.gen(function* () {
+    const images: Array<EmbeddedImage> = []
+    let total = 0
+    for (const path of given) {
+      const image = yield* readImage(cwd, path)
+      total += image.bytes
+      if (total > MAX_TOTAL_BYTES) {
+        return yield* Effect.fail(
+          new ToolError({
+            code: 'invalid-arguments',
+            message: 'images over the 10MB total: ' + image.given,
+          }),
+        )
+      }
+      images.push(image)
+    }
+    return images
+  })
+
+/**
+ * Folds each referenced file into a data URL. An image the page never names is
+ * left as given; refusing it belongs to the standalone check, not here.
+ */
+const foldImages = (html: string, images: ReadonlyArray<EmbeddedImage>): string => {
+  const bySrc = new Map<string, string>()
+  for (const image of images) {
+    bySrc.set(image.given, image.dataUrl)
+    bySrc.set(basename(image.given), image.dataUrl)
+  }
+  return html.replace(/src="([^"]*)"/g, (whole, src: string) => {
+    const dataUrl = bySrc.get(src)
+    return dataUrl === undefined ? whole : 'src="' + dataUrl + '"'
+  })
+}
+
 /**
  * Writes one HTML page beside the session logs and reports the route the web
  * server serves it on. The route and this tool derive the directory from the
@@ -47,7 +132,7 @@ export const makeArtifactTool = (
 ): ToolDefinition<ArtifactArgs, ArtifactValue> => ({
   name: 'artifact',
   description:
-    'Publishes one self-contained HTML page for this session and returns the /artifact/ URL jzh web serves it on. Use it for reports, diagrams, and tables that read better as a page than as chat text. Writing the same name again replaces the page.',
+    'Publishes one self-contained HTML page for this session and returns the /artifact/ URL jzh web serves it on. Use it for reports, diagrams, and tables that read better as a page than as chat text. Pass image paths in images to embed them as data URLs. Writing the same name again replaces the page.',
   parameters: Parameters,
   output: {
     schema: Schema.Struct({
@@ -76,10 +161,12 @@ export const makeArtifactTool = (
           new ToolError({ code: 'denied', message: 'read-only mode writes nothing: ' + path }),
         )
       }
+      const images = yield* readImages(exec.cwd, args.images ?? [])
+      const html = foldImages(args.html, images)
       yield* Effect.tryPromise({
         try: async () => {
           await mkdir(directory, { recursive: true })
-          await writeFile(path, args.html)
+          await writeFile(path, html)
         },
         catch: () =>
           new ToolError({ code: 'execution', message: 'cannot write the page at ' + path }),

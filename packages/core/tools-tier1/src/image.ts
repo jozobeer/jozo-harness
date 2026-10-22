@@ -27,7 +27,8 @@ const MEDIA: Readonly<Record<string, string>> = {
   gif: 'image/gif',
 }
 
-const mediaTypeOf = (path: string): string | undefined => {
+/** The formats artifact embeds too, so the two tools accept the same files. */
+export const mediaTypeOf = (path: string): string | undefined => {
   const dot = path.lastIndexOf('.')
   return dot < 0 ? undefined : MEDIA[path.slice(dot + 1).toLowerCase()]
 }
