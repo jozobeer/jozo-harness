@@ -567,6 +567,43 @@ describe('the Solid page', () => {
     expect(open?.textContent).toBe('Open in a new tab')
   })
 
+  test('a page published by a call inside run_code draws the page', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const { store } = makeStore({
+      conversation: { ...emptyConversation, blocks: [{ kind: 'user', text: 'go' }] },
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'step/start', { step: 1 }),
+        at(3, 'tool/call', {
+          callId: 'c1',
+          name: 'run_code',
+          arguments: '{"code":"await tools.artifact({ name: \'report\' })"}',
+          summary: 'run_code',
+        }),
+        at(4, 'tool/result', {
+          callId: 'c1',
+          isError: false,
+          summary: 'published',
+          content: [
+            {
+              type: 'text',
+              text: 'return: "published"\npage: /artifact/s1/report',
+            },
+          ],
+        }),
+        at(5, 'step/end', { step: 1 }),
+        at(6, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      ]),
+    })
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    const frame = container.querySelector('.tool-card iframe')
+    expect(frame?.getAttribute('src')).toBe('/artifact/s1/report')
+    const open = container.querySelector('.tool-card a.tool-page-open')
+    expect(open?.getAttribute('href')).toBe('/artifact/s1/report')
+  })
+
   test('a tool result that is not a page line draws no frame', () => {
     const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
     const { store } = makeStore({

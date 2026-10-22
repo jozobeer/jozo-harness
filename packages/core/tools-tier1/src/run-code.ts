@@ -258,6 +258,9 @@ const splitLine = (line: string): SplitLine => {
   return { output: line.slice(0, index), record: line.slice(index) }
 }
 
+/** The one line an artifact result writes; a nested page has to survive the outer result. */
+const PAGE_LINE = /^page: \/artifact\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/
+
 /** The return value as the conversation reads it; absent when the program returned nothing. */
 const returnedOf = (final: ProtocolFinal): string =>
   final.hasValue === true && final.value !== undefined
@@ -275,6 +278,7 @@ const runSession = async (
   const stderr = new Response(child.stderr).text()
   const sink = makeSink(RUN_CODE_OUTPUT_LIMIT)
   const calls: Array<string> = []
+  const pages: Array<string> = []
 
   const answer = async (message: ProtocolCall): Promise<void> => {
     calls.push(message.name)
@@ -294,6 +298,12 @@ const runSession = async (
     // A nested tool's note belongs to the step the program runs in, so the outer
     // call carries it: the fragments leave in the order the program made the calls.
     for (const text of result.context ?? []) context.addContext?.(text)
+    // The child's result leaves to the program, then only its summary reaches
+    // the log; keep the published page line so the outer card can draw it.
+    for (const line of textOf(result).split('\n')) {
+      const page = line.trim()
+      if (PAGE_LINE.test(page) && !pages.includes(page)) pages.push(page)
+    }
     await Effect.runPromise(
       host.append('tool/ptc-dispatch', {
         callId,
@@ -331,8 +341,11 @@ const runSession = async (
     throw new ToolError({ code: 'execution', message: 'run_code failed: ' + final.error })
   }
   const printed = sink.finish()
+  const output = printed.output + returnedOf(final)
+  const shown = new Set(output.split('\n').map((line) => line.trim()))
+  const extra = pages.filter((page) => !shown.has(page))
   return {
-    output: printed.output + returnedOf(final),
+    output: extra.length === 0 ? output : output + '\n' + extra.join('\n'),
     truncated: printed.truncated,
     toolCalls: calls.length,
   }
