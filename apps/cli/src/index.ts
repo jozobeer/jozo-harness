@@ -9,6 +9,7 @@ import {
 } from '@jozo-harness/agent'
 import {
   Hooks,
+  isRowEnabled,
   loadProfile,
   mergeRows,
   parseProfile,
@@ -300,8 +301,9 @@ export const profileRows = (
     return mergeRows(layers)
   })
 
-const hasRow = (rows: ReadonlyArray<PluginRow>, name: string): boolean =>
-  rows.some((row) => row.name === name)
+/** A row installs its plugin only while the loader leaves it in the layer. */
+const hasEnabledRow = (rows: ReadonlyArray<PluginRow>, name: string): boolean =>
+  rows.some((row) => row.name === name && isRowEnabled(row))
 
 /** Streams assistant text unless the caller asked for JSON session events. */
 const installOutput = (hooks: HookRegistry, options: CommandOptions) =>
@@ -797,7 +799,7 @@ const installTeamIdentityContext = (
 
 /** The boundary this run's commands are confined to; absent when no tier 0 row asked for one. */
 const sandboxOf = (wiring: ProfileWiring): SandboxShape | undefined =>
-  hasRow(wiring.rows, '@jozo-harness/tools-tier0')
+  hasEnabledRow(wiring.rows, '@jozo-harness/tools-tier0')
     ? Context.get(wiring.context, Sandbox)
     : undefined
 
@@ -834,7 +836,7 @@ const planModeFromProfile = (
  */
 const installArtifact = (tools: ToolRegistry, wiring: ProfileWiring) =>
   Effect.gen(function* () {
-    if (!hasRow(wiring.rows, '@jozo-harness/artifact')) return
+    if (!hasEnabledRow(wiring.rows, '@jozo-harness/artifact')) return
     const home = wiring.options.jzhHome
     if (home === undefined) return
     for (const tool of Context.get(wiring.context, ArtifactTools)(home)) {
@@ -852,7 +854,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
   Effect.gen(function* () {
     const tools = Context.get(wiring.context, Tools)
     const planMode = planModeFromProfile(wiring.rows, wiring.agent.session)
-    if (hasRow(wiring.rows, '@jozo-harness/tools-tier0')) {
+    if (hasEnabledRow(wiring.rows, '@jozo-harness/tools-tier0')) {
       const sessions = Context.get(wiring.context, Agents)
       // A worktree call is shared with every child, so it moves the log of the
       // session that made the call rather than the run's root session.
@@ -884,7 +886,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
         worktree,
       )
     }
-    if (hasRow(wiring.rows, '@jozo-harness/tools-tier1')) {
+    if (hasEnabledRow(wiring.rows, '@jozo-harness/tools-tier1')) {
       yield* installTier1(
         tools,
         Context.get(wiring.context, Ask),
@@ -920,7 +922,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
     }
     // An active goal keeps going by itself: at the end of a turn of this agent, the
     // next round is queued before the turn closes, so the run cannot go idle in between.
-    if (hasRow(wiring.rows, '@jozo-harness/tools-tier1')) {
+    if (hasEnabledRow(wiring.rows, '@jozo-harness/tools-tier1')) {
       const agents = Context.get(wiring.context, Agents)
       yield* wiring.hooks.on('agent/turn-stopping', (ending: Agent) =>
         ending === wiring.agent ? startGoalRound(ending, agents) : Effect.void,
@@ -1481,7 +1483,7 @@ const buildSession = (
     // A UI owns the screen; only the non-interactive paths stream text out.
     if (!wantsUi) yield* installOutput(hooks, options)
 
-    if (hasRow(rows, '@jozo-harness/mcp')) {
+    if (hasEnabledRow(rows, '@jozo-harness/mcp')) {
       yield* installMcpServers(Context.get(context, Tools), Context.get(context, McpServers))
     }
 

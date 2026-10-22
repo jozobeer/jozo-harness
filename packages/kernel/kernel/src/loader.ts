@@ -1,7 +1,7 @@
 import { Effect, Layer, Schema } from 'effect'
 import { PluginError } from './errors.ts'
 import type { Plugin } from './plugin.ts'
-import { mergeRows, type PluginRow } from './profile.ts'
+import { isRowEnabled, mergeRows, type PluginRow } from './profile.ts'
 
 export interface LoadProfileOptions {
   readonly plugins: ReadonlyArray<Plugin<any, any, any>>
@@ -210,7 +210,7 @@ export function loadProfile(
 ): Effect.Effect<Layer.Layer<any, PluginError, never>, PluginError> {
   return Effect.gen(function* () {
     const pluginsByName = yield* pluginMap(options.plugins)
-    const enabled = mergeRows(options.layers).filter((row) => row.disabled !== true)
+    const enabled = mergeRows(options.layers).filter(isRowEnabled)
     yield* requireKnownPlugins(enabled, pluginsByName)
     const providerByService = yield* providerIndex(enabled, pluginsByName)
     const dependencies = yield* requireProviders(enabled, pluginsByName, providerByService)
