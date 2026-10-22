@@ -35,6 +35,35 @@ const writeFileDeep = async (path: string, text: string | Uint8Array): Promise<v
   await writeFile(path, text)
 }
 
+/** One artifact as the list route promises it. */
+interface ArtifactEntry {
+  readonly name: string
+  readonly path: string
+  readonly bytes: number
+  readonly updatedAt: string
+}
+
+const isArtifactEntry = (value: unknown): value is ArtifactEntry =>
+  typeof value === 'object' &&
+  value !== null &&
+  'name' in value &&
+  typeof value.name === 'string' &&
+  'path' in value &&
+  typeof value.path === 'string' &&
+  'bytes' in value &&
+  typeof value.bytes === 'number' &&
+  'updatedAt' in value &&
+  typeof value.updatedAt === 'string'
+
+/** Parses the list the route returns, refusing a shape the page could not rely on. */
+const artifactEntries = (text: string): ReadonlyArray<ArtifactEntry> => {
+  const parsed: unknown = JSON.parse(text)
+  if (!Array.isArray(parsed) || !parsed.every(isArtifactEntry)) {
+    throw new Error('the artifact list is malformed')
+  }
+  return parsed
+}
+
 interface FakeHost {
   readonly summary: SessionSummary
   readonly host: UiHost
@@ -580,6 +609,68 @@ describe('the web transport', () => {
     expect(observed.traversal).toBe(400)
     expect(observed.unknown).toBe(404)
     expect(observed.foreignHost).toBe(403)
+    await rm(root, { recursive: true, force: true })
+    await rm(home, { recursive: true, force: true })
+  })
+
+  test('the artifact list names a session html in order, and an absent session is empty', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-artifact-list-'))
+    const home = await mkdtemp(join(tmpdir(), 'jozo-harness-web-artifact-list-home-'))
+    const sessionRoot = join(home, 'sessions')
+    const artifacts = join(home, 'artifacts', 'a')
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    await writeFileDeep(join(artifacts, 'beta.html'), '<h1>beta</h1>')
+    await writeFileDeep(join(artifacts, 'alpha.html'), '<h1>alpha</h1>')
+    const web = makeWeb('a')
+    const base = makeSettings()
+    const settings = {
+      ...base,
+      port: {
+        ...base.port,
+        read: () => Effect.succeed({ ...settingsView, sessionRoot }),
+      } satisfies SettingsPort,
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const listUrl = started.origin + '/artifacts/a'
+          const listed = yield* Effect.promise(() =>
+            fetch(listUrl, { headers: { cookie: started.cookie } }),
+          )
+          const text = yield* Effect.promise(() => listed.text())
+          const empty = yield* Effect.promise(() =>
+            fetch(started.origin + '/artifacts/none', { headers: { cookie: started.cookie } }),
+          )
+          const emptyText = yield* Effect.promise(() => empty.text())
+          const anonymous = yield* Effect.promise(() => fetch(listUrl))
+          yield* Deferred.succeed(started.stop, undefined)
+          return {
+            status: listed.status,
+            type: listed.headers.get('content-type'),
+            listed: artifactEntries(text),
+            empty: artifactEntries(emptyText),
+            anonymous: anonymous.status,
+          }
+        }),
+      ),
+    )
+
+    expect(observed.status).toBe(200)
+    expect(observed.type).toBe('application/json; charset=utf-8')
+    expect(observed.listed.map((entry) => entry.name)).toEqual(['alpha', 'beta'])
+    expect(observed.listed.map((entry) => entry.path)).toEqual([
+      '/artifact/a/alpha',
+      '/artifact/a/beta',
+    ])
+    for (const entry of observed.listed) {
+      const info = await stat(join(artifacts, entry.name + '.html'))
+      expect(entry.bytes).toBe(info.size)
+      expect(Number.isNaN(Date.parse(entry.updatedAt))).toBe(false)
+    }
+    expect(observed.empty).toEqual([])
+    expect(observed.anonymous).toBe(401)
     await rm(root, { recursive: true, force: true })
     await rm(home, { recursive: true, force: true })
   })
