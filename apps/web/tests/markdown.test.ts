@@ -103,6 +103,27 @@ describe('the markdown renderer', () => {
     expect(view).toContain('&quot;onmouseover=&quot;')
   })
 
+  test('a png data URL draws as a picture', () => {
+    const view = renderMarkdown('![dot](data:image/png;base64,iVBORw0KGgo=)')
+    expect(view).toBe(
+      '<p><figure class="answer-image"><img src="data:image/png;base64,iVBORw0KGgo=" alt="dot" ' +
+        'loading="lazy" decoding="async"><figcaption>dot</figcaption></figure></p>',
+    )
+  })
+
+  test('an svg data URL stays the literal notation', () => {
+    const view = renderMarkdown('![x](data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=)')
+    expect(view).not.toContain('<img')
+    expect(view).toContain('![x](data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=)')
+  })
+
+  test('a data URL past the limit is a link instead of a picture', () => {
+    const body = 'A'.repeat(2_000_001)
+    const view = renderMarkdown('![big](data:image/png;base64,' + body + ')')
+    expect(view).not.toContain('<img')
+    expect(view).toContain('<a href="data:image/png;base64,' + body + '">big</a>')
+  })
+
   test('markup after a bare URL stays escaped text', () => {
     const view = renderMarkdown('see https://e.x/"><img src=x onerror=alert(1)>')
     expect(view).not.toContain('<img')

@@ -1,4 +1,4 @@
-import { imageSrcOf } from './diagram.ts'
+import { imageViewOf } from './diagram.ts'
 import { svgMarkupOf } from './svg.ts'
 import { escapeHtml } from './html.ts'
 import { linkPartsOf, type LinkPart } from './linkify.ts'
@@ -113,14 +113,23 @@ const plainInline = (text: string): string =>
 
 const IMAGE = /!\[([^\]\n]*)\]\(([^()\s]*)\)/g
 
-/** One image notation as a picture; a URL that is not http(s) stays the literal text. */
+/**
+ * One image notation as a picture. A source that cannot be drawn stays the
+ * literal notation, and a data URL past the size limit becomes a link so the
+ * answer still lets a reader reach it.
+ */
 const imageHtml = (match: RegExpExecArray): string => {
-  const src = imageSrcOf(match[2] ?? '')
-  if (src === undefined) return escapeHtml(match[0])
+  const image = imageViewOf(match[2] ?? '')
+  if (image === undefined) return escapeHtml(match[0])
   const alt = match[1] ?? ''
+  if (image.kind === 'link') {
+    return (
+      '<a href="' + escapeHtml(image.href) + '">' + escapeHtml(alt === '' ? 'image' : alt) + '</a>'
+    )
+  }
   return (
     '<figure class="answer-image"><img src="' +
-    escapeHtml(src) +
+    escapeHtml(image.src) +
     '" alt="' +
     escapeHtml(alt) +
     '" loading="lazy" decoding="async">' +
