@@ -55,24 +55,38 @@ describe('the markdown renderer', () => {
   test('a bare URL becomes a link with its query escaped once', () => {
     const view = renderMarkdown('see https://example.com/a?x=1&y=2 now')
     expect(view).toBe(
-      '<p>see <a href="https://example.com/a?x=1&amp;y=2" target="_blank" rel="noreferrer noopener">' +
-        'https://example.com/a?x=1&amp;y=2</a> now</p>',
+      '<p>see <a href="https://example.com/a?x=1&amp;y=2" ' +
+        'title="https://example.com/a?x=1&amp;y=2" target="_blank" rel="noreferrer noopener">' +
+        'example.com/a</a> now</p>',
+    )
+  })
+
+  test('a long bare URL shows a short label and keeps the whole URL in its title', () => {
+    const view = renderMarkdown(
+      'see https://github.com/jozobeer/jozo-harness/blob/main/docs/notes/2026-10-22-diagram-format.md now',
+    )
+    expect(view).toBe(
+      '<p>see <a href="https://github.com/jozobeer/jozo-harness/blob/main/docs/notes/2026-10-22-diagram-format.md" ' +
+        'title="https://github.com/jozobeer/jozo-harness/blob/main/docs/notes/2026-10-22-diagram-format.md" ' +
+        'target="_blank" rel="noreferrer noopener">' +
+        'github.com/jozobeer/jozo-harness/blob/main/docs…</a> now</p>',
     )
   })
 
   test('sentence punctuation stays outside a bare URL', () => {
     const view = renderMarkdown('see (https://example.com/docs).')
     expect(view).toBe(
-      '<p>see (<a href="https://example.com/docs" target="_blank" rel="noreferrer noopener">' +
-        'https://example.com/docs</a>).</p>',
+      '<p>see (<a href="https://example.com/docs" title="https://example.com/docs" ' +
+        'target="_blank" rel="noreferrer noopener">example.com/docs</a>).</p>',
     )
   })
 
   test('a URL keeps a bracket pair it opened itself', () => {
     const view = renderMarkdown('https://en.wikipedia.org/wiki/Foo_(bar)')
     expect(view).toBe(
-      '<p><a href="https://en.wikipedia.org/wiki/Foo_(bar)" target="_blank" rel="noreferrer noopener">' +
-        'https://en.wikipedia.org/wiki/Foo_(bar)</a></p>',
+      '<p><a href="https://en.wikipedia.org/wiki/Foo_(bar)" ' +
+        'title="https://en.wikipedia.org/wiki/Foo_(bar)" target="_blank" rel="noreferrer noopener">' +
+        'en.wikipedia.org/wiki/Foo_(bar)</a></p>',
     )
   })
 

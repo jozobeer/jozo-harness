@@ -799,10 +799,18 @@ describe('the Solid page', () => {
 
     const { container } = render(() => <Conversation store={store} />)
 
-    const hrefs = [...container.querySelectorAll('.tool-card a')].map((link) =>
-      link.getAttribute('href'),
-    )
-    expect(hrefs).toEqual([
+    const links = [...container.querySelectorAll('.tool-card a')]
+    expect(links.map((link) => link.getAttribute('href'))).toEqual([
+      'https://example.com/page',
+      'https://example.com/page',
+      'https://example.com/out',
+    ])
+    expect(links.map((link) => link.textContent)).toEqual([
+      'example.com/page',
+      'example.com/page',
+      'example.com/out',
+    ])
+    expect(links.map((link) => link.getAttribute('title'))).toEqual([
       'https://example.com/page',
       'https://example.com/page',
       'https://example.com/out',
@@ -810,6 +818,7 @@ describe('the Solid page', () => {
     expect(container.querySelector('.turn-ask .body a')?.getAttribute('href')).toBe(
       'https://example.com/ask',
     )
+    expect(container.querySelector('.turn-ask .body a')?.textContent).toBe('example.com/ask')
 
     // A link in the folded line opens the page without folding the card open too.
     const card = container.querySelector('.tool-card') as HTMLDetailsElement

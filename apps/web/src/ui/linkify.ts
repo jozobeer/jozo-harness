@@ -1,13 +1,38 @@
 /** One run of plain text, or a link found in it. */
 export type LinkPart =
   | { readonly kind: 'text'; readonly text: string }
-  | { readonly kind: 'link'; readonly href: string; readonly label: string }
+  | {
+      readonly kind: 'link'
+      readonly href: string
+      readonly label: string
+      readonly title?: string
+    }
 
 /** A URL the browser may follow; a protocol-relative `//` is not one. */
 const SAFE_HREF = /^(?:https?:|mailto:|\/(?!\/))/i
 
 /** Whether an explicitly written href may become an anchor. */
 export const isSafeHref = (href: string): boolean => SAFE_HREF.test(href)
+
+/** How many characters an auto link shows before its tail is cut. */
+const LABEL_MAX = 48
+
+/**
+ * A short, readable label for a bare URL: its host and the start of its path,
+ * without the query or fragment that a reader rarely needs. The href keeps
+ * every part, and the title shows the whole URL on hover.
+ */
+export const linkLabelOf = (url: string): string => {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return url
+  }
+  const path = parsed.pathname === '/' ? '' : parsed.pathname
+  const label = parsed.host + path
+  return label.length <= LABEL_MAX ? label : label.slice(0, LABEL_MAX - 1) + '…'
+}
 
 const TRAILING = new Set(['.', ',', ';', ':', '!', '?', '。', '、'])
 const CLOSERS: Readonly<Record<string, string>> = { ')': '(', ']': '[', '}': '{' }
@@ -56,7 +81,10 @@ const splitBare = (
   if (bare.endsWith('…')) return undefined
   const href = trimUrl(bare)
   if (href === '') return undefined
-  return { link: { kind: 'link', href, label: href }, tail: bare.slice(href.length) }
+  return {
+    link: { kind: 'link', href, label: linkLabelOf(href), title: href },
+    tail: bare.slice(href.length),
+  }
 }
 
 /** A bare URL match as its link and whatever punctuation followed it. */

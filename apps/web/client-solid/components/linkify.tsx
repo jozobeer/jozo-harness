@@ -15,6 +15,7 @@ export const Linkify = (props: { text: string; stop?: boolean }) => (
         <a
           class="auto-link"
           href={part.href}
+          title={part.title}
           target="_blank"
           rel="noreferrer noopener"
           onClick={(event) => {
