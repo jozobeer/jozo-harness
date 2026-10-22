@@ -14,7 +14,8 @@ const Parameters = Schema.Struct({
     description: 'The file to change, absolute or relative to the working directory.',
   }),
   oldString: Schema.String.annotate({
-    description: 'The exact text to replace. It must appear exactly once unless all is true.',
+    description:
+      'The exact text to replace. It must not be empty, and it must appear exactly once unless all is true.',
   }),
   newString: Schema.String.annotate({ description: 'The text to put in its place.' }),
   all: Schema.optionalKey(
@@ -41,6 +42,19 @@ const countOf = (text: string, needle: string): number => {
     index = text.indexOf(needle, index + needle.length)
   }
   return count
+}
+
+/**
+ * An empty needle matches at every index and never advances, so the search
+ * would not return. Refuse it before any file is read.
+ */
+const refuseEmptyOldString = (oldString: string): Effect.Effect<void, ToolError> => {
+  if (oldString === '') {
+    return Effect.fail(
+      new ToolError({ code: 'invalid-arguments', message: 'old text must not be empty' }),
+    )
+  }
+  return Effect.void
 }
 
 /**
@@ -75,6 +89,7 @@ export const makeEditTool = (
     },
     execute: (args, context) =>
       Effect.gen(function* () {
+        yield* refuseEmptyOldString(args.oldString)
         const mode = yield* modeOfCall({
           args: args,
           callId: context.callId,
@@ -103,9 +118,11 @@ export const makeEditTool = (
             }),
           )
         }
+        // A function replacement is copied literally. A string replacement would
+        // expand $$, $&, $', and $`, so a price or a shell snippet would rewrite the file.
         const updated = all
           ? source.text.split(args.oldString).join(args.newString)
-          : source.text.replace(args.oldString, args.newString)
+          : source.text.replace(args.oldString, () => args.newString)
         yield* Effect.tryPromise({
           try: () => writeFile(path, restoreLineEndings(updated, source.lineEndings)),
           catch: () => new ToolError({ code: 'execution', message: 'cannot write ' + path }),

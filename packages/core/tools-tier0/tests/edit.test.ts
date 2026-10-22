@@ -191,6 +191,32 @@ describe('edit tool', () => {
     await rm(dir, { recursive: true, force: true })
   })
 
+  test('writes dollar patterns as literal text', async () => {
+    const { dir, call } = await withReadFile('start MIDDLE end\n')
+    const replacement = "cost $$ and $& and $' tail"
+
+    const result = await Effect.runPromise(
+      call('edit', { path: 'a.txt', oldString: 'MIDDLE', newString: replacement }),
+    )
+
+    expect(result?.isError).toBe(false)
+    expect(await readFile(join(dir, 'a.txt'), 'utf8')).toBe('start ' + replacement + ' end\n')
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('refuses an empty old string and leaves the file alone', async () => {
+    const { dir, call } = await withReadFile('untouched\n')
+
+    const result = await Effect.runPromise(
+      call('edit', { path: 'a.txt', oldString: '', newString: 'inserted' }),
+    )
+
+    expect(result?.isError).toBe(true)
+    expect(textOf(result)).toContain('empty')
+    expect(await readFile(join(dir, 'a.txt'), 'utf8')).toBe('untouched\n')
+    await rm(dir, { recursive: true, force: true })
+  })
+
   test('a file that is not UTF-8 cannot be read, so it cannot be edited', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-edit-'))
     const path = join(dir, 'a.txt')
