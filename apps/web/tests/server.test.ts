@@ -720,6 +720,138 @@ describe('the web transport', () => {
     await rm(home, { recursive: true, force: true })
   })
 
+  test('a deleted page is gone from its session while another session keeps its own', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-artifact-delete-'))
+    const home = await mkdtemp(join(tmpdir(), 'jozo-harness-web-artifact-delete-home-'))
+    const sessionRoot = join(home, 'sessions')
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    await writeFileDeep(join(home, 'artifacts', 'a', 'report.html'), '<h1>report</h1>')
+    await writeFileDeep(join(home, 'artifacts', 'b', 'other.html'), '<h1>other</h1>')
+    const web = makeWeb('a')
+    const base = makeSettings()
+    const settings = {
+      ...base,
+      port: {
+        ...base.port,
+        read: () => Effect.succeed({ ...settingsView, sessionRoot }),
+      } satisfies SettingsPort,
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const page = started.origin + '/artifact/a/report'
+          const remove = (): Promise<Response> =>
+            fetch(page, {
+              method: 'DELETE',
+              headers: { cookie: started.cookie, origin: started.origin },
+            })
+          const removed = yield* Effect.promise(remove)
+          const gone = yield* Effect.promise(() =>
+            fetch(page, { headers: { cookie: started.cookie } }),
+          )
+          const other = yield* Effect.promise(() =>
+            fetch(started.origin + '/artifact/b/other', { headers: { cookie: started.cookie } }),
+          )
+          const listed = yield* Effect.promise(() =>
+            fetch(started.origin + '/artifacts/a', { headers: { cookie: started.cookie } }),
+          )
+          const listedText = yield* Effect.promise(() => listed.text())
+          const again = yield* Effect.promise(remove)
+          yield* Deferred.succeed(started.stop, undefined)
+          return {
+            removed: removed.status,
+            gone: gone.status,
+            other: other.status,
+            listed: artifactEntries(listedText),
+            again: again.status,
+          }
+        }),
+      ),
+    )
+
+    expect(observed.removed).toBe(204)
+    expect(observed.gone).toBe(404)
+    expect(observed.other).toBe(200)
+    expect(observed.listed).toEqual([])
+    expect(observed.again).toBe(404)
+    await rm(root, { recursive: true, force: true })
+    await rm(home, { recursive: true, force: true })
+  })
+
+  test('a delete without the gate, a safe name, or an existing page is refused', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-artifact-delete-refuse-'))
+    const home = await mkdtemp(join(tmpdir(), 'jozo-harness-web-artifact-delete-refuse-home-'))
+    const sessionRoot = join(home, 'sessions')
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    await writeFileDeep(join(home, 'artifacts', 'a', 'report.html'), '<h1>report</h1>')
+    const web = makeWeb('a')
+    const base = makeSettings()
+    const settings = {
+      ...base,
+      port: {
+        ...base.port,
+        read: () => Effect.succeed({ ...settingsView, sessionRoot }),
+      } satisfies SettingsPort,
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const page = started.origin + '/artifact/a/report'
+          const anonymous = yield* Effect.promise(() =>
+            fetch(page, { method: 'DELETE', headers: { 'x-requested-with': 'XMLHttpRequest' } }),
+          )
+          const unproven = yield* Effect.promise(() =>
+            fetch(page, { method: 'DELETE', headers: { cookie: started.cookie } }),
+          )
+          const foreign = yield* Effect.promise(() =>
+            fetch(page, {
+              method: 'DELETE',
+              headers: { cookie: started.cookie, origin: 'http://evil.example' },
+            }),
+          )
+          const traversal = yield* Effect.promise(() =>
+            fetch(started.origin + '/artifact/a/..%2fsecret', {
+              method: 'DELETE',
+              headers: { cookie: started.cookie, origin: started.origin },
+            }),
+          )
+          const missing = yield* Effect.promise(() =>
+            fetch(started.origin + '/artifact/a/missing', {
+              method: 'DELETE',
+              headers: { cookie: started.cookie, origin: started.origin },
+            }),
+          )
+          const listed = yield* Effect.promise(() =>
+            fetch(started.origin + '/artifacts/a', { headers: { cookie: started.cookie } }),
+          )
+          const listedText = yield* Effect.promise(() => listed.text())
+          yield* Deferred.succeed(started.stop, undefined)
+          return {
+            anonymous: anonymous.status,
+            unproven: unproven.status,
+            foreign: foreign.status,
+            traversal: traversal.status,
+            missing: missing.status,
+            listed: artifactEntries(listedText),
+          }
+        }),
+      ),
+    )
+
+    expect(observed.anonymous).toBe(401)
+    expect(observed.unproven).toBe(403)
+    expect(observed.foreign).toBe(403)
+    expect(observed.traversal).toBe(400)
+    expect(observed.missing).toBe(404)
+    expect(observed.listed.map((entry) => entry.name)).toEqual(['report'])
+    await rm(root, { recursive: true, force: true })
+    await rm(home, { recursive: true, force: true })
+  })
+
   test('two tabs subscribe to the same conversation', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-tabs-'))
     await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')

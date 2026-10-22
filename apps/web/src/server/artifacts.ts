@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from 'node:fs/promises'
+import { readFile, readdir, stat, unlink } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join } from 'node:path'
 import {
@@ -71,17 +71,37 @@ const refuse = (response: ServerResponse, status: number, body: string): void =>
   response.end(body)
 }
 
+/** The methods each route answers: a list is read-only, a page may also be removed. */
+const methodAllowed = (method: string | undefined, route: ArtifactRoute): boolean =>
+  route.kind === 'file' ? method === 'GET' || method === 'DELETE' : method === 'GET'
+
+/**
+ * True when a delete came from this page's origin or a script that named a
+ * header a plain form cannot set. A browser sends Origin on DELETE; the header
+ * proves the same intent for a caller that is not a browser.
+ */
+const deleteConfirmed = (request: IncomingMessage, gate: ArtifactGate): boolean =>
+  request.headers['x-requested-with'] !== undefined ||
+  (request.headers.origin !== undefined &&
+    originAllowed(request.headers.origin, gate.port, gate.publicOrigin, gate.tailnet))
+
 /** True when the route's shared gate admits the request; a refusal has already been sent. */
 const admitted = (
   request: IncomingMessage,
   response: ServerResponse,
   gate: ArtifactGate,
+  route: ArtifactRoute,
 ): boolean => {
-  if (request.method !== 'GET') {
+  if (!methodAllowed(request.method, route)) {
     refuse(response, 405, 'method not allowed')
     return false
   }
   if (!originAllowed(request.headers.origin, gate.port, gate.publicOrigin, gate.tailnet)) {
+    refuse(response, 403, 'forbidden')
+    return false
+  }
+  // A same-site GET is harmless; a delete must also prove the caller meant it.
+  if (request.method === 'DELETE' && !deleteConfirmed(request, gate)) {
     refuse(response, 403, 'forbidden')
     return false
   }
@@ -147,6 +167,27 @@ const answerList = async (
   response.end(JSON.stringify(entries))
 }
 
+/** Removes one page; a name that is not there, or a root that is unknown, is a miss. */
+const answerDelete = async (
+  response: ServerResponse,
+  root: string | undefined,
+  sessionId: string,
+  name: string,
+): Promise<void> => {
+  const removed =
+    root !== undefined &&
+    (await unlink(join(root, sessionId, name + '.html')).then(
+      () => true,
+      () => false,
+    ))
+  if (!removed) {
+    refuse(response, 404, 'not found')
+    return
+  }
+  response.writeHead(204)
+  response.end()
+}
+
 const answerFile = async (
   response: ServerResponse,
   root: string | undefined,
@@ -186,8 +227,12 @@ export const answerArtifact = async (
     refuse(response, 400, 'invalid artifact path')
     return true
   }
-  if (!admitted(request, response, gate)) return true
+  if (!admitted(request, response, gate, route)) return true
   if (route.kind === 'list') await answerList(response, gate.root, route.sessionId)
-  else await answerFile(response, gate.root, route.sessionId, route.name)
+  else if (request.method === 'DELETE') {
+    await answerDelete(response, gate.root, route.sessionId, route.name)
+  } else {
+    await answerFile(response, gate.root, route.sessionId, route.name)
+  }
   return true
 }
