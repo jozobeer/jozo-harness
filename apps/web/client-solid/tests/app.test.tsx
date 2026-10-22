@@ -604,6 +604,49 @@ describe('the Solid page', () => {
     expect(open?.getAttribute('href')).toBe('/artifact/s1/report')
   })
 
+  test('a run_code result that published two pages draws both frames', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const { store } = makeStore({
+      conversation: { ...emptyConversation, blocks: [{ kind: 'user', text: 'go' }] },
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'step/start', { step: 1 }),
+        at(3, 'tool/call', {
+          callId: 'c1',
+          name: 'run_code',
+          arguments: '{}',
+          summary: 'run_code',
+        }),
+        at(4, 'tool/result', {
+          callId: 'c1',
+          isError: false,
+          summary: 'published',
+          content: [
+            {
+              type: 'text',
+              text: 'return: "published"\npage: /artifact/s1/report\npage: /artifact/s1/figure',
+            },
+          ],
+        }),
+        at(5, 'step/end', { step: 1 }),
+        at(6, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      ]),
+    })
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    const frames = [...container.querySelectorAll('.tool-card iframe')]
+    expect(frames.map((frame) => frame.getAttribute('src'))).toEqual([
+      '/artifact/s1/report',
+      '/artifact/s1/figure',
+    ])
+    const opens = [...container.querySelectorAll('.tool-card a.tool-page-open')]
+    expect(opens.map((open) => open.getAttribute('href'))).toEqual([
+      '/artifact/s1/report',
+      '/artifact/s1/figure',
+    ])
+  })
+
   test('a tool result that is not a page line draws no frame', () => {
     const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
     const { store } = makeStore({
@@ -1881,6 +1924,56 @@ describe('the Solid page', () => {
       '/artifact/s1/notes',
     ])
     expect(pages[0]?.querySelector('a')?.getAttribute('target')).toBe('_blank')
+  })
+
+  test('the run pane lists every page one run_code result published', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const { store } = makeStore({
+      pane: { kind: 'run' },
+      trace: traceOf([
+        at(1, 'tool/call', {
+          callId: 'c1',
+          name: 'run_code',
+          arguments: '{}',
+          summary: 'run_code',
+        }),
+        at(2, 'tool/result', {
+          callId: 'c1',
+          isError: false,
+          summary: 'published',
+          content: [
+            {
+              type: 'text',
+              text: 'return: "published"\npage: /artifact/s1/report\npage: /artifact/s1/figure',
+            },
+          ],
+        }),
+      ]),
+      run: {
+        goal: null,
+        schedules: [],
+        jobs: [],
+        subagents: [],
+        todos: [],
+        todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+        skills: [],
+        promptSections: [],
+        queued: [],
+        steering: [],
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+      },
+    })
+
+    const { container } = render(() => <ContextPane store={store} />)
+
+    const pages = [...container.querySelectorAll('.run-pages .run-page')]
+    expect(pages.map((row) => textOf(row, '.run-page-name'))).toEqual(['report', 'figure'])
+    expect(pages.map((row) => row.querySelector('a')?.getAttribute('href'))).toEqual([
+      '/artifact/s1/report',
+      '/artifact/s1/figure',
+    ])
   })
 
   test('the run pane draws no pages section when no call published one', () => {

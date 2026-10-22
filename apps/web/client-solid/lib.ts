@@ -58,19 +58,19 @@ export const childSessionsOf = (
 /** The one line an artifact result writes; text around it means the call published no page. */
 const PAGE_LINE = /^page: (\/artifact\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)$/
 
-/** The page a finished call published, when its whole result is that line. */
-export const pageOf = (tool: TraceTool): string | undefined => {
-  if (tool.endedAt === undefined) return undefined
+/** The pages a finished call published, in the order its result names them. */
+export const pagesIn = (tool: TraceTool): ReadonlyArray<string> => {
+  if (tool.endedAt === undefined) return []
   const output = tool.output.trim()
   const whole = PAGE_LINE.exec(output)
-  if (whole?.[1] !== undefined) return whole[1]
-  // A program publishes a page through a nested call, so its line sits among
-  // the program's output; only run_code reads a page from a longer result.
-  if (tool.name !== 'run_code') return undefined
+  if (whole?.[1] !== undefined) return [whole[1]]
+  // A program publishes pages through nested calls, so their lines sit among
+  // the program's output; only run_code reads pages from a longer result.
+  if (tool.name !== 'run_code') return []
   return output
     .split('\n')
     .map((line) => PAGE_LINE.exec(line.trim())?.[1])
-    .find((page) => page !== undefined)
+    .filter((page): page is string => page !== undefined)
 }
 
 /** The pages a session's finished calls published, newest first, each once. */
@@ -78,8 +78,7 @@ export const pagesOf = (turns: ReadonlyArray<TraceTurn>): ReadonlyArray<string> 
   const pages = new Set<string>()
   for (const turn of [...turns].reverse()) {
     for (const tool of [...toolsOf(turn)].reverse()) {
-      const page = pageOf(tool)
-      if (page !== undefined) pages.add(page)
+      for (const page of pagesIn(tool)) pages.add(page)
     }
   }
   return [...pages]

@@ -12,7 +12,7 @@ import { Linkify } from './linkify.tsx'
 import { EndMark } from './ui/end-mark.tsx'
 import { Icon, toolIconOf } from './ui/icon.tsx'
 import { Mug } from './ui/mug.tsx'
-import { pageOf, spanOf } from '../lib.ts'
+import { pagesIn, spanOf } from '../lib.ts'
 import { useSeen } from '../seen.ts'
 import type { SessionStore } from '../store.ts'
 
@@ -138,7 +138,7 @@ const Tool = (props: { tool: TraceTool }) => (
         <Linkify text={plainText(props.tool.output)} />
       </pre>
     </Show>
-    <Show when={pageOf(props.tool)}>{(page) => <ToolPage page={page()} />}</Show>
+    <For each={pagesIn(props.tool)}>{(page) => <ToolPage page={page} />}</For>
     <For each={props.tool.images}>{(image) => <ToolImage image={image} />}</For>
   </details>
 )
