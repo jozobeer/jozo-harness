@@ -2423,6 +2423,7 @@ describe('the Solid page', () => {
 
     expect(calls.some((call) => call.kind === 'act')).toBe(false)
     expect(container.textContent).toContain('Delete this session?')
+    expect(container.textContent).toContain('Pages it published remain.')
 
     fireEvent.click(container.querySelector('.session-delete-confirm') as Element)
 
