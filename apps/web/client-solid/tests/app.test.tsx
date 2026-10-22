@@ -1941,6 +1941,10 @@ describe('the Solid page', () => {
       '/artifact/s1/notes',
     ])
     expect(pages[0]?.querySelector('a')?.getAttribute('target')).toBe('_blank')
+    expect(pages.map((row) => textOf(row, '.run-page-download'))).toEqual(['Download', 'Download'])
+    expect(
+      pages.map((row) => row.querySelector('.run-page-download')?.getAttribute('href')),
+    ).toEqual(['/artifact/s1/report?download=1', '/artifact/s1/notes?download=1'])
   })
 
   test('the run pane lists every page one run_code result published', () => {

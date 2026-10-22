@@ -170,6 +170,9 @@ const Pages = (props: { store: SessionStore; pages: ReadonlyArray<string> }) => 
               <a class="run-page-open" href={page} target="_blank" rel="noopener">
                 Open in a new tab
               </a>
+              <a class="run-page-download" href={page + '?download=1'}>
+                Download
+              </a>
               <button
                 class="run-page-delete danger"
                 type="button"

@@ -188,7 +188,12 @@ const answerDelete = async (
   response.end()
 }
 
+/** True when the request asked for the page as a file instead of as a tab. */
+const wantsDownload = (request: IncomingMessage): boolean =>
+  new URL(request.url ?? '/', 'http://127.0.0.1').searchParams.get('download') === '1'
+
 const answerFile = async (
+  request: IncomingMessage,
   response: ServerResponse,
   root: string | undefined,
   sessionId: string,
@@ -202,10 +207,14 @@ const answerFile = async (
     refuse(response, 404, 'not found')
     return
   }
+  // The same bytes under the same gate; a download only asks the browser to save them.
   response.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
     'content-security-policy': 'sandbox allow-scripts',
     'x-content-type-options': 'nosniff',
+    ...(wantsDownload(request)
+      ? { 'content-disposition': 'attachment; filename="' + name + '.html"' }
+      : {}),
   })
   response.end(body)
 }
@@ -232,7 +241,7 @@ export const answerArtifact = async (
   else if (request.method === 'DELETE') {
     await answerDelete(response, gate.root, route.sessionId, route.name)
   } else {
-    await answerFile(response, gate.root, route.sessionId, route.name)
+    await answerFile(request, response, gate.root, route.sessionId, route.name)
   }
   return true
 }
