@@ -18,6 +18,7 @@ import {
   withBranch,
   withCommands,
   withConnection,
+  withDeletedPage,
   withDraft,
   withFiles,
   withModels,
@@ -255,6 +256,8 @@ export interface SessionStore {
   readonly setModel: (model: string) => void
   /** Renames, pins, archives, or deletes one session through its row menu. */
   readonly act: (sessionId: string, action: SessionAction) => void
+  /** Drops a page the server no longer holds, so the run pane stops listing it. */
+  readonly pageDeleted: (page: string) => void
 }
 
 export interface SessionStoreOptions {
@@ -982,5 +985,6 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     setModel: (model) => Queue.offerUnsafe(panelAsks, { kind: 'setModel', model }),
     act: (sessionId, action) =>
       Queue.offerUnsafe(panelAsks, { kind: 'sessionAction', sessionId, action }),
+    pageDeleted: (page) => update((now) => withDeletedPage(now, page)),
   }
 }

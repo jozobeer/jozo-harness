@@ -3,7 +3,14 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { createRoot, createSignal } from 'solid-js'
 import type { SubmitMode, UiCommand } from '@jozo-harness/ui-protocol'
 import { emptyConversation } from '@jozo-harness/ui-view'
-import { initialState, withDraft, withTheme, type Pane, type WebState } from '../../src/ui/state.ts'
+import {
+  initialState,
+  withDeletedPage,
+  withDraft,
+  withTheme,
+  type Pane,
+  type WebState,
+} from '../../src/ui/state.ts'
 import { App } from '../app.tsx'
 import { Composer } from '../components/composer.tsx'
 import { ContextPane } from '../components/context-pane.tsx'
@@ -111,6 +118,7 @@ const makeStore = (
       calls.push({ kind: 'browseDirectories', path })
       browses.push({ path, reply })
     },
+    pageDeleted: (page) => update((current) => withDeletedPage(current, page)),
   }
   return { store, calls, browses, setState: update }
 }
@@ -1974,6 +1982,130 @@ describe('the Solid page', () => {
       '/artifact/s1/report',
       '/artifact/s1/figure',
     ])
+  })
+
+  test('a page row deletes its page and leaves the list once the route answers 204', async () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const publish = (seq: number, callId: string, page: string) => [
+      at(seq, 'tool/call', {
+        callId,
+        name: 'artifact',
+        arguments: '{}',
+        summary: 'artifact',
+      }),
+      at(seq + 1, 'tool/result', {
+        callId,
+        isError: false,
+        summary: '',
+        content: [{ type: 'text', text: 'page: ' + page }],
+      }),
+    ]
+    const { store } = makeStore({
+      pane: { kind: 'run' },
+      trace: traceOf([
+        ...publish(1, 'c1', '/artifact/s1/report'),
+        ...publish(3, 'c2', '/artifact/s1/notes'),
+      ]),
+      run: {
+        goal: null,
+        schedules: [],
+        jobs: [],
+        subagents: [],
+        todos: [],
+        todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+        skills: [],
+        promptSections: [],
+        queued: [],
+        steering: [],
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+      },
+    })
+    const asked: Array<{ readonly url: string; readonly init: RequestInit | undefined }> = []
+    let answer: (status: number) => void = () => undefined
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      asked.push({ url, init })
+      return new Promise((resolved) => {
+        answer = (status) => resolved({ status })
+      })
+    })
+    try {
+      const { container } = render(() => <ContextPane store={store} />)
+      // The newest page leads the list, so its row is the first delete.
+      const notes = container.querySelectorAll('.run-page-delete')[0]
+      fireEvent.click(notes as Element)
+
+      expect(asked).toEqual([
+        {
+          url: '/artifact/s1/notes',
+          init: { method: 'DELETE', headers: { 'X-Requested-With': 'fetch' } },
+        },
+      ])
+      // A second press while the first is still out would send the same delete twice.
+      expect((notes as HTMLButtonElement).disabled).toBe(true)
+
+      answer(204)
+      await vi.waitFor(() =>
+        expect(
+          [...container.querySelectorAll('.run-page-name')].map((name) => name.textContent),
+        ).toEqual(['report']),
+      )
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  test('a page row whose delete is refused stays, with the number the route answered', async () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const { store } = makeStore({
+      pane: { kind: 'run' },
+      trace: traceOf([
+        at(1, 'tool/call', {
+          callId: 'c1',
+          name: 'artifact',
+          arguments: '{}',
+          summary: 'artifact',
+        }),
+        at(2, 'tool/result', {
+          callId: 'c1',
+          isError: false,
+          summary: '',
+          content: [{ type: 'text', text: 'page: /artifact/s1/report' }],
+        }),
+      ]),
+      run: {
+        goal: null,
+        schedules: [],
+        jobs: [],
+        subagents: [],
+        todos: [],
+        todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+        skills: [],
+        promptSections: [],
+        queued: [],
+        steering: [],
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+      },
+    })
+    vi.stubGlobal('fetch', () => Promise.resolve({ status: 500 }))
+    try {
+      const { container } = render(() => <ContextPane store={store} />)
+      fireEvent.click(container.querySelector('.run-page-delete') as Element)
+
+      await vi.waitFor(() =>
+        expect(container.querySelector('.run-page-error')?.textContent).toContain('500'),
+      )
+      expect(container.querySelectorAll('.run-page')).toHaveLength(1)
+      expect(textOf(container, '.run-page-name')).toBe('report')
+      expect((container.querySelector('.run-page-delete') as HTMLButtonElement).disabled).toBe(
+        false,
+      )
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   test('the run pane draws no pages section when no call published one', () => {

@@ -4,6 +4,7 @@ import {
   applyUiEvent,
   initialState,
   withBlank,
+  withDeletedPage,
   withDraft,
   withSession,
   withSessions,
@@ -227,6 +228,7 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
       setState((now) => withSettings(now, settings))
     },
     setModel: () => undefined,
+    pageDeleted: (page) => setState((now) => withDeletedPage(now, page)),
     // The made-up rail keeps its own rows, so the menu is alive without a server.
     act: (id, action) => {
       const index = sessions.findIndex((item) => item.summary.id === id)
