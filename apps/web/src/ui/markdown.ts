@@ -80,6 +80,118 @@ const withCodeSpans = (text: string): string =>
     )
     .join('')
 
+const DELIMITER = /^:?-+:?$/
+
+type Align = 'left' | 'center' | 'right'
+
+type Table = {
+  readonly head: ReadonlyArray<string>
+  readonly aligns: ReadonlyArray<Align | undefined>
+  readonly rows: ReadonlyArray<ReadonlyArray<string>>
+  readonly end: number
+}
+
+/** Drops the empty cells the outer pipes make and unescapes the pipes inside. */
+const trimEdges = (cells: ReadonlyArray<string>, line: string): ReadonlyArray<string> => {
+  const from = (line.trimStart()[0] ?? '') === '|' ? 1 : 0
+  const to = (line.trimEnd().slice(-1) ?? '') === '|' ? cells.length - 1 : cells.length
+  return cells.slice(from, to).map((part) => part.trim().replace(/\\\|/g, '|'))
+}
+
+/** Splits a pipe row; a pipe inside a code span or an escaped pipe is content. */
+const cellsOf = (line: string): ReadonlyArray<string> => {
+  const cells: Array<string> = []
+  let cell = ''
+  let code = false
+  for (let at = 0; at < line.length; at += 1) {
+    const char = line[at] ?? ''
+    code = char === '`' ? !code : code
+    const split = char === '|' && !code && line[at - 1] !== '\\'
+    if (!split) {
+      cell += char
+      continue
+    }
+    cells.push(cell)
+    cell = ''
+  }
+  cells.push(cell)
+  return trimEdges(cells, line)
+}
+
+const alignOf = (cell: string): Align | undefined =>
+  cell.startsWith(':') && cell.endsWith(':')
+    ? 'center'
+    : cell.startsWith(':')
+      ? 'left'
+      : cell.endsWith(':')
+        ? 'right'
+        : undefined
+
+/** The delimiter cells, which every table needs and which set each column's alignment. */
+const marksOf = (line: string): ReadonlyArray<string> | undefined => {
+  if (!line.includes('|')) return undefined
+  const marks = cellsOf(line)
+  if (marks.length === 0) return undefined
+  return marks.every((mark) => DELIMITER.test(mark)) ? marks : undefined
+}
+
+/** The body rows under a table; the first line without a pipe ends them. */
+const rowsFrom = (
+  lines: ReadonlyArray<string>,
+  start: number,
+): { readonly rows: ReadonlyArray<ReadonlyArray<string>>; readonly end: number } => {
+  const rows: Array<ReadonlyArray<string>> = []
+  let end = start
+  while (end < lines.length) {
+    const row = lines[end] ?? ''
+    if (row.trim() === '' || !row.includes('|')) break
+    rows.push(cellsOf(row))
+    end += 1
+  }
+  return { rows, end }
+}
+
+/** A header row, a delimiter row and the rows under them; a bare pipe line is prose. */
+const tableAt = (lines: ReadonlyArray<string>, index: number): Table | undefined => {
+  const header = lines[index] ?? ''
+  if (!header.includes('|')) return undefined
+  const marks = marksOf(lines[index + 1] ?? '')
+  if (marks === undefined) return undefined
+  const head = cellsOf(header)
+  if (head.length !== marks.length) return undefined
+  const body = rowsFrom(lines, index + 2)
+  return { head, aligns: marks.map(alignOf), rows: body.rows, end: body.end }
+}
+
+const cellHtml = (tag: 'th' | 'td', text: string, align: Align | undefined): string =>
+  '<' +
+  tag +
+  (align === undefined ? '' : ' class="align-' + align + '"') +
+  '>' +
+  withCodeSpans(text) +
+  '</' +
+  tag +
+  '>'
+
+const tableHtml = (table: Table): string => {
+  const head = table.head.map((text, column) => cellHtml('th', text, table.aligns[column])).join('')
+  const body = table.rows
+    .map((row) =>
+      table.head
+        .map((_, column) => cellHtml('td', row[column] ?? '', table.aligns[column]))
+        .join(''),
+    )
+    .map((cells) => '<tr>' + cells + '</tr>')
+    .join('')
+  return (
+    '<table><thead><tr>' +
+    head +
+    '</tr></thead>' +
+    (table.rows.length === 0 ? '' : '<tbody>' + body + '</tbody>') +
+    '</table>'
+  )
+}
+
 type Line =
   | { readonly kind: 'blank' }
   | { readonly kind: 'heading'; readonly level: number; readonly text: string }
@@ -153,13 +265,24 @@ const renderBlocks = (lines: ReadonlyArray<string>): string => {
   const out: Array<string> = []
   let open = ''
   let previous = ''
-  for (const line of lines) {
-    const kind = classify(line)
+  let index = 0
+  while (index < lines.length) {
+    const table = tableAt(lines, index)
+    if (table !== undefined) {
+      switchTag(open, '', out)
+      open = ''
+      previous = ''
+      out.push(tableHtml(table))
+      index = table.end
+      continue
+    }
+    const kind = classify(lines[index] ?? '')
     const piece = emit(kind, previous === kind.kind)
     previous = kind.kind === 'blank' ? '' : kind.kind
     switchTag(open, piece.tag, out)
     open = piece.tag
     out.push(piece.html)
+    index += 1
   }
   return out.join('') + closeTag(open)
 }

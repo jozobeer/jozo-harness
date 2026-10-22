@@ -107,4 +107,40 @@ describe('the markdown renderer', () => {
     expect(view).not.toContain('<img')
     expect(view).toContain('&lt;img')
   })
+
+  test('a pipe table draws three columns with their alignments and inline markup', () => {
+    const view = renderMarkdown(
+      '| name | count | note |\n| :--- | ---: | :---: |\n| `a` | 3 | **bold** |\n| b | 4 | plain |',
+    )
+    expect(view).toBe(
+      '<table><thead><tr>' +
+        '<th class="align-left">name</th>' +
+        '<th class="align-right">count</th>' +
+        '<th class="align-center">note</th>' +
+        '</tr></thead><tbody>' +
+        '<tr>' +
+        '<td class="align-left"><code>a</code></td>' +
+        '<td class="align-right">3</td>' +
+        '<td class="align-center"><strong>bold</strong></td>' +
+        '</tr>' +
+        '<tr>' +
+        '<td class="align-left">b</td>' +
+        '<td class="align-right">4</td>' +
+        '<td class="align-center">plain</td>' +
+        '</tr>' +
+        '</tbody></table>',
+    )
+  })
+
+  test('pipe prose without a delimiter row stays a paragraph', () => {
+    expect(renderMarkdown('a | b\njust text')).toBe('<p>a | b<br>just text</p>')
+  })
+
+  test('a pipe inside a code span does not split its cell', () => {
+    const view = renderMarkdown('| cmd |\n| --- |\n| `a | b` |')
+    expect(view).toBe(
+      '<table><thead><tr><th>cmd</th></tr></thead><tbody>' +
+        '<tr><td><code>a | b</code></td></tr></tbody></table>',
+    )
+  })
 })
