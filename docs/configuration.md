@@ -67,7 +67,7 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 | `@jozo-harness/agent-loop` | `models` — ルートのモデル名（`provider/model` の model 部分）をキーに、`contextWindow` と `maxTokens` をモデルごとに持つ（同じ行の単一値より優先する）、`contextWindow` — ルートしたモデルの context window（トークン）。`models` のそのモデルの値、この値、adapter の値、128000 の順に使う、`thresholdRatio` — 推定が窓のこの割合に達したら compaction する（既定 0.8）、`headroomTokens` — 発火点と窓の間に必ず空けるトークン（既定 65536）、`maxTokens` — 1 リクエストが答えのために予約するトークン。`models` にそのモデルの値があればそちらを使う。provider へ `max_tokens` として送り、発火点から先に引く（既定は無し＝予約しない）、`retainTokens` — 末尾で内容を置き換えない範囲を、推定トークンで表した目標（既定は窓の 16%。最新の 1 件は大きさによらず残る）、`maxBytes` — これを超える text block を、保持の外でスタブに置き換える（バイト、既定 32000）、`maxParallelToolCalls` — 並列に走らせる tool call の上限（既定 10。0 以下でも 1 件ずつ） |
 | `@jozo-harness/mcp` | `command`（必須）、`prefix` |
 
-`@jozo-harness/artifact` はキーを持たない。行を足すと、そのセッションのモデルに `artifact` tool が渡り、モデルは 1 枚の HTML ページを session root の隣の `artifacts/<sessionId>/<name>.html` に書ける。preset が `read-only` の run では書かず、`denied` を返す。配信は jzh web の `/artifact/<sessionId>/<name>` が行う。同梱 profile に入れていないのは、ページを書かないセッションの tool 一覧を太らせないためである（既定では入らない）。
+`@jozo-harness/artifact` はキーを持たない。行を足すと、そのセッションのモデルに `artifact` tool が渡り、モデルは 1 枚の HTML ページを session root の隣の `artifacts/<sessionId>/<name>.html` に書ける。ページは `images` に渡した png / jpeg / webp / gif のパスを data URL に畳んだ 1 ファイルで（1 枚 2MB・合計 10MB まで）、`http://` / `https://` / `//` の外部サブリソースを参照する HTML は保存時に拒否する。preset が `read-only` の run では書かず、`denied` を返す。配信は jzh web の `/artifact/<sessionId>/<name>` が行う。同梱 profile に入れていないのは、ページを書かないセッションの tool 一覧を太らせないためである（既定では入らない）。
 
 同梱の `base` profile は `root` に `~/.jzh/sessions`、`preset` に `workspace-write`、`baseUrl` に `https://ollama.com/v1`、`localBaseUrl` に `http://127.0.0.1:11434/v1`、`apiKeyEnv` に `OLLAMA_API_KEY` を置いている。`localBaseUrl` があるので送信は常に local daemon へ行き、`baseUrl` は `jzh models` の一覧取得に使う。`agent-loop` 行は既定ルート `deepseek-v4.1-flash` の窓を 1048576、出力予約を 393216 とし、発火点を 589824 にする。`models` のキーは route の model 名であり、local daemon へ送るときだけ付く `:cloud` は含めない。route に local daemon の名前（`deepseek-v4.1-flash:cloud`）を明示した場合のために、同じ値を持つキーも置いている。
 
@@ -171,7 +171,7 @@ route は `opencode/<model>`、wire に送る model は `<model>` そのもの�
 | 公開ページ | session root の隣の `artifacts/<sessionId>/<name>.html`（既定は `~/.jzh/artifacts/...`） | `@jozo-harness/artifact` 行を足す（キーは無い）。`session-jsonl` 行の `root` を変えると一緒に移る |
 | Web UI | `127.0.0.1`。Tailscale を検出したときは tailnet IPv4 でも同じポートを listen する（`0.0.0.0` / `::` では受けない） | `--port`、設定ファイルの `port`。公開は `--public-url` |
 
-公開ページはセッションのログとは別に置く。セッションを削除してもページは残り、`artifacts/<id>/` から消すまで配信され続ける。
+公開ページはセッションのログの隣に置く。セッションを削除するとページも `artifacts/<id>/` ごと消える（#291 の時点では残った）。ページだけを消したいときは `artifacts/<id>/` から消す。
 
 `jzh web` は同じディレクトリを `GET /artifacts/<sessionId>` でも読める。返すのは HTML ページの配列で、各要素は `name`（`.html` を除いた名前）、`path`（`/artifact/<sessionId>/<name>`）、`bytes`（ファイルの大きさ）、`updatedAt`（mtime の ISO 8601）を持つ。並びは `name` の昇順で、ディレクトリが無ければ `[]` になる。`GET` 以外は 405、`Origin` を載せた要求は許可した origin 以外なら 403、cookie か起動 URL の token / code が無ければ 401 になる。画面はまだこの経路を呼ばず、Run ペインの `pages` はログの `page:` 行から組み立てる。
 
