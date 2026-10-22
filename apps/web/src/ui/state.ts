@@ -66,6 +66,8 @@ export interface WebState {
   readonly run: RunStateView | undefined
   /** Every turn this session ran, folded one event at a time down to its steps and calls. */
   readonly trace: ReadonlyArray<TraceTurn>
+  /** The pages removed from this session here, which the log still names. */
+  readonly deletedPages: ReadonlyArray<string>
 }
 
 /** The folders a new session may start in, and the one it starts in by default. */
@@ -100,6 +102,7 @@ export const initialState: WebState = {
   turns: [],
   run: undefined,
   trace: [],
+  deletedPages: [],
 }
 
 export const withConnection = (state: WebState, connected: boolean): WebState => ({
@@ -121,6 +124,12 @@ export const withOpened = (state: WebState, opened: ReadonlyArray<string>): WebS
 })
 
 export const withProblem = (state: WebState, problem: string): WebState => ({ ...state, problem })
+
+/** A page the server no longer holds, so the run pane does not offer it again. */
+export const withDeletedPage = (state: WebState, page: string): WebState =>
+  state.deletedPages.includes(page)
+    ? state
+    : { ...state, deletedPages: [...state.deletedPages, page] }
 
 export const withTheme = (state: WebState, theme: Theme): WebState => ({ ...state, theme })
 
@@ -204,6 +213,7 @@ export const withSession = (state: WebState, summary: SessionSummary): WebState 
     files: state.sessionId === summary.id ? state.files : undefined,
     turns: [],
     trace: [],
+    deletedPages: [],
   }
 }
 

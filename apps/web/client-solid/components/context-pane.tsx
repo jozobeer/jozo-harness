@@ -117,26 +117,80 @@ const ChildLinks = (props: { store: SessionStore; blocks: ReadonlyArray<Conversa
   )
 }
 
-/** The pages the session published; the conversation holds the frames themselves. */
-const Pages = (props: { pages: ReadonlyArray<string> }) => (
-  <Show when={props.pages.length > 0}>
-    <div class="run-section">
-      <span class="run-section-title">pages</span>
-    </div>
-    <ul class="run-pages">
-      <For each={props.pages}>
-        {(page) => (
-          <li class="run-page">
-            <span class="run-page-name">{basenameOf(page)}</span>
-            <a class="run-page-open" href={page} target="_blank" rel="noopener">
-              Open in a new tab
-            </a>
-          </li>
-        )}
-      </For>
-    </ul>
-  </Show>
-)
+/** Why one page's removal did not land, as the row says it. */
+const whyNotRemoved = (error: unknown): string =>
+  'could not remove this page: ' + (error instanceof Error ? error.message : String(error))
+
+/**
+ * The pages the session published; the conversation holds the frames themselves.
+ * A row can remove its page, which the log still names, so the page remembers
+ * what it removed.
+ */
+const Pages = (props: { store: SessionStore; pages: ReadonlyArray<string> }) => {
+  /** The pages on their way out now, so a second press while one is out does nothing. */
+  const [sending, setSending] = createSignal<ReadonlyArray<string>>([])
+  /** What a removal answered, by page, shown on its own row. */
+  const [failed, setFailed] = createSignal<Readonly<Record<string, string>>>({})
+  const shown = (): ReadonlyArray<string> =>
+    props.pages.filter((page) => !props.store.state().deletedPages.includes(page))
+  const remove = async (page: string): Promise<void> => {
+    if (sending().includes(page)) return
+    setSending((now) => [...now, page])
+    setFailed((now) => {
+      const next = { ...now }
+      delete next[page]
+      return next
+    })
+    try {
+      const answer = await fetch(page, {
+        method: 'DELETE',
+        headers: { 'X-Requested-With': 'fetch' },
+      })
+      if (answer.status === 204) {
+        props.store.pageDeleted(page)
+        return
+      }
+      setFailed((now) => ({ ...now, [page]: 'the server answered ' + String(answer.status) }))
+    } catch (error) {
+      setFailed((now) => ({ ...now, [page]: whyNotRemoved(error) }))
+    } finally {
+      setSending((now) => now.filter((one) => one !== page))
+    }
+  }
+  return (
+    <Show when={shown().length > 0}>
+      <div class="run-section">
+        <span class="run-section-title">pages</span>
+      </div>
+      <ul class="run-pages">
+        <For each={shown()}>
+          {(page) => (
+            <li class="run-page">
+              <span class="run-page-name">{basenameOf(page)}</span>
+              <a class="run-page-open" href={page} target="_blank" rel="noopener">
+                Open in a new tab
+              </a>
+              <button
+                class="run-page-delete danger"
+                type="button"
+                disabled={sending().includes(page)}
+                aria-label={'delete ' + basenameOf(page)}
+                onClick={() => void remove(page)}
+              >
+                Delete
+              </button>
+              <Show when={(failed()[page] ?? '') !== ''}>
+                <span class="run-page-error" role="alert">
+                  {failed()[page] ?? ''}
+                </span>
+              </Show>
+            </li>
+          )}
+        </For>
+      </ul>
+    </Show>
+  )
+}
 
 /** The heading of a work section: what it holds and how much of it still works. */
 const WorkHeading = (props: { title: string; live: number; done: number }) => (
@@ -304,7 +358,7 @@ const Run = (props: { store: SessionStore }) => {
             <Todos todos={state().todos} counts={state().todoCounts} />
             <Skills skills={state().skills} />
             <PromptSections sections={state().promptSections} />
-            <Pages pages={pagesOf(props.store.state().trace)} />
+            <Pages store={props.store} pages={pagesOf(props.store.state().trace)} />
             <Show when={state().schedules.length > 0}>
               <ul class="run-schedules">
                 <For each={state().schedules}>
