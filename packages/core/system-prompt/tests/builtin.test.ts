@@ -96,6 +96,13 @@ describe('guidance matches the tools it describes', () => {
     expect(line).toContain('fresh')
   })
 
+  test('run_code asks for several reads to share one step', () => {
+    const line = toolGuidance({ variables: {}, tools: [schema('run_code')] })
+
+    expect(line).toContain('several things in one program')
+    expect(line).toContain('in parallel or in that program')
+  })
+
   test('both web tools ask for a citation', () => {
     const line = toolGuidance({ variables: {}, tools: [schema('web_fetch'), schema('web_search')] })
 
