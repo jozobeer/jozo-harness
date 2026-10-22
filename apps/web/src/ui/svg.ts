@@ -112,20 +112,33 @@ const bytesOf = (text: string): number => new TextEncoder().encode(text).length
  * and attributes. Children are rebuilt the same way, so the source is never
  * handed back as markup that a parser would act on again.
  */
-const copyOf = (source: SvgNode, target: SvgNode): void => {
+const copyAttributes = (source: SvgNode, target: SvgNode): void => {
   for (const attribute of Array.from(source.attributes)) {
-    if (!ATTRIBUTES.has(attribute.name)) continue
-    target.setAttribute(attribute.name, attribute.value)
+    if (ATTRIBUTES.has(attribute.name)) target.setAttribute(attribute.name, attribute.value)
   }
+}
+
+/**
+ * One child of the source as a fresh node in the target's document, or nothing
+ * when the child is neither text nor an allowlisted element. Text is copied as a
+ * text node so it can never be read back as markup.
+ */
+const copyChild = (child: SvgNode, target: SvgNode): SvgNode | undefined => {
+  if (child.nodeType === 3) {
+    target.appendChild(target.ownerDocument.createTextNode(child.nodeValue ?? ''))
+    return undefined
+  }
+  if (child.nodeType !== 1 || !ELEMENTS.has(child.localName)) return undefined
+  const next = target.ownerDocument.createElementNS(SVG_NS, child.localName)
+  target.appendChild(next)
+  return next
+}
+
+const copyOf = (source: SvgNode, target: SvgNode): void => {
+  copyAttributes(source, target)
   for (const child of Array.from(source.childNodes)) {
-    if (child.nodeType === 3) {
-      target.appendChild(target.ownerDocument.createTextNode(child.nodeValue ?? ''))
-      continue
-    }
-    if (child.nodeType !== 1 || !ELEMENTS.has(child.localName)) continue
-    const next = target.ownerDocument.createElementNS(SVG_NS, child.localName)
-    target.appendChild(next)
-    copyOf(child, next)
+    const next = copyChild(child, target)
+    if (next !== undefined) copyOf(child, next)
   }
 }
 
