@@ -173,6 +173,8 @@ route は `opencode/<model>`、wire に送る model は `<model>` そのもの�
 
 公開ページはセッションのログとは別に置く。セッションを削除してもページは残り、`artifacts/<id>/` から消すまで配信され続ける。
 
+`jzh web` は同じディレクトリを `GET /artifacts/<sessionId>` でも読める。返すのは HTML ページの配列で、各要素は `name`（`.html` を除いた名前）、`path`（`/artifact/<sessionId>/<name>`）、`bytes`（ファイルの大きさ）、`updatedAt`（mtime の ISO 8601）を持つ。並びは `name` の昇順で、ディレクトリが無ければ `[]` になる。`GET` 以外は 405、`Origin` を載せた要求は許可した origin 以外なら 403、cookie か起動 URL の token / code が無ければ 401 になる。画面はまだこの経路を呼ばず、Run ペインの `pages` はログの `page:` 行から組み立てる。
+
 ## 設定できないもの
 
 - provider の能力（tool の強制なし、画像なし、prompt cache 制御なし）は adapter に固定されている。reasoning effort は `effort` / `--effort` で指定でき、adapter は `reasoning_effort` としてそのまま渡す（endpoint がその語を受け付けるかは検証しない）
