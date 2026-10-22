@@ -9,17 +9,20 @@ const viewOf = (text: string): HTMLElement => render(() => <Markdown text={text}
 const FENCE = '```'
 
 describe('a chat answer with diagrams and images', () => {
-  test('an svg fence draws one image, never live svg markup', () => {
+  test('an svg fence draws a sanitized inline diagram, never an image', () => {
     const view = viewOf(
       FENCE +
-        'svg\n<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><rect /></svg>\n' +
+        'svg\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8">' +
+        '<script>alert(1)</script><rect onload="alert(1)" width="4"/>' +
+        '<foreignObject><body>x</body></foreignObject></svg>\n' +
         FENCE,
     )
-    const images = view.querySelectorAll('img')
-    expect(images).toHaveLength(1)
-    expect(images[0]?.getAttribute('src')).toMatch(/^data:image\/svg\+xml;base64,/)
-    expect(view.querySelector('svg')).toBeNull()
+    expect(view.querySelectorAll('img')).toHaveLength(0)
+    const svg = view.querySelector('figure.diagram > svg')
+    expect(svg?.getAttribute('viewBox')).toBe('0 0 8 8')
+    expect(svg?.querySelector('rect')?.getAttribute('onload')).toBeNull()
     expect(view.querySelector('script')).toBeNull()
+    expect(view.querySelector('foreignObject')).toBeNull()
   })
 
   test('an https image draws with its alt as the caption', () => {

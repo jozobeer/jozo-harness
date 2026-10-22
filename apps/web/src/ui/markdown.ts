@@ -1,4 +1,5 @@
-import { imageSrcOf, svgDataUrl } from './diagram.ts'
+import { imageSrcOf } from './diagram.ts'
+import { svgMarkupOf } from './svg.ts'
 import { escapeHtml } from './html.ts'
 import { linkPartsOf, type LinkPart } from './linkify.ts'
 
@@ -320,14 +321,8 @@ const renderBlocks = (lines: ReadonlyArray<string>): string => {
 }
 
 const codeHtml = (segment: Extract<Segment, { kind: 'code' }>): string => {
-  const svg = segment.lang === 'svg' ? svgDataUrl(segment.body) : undefined
-  if (svg !== undefined) {
-    return (
-      '<figure class="diagram"><img src="' +
-      svg +
-      '" alt="SVG diagram" loading="lazy" decoding="async"></figure>'
-    )
-  }
+  const svg = segment.lang === 'svg' ? svgMarkupOf(segment.body) : undefined
+  if (svg !== undefined) return '<figure class="diagram">' + svg + '</figure>'
   const lang = segment.lang === '' ? '' : ' data-lang="' + escapeHtml(segment.lang) + '"'
   return '<pre class="code"' + lang + '><code>' + escapeHtml(segment.body) + '</code></pre>'
 }
