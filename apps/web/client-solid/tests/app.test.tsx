@@ -1830,6 +1830,104 @@ describe('the Solid page', () => {
     expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'trajectory' } })
   })
 
+  test('the run pane lists each page the session published, newest first and once', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const publish = (seq: number, callId: string, page: string) => [
+      at(seq, 'tool/call', {
+        callId,
+        name: 'artifact',
+        arguments: '{}',
+        summary: 'artifact',
+      }),
+      at(seq + 1, 'tool/result', {
+        callId,
+        isError: false,
+        summary: '',
+        content: [{ type: 'text', text: 'page: ' + page }],
+      }),
+    ]
+    const { store } = makeStore({
+      pane: { kind: 'run' },
+      trace: traceOf([
+        ...publish(1, 'c1', '/artifact/s1/report'),
+        ...publish(3, 'c2', '/artifact/s1/notes'),
+        ...publish(5, 'c3', '/artifact/s1/report'),
+      ]),
+      run: {
+        goal: null,
+        schedules: [],
+        jobs: [],
+        subagents: [],
+        todos: [],
+        todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+        skills: [],
+        promptSections: [],
+        queued: [],
+        steering: [],
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+      },
+    })
+
+    const { container } = render(() => <ContextPane store={store} />)
+
+    const pages = [...container.querySelectorAll('.run-pages .run-page')]
+    expect(pages).toHaveLength(2)
+    // The same page published twice is one row, and the latest publication leads.
+    expect(pages.map((row) => textOf(row, '.run-page-name'))).toEqual(['report', 'notes'])
+    expect(pages.map((row) => row.querySelector('a')?.getAttribute('href'))).toEqual([
+      '/artifact/s1/report',
+      '/artifact/s1/notes',
+    ])
+    expect(pages[0]?.querySelector('a')?.getAttribute('target')).toBe('_blank')
+  })
+
+  test('the run pane draws no pages section when no call published one', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const { store } = makeStore({
+      pane: { kind: 'run' },
+      trace: traceOf([
+        at(1, 'tool/call', {
+          callId: 'c1',
+          name: 'read',
+          arguments: '{"path":"a.ts"}',
+          summary: 'read a.ts',
+        }),
+        at(2, 'tool/result', {
+          callId: 'c1',
+          isError: false,
+          summary: 'lines: 1',
+          content: [{ type: 'text', text: 'the file' }],
+        }),
+      ]),
+      run: {
+        goal: null,
+        schedules: [],
+        jobs: [],
+        subagents: [],
+        todos: [],
+        todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+        skills: [],
+        promptSections: [],
+        queued: [],
+        steering: [],
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+      },
+    })
+
+    const { container } = render(() => <ContextPane store={store} />)
+
+    expect(
+      [...container.querySelectorAll('.run-section-title')].some(
+        (title) => title.textContent === 'pages',
+      ),
+    ).toBe(false)
+    expect(container.querySelector('.run-page')).toBeNull()
+  })
+
   test('the run pane lists running subagents, moves to one, and stops it', () => {
     const { store, calls } = makeStore({
       pane: { kind: 'run' },
