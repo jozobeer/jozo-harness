@@ -12,6 +12,9 @@ export const PluginRowSchema = Schema.Struct({
 /** One plugin line of a profile. The row id is the merge key across layers. */
 export type PluginRow = (typeof PluginRowSchema)['Type']
 
+/** A row takes part in a run unless its line says otherwise. */
+export const isRowEnabled = (row: PluginRow): boolean => row.disabled !== true
+
 /** A named list of plugin rows loaded from one YAML document. */
 export interface Profile {
   readonly name: string
