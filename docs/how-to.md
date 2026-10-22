@@ -91,7 +91,7 @@ plugins:
 この調査結果を report という名前の HTML ページにまとめて。表と図を 1 枚に入れて。
 ```
 
-モデルが `artifact` に `{ name, html }` を渡すと、run の session root の隣の `artifacts/<sessionId>/<name>.html` に書き、結果に `page: /artifact/<sessionId>/<name>` の 1 行を返す。preset が `read-only` の run では書かず、`denied` を返す。`name` は英数字と `.` `_` `-` だけで、`.html` は付けない。ページは CSS と JavaScript を中に持つ 1 枚の HTML にする。
+モデルが `artifact` に `{ name, html }` を渡すと、run の session root の隣の `artifacts/<sessionId>/<name>.html` に書き、結果に `page: /artifact/<sessionId>/<name>` の 1 行を返す。preset が `read-only` の run では書かず、`denied` を返す。`name` は英数字と `.` `_` `-` だけで、`.html` は付けない。ページは CSS と JavaScript を中に持つ 1 枚の HTML にする。`img` の `src` や `link` の `href` などで `http://` / `https://` / `//` の外部ファイルを参照すると `invalid-arguments` で拒否し、`images` に渡したのに HTML から参照していないパスも拒否する。
 
 jzh web でそのセッションを開くと、結果の下にページが iframe で出る。iframe は `allow-scripts` だけを持つ sandbox なので、ページは jzh web の origin にも cookie にも触れない。`Open in a new tab` を押すと別タブで開く。
 
