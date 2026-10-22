@@ -1,3 +1,4 @@
+import { imageSrcOf, svgDataUrl } from './diagram.ts'
 import { escapeHtml } from './html.ts'
 import { linkPartsOf, type LinkPart } from './linkify.ts'
 
@@ -64,12 +65,43 @@ const anchor = (part: Extract<LinkPart, { kind: 'link' }>): string =>
   '</a>'
 
 /** Inline markup of one raw run: links, strong, emphasis. */
-const inlineOf = (text: string): string =>
+const plainInline = (text: string): string =>
   linkPartsOf(text)
     .map((part) => (part.kind === 'link' ? anchor(part) : escapeHtml(part.text)))
     .join('')
     .replace(BOLD, '<strong>$1</strong>')
     .replace(ITALIC, '<em>$1</em>')
+
+const IMAGE = /!\[([^\]\n]*)\]\(([^()\s]*)\)/g
+
+/** One image notation as a picture; a URL that is not http(s) stays the literal text. */
+const imageHtml = (match: RegExpExecArray): string => {
+  const src = imageSrcOf(match[2] ?? '')
+  if (src === undefined) return escapeHtml(match[0])
+  const alt = match[1] ?? ''
+  return (
+    '<figure class="answer-image"><img src="' +
+    escapeHtml(src) +
+    '" alt="' +
+    escapeHtml(alt) +
+    '" loading="lazy" decoding="async">' +
+    (alt === '' ? '' : '<figcaption>' + escapeHtml(alt) + '</figcaption>') +
+    '</figure>'
+  )
+}
+
+/** Inline markup of one raw run: images first, then links, strong, emphasis. */
+const inlineOf = (text: string): string => {
+  const out: Array<string> = []
+  let at = 0
+  for (const match of text.matchAll(IMAGE)) {
+    const start = match.index ?? 0
+    out.push(plainInline(text.slice(at, start)), imageHtml(match))
+    at = start + match[0].length
+  }
+  out.push(plainInline(text.slice(at)))
+  return out.join('')
+}
 
 /** Code spans are marked before anything else, so their body is never read as markup. */
 const withCodeSpans = (text: string): string =>
@@ -288,6 +320,14 @@ const renderBlocks = (lines: ReadonlyArray<string>): string => {
 }
 
 const codeHtml = (segment: Extract<Segment, { kind: 'code' }>): string => {
+  const svg = segment.lang === 'svg' ? svgDataUrl(segment.body) : undefined
+  if (svg !== undefined) {
+    return (
+      '<figure class="diagram"><img src="' +
+      svg +
+      '" alt="SVG diagram" loading="lazy" decoding="async"></figure>'
+    )
+  }
   const lang = segment.lang === '' ? '' : ' data-lang="' + escapeHtml(segment.lang) + '"'
   return '<pre class="code"' + lang + '><code>' + escapeHtml(segment.body) + '</code></pre>'
 }
