@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { Context, Effect, Layer, Schema } from 'effect'
 import type { Plugin } from '@jozo-harness/kernel'
 import { noneSandbox, type SandboxShape } from '@jozo-harness/safety'
@@ -28,13 +28,21 @@ export interface ArtifactValue {
 const NAME = /^[A-Za-z0-9._-]+$/
 
 /**
+ * Artifacts live beside the sessions root, under the same parent, so a changed
+ * root moves both what the tool writes and what the web server serves.
+ */
+export const artifactRootOf = (sessionRoot: string): string =>
+  join(dirname(sessionRoot), 'artifacts')
+
+/**
  * Writes one HTML page beside the session logs and reports the route the web
- * server serves it on. The route appends .html, so the name is the base name.
+ * server serves it on. The route and this tool derive the directory from the
+ * same session root. The route appends .html, so the name is the base name.
  * The page sits outside the workspace, so the sandbox never wraps this write:
  * the mode is read here, and a read-only run publishes nothing.
  */
 export const makeArtifactTool = (
-  home: string,
+  sessionRoot: string,
   sandbox: SandboxShape = noneSandbox,
 ): ToolDefinition<ArtifactArgs, ArtifactValue> => ({
   name: 'artifact',
@@ -61,7 +69,7 @@ export const makeArtifactTool = (
           }),
         )
       }
-      const directory = join(home, 'artifacts', exec.sessionId)
+      const directory = join(artifactRootOf(sessionRoot), exec.sessionId)
       const path = join(directory, args.name + '.html')
       if (sandbox.mode === 'read-only') {
         return yield* Effect.fail(
@@ -85,11 +93,11 @@ export const makeArtifactTool = (
 
 /**
  * The artifact tool, ready for whoever registers tools into the registry. It
- * takes the jzh home from the run, so the page lands beside the sessions root.
+ * takes the sessions root from the run, so the page lands beside the logs.
  */
 export class ArtifactTools extends Context.Service<
   ArtifactTools,
-  (home: string, sandbox: SandboxShape) => ReadonlyArray<ToolDefinition<any, any>>
+  (sessionRoot: string, sandbox: SandboxShape) => ReadonlyArray<ToolDefinition<any, any>>
 >()('jozo-harness/ArtifactTools') {}
 
 /** Loader definition for the artifact tool; the row opts a session into writing pages. */
@@ -98,5 +106,8 @@ export const artifactPlugin: Plugin<{}, ArtifactTools, never> = {
   config: Schema.Struct({}),
   provides: [ArtifactTools],
   requires: [],
-  layer: () => Layer.succeed(ArtifactTools, (home, sandbox) => [makeArtifactTool(home, sandbox)]),
+  layer: () =>
+    Layer.succeed(ArtifactTools, (sessionRoot, sandbox) => [
+      makeArtifactTool(sessionRoot, sandbox),
+    ]),
 }

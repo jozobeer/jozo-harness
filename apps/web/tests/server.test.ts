@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { request } from 'node:http'
+import { makeArtifactTool } from '@jozo-harness/tools-tier1'
 import type { UiCommand, UiEvent, UiHost } from '@jozo-harness/ui-protocol'
 import { WebSocket } from 'ws'
 import { Deferred, Effect, Exit, Fiber, Option, Queue, Stream, type Scope } from 'effect'
@@ -609,6 +610,50 @@ describe('the web transport', () => {
     expect(observed.traversal).toBe(400)
     expect(observed.unknown).toBe(404)
     expect(observed.foreignHost).toBe(403)
+    await rm(root, { recursive: true, force: true })
+    await rm(home, { recursive: true, force: true })
+  })
+
+  test('a page the tool wrote under a changed session root is served on the route', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-artifact-tool-'))
+    const home = await mkdtemp(join(tmpdir(), 'jozo-harness-web-artifact-tool-home-'))
+    // A root outside the default proves the tool and the route both follow it.
+    const sessionRoot = join(home, 'logs')
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    await Effect.runPromise(
+      makeArtifactTool(sessionRoot).execute(
+        { name: 'report', html: '<h1>report</h1>' },
+        { sessionId: 'a', cwd: home, callId: 'c1' },
+      ),
+    )
+    const web = makeWeb('a')
+    const base = makeSettings()
+    const settings = {
+      ...base,
+      port: {
+        ...base.port,
+        read: () => Effect.succeed({ ...settingsView, sessionRoot }),
+      } satisfies SettingsPort,
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const served = yield* Effect.promise(() =>
+            fetch(started.origin + '/artifact/a/report', {
+              headers: { cookie: started.cookie },
+            }),
+          )
+          const text = yield* Effect.promise(() => served.text())
+          yield* Deferred.succeed(started.stop, undefined)
+          return { status: served.status, text }
+        }),
+      ),
+    )
+
+    expect(observed.status).toBe(200)
+    expect(observed.text).toContain('<h1>report</h1>')
     await rm(root, { recursive: true, force: true })
     await rm(home, { recursive: true, force: true })
   })

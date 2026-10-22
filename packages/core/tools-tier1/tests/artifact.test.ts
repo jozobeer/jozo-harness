@@ -27,7 +27,7 @@ const publish = (
   added: ReadonlyArray<string>
 }> => {
   const added: Array<string> = []
-  const tool = makeArtifactTool(home, sandbox)
+  const tool = makeArtifactTool(join(home, 'sessions'), sandbox)
   return Effect.runPromise(
     Effect.match(
       tool.execute(
@@ -50,7 +50,7 @@ const publish = (
 const withMode = (mode: SandboxShape['mode']): SandboxShape => ({ ...noneSandbox, mode })
 
 describe('artifact tool', () => {
-  test('writes the page under the jzh home, beside the sessions', async () => {
+  test('writes the page beside the sessions root', async () => {
     await withHome(async (home) => {
       const { value } = await publish(home, 'report', '<h1>report</h1>')
 
@@ -101,7 +101,7 @@ describe('artifact tool', () => {
 
   test('renders the page url as one line of conversation', async () => {
     await withHome(async (home) => {
-      const tool = makeArtifactTool(home)
+      const tool = makeArtifactTool(join(home, 'sessions'))
       const { value } = await publish(home, 'report', '<h1>report</h1>')
 
       expect(tool.output.render({ name: 'report', html: '<h1>report</h1>' }, value!)).toEqual([
@@ -120,7 +120,7 @@ describe('artifact tool', () => {
 
   test('refuses a name the artifact route would not serve', async () => {
     await withHome(async (home) => {
-      const tool = makeArtifactTool(home)
+      const tool = makeArtifactTool(join(home, 'sessions'))
       for (const name of ['../escape', 'a/b', '', 'report html', '..']) {
         const exit = await Effect.runPromiseExit(
           tool.execute({ name, html: '<p>x</p>' }, { sessionId: 's1', cwd: home, callId: 'c1' }),

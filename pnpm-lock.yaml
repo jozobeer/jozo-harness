@@ -269,6 +269,9 @@ importers:
       '@jozo-harness/tools-tier0':
         specifier: workspace:*
         version: link:../../packages/core/tools-tier0
+      '@jozo-harness/tools-tier1':
+        specifier: workspace:*
+        version: link:../../packages/core/tools-tier1
       '@jozo-harness/ui-protocol':
         specifier: workspace:*
         version: link:../../packages/ui/protocol
