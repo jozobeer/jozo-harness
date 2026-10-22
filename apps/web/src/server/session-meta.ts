@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { artifactRootOf } from '@jozo-harness/tools-tier1'
 import { Effect } from 'effect'
 import type { SessionAction, SessionSummary } from '../shared/rpc.ts'
 import { WebError } from './errors.ts'
@@ -136,8 +137,21 @@ export const applyMeta = (
 ): ReadonlyArray<SessionSummary> => summaries.map((summary) => withMeta(summary, meta[summary.id]))
 
 /**
+ * A session's pages live beside the logs, so deleting the session takes them
+ * too; a session that wrote none has nothing to remove.
+ */
+const removeArtifacts = (root: string, id: string): Effect.Effect<void, WebError> =>
+  Effect.tryPromise({
+    try: () => rm(join(artifactRootOf(root), id), { recursive: true, force: true }),
+    catch: (cause) =>
+      new WebError({
+        message: 'cannot delete the pages of session ' + id + ': ' + messageOf(cause),
+      }),
+  })
+
+/**
  * One row-menu action: the name changes in the metadata, the flags toggle, and a
- * delete removes the log directory the id names along with its entry.
+ * delete removes the log directory the id names along with its pages and entry.
  */
 export const sessionActionOf = (
   root: string,
@@ -163,6 +177,9 @@ export const sessionActionOf = (
       yield* patchMeta(root, safe, { archived: action.archived })
       return
     }
+    // Pages go first: if one cannot be removed the session itself stays, so a
+    // failed delete never leaves the log gone while its pages linger.
+    yield* removeArtifacts(root, safe)
     yield* Effect.tryPromise({
       try: () => rm(join(root, safe), { recursive: true, force: false }),
       catch: (cause) =>
