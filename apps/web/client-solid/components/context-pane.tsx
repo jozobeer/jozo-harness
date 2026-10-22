@@ -4,7 +4,7 @@ import type { RunStateView, SettingsView } from '../../src/shared/rpc.ts'
 import type { Pane } from '../../src/ui/state.ts'
 import { THEMES, type Theme } from '../../src/ui/theme.ts'
 import type { TurnView } from '../../src/ui/trajectory.ts'
-import { childSessionsOf, elapsedOf } from '../lib.ts'
+import { basenameOf, childSessionsOf, elapsedOf, pagesOf } from '../lib.ts'
 import type { SessionStore } from '../store.ts'
 import { Review } from './review.tsx'
 import { Inspector } from './inspector.tsx'
@@ -116,6 +116,27 @@ const ChildLinks = (props: { store: SessionStore; blocks: ReadonlyArray<Conversa
     </Show>
   )
 }
+
+/** The pages the session published; the conversation holds the frames themselves. */
+const Pages = (props: { pages: ReadonlyArray<string> }) => (
+  <Show when={props.pages.length > 0}>
+    <div class="run-section">
+      <span class="run-section-title">pages</span>
+    </div>
+    <ul class="run-pages">
+      <For each={props.pages}>
+        {(page) => (
+          <li class="run-page">
+            <span class="run-page-name">{basenameOf(page)}</span>
+            <a class="run-page-open" href={page} target="_blank" rel="noopener">
+              Open in a new tab
+            </a>
+          </li>
+        )}
+      </For>
+    </ul>
+  </Show>
+)
 
 /** The heading of a work section: what it holds and how much of it still works. */
 const WorkHeading = (props: { title: string; live: number; done: number }) => (
@@ -283,6 +304,7 @@ const Run = (props: { store: SessionStore }) => {
             <Todos todos={state().todos} counts={state().todoCounts} />
             <Skills skills={state().skills} />
             <PromptSections sections={state().promptSections} />
+            <Pages pages={pagesOf(props.store.state().trace)} />
             <Show when={state().schedules.length > 0}>
               <ul class="run-schedules">
                 <For each={state().schedules}>
