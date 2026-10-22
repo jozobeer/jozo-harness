@@ -126,6 +126,7 @@ import {
   Approval,
   Ask,
   Sandbox,
+  noneSandbox,
   approvalServiceLayer,
   askServiceLayer,
   currentPlanMode,
@@ -839,7 +840,13 @@ const installArtifact = (tools: ToolRegistry, wiring: ProfileWiring) =>
     if (!hasEnabledRow(wiring.rows, '@jozo-harness/artifact')) return
     const home = wiring.options.jzhHome
     if (home === undefined) return
-    for (const tool of Context.get(wiring.context, ArtifactTools)(home)) {
+    // The page is written by a tool, not a command, so the sandbox never wraps
+    // it and the preset has to reach the tool here to keep read-only runs from
+    // publishing. Without a safety row there is no preset to obey.
+    const sandbox = hasEnabledRow(wiring.rows, '@jozo-harness/safety')
+      ? Context.get(wiring.context, Sandbox)
+      : noneSandbox
+    for (const tool of Context.get(wiring.context, ArtifactTools)(home, sandbox)) {
       yield* tools.register(tool)
     }
   })
