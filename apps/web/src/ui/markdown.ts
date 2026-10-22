@@ -3,9 +3,10 @@ import { svgMarkupOf } from './svg.ts'
 import { escapeHtml } from './html.ts'
 import { linkPartsOf, type LinkPart } from './linkify.ts'
 
-/** One piece of a document: a fenced block, or the lines that surround it. */
+/** One piece of a document: a code fence, a raw svg block, or the lines that surround them. */
 type Segment =
   | { readonly kind: 'code'; readonly lang: string; readonly body: string }
+  | { readonly kind: 'svg'; readonly source: string }
   | { readonly kind: 'text'; readonly lines: ReadonlyArray<string> }
 
 const FENCE = /^ {0,3}`{3,}(.*)$/
@@ -28,7 +29,44 @@ const fenceAt = (
   return { lang: (fence[1] ?? '').trim(), end }
 }
 
-/** Splits fenced code out of the text; every other line keeps its order. */
+const RAW_SVG = /^[ \t]*<svg[\s>]/
+const RAW_SVG_END = '</svg>'
+
+/**
+ * A raw svg block that starts a line and runs through its closing tag, plus any
+ * text that shares the closing line. A block without that tag stays prose.
+ */
+const rawSvgAt = (
+  lines: ReadonlyArray<string>,
+  index: number,
+): { readonly source: string; readonly rest: string; readonly end: number } | undefined => {
+  if (!RAW_SVG.test(lines[index] ?? '')) return undefined
+  for (let end = index; end < lines.length; end += 1) {
+    const line = lines[end] ?? ''
+    const at = line.indexOf(RAW_SVG_END)
+    if (at === -1) continue
+    const source = [...lines.slice(index, end), line.slice(0, at + RAW_SVG_END.length)].join('\n')
+    return { source, rest: line.slice(at + RAW_SVG_END.length), end }
+  }
+  return undefined
+}
+
+/** The block that starts at `index`, or nothing when the line is prose. */
+const blockAt = (
+  lines: ReadonlyArray<string>,
+  index: number,
+): { readonly segment: Segment; readonly end: number; readonly rest: string } | undefined => {
+  const fence = fenceAt(lines, index)
+  if (fence !== undefined) {
+    const body = lines.slice(index + 1, fence.end).join('\n')
+    return { segment: { kind: 'code', lang: fence.lang, body }, end: fence.end, rest: '' }
+  }
+  const raw = rawSvgAt(lines, index)
+  if (raw === undefined) return undefined
+  return { segment: { kind: 'svg', source: raw.source }, end: raw.end, rest: raw.rest }
+}
+
+/** Splits fenced code and raw svg out of the text; every other line keeps its order. */
 const segmentsOf = (lines: ReadonlyArray<string>): ReadonlyArray<Segment> => {
   const segments: Array<Segment> = []
   let plain: Array<string> = []
@@ -38,16 +76,16 @@ const segmentsOf = (lines: ReadonlyArray<string>): ReadonlyArray<Segment> => {
     plain = []
   }
   while (index < lines.length) {
-    const fence = fenceAt(lines, index)
-    if (fence === undefined) {
+    const block = blockAt(lines, index)
+    if (block === undefined) {
       plain.push(lines[index] ?? '')
       index += 1
       continue
     }
     flush()
-    const body = lines.slice(index + 1, fence.end).join('\n')
-    segments.push({ kind: 'code', lang: fence.lang, body })
-    index = fence.end + 1
+    segments.push(block.segment)
+    if (block.rest.trim() !== '') plain.push(block.rest)
+    index = block.end + 1
   }
   flush()
   return segments
@@ -320,6 +358,12 @@ const renderBlocks = (lines: ReadonlyArray<string>): string => {
   return out.join('') + closeTag(open)
 }
 
+const rawSvgHtml = (source: string): string => {
+  const svg = svgMarkupOf(source)
+  if (svg !== undefined) return '<figure class="diagram">' + svg + '</figure>'
+  return '<pre class="code"><code>' + escapeHtml(source) + '</code></pre>'
+}
+
 const codeHtml = (segment: Extract<Segment, { kind: 'code' }>): string => {
   const svg = segment.lang === 'svg' ? svgMarkupOf(segment.body) : undefined
   if (svg !== undefined) return '<figure class="diagram">' + svg + '</figure>'
@@ -327,8 +371,17 @@ const codeHtml = (segment: Extract<Segment, { kind: 'code' }>): string => {
   return '<pre class="code"' + lang + '><code>' + escapeHtml(segment.body) + '</code></pre>'
 }
 
+const segmentHtml = (segment: Segment): string => {
+  switch (segment.kind) {
+    case 'code':
+      return codeHtml(segment)
+    case 'svg':
+      return rawSvgHtml(segment.source)
+    case 'text':
+      return renderBlocks(segment.lines)
+  }
+}
+
 /** Renders the markdown a conversation needs. The output is escaped HTML. */
 export const renderMarkdown = (text: string): string =>
-  segmentsOf(text.split('\n'))
-    .map((segment) => (segment.kind === 'code' ? codeHtml(segment) : renderBlocks(segment.lines)))
-    .join('')
+  segmentsOf(text.split('\n')).map(segmentHtml).join('')
