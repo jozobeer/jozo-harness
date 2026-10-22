@@ -116,6 +116,37 @@ describe('run_code', () => {
     expect(outcome.context).toEqual(['first note', 'second note'])
   })
 
+  test('a page a nested tool published stays in the outer result', async () => {
+    const page: ToolDefinition<{ readonly name: string }, { readonly url: string }> = {
+      name: 'artifact',
+      description: 'Publish a page',
+      parameters: Schema.Struct({ name: Schema.String }),
+      output: {
+        schema: Schema.Struct({ url: Schema.String }),
+        render: (_args, value) => [{ type: 'text', text: 'page: ' + value.url }],
+      },
+      execute: (args) => Effect.succeed({ url: '/artifact/s-1/' + args.name }),
+    }
+    const tool = makeRunCodeTool(
+      host(
+        () =>
+          Effect.succeed({
+            ...ok('page: /artifact/s-1/report', { url: '/artifact/s-1/report' }),
+            context: ['/artifact/s-1/report'],
+          }),
+        undefined,
+        [page],
+      ),
+    )
+
+    const outcome = await run(tool, "await tools.artifact({ name: 'report' })\nreturn 'published'")
+
+    expect(outcome.isError).toBe(false)
+    expect(outcome.context).toEqual(['/artifact/s-1/report'])
+    // The child's result is summarized away, so the page line must survive here.
+    expect(textOf(outcome.content)).toContain('page: /artifact/s-1/report')
+  })
+
   test('a nested failure reaches the program as a thrown error', async () => {
     const tool = makeRunCodeTool(host(() => Effect.succeed(failed('denied: no'))))
 
