@@ -207,4 +207,73 @@ describe('artifact tool', () => {
       expect(JSON.stringify(content)).not.toContain('base64')
     })
   })
+
+  test('refuses a page that loads a file from outside itself', async () => {
+    await withHome(async (home) => {
+      const url = 'https://example.com/a.png'
+      const { value, error } = await publish(home, 'report', '<img src="' + url + '">')
+
+      expect(value).toBeUndefined()
+      expect(error).toMatchObject({ code: 'invalid-arguments' })
+      expect(error?.message).toContain(url)
+      await expect(stat(join(home, 'artifacts'))).rejects.toThrow()
+    })
+  })
+
+  test('refuses a page that loads a file over a protocol-relative url', async () => {
+    await withHome(async (home) => {
+      const url = '//cdn.example.com/x.css'
+      const { value, error } = await publish(home, 'report', '<link href="' + url + '">')
+
+      expect(value).toBeUndefined()
+      expect(error).toMatchObject({ code: 'invalid-arguments' })
+      expect(error?.message).toContain(url)
+    })
+  })
+
+  test('refuses an outside reference from every element that can load one', async () => {
+    await withHome(async (home) => {
+      const url = 'https://example.com/a.png'
+      const pages = [
+        '<img src="' + url + '">',
+        '<script src="' + url + '"></script>',
+        '<link href="' + url + '">',
+        '<iframe src="' + url + '"></iframe>',
+        '<video src="' + url + '"></video>',
+        '<video poster="' + url + '"></video>',
+        '<audio src="' + url + '"></audio>',
+        '<source src="' + url + '">',
+        '<object data="' + url + '"></object>',
+      ]
+      for (const html of pages) {
+        const { value, error } = await publish(home, 'report', html)
+        expect(value, html).toBeUndefined()
+        expect(error, html).toMatchObject({ code: 'invalid-arguments' })
+        expect(error?.message, html).toContain(url)
+      }
+    })
+  })
+
+  test('publishes a page whose references stay inside the document', async () => {
+    await withHome(async (home) => {
+      const html =
+        '<img src="data:image/png;base64,AAAA"><a href="#top">top</a><a href="/artifact/s1/other">other</a>'
+      const { value, error } = await publish(home, 'report', html)
+
+      expect(error).toBeUndefined()
+      expect(await readFile(value!.path, 'utf8')).toBe(html)
+    })
+  })
+
+  test('refuses an image the page never references', async () => {
+    await withHome(async (home) => {
+      await writeImage(home, 'logo.png', PNG)
+      const { value, error } = await publish(home, 'report', '<p>x</p>', noneSandbox, ['logo.png'])
+
+      expect(value).toBeUndefined()
+      expect(error).toMatchObject({ code: 'invalid-arguments' })
+      expect(error?.message).toContain('logo.png')
+      await expect(stat(join(home, 'artifacts'))).rejects.toThrow()
+    })
+  })
 })

@@ -104,6 +104,74 @@ const readImages = (
   })
 
 /**
+ * A page stays standalone only while it names every file itself. These are the
+ * elements and attributes a browser loads as a subresource, so an http(s) or
+ * protocol-relative value there pulls a file from outside the page.
+ */
+const SUBRESOURCE_ATTRIBUTES: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
+  ['img', ['src']],
+  ['script', ['src']],
+  ['link', ['href']],
+  ['iframe', ['src']],
+  ['video', ['src', 'poster']],
+  ['audio', ['src']],
+  ['source', ['src']],
+  ['object', ['data']],
+])
+
+const TAG = /<([a-zA-Z][a-zA-Z0-9-]*)\b([^>]*)>/g
+const ATTRIBUTE = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g
+
+interface Reference {
+  readonly attribute: string
+  readonly value: string
+}
+
+const tagsOf = (html: string): ReadonlyArray<{ name: string; body: string }> =>
+  Array.from(html.matchAll(TAG), ([, name = '', body = '']) => ({
+    name: name.toLowerCase(),
+    body,
+  }))
+
+const attributesOf = (body: string): ReadonlyArray<[string, string]> =>
+  Array.from(
+    body.matchAll(ATTRIBUTE),
+    ([, name = '', double = '', single = '', bare = '']): [string, string] => [
+      name.toLowerCase(),
+      double || single || bare,
+    ],
+  )
+
+/** The subresource references the page makes, in document order. */
+const references = (html: string): ReadonlyArray<Reference> =>
+  tagsOf(html).flatMap((tag) => {
+    const wanted = SUBRESOURCE_ATTRIBUTES.get(tag.name) ?? []
+    return attributesOf(tag.body)
+      .filter(([attribute]) => wanted.includes(attribute))
+      .map(([attribute, value]) => ({ attribute, value }))
+  })
+
+/** The value that leaves the document, or undefined while the page stands alone. */
+const outsideReference = (html: string): string | undefined => {
+  for (const reference of references(html)) {
+    if (/^(?:https?:\/\/|\/\/)/i.test(reference.value)) return reference.value
+  }
+  return undefined
+}
+
+/** The src values the page names, which are the places foldImages fills in. */
+const namedSources = (html: string): ReadonlyArray<string> =>
+  references(html)
+    .filter((reference) => reference.attribute === 'src')
+    .map((reference) => reference.value)
+
+/** The first image the page never names, which would leave an unread file behind. */
+const unreferencedImage = (html: string, images: ReadonlyArray<string>): string | undefined => {
+  const sources = namedSources(html)
+  return images.find((given) => !sources.includes(given) && !sources.includes(basename(given)))
+}
+
+/**
  * Folds each referenced file into a data URL. An image the page never names is
  * left as given; refusing it belongs to the standalone check, not here.
  */
@@ -161,7 +229,26 @@ export const makeArtifactTool = (
           new ToolError({ code: 'denied', message: 'read-only mode writes nothing: ' + path }),
         )
       }
-      const images = yield* readImages(exec.cwd, args.images ?? [])
+      const outside = outsideReference(args.html)
+      if (outside !== undefined) {
+        return yield* Effect.fail(
+          new ToolError({
+            code: 'invalid-arguments',
+            message: 'a page must not load files from outside itself: ' + outside,
+          }),
+        )
+      }
+      const given = args.images ?? []
+      const images = yield* readImages(exec.cwd, given)
+      const unused = unreferencedImage(args.html, given)
+      if (unused !== undefined) {
+        return yield* Effect.fail(
+          new ToolError({
+            code: 'invalid-arguments',
+            message: 'the page never references this image: ' + unused,
+          }),
+        )
+      }
       const html = foldImages(args.html, images)
       yield* Effect.tryPromise({
         try: async () => {
