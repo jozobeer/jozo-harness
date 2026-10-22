@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, test } from 'vitest'
 import { renderMarkdown } from '../src/ui/markdown.ts'
 
@@ -134,6 +135,40 @@ describe('the markdown renderer', () => {
 
   test('pipe prose without a delimiter row stays a paragraph', () => {
     expect(renderMarkdown('a | b\njust text')).toBe('<p>a | b<br>just text</p>')
+  })
+
+  test('a raw svg block in the body is drawn as a diagram', () => {
+    const view = renderMarkdown(
+      'before\n\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">\n<rect width="4" height="3"/>\n</svg>\n\nafter',
+    )
+    expect(view).toContain('<figure class="diagram"><svg')
+    expect(view).toContain('viewBox="0 0 10 10"')
+    expect(view).toContain('<rect width="4" height="3"/>')
+    expect(view).toContain('<p>before</p>')
+    expect(view).toContain('<p>after</p>')
+  })
+
+  test('a raw svg block with a script drops the script', () => {
+    const view = renderMarkdown(
+      '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><circle r="2"/></svg>',
+    )
+    expect(view).toContain('<figure class="diagram">')
+    expect(view).toContain('<circle r="2"/>')
+    expect(view).not.toContain('<script')
+    expect(view).not.toContain('alert(1)')
+  })
+
+  test('an svg start without its closing tag stays text', () => {
+    const view = renderMarkdown('<svg xmlns="http://www.w3.org/2000/svg"><rect width="4"/>')
+    expect(view).not.toContain('<figure')
+    expect(view).toContain('&lt;svg')
+    expect(view).toContain('&lt;rect')
+  })
+
+  test('an oversized raw svg is escaped as code', () => {
+    const view = renderMarkdown('<svg>' + 'x'.repeat(100_001) + '</svg>')
+    expect(view).not.toContain('<figure')
+    expect(view.startsWith('<pre class="code"><code>&lt;svg&gt;')).toBe(true)
   })
 
   test('a pipe inside a code span does not split its cell', () => {
