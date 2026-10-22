@@ -98,6 +98,7 @@ const anchor = (part: Extract<LinkPart, { kind: 'link' }>): string =>
   '<a href="' +
   escapeHtml(part.href) +
   '"' +
+  (part.title === undefined ? '' : ' title="' + escapeHtml(part.title) + '"') +
   (ANCHOR.test(part.href) ? ' target="_blank" rel="noreferrer noopener"' : '') +
   '>' +
   escapeHtml(part.label) +
