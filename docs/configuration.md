@@ -171,6 +171,8 @@ route は `opencode/<model>`、wire に送る model は `<model>` そのもの�
 | 公開ページ | session root の隣の `artifacts/<sessionId>/<name>.html`（既定は `~/.jzh/artifacts/...`） | `@jozo-harness/artifact` 行を足す（キーは無い）。`session-jsonl` 行の `root` を変えると一緒に移る |
 | Web UI | `127.0.0.1`。Tailscale を検出したときは tailnet IPv4 でも同じポートを listen する（`0.0.0.0` / `::` では受けない） | `--port`、設定ファイルの `port`。公開は `--public-url` |
 
+公開ページはセッションのログとは別に置く。セッションを削除してもページは残り、`artifacts/<id>/` から消すまで配信され続ける。
+
 ## 設定できないもの
 
 - provider の能力（tool の強制なし、画像なし、prompt cache 制御なし）は adapter に固定されている。reasoning effort は `effort` / `--effort` で指定でき、adapter は `reasoning_effort` としてそのまま渡す（endpoint がその語を受け付けるかは検証しない）

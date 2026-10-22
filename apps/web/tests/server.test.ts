@@ -1109,11 +1109,15 @@ describe('the web transport', () => {
     await rm(workspace, { recursive: true, force: true })
   })
 
-  test('the row menu deletes an open session, and the page lets go of it', async () => {
+  test('the row menu deletes an open session, and its pages outlive the log', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-menu-'))
     await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
-    const sessionRoot = await mkdtemp(join(tmpdir(), 'jozo-harness-web-menu-logs-'))
+    const home = await mkdtemp(join(tmpdir(), 'jozo-harness-web-menu-home-'))
+    const sessionRoot = join(home, 'sessions')
     await mkdir(join(sessionRoot, 'a'), { recursive: true })
+    await mkdir(join(sessionRoot, 'b'), { recursive: true })
+    await writeFileDeep(join(home, 'artifacts', 'a', 'report.html'), '<h1>report</h1>')
+    await writeFileDeep(join(home, 'artifacts', 'b', 'other.html'), '<h1>other</h1>')
     const web = makeWeb('a', '/work', false)
     const base = makeSettings()
     const settings = {
@@ -1154,7 +1158,18 @@ describe('the web transport', () => {
                 return true
               }
             })
-            return { pinned, listed, opened, deleted, after, gone }
+            const pages = yield* Effect.promise(async () => {
+              const [own, other] = await Promise.all([
+                fetch(started.origin + '/artifact/a/report', {
+                  headers: { cookie: started.cookie },
+                }),
+                fetch(started.origin + '/artifact/b/other', {
+                  headers: { cookie: started.cookie },
+                }),
+              ])
+              return { own: own.status, other: other.status }
+            })
+            return { pinned, listed, opened, deleted, after, gone, pages }
           }).pipe(clientLayers(wsUrl))
           const result = yield* withoutServices(useClient)
           yield* Deferred.succeed(started.stop, undefined)
@@ -1172,10 +1187,12 @@ describe('the web transport', () => {
     expect(observed.gone).toBe(true)
     expect(observed.after.opened).toEqual([])
     expect(observed.after.initial).toBe('')
+    // A page is an artifact of its own; deleting the log leaves it served.
+    expect(observed.pages).toEqual({ own: 200, other: 200 })
     // The core was released before the directory went away.
     expect(web.closed).toEqual(['a'])
     await rm(root, { recursive: true, force: true })
-    await rm(sessionRoot, { recursive: true, force: true })
+    await rm(home, { recursive: true, force: true })
   })
 
   test('the row menu refuses to delete a session that is still working, and says what to stop', async () => {

@@ -335,7 +335,7 @@ const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) 
           aria-label="Delete session"
         >
           <p class="session-confirm-asked">Delete this session?</p>
-          <p class="session-confirm-hint">Its log is removed. This cannot be undone.</p>
+          <p class="session-confirm-hint">Its log is removed. Pages it published remain.</p>
           <div class="session-confirm-actions">
             <button
               class="session-delete-confirm"
