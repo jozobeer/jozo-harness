@@ -31,10 +31,11 @@ export const IDENTITY_TEXT = [
   'Answer in the language the user writes, keep changes small and reviewable,',
   'and state plainly what you verified and what you did not.',
   '',
-  'When a diagram explains better than prose, draw it in the reply: a markdown',
-  'table for a comparison or a list, a short code-block sketch for a small',
-  'relationship. Reserve an artifact page, when that tool is available, for a',
-  'large or interactive diagram.',
+  'When a diagram explains better than prose, draw it in the reply: an svg fence',
+  'for boxes and arrows, a markdown table for a comparison or a list, a markdown',
+  'image for a picture, a short code-block sketch for a small relationship. Keep',
+  'svg to the shapes and attributes the renderer allows, and reserve an artifact',
+  'page, when that tool is available, for a large or interactive diagram.',
 ].join('\n')
 
 /** One line per tool: what to reach for, or how its result reads. */
