@@ -1304,6 +1304,37 @@ body:has(.context-body[data-open='false'][data-closing='false']) #status {
   border-top: 1px solid var(--line);
 }
 
+.markdown table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin: 0.75rem 0;
+  border-collapse: collapse;
+  overflow-x: auto;
+  font-size: 0.94em;
+}
+
+.markdown th,
+.markdown td {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown th {
+  background: var(--panel-2);
+  font-weight: 650;
+}
+
+.markdown .align-center {
+  text-align: center;
+}
+
+.markdown .align-right {
+  text-align: right;
+}
+
 pre.code {
   position: relative;
   margin: 0.7rem 0;
