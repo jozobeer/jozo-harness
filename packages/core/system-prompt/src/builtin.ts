@@ -61,6 +61,10 @@ const TOOL_GUIDANCE: ReadonlyArray<readonly [name: string, line: string]> = [
   ],
   ['skill', 'Read a skill with the skill tool before acting on a task that names or matches one.'],
   [
+    'run_code',
+    'Reach for run_code to read and transform several things in one program instead of calling tools one by one; it reaches the same tools and sandbox. When a step needs several reads, make them in one step, in parallel or in that program.',
+  ],
+  [
     'ralph',
     'Use ralph only when the human explicitly asks for a Ralph or fresh-agent iteration; ordinary long work belongs to goal.',
   ],
