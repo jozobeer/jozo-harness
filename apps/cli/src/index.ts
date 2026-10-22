@@ -833,20 +833,19 @@ const planModeFromProfile = (
 
 /**
  * The artifact row is opt-in, and its page belongs beside the sessions root, so it
- * takes the jzh home this run resolved rather than one of its own.
+ * takes that root from the profile rather than one of its own.
  */
 const installArtifact = (tools: ToolRegistry, wiring: ProfileWiring) =>
   Effect.gen(function* () {
     if (!hasEnabledRow(wiring.rows, '@jozo-harness/artifact')) return
-    const home = wiring.options.jzhHome
-    if (home === undefined) return
+    const sessionRoot = sessionRootOf(wiring.rows)
     // The page is written by a tool, not a command, so the sandbox never wraps
     // it and the preset has to reach the tool here to keep read-only runs from
     // publishing. Without a safety row there is no preset to obey.
     const sandbox = hasEnabledRow(wiring.rows, '@jozo-harness/safety')
       ? Context.get(wiring.context, Sandbox)
       : noneSandbox
-    for (const tool of Context.get(wiring.context, ArtifactTools)(home, sandbox)) {
+    for (const tool of Context.get(wiring.context, ArtifactTools)(sessionRoot, sandbox)) {
       yield* tools.register(tool)
     }
   })

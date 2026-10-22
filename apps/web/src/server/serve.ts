@@ -4,6 +4,7 @@ import type { Duplex } from 'node:stream'
 import { WebSocket, WebSocketServer, type RawData } from 'ws'
 import { Effect, Layer, Option, Stream } from 'effect'
 import { RpcSerialization, RpcServer } from 'effect/rpc'
+import { artifactRootOf } from '@jozo-harness/tools-tier1'
 import { sendCommand } from '@jozo-harness/ui-protocol'
 import { UiRpcs, type CommandView } from '../shared/rpc.ts'
 import {
@@ -27,7 +28,7 @@ import {
   type SessionFactory,
   type SessionRegistry,
 } from './sessions.ts'
-import { answerArtifact, artifactRootOf } from './artifacts.ts'
+import { answerArtifact } from './artifacts.ts'
 import { searchWorkspaceFiles } from './files.ts'
 import { branchOf } from './git-branch.ts'
 import type { SettingsPort } from './settings.ts'

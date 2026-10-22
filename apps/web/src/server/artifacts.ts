@@ -1,6 +1,6 @@
 import { readFile, readdir, stat } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import {
   codeFromUrl,
   COOKIE_NAME,
@@ -12,13 +12,6 @@ import {
   type PublicOrigin,
 } from './auth.ts'
 import type { TailnetAddresses } from './tailnet.ts'
-
-/**
- * Artifacts live beside the sessions root, under the same jzh home, so a
- * session's page and the HTML it wrote are found through one directory.
- */
-export const artifactRootOf = (sessionRoot: string): string =>
-  join(dirname(sessionRoot), 'artifacts')
 
 /** A session id or artifact name the route may hand to the filesystem. */
 const safeSegment = (value: string): boolean =>

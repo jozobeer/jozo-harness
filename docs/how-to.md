@@ -91,7 +91,7 @@ plugins:
 この調査結果を report という名前の HTML ページにまとめて。表と図を 1 枚に入れて。
 ```
 
-モデルが `artifact` に `{ name, html }` を渡すと、run の jzh home の `artifacts/<sessionId>/<name>.html` に書き、結果に `page: /artifact/<sessionId>/<name>` の 1 行を返す。preset が `read-only` の run では書かず、`denied` を返す。`name` は英数字と `.` `_` `-` だけで、`.html` は付けない。ページは CSS と JavaScript を中に持つ 1 枚の HTML にする。
+モデルが `artifact` に `{ name, html }` を渡すと、run の session root の隣の `artifacts/<sessionId>/<name>.html` に書き、結果に `page: /artifact/<sessionId>/<name>` の 1 行を返す。preset が `read-only` の run では書かず、`denied` を返す。`name` は英数字と `.` `_` `-` だけで、`.html` は付けない。ページは CSS と JavaScript を中に持つ 1 枚の HTML にする。
 
 jzh web でそのセッションを開くと、結果の下にページが iframe で出る。iframe は `allow-scripts` だけを持つ sandbox なので、ページは jzh web の origin にも cookie にも触れない。`Open in a new tab` を押すと別タブで開く。
 
@@ -275,6 +275,8 @@ plugins:
 ```sh
 jzh --patch sessions.yml "…"
 ```
+
+`root` を変えると、その run の `artifact` が書くページと `jzh web` が配信するページも、この root の隣の `artifacts/` に移る。既定の `~/.jzh/sessions` のときは `~/.jzh/artifacts/` になる。
 
 ## コマンドを sandbox の外で走らせる
 
