@@ -21,6 +21,42 @@ export const ESCALATION_TARGETS: ReadonlyArray<SandboxMode> = [
 export const sandboxDenialMarker = (mode: SandboxMode): string =>
   `[sandbox: file access denied under ${mode} mode]`
 
+/** Why a confined run failed: the sandbox refused a file effect, or could not be applied at all. */
+export type SandboxFailure = 'none' | 'denied' | 'apply-failed'
+
+/** seatbelt's exit code when it cannot apply a profile inside another sandbox. */
+const SANDBOX_APPLY_EXIT_CODE = 71
+
+/**
+ * Classifies a non-zero run by what the sandbox said. A seatbelt that cannot be
+ * applied inside another sandbox is not a denial of any file: widening the mode
+ * cannot fix it, so it keeps its own name.
+ * @param exitCode - what the wrapped command exited with.
+ * @param stderr - what it printed.
+ * @param signatures - the backend's words for a refused file effect.
+ */
+export function classifySandboxFailure(
+  exitCode: number,
+  stderr: string,
+  signatures: ReadonlyArray<string>,
+): SandboxFailure {
+  if (exitCode === 0) return 'none'
+  const lowered = stderr.toLowerCase()
+  if (exitCode === SANDBOX_APPLY_EXIT_CODE && lowered.includes('sandbox_apply'))
+    return 'apply-failed'
+  return signatures.some((signature) => lowered.includes(signature.toLowerCase()))
+    ? 'denied'
+    : 'none'
+}
+
+/**
+ * What an unapplicable sandbox says instead of a denial: the reason, and the two
+ * ways to run somewhere the profile can be applied. There is no retry to offer.
+ */
+export const sandboxApplyFailureMarker =
+  '[sandbox: the seatbelt could not be applied inside another sandbox (exit 71); ' +
+  'run jzh outside it, or pass sandbox: none]'
+
 /**
  * The same-turn hint that rides a denial: the sanctioned retry, and who it asks.
  * @param subject - this family's noun for the denied action (`command` for bash).

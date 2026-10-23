@@ -67,6 +67,29 @@ const confining = (standing: SandboxMode = 'workspace-write'): SandboxShape => (
   },
 })
 
+/**
+ * A sandbox whose backend cannot be applied at all: the wrapper prints the
+ * kernel's refusal and exits 71, the way seatbelt does inside another seatbelt.
+ */
+const unappliable = (): SandboxShape => ({
+  name: 'test-nested',
+  confines: true,
+  mode: 'workspace-write',
+  wrap: (command) => {
+    const mode = command.mode ?? 'workspace-write'
+    return Effect.succeed({
+      argv: [
+        'bash',
+        '-lc',
+        'printf "%s\\n" "sandbox-exec: sandbox_apply: Operation not permitted" >&2; exit 71',
+      ],
+      cwd: command.cwd,
+      mode,
+      denialSignatures: [],
+    })
+  },
+})
+
 /** An approval seam that answers `approved` and records what it was asked. */
 const answering = async (approved: boolean): Promise<[ApprovalShape, Array<ApprovalRequested>]> => {
   const asked: Array<ApprovalRequested> = []
@@ -156,6 +179,21 @@ describe('bash escalation', () => {
 
     expect(result?.isError).toBe(true)
     expect(asked).toEqual([])
+  })
+
+  test('a seatbelt that cannot be applied inside another sandbox is not a file denial', async () => {
+    const [approval] = await answering(false)
+    const result = await Effect.runPromise(
+      call(makeBashTool(unappliable(), approval), { command: 'echo hi' }),
+    )
+
+    const text = textOf(result)
+    expect(result?.isError).toBe(false)
+    expect(text).toContain(
+      '[sandbox: the seatbelt could not be applied inside another sandbox (exit 71); run jzh outside it, or pass sandbox: none]',
+    )
+    expect(text).not.toContain('file access denied')
+    expect(text).not.toContain('escalation available')
   })
 
   test('nothing confines, so there is nothing to escalate and the schema still says so', async () => {
