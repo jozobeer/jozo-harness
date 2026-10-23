@@ -103,10 +103,52 @@ export const seatbeltStartupNotice = (
 ): string | undefined => {
   // bwrap is irrelevant here: the only answer this needs is whether the seatbelt runs.
   const decision = decideSandbox(config, platform, () => false)
-  const confined = modeOf(config.preset) !== 'danger-full-access'
-  return decision._tag === 'available' && decision.name === 'seatbelt' && confined
-    ? seatbeltWarning(probe())
-    : undefined
+  return underSeatbelt(config, decision) ? seatbeltWarning(probe()) : undefined
+}
+
+/**
+ * Whether commands would actually be wrapped by the seatbelt. Only then does the
+ * probe's answer matter: the full preset hands commands straight to the shell.
+ */
+const underSeatbelt = (config: SafetyConfig, decision: SandboxDecision): boolean =>
+  decision._tag === 'available' &&
+  decision.name === 'seatbelt' &&
+  modeOf(config.preset) !== 'danger-full-access'
+
+const REFUSED_SEATBELT = '; the seatbelt cannot be applied here, so commands are refused'
+
+/**
+ * The sandbox line the runtime context shows. A refused seatbelt cannot wrap a
+ * command, so the line ends with that reason instead of letting the model read
+ * the refusal as a file denial; an applied or missing binary keeps the wording
+ * it had, and no other backend changes.
+ */
+export const sandboxContextText = (
+  config: SafetyConfig,
+  decision: SandboxDecision,
+  probe: SeatbeltProbeResult | undefined,
+): string => {
+  const mode = modeOf(config.preset)
+  const confined = decision._tag === 'available' && decision.name !== 'none'
+  const backend = decision._tag === 'available' ? decision.name : 'none'
+  const enforcement = decision._tag === 'available' ? (decision.enforcement ?? 'full') : 'full'
+  const refused =
+    probe === 'refused' &&
+    decision._tag === 'available' &&
+    decision.name === 'seatbelt' &&
+    mode !== 'danger-full-access'
+  const line = confined
+    ? 'sandbox: ' +
+      mode +
+      ' (backend: ' +
+      backend +
+      '; enforcement: ' +
+      enforcement +
+      '; commands run confined; a file effect the sandbox refuses comes back as [sandbox: file access denied under ' +
+      mode +
+      ' mode])'
+    : 'sandbox: none (commands run without a sandbox)'
+  return refused ? line + REFUSED_SEATBELT : line
 }
 
 const sandboxOf = (
@@ -154,15 +196,13 @@ export const sandboxLayerFor = (
 const policyLayerWithContexts = (
   config: SafetyConfig,
   decision: SandboxDecision,
+  probe: SeatbeltProbeResult | undefined,
 ): Layer.Layer<Policy, never, SystemPrompt> =>
   Layer.effect(
     Policy,
     Effect.gen(function* () {
       const prompt = yield* SystemPrompt
       const mode = modeOf(config.preset)
-      const confined = decision._tag === 'available' && decision.name !== 'none'
-      const backend = decision._tag === 'available' ? decision.name : 'none'
-      const enforcement = decision._tag === 'available' ? (decision.enforcement ?? 'full') : 'full'
       yield* prompt.context({
         name: 'approval',
         order: APPROVAL_CONTEXT_ORDER,
@@ -177,18 +217,7 @@ const policyLayerWithContexts = (
       yield* prompt.context({
         name: 'sandbox',
         order: SANDBOX_CONTEXT_ORDER,
-        text: () =>
-          Effect.succeed(
-            'sandbox: ' +
-              (confined
-                ? mode + ' (backend: ' + backend + '; enforcement: ' + enforcement + ';'
-                : 'none (') +
-              (confined
-                ? ' commands run confined; a file effect the sandbox refuses comes back as [sandbox: file access denied under ' +
-                  mode +
-                  ' mode])'
-                : 'commands run without a sandbox)'),
-          ),
+        text: () => Effect.succeed(sandboxContextText(config, decision, probe)),
       })
       const shape: PolicyShape = { preset: config.preset, mode }
       return shape
@@ -203,8 +232,10 @@ export const safetyPlugin: Plugin<SafetyConfig, Policy | Sandbox, SystemPrompt> 
   requires: [SystemPrompt],
   layer: (config) => {
     const decision = decideSandbox(config, process.platform, probeBwrap)
+    // One probe per build: every runtime context and every wrapped command share it.
+    const probe = underSeatbelt(config, decision) ? probeSeatbelt() : undefined
     return Layer.mergeAll(
-      policyLayerWithContexts(config, decision),
+      policyLayerWithContexts(config, decision, probe),
       layerForDecision(config, decision),
     )
   },

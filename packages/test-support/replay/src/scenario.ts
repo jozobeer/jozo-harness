@@ -81,12 +81,16 @@ const INSTANT = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g
 /** The sandbox backend the runtime context names: `auto` picks it from the host platform. */
 const NATIVE_BACKEND = /backend: (?:seatbelt|bwrap);/g
 
+/** Whether the host can apply a seatbelt decides the tail of the sandbox line. */
+const REFUSED_SEATBELT = /; the seatbelt cannot be applied here, so commands are refused/g
+
 const replaced = (text: string, tokens: ReadonlyArray<readonly [string, string]>): string =>
   tokens
     .reduce((current, [value, token]) => current.split(value).join(token), text)
     .replace(UUID, '<uuid>')
     .replace(INSTANT, '<time>')
     .replace(NATIVE_BACKEND, 'backend: <native>;')
+    .replace(REFUSED_SEATBELT, '')
 
 /** The fields that change every run, wherever they sit in an event. */
 const UNSTABLE = /^(time\d*|dt|duration|createdAt|mtimeMs|startedAt|firedAt)$/
