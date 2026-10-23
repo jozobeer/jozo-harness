@@ -7,8 +7,10 @@ import {
   Policy,
   Sandbox,
   safetyPlugin,
+  sandboxContextText,
   sandboxLayerFor,
   seatbeltStartupNotice,
+  type SeatbeltProbeResult,
 } from '../src/index.ts'
 
 /** The backend `auto` resolves to where this test runs. */
@@ -154,6 +156,29 @@ describe('seatbelt startup notice', () => {
     expect(
       seatbeltStartupNotice({ preset: 'workspace-write', sandbox: 'none' }, 'darwin', refused),
     ).toBeUndefined()
+  })
+})
+
+describe('sandbox context line', () => {
+  const lineFor = (probe: SeatbeltProbeResult | undefined): string =>
+    sandboxContextText(
+      { preset: 'workspace-write', sandbox: 'auto' },
+      { _tag: 'available', name: 'seatbelt', enforcement: 'full' },
+      probe,
+    )
+
+  test('names a refused seatbelt at the end of the sandbox line', () => {
+    const line = lineFor('refused')
+
+    expect(line).toContain('; the seatbelt cannot be applied here, so commands are refused')
+    expect(line.endsWith('refused')).toBe(true)
+  })
+
+  test('keeps the line it had when the seatbelt applies or the binary is missing', () => {
+    const applies = lineFor('applies')
+
+    expect(applies).not.toContain('cannot be applied')
+    expect(lineFor('missing')).toBe(applies)
   })
 })
 

@@ -85,6 +85,24 @@ describe('normalizeLog', () => {
     expect(lines[0]).toContain('backend: <native>;')
     expect(lines[1]).toBe(lines[0])
   })
+
+  test('drops the seatbelt refusal so a recording replays inside and outside a sandbox', () => {
+    const line = (suffix: string): string =>
+      normalizeLog(
+        [
+          {
+            seq: 1,
+            time: 0,
+            type: 'user/message',
+            data: { text: '- sandbox: workspace-write' + suffix },
+          },
+        ],
+        [],
+      )
+    const refused = '; the seatbelt cannot be applied here, so commands are refused'
+
+    expect(line(refused)).toBe(line(''))
+  })
 })
 
 describe('replayAdapter', () => {
