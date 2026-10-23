@@ -132,6 +132,10 @@ import {
   currentPlanMode,
   installAsk,
   makePlanMode,
+  safetyConfigSchema,
+  seatbeltStartupNotice,
+  type SafetyConfig,
+  type SeatbeltProbeResult,
   recordingAnswerer,
   type ApprovalAnswerer,
   type ApprovalRequested,
@@ -209,6 +213,8 @@ export interface CommandOptions {
   readonly approve?: (request: ApprovalRequested) => Effect.Effect<boolean>
   /** Answers ask_user questions; without it the question waits for an Ask answer. */
   readonly answer?: (request: AskRequested) => Effect.Effect<string>
+  /** The startup seatbelt probe; tests replace the spawn, and a direct caller may omit it. */
+  readonly seatbeltProbe?: () => SeatbeltProbeResult
   /** Extra skill roots from the settings file; the workspace and the jzh home always rank around them. */
   readonly skills?: ReadonlyArray<string>
   /** The jzh home: user-global AGENTS.md and skills live here. */
@@ -305,6 +311,24 @@ export const profileRows = (
 /** A row installs its plugin only while the loader leaves it in the layer. */
 const hasEnabledRow = (rows: ReadonlyArray<PluginRow>, name: string): boolean =>
   rows.some((row) => row.name === name && isRowEnabled(row))
+
+/** The safety row's config when the profile has one; a malformed row is not this check's to report. */
+const safetyConfigOf = (rows: ReadonlyArray<PluginRow>): SafetyConfig | undefined => {
+  const row = rows.find((each) => each.name === '@jozo-harness/safety' && isRowEnabled(each))
+  return row !== undefined && Schema.is(safetyConfigSchema)(row.config) ? row.config : undefined
+}
+
+/**
+ * Asks once whether the profile this command is about to run under can apply its
+ * seatbelt. The answer only names the reason on stderr; the mode, and every
+ * command wrapped in it, stay as they were.
+ */
+const warnUnappliableSeatbelt = (rows: ReadonlyArray<PluginRow>, options: CommandOptions): void => {
+  const safety = safetyConfigOf(rows)
+  if (safety === undefined || options.seatbeltProbe === undefined) return
+  const notice = seatbeltStartupNotice(safety, process.platform, options.seatbeltProbe)
+  if (notice !== undefined) options.stderr(notice + '\n')
+}
 
 /** Streams assistant text unless the caller asked for JSON session events. */
 const installOutput = (hooks: HookRegistry, options: CommandOptions) =>
@@ -1748,6 +1772,8 @@ export function runCommand(options: CommandOptions): Effect.Effect<number> {
       options.stdout(text)
       return 0
     }
+
+    warnUnappliableSeatbelt(rows, options)
 
     const work = workOf(options)
     if (work === undefined) {

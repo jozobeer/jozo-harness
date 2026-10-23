@@ -202,3 +202,39 @@ describe('main', () => {
     expect(out.join('')).toContain('"baseUrl":"http://127.0.0.1:11434/v1"')
   })
 })
+
+// The notice names the seatbelt, so there is nothing to say on a platform that has none.
+describe.skipIf(process.platform !== 'darwin')('startup probe', () => {
+  test('keeps starting after naming a seatbelt that cannot be applied', async () => {
+    const err: Array<string> = []
+    const code = await Effect.runPromise(
+      main([], {
+        stdout: () => undefined,
+        stderr: (text) => err.push(text),
+        cwd: '/work',
+        seatbeltProbe: () => 'refused',
+      }),
+    )
+
+    // Nothing to do is still the reason this run ends; the probe only warns.
+    expect(code).toBe(2)
+    expect(err).toHaveLength(2)
+    expect(err[0]).toContain('the seatbelt cannot be applied inside another sandbox')
+    expect(err[1]).toContain('nothing to do')
+  })
+
+  test('says nothing when the probe applies the profile', async () => {
+    const err: Array<string> = []
+    const code = await Effect.runPromise(
+      main([], {
+        stdout: () => undefined,
+        stderr: (text) => err.push(text),
+        cwd: '/work',
+        seatbeltProbe: () => 'applies',
+      }),
+    )
+
+    expect(code).toBe(2)
+    expect(err).toEqual(['nothing to do: pass a task or run on a terminal'])
+  })
+})

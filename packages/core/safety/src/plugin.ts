@@ -2,7 +2,12 @@ import { PluginError, type Plugin } from '@jozo-harness/kernel'
 import { SystemPrompt } from '@jozo-harness/system-prompt'
 import { Effect, Layer, Schema } from 'effect'
 import { Sandbox, noneSandbox, type SandboxEnforcement, type SandboxShape } from './sandbox.ts'
-import { seatbeltSandbox } from './seatbelt.ts'
+import {
+  probeSeatbelt,
+  seatbeltSandbox,
+  seatbeltWarning,
+  type SeatbeltProbeResult,
+} from './seatbelt.ts'
 import { bwrapSandbox, bwrapUnavailableMessage, probeBwrap } from './linux.ts'
 import { Ask } from './ask.ts'
 import { askServiceLayer } from './ask.ts'
@@ -84,6 +89,24 @@ export const decideSandbox = (
   }
   if (backend === 'none') return { _tag: 'available', name: 'none' }
   return backend === 'seatbelt' ? seatbeltDecision(platform) : bwrapDecision(platform, bwrapUsable)
+}
+
+/**
+ * The startup line for a profile that would run under the seatbelt. The probe runs
+ * only when that is the backend this platform would apply and the preset keeps
+ * commands confined; the decision, and so the default behavior, is unchanged.
+ */
+export const seatbeltStartupNotice = (
+  config: SafetyConfig,
+  platform: string,
+  probe: () => SeatbeltProbeResult = probeSeatbelt,
+): string | undefined => {
+  // bwrap is irrelevant here: the only answer this needs is whether the seatbelt runs.
+  const decision = decideSandbox(config, platform, () => false)
+  const confined = modeOf(config.preset) !== 'danger-full-access'
+  return decision._tag === 'available' && decision.name === 'seatbelt' && confined
+    ? seatbeltWarning(probe())
+    : undefined
 }
 
 const sandboxOf = (
