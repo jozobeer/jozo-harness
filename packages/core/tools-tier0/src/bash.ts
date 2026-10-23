@@ -2,10 +2,13 @@ import { Schema, Effect } from 'effect'
 import { ToolError, oneLine, type ToolDefinition } from '@jozo-harness/tools'
 import {
   ESCALATION_TARGETS,
+  classifySandboxFailure,
   escalationHintMarker,
   noneSandbox,
+  sandboxApplyFailureMarker,
   sandboxDenialMarker,
   type ApprovalShape,
+  type SandboxFailure,
   type SandboxMode,
   type SandboxShape,
 } from '@jozo-harness/safety'
@@ -57,18 +60,11 @@ export interface BashValue {
   readonly timeoutMs: number
   /** The job a timed-out command was handed to, when the run has a job registry. */
   readonly jobId?: string
-  /** The mode the command ran under, and whether the sandbox refused a file effect. */
+  /** The mode the command ran under, and what the sandbox said about the run. */
   readonly sandbox: {
     readonly mode: SandboxMode
-    readonly denied: boolean
+    readonly failure: SandboxFailure
   }
-}
-
-/** What a denied call says: which mode refused it, and how a retry is asked for. */
-const denialOf = (stderr: string, exitCode: number, signatures: ReadonlyArray<string>): boolean => {
-  if (exitCode === 0) return false
-  const lowered = stderr.toLowerCase()
-  return signatures.some((signature) => lowered.includes(signature.toLowerCase()))
 }
 
 /** The timeout a call actually gets: a default, never more than the tool allows. */
@@ -201,8 +197,10 @@ const markersOf = (value: BashValue, escalation: boolean): ReadonlyArray<string>
   ...(value.jobId === undefined && value.exitCode !== 0
     ? ['[exit code: ' + String(value.exitCode) + ']']
     : []),
-  ...(value.sandbox.denied ? [sandboxDenialMarker(value.sandbox.mode)] : []),
-  ...(value.sandbox.denied && escalation ? [escalationHintMarker('command')] : []),
+  ...(value.sandbox.failure === 'denied' ? [sandboxDenialMarker(value.sandbox.mode)] : []),
+  ...(value.sandbox.failure === 'denied' && escalation ? [escalationHintMarker('command')] : []),
+  // An unapplicable sandbox is not a denial, so it offers no wider mode to retry in.
+  ...(value.sandbox.failure === 'apply-failed' ? [sandboxApplyFailureMarker] : []),
 ]
 
 const renderOutput = (value: BashValue, escalation: boolean): string => {
@@ -239,7 +237,7 @@ export const makeBashTool = (
         jobId: Schema.optionalKey(Schema.String),
         sandbox: Schema.Struct({
           mode: Schema.Literals([...ESCALATION_TARGETS, 'read-only']),
-          denied: Schema.Boolean,
+          failure: Schema.Literals(['none', 'denied', 'apply-failed']),
         }),
       }),
       render: (_args, value) => [{ type: 'text', text: renderOutput(value, canEscalate) }],
@@ -273,7 +271,7 @@ export const makeBashTool = (
           ...run,
           sandbox: {
             mode: wrapped.mode,
-            denied: denialOf(run.stderr, run.exitCode, wrapped.denialSignatures),
+            failure: classifySandboxFailure(run.exitCode, run.stderr, wrapped.denialSignatures),
           },
         }
       }),

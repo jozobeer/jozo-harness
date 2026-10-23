@@ -2,7 +2,9 @@ import { describe, expect, test } from 'vitest'
 import { Effect } from 'effect'
 import {
   approveEscalation,
+  classifySandboxFailure,
   escalationHintMarker,
+  sandboxApplyFailureMarker,
   sandboxDenialMarker,
   validateEscalationArgs,
   type ApprovalRequested,
@@ -85,6 +87,41 @@ describe('approveEscalation', () => {
 
     expect(observed._tag).toBe('Failure')
     expect(asked).toEqual([])
+  })
+})
+
+describe('classifySandboxFailure', () => {
+  test('a seatbelt that cannot be applied inside another sandbox is its own failure', () => {
+    expect(
+      classifySandboxFailure(71, 'sandbox-exec: sandbox_apply: Operation not permitted\n', []),
+    ).toBe('apply-failed')
+  })
+
+  test('the apply failure says how to proceed and offers no escalation', () => {
+    expect(sandboxApplyFailureMarker).toBe(
+      '[sandbox: the seatbelt could not be applied inside another sandbox (exit 71); run jzh outside it, or pass sandbox: none]',
+    )
+    expect(sandboxApplyFailureMarker).not.toContain('sandbox_permissions')
+    expect(sandboxApplyFailureMarker).not.toContain('file access denied')
+  })
+
+  test('a refusal that signed the sandbox words stays a file denial', () => {
+    expect(
+      classifySandboxFailure(1, 'bash: /etc/hosts: Operation not permitted', [
+        'operation not permitted',
+      ]),
+    ).toBe('denied')
+  })
+
+  test('a command that merely failed is passed through', () => {
+    expect(classifySandboxFailure(0, '', ['operation not permitted'])).toBe('none')
+    expect(classifySandboxFailure(1, 'npm: command not found', ['operation not permitted'])).toBe(
+      'none',
+    )
+  })
+
+  test('exit 71 without the apply signature is not an apply failure', () => {
+    expect(classifySandboxFailure(71, 'bash: exit 71', ['operation not permitted'])).toBe('none')
   })
 })
 
