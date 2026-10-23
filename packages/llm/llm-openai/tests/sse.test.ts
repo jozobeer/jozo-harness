@@ -93,4 +93,42 @@ describe('OpenAiStreamDecoder', () => {
     const chunks = decodeOpenAiStream([': keep-alive', 'data: not json', 'data: [DONE]'])
     expect(chunks).toEqual([])
   })
+
+  test('keeps each tool call id when later argument fragments omit it', () => {
+    const line = (delta: unknown, finish: string | null = null): string =>
+      'data: ' + JSON.stringify({ choices: [{ delta, finish_reason: finish }] })
+    const chunks = decodeOpenAiStream([
+      line({
+        tool_calls: [
+          {
+            index: 0,
+            id: 'call_a',
+            type: 'function',
+            function: { name: 'echo', arguments: '' },
+          },
+          {
+            index: 1,
+            id: 'call_b',
+            type: 'function',
+            function: { name: 'count', arguments: '' },
+          },
+        ],
+      }),
+      line({ tool_calls: [{ index: 0, function: { arguments: '{"text":"a"}' } }] }),
+      line({ tool_calls: [{ index: 1, function: { arguments: '{"value":2}' } }] }),
+      line({}, 'tool_calls'),
+    ])
+    const assembler = new BlockAssembler()
+    for (const chunk of chunks) assembler.push(chunk)
+    const calls = assembler
+      .snapshot()
+      .content.flatMap((block) => (block.type === 'tool-call' ? [block] : []))
+
+    // OpenAI sends the id once. A later fragment that only extends arguments
+    // must not replace that id, or the follow-up request cannot pair the result.
+    expect(calls).toEqual([
+      { type: 'tool-call', id: 'call_a', name: 'echo', arguments: '{"text":"a"}' },
+      { type: 'tool-call', id: 'call_b', name: 'count', arguments: '{"value":2}' },
+    ])
+  })
 })

@@ -104,7 +104,9 @@ export class BlockAssembler {
         : { kind: 'tool-call', id: chunk.id, name: undefined, arguments: '' }
     this.drafts.set(chunk.index, {
       kind: 'tool-call',
-      id: chunk.id,
+      // A continuation fragment often carries no id. An empty one must not
+      // replace the id the call opened with, or the result cannot be paired.
+      id: chunk.id !== '' ? chunk.id : base.id,
       name: chunk.name ?? base.name,
       arguments: base.arguments + chunk.argumentsDelta,
     })
