@@ -3,7 +3,13 @@ import { systemPromptPlugin } from '@jozo-harness/system-prompt'
 import { Context, Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
 import { SystemPrompt } from '@jozo-harness/system-prompt'
-import { Policy, Sandbox, safetyPlugin, sandboxLayerFor } from '../src/index.ts'
+import {
+  Policy,
+  Sandbox,
+  safetyPlugin,
+  sandboxLayerFor,
+  seatbeltStartupNotice,
+} from '../src/index.ts'
 
 /** The backend `auto` resolves to where this test runs. */
 const native = process.platform === 'darwin' ? 'seatbelt' : 'bwrap'
@@ -112,6 +118,45 @@ describe('safetyPlugin', () => {
     }
   })
 })
+describe('seatbelt startup notice', () => {
+  test('probes once and names a seatbelt that cannot be applied', () => {
+    const calls: Array<number> = []
+    const notice = seatbeltStartupNotice(
+      { preset: 'workspace-write', sandbox: 'auto' },
+      'darwin',
+      () => {
+        calls.push(1)
+        return 'refused'
+      },
+    )
+
+    expect(notice).toContain('cannot be applied inside another sandbox')
+    expect(calls).toHaveLength(1)
+  })
+
+  test('says nothing when the probe applies or the run uses another backend', () => {
+    const refused = (): 'refused' => 'refused'
+
+    expect(
+      seatbeltStartupNotice(
+        { preset: 'workspace-write', sandbox: 'auto' },
+        'darwin',
+        () => 'applies',
+      ),
+    ).toBeUndefined()
+    expect(
+      seatbeltStartupNotice({ preset: 'workspace-write', sandbox: 'auto' }, 'linux', refused),
+    ).toBeUndefined()
+    // The full preset wraps nothing, so a refused profile never refuses a command.
+    expect(
+      seatbeltStartupNotice({ preset: 'full', sandbox: 'seatbelt' }, 'darwin', refused),
+    ).toBeUndefined()
+    expect(
+      seatbeltStartupNotice({ preset: 'workspace-write', sandbox: 'none' }, 'darwin', refused),
+    ).toBeUndefined()
+  })
+})
+
 describe('sandbox selection', () => {
   test('auto takes the backend this platform has', async () => {
     const context = await Effect.runPromise(

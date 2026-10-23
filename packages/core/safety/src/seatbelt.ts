@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { realpathSync } from 'node:fs'
 import { wrapForProvider, type SandboxShape } from './sandbox.ts'
 import type { SandboxMode } from './policy.ts'
@@ -62,6 +63,49 @@ export function seatbeltProfile(options: SeatbeltProfileOptions): string {
  * stderr case-insensitively, so only a denial is read as one.
  */
 const DENIAL_SIGNATURES: ReadonlyArray<string> = ['operation not permitted']
+
+/** What the one startup probe found: the profile applied, was refused, or never ran. */
+export type SeatbeltProbeResult = 'applies' | 'refused' | 'missing'
+
+/** How the probe learns the outcome; tests replace the real spawn. */
+export type SeatbeltProbe = (argv: ReadonlyArray<string>) => SeatbeltProbeResult
+
+/** The smallest profile: enough to ask whether a nested sandbox can apply another. */
+const PROBE_ARGV: ReadonlyArray<string> = [
+  'sandbox-exec',
+  '-p',
+  '(version 1)(allow default)',
+  '--',
+  'true',
+]
+
+const runSeatbeltProbe: SeatbeltProbe = (argv) => {
+  const [file, ...args] = argv
+  if (file === undefined) return 'missing'
+  const result = spawnSync(file, args, { stdio: 'ignore' })
+  if (result.error !== undefined) return 'missing'
+  return result.status === 0 ? 'applies' : 'refused'
+}
+
+/**
+ * Asks once, at startup, whether this process can apply a seatbelt profile. A
+ * seatbelt the host already applied refuses the nested one with exit 71, which no
+ * command can survive, so every call would fail for a reason no mode can widen.
+ */
+export function probeSeatbelt(run: SeatbeltProbe = runSeatbeltProbe): SeatbeltProbeResult {
+  return run(PROBE_ARGV)
+}
+
+/**
+ * The one line startup says. A refused profile is named because no command escapes
+ * it; a missing binary and an applied profile say nothing, and the run keeps the
+ * behavior it had either way.
+ */
+export const seatbeltWarning = (result: SeatbeltProbeResult): string | undefined =>
+  result === 'refused'
+    ? 'jzh: the seatbelt cannot be applied inside another sandbox; commands will be refused. ' +
+      'Run outside it, or pass sandbox: none.'
+    : undefined
 
 /**
  * Wraps commands with sandbox-exec on macOS. The mode decides what the command

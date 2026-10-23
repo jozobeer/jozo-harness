@@ -2,6 +2,7 @@ import { loadBundledProfile, loadBundledProfileNamed } from '@jozo-harness/bundl
 import { type PluginRow } from '@jozo-harness/kernel'
 import { cwdOf, titleOf, type SessionEvent, type SessionHeader } from '@jozo-harness/session'
 import { jsonlSessions, makeSessionQuery } from '@jozo-harness/session-jsonl'
+import { probeSeatbelt, type SeatbeltProbeResult } from '@jozo-harness/safety'
 import type { TuiIo } from '@jozo-harness/tui'
 import { Effect, Stream } from 'effect'
 import { readFile } from 'node:fs/promises'
@@ -37,6 +38,8 @@ export interface MainIo {
   readonly tty?: boolean
   /** Completes to request a user cancellation of the running turn. */
   readonly interrupt?: Effect.Effect<void>
+  /** The startup seatbelt probe; tests replace the real spawn. */
+  readonly seatbeltProbe?: () => SeatbeltProbeResult
 }
 
 const HELP = `jzh "task"                     one-shot headless run
@@ -250,6 +253,8 @@ const commandOptions = (parsed: ParsedArgs, io: MainIo, inputs: CommandInputs): 
   ...optional('resume', parsed.resume),
   ...(parsed.allowPresetChange ? { allowPresetChange: true } : {}),
   ...(parsed.subagents ? { subagents: true } : {}),
+  // The real entry probes; a run a test assembles for itself does not.
+  seatbeltProbe: io.seatbeltProbe ?? probeSeatbelt,
   ...(inputs.patches.length === 0 ? {} : { patches: inputs.patches }),
   surface: inputs.surface,
   ...(parsed.dumpConfig ? { dumpConfig: true } : {}),

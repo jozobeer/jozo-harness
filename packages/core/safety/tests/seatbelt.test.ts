@@ -3,7 +3,7 @@ import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Effect } from 'effect'
-import { seatbeltProfile, seatbeltSandbox } from '../src/index.ts'
+import { probeSeatbelt, seatbeltProfile, seatbeltSandbox, seatbeltWarning } from '../src/index.ts'
 
 describe('seatbeltProfile', () => {
   test('opens reads by default and closes writes', () => {
@@ -55,6 +55,29 @@ describe('seatbeltProfile', () => {
     // Reads and network are open because the profile allows everything by default;
     // naming the network would be a second, narrower rule to keep in sync.
     expect(profile).not.toContain('network')
+  })
+})
+
+describe('probeSeatbelt', () => {
+  test('runs the smallest profile once and reports what it said', () => {
+    const calls: Array<ReadonlyArray<string>> = []
+    const result = probeSeatbelt((argv) => {
+      calls.push(argv)
+      return 'refused'
+    })
+
+    expect(result).toBe('refused')
+    expect(calls).toEqual([['sandbox-exec', '-p', '(version 1)(allow default)', '--', 'true']])
+  })
+})
+
+describe('seatbeltWarning', () => {
+  test('warns only when the seatbelt refuses to apply the profile', () => {
+    expect(seatbeltWarning('refused')).toContain('cannot be applied inside another sandbox')
+    expect(seatbeltWarning('refused')).toContain('sandbox: none')
+    // Nothing confines a run when the binary is absent, and an applied profile needs no line.
+    expect(seatbeltWarning('missing')).toBeUndefined()
+    expect(seatbeltWarning('applies')).toBeUndefined()
   })
 })
 
