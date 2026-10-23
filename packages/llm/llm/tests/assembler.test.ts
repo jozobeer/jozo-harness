@@ -57,6 +57,22 @@ describe('BlockAssembler', () => {
     expect(assembler.snapshot().content).toEqual([{ type: 'text', text: 'authoritative' }])
   })
 
+  test('an empty id on a later fragment does not clear the tool call id', () => {
+    const assembler = new BlockAssembler()
+    assembler.push({
+      type: 'tool-call-delta',
+      index: 2,
+      id: 'call_1',
+      name: 'echo',
+      argumentsDelta: '{"text":',
+    })
+    assembler.push({ type: 'tool-call-delta', index: 2, id: '', argumentsDelta: '"hi"}' })
+
+    expect(assembler.snapshot().content).toEqual([
+      { type: 'tool-call', id: 'call_1', name: 'echo', arguments: '{"text":"hi"}' },
+    ])
+  })
+
   test('fails when a tool call never receives its name', () => {
     const assembler = new BlockAssembler()
     assembler.push({
