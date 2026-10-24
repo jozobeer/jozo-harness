@@ -41,6 +41,32 @@ describe('the svg sanitizer', () => {
       expect(markup).not.toContain(gone)
   })
 
+  test('drops an external url in a presentation attribute and keeps a local one', () => {
+    const markup = svgMarkupOf(
+      diagram(
+        '<linearGradient id="g"><stop offset="0" stop-color="red"/></linearGradient>' +
+          '<rect fill="url(#g)" stroke="url(https://evil.example/a)" width="4" height="3"/>' +
+          '<line marker-start="url(//evil.example/m)" x1="0" y1="0" x2="1" y2="1"/>',
+      ),
+    )
+    expect(markup).toContain('fill="url(#g)"')
+    expect(markup).toContain('<line')
+    expect(markup).not.toContain('evil.example')
+    expect(markup).not.toContain('marker-start')
+    expect(markup).not.toContain('stroke=')
+  })
+
+  test('drops an external url hidden by a css comment or a hex escape', () => {
+    const markup = svgMarkupOf(
+      diagram(
+        '<rect fill="url(/*x*/https://evil.example/a)" width="1" height="1"/>' +
+          '<rect fill="url(\\2f\\2fevil.example/b)" width="1" height="1"/>',
+      ),
+    )
+    expect(markup).not.toContain('evil.example')
+    expect(markup).not.toContain('url(')
+  })
+
   test('keeps an oversized diagram as code', () => {
     const big = '<svg>' + 'x'.repeat(SVG_MAX_BYTES) + '</svg>'
     expect(svgOf(big)).toBeUndefined()
