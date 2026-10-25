@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { Effect, Logger } from 'effect'
+import { Effect, Fiber, Logger } from 'effect'
 import { SessionError, makeSession, type SessionEvent, type SessionSink } from '../src/index.ts'
 import { event, headerEvent } from './support.ts'
 
@@ -145,5 +145,113 @@ describe('makeSession', () => {
     )
 
     expect(error.code).toBe('persistence')
+  })
+
+  test('continues past the highest stored seq when the restored log has a gap', async () => {
+    const collected = collect()
+    const session = await Effect.runPromise(
+      makeSession({
+        id: 's-gap',
+        events: [headerEvent(), event(4, 'user/message', { text: 'kept', source: 'user' })],
+        sink: collected.sink,
+        now: () => 9,
+      }),
+    )
+
+    await Effect.runPromise(session.append('system/message', { text: 'next' }))
+
+    // A count would reuse seq 3, and the page drops any event that is not newer
+    // than the last one it applied, so the appended line would never appear.
+    expect(collected.written[0]?.seq).toBe(5)
+    expect(session.events().map((sessionEvent) => sessionEvent.seq)).toEqual([1, 4, 5])
+  })
+
+  test('overlapping appends take successive seqs', async () => {
+    const collected = collect()
+    let calls = 0
+    let releaseFirst: () => void = () => undefined
+    const holdFirst = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    let markEntered: () => void = () => undefined
+    const entered = new Promise<void>((resolve) => {
+      markEntered = resolve
+    })
+    const session = await Effect.runPromise(
+      makeSession({
+        id: 's-overlap',
+        events: [headerEvent()],
+        now: () => 7,
+        sink: {
+          append: (sessionEvent) =>
+            Effect.gen(function* () {
+              calls += 1
+              if (calls === 1) {
+                markEntered()
+                yield* Effect.promise(() => holdFirst)
+              }
+              collected.written.push(sessionEvent)
+            }),
+          flush: () => Effect.void,
+        },
+      }),
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const first = yield* Effect.forkChild(
+          session.append('user/message', { text: 'one', source: 'user' }),
+        )
+        yield* Effect.promise(() => entered)
+        const second = yield* Effect.forkChild(session.append('system/message', { text: 'two' }))
+        // The first append is held inside the sink. Yield so the second fiber
+        // reaches the log while that write is still open.
+        yield* Effect.yieldNow
+        yield* Effect.sleep('1 millis')
+        releaseFirst()
+        yield* Fiber.join(first)
+        yield* Fiber.join(second)
+      }),
+    )
+
+    expect(collected.written.map((sessionEvent) => sessionEvent.seq)).toEqual([2, 3])
+    expect(session.events().map((sessionEvent) => sessionEvent.seq)).toEqual([1, 2, 3])
+  })
+
+  test('a failed append does not keep the next one from writing', async () => {
+    const collected = collect()
+    let calls = 0
+    const session = await Effect.runPromise(
+      makeSession({
+        id: 's-retry',
+        events: [headerEvent()],
+        sink: {
+          append: (sessionEvent) =>
+            Effect.gen(function* () {
+              calls += 1
+              if (calls === 1) {
+                return yield* Effect.fail(
+                  new SessionError({ code: 'persistence', message: 'disk full' }),
+                )
+              }
+              collected.written.push(sessionEvent)
+            }),
+          flush: () => Effect.void,
+        },
+        now: () => 1,
+      }),
+    )
+
+    const error = await Effect.runPromise(
+      Effect.flip(session.append('user/message', { text: 'lost', source: 'user' })),
+    )
+    await Effect.runPromise(session.append('system/message', { text: 'kept' }))
+
+    expect(error.code).toBe('persistence')
+    expect(collected.written.map((sessionEvent) => sessionEvent.seq)).toEqual([2])
+    expect(session.events().map((sessionEvent) => sessionEvent.type)).toEqual([
+      'session/header',
+      'system/message',
+    ])
   })
 })
