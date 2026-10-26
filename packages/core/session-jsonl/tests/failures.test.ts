@@ -101,16 +101,95 @@ describe('jsonlSessions failures', () => {
   test('a repair that cannot be written still opens the kept prefix', async () => {
     const { root, persistence } = isolated()
     const created = await Effect.runPromise(persistence.create(header()))
+    const file = fileOf(root, created.id)
+    const directory = join(root, created.id)
     // A torn tail: a line that never finished, so the log is worth repairing.
-    await appendFile(fileOf(root, created.id), '{"seq":2,"time":101,"type":"user/message"')
-    await chmod(fileOf(root, created.id), 0o400)
+    await appendFile(file, '{"seq":2,"time":101,"type":"user/message"')
+    const before = await readFile(file, 'utf8')
+    // The directory, not the file: a rename can replace a read-only inode.
+    await chmod(directory, 0o500)
 
     try {
       const opened = await Effect.runPromise(persistence.open(created.id))
 
-      expect(opened.events.map((event) => event.type)).toEqual(['session/header'])
+      // The note is in the session so the next seq stays past it, but the torn
+      // file is left untouched until a later append can rewrite it.
+      expect(opened.events.map((event) => event.type)).toEqual([
+        'session/header',
+        'session/repaired',
+      ])
+      expect(await readFile(file, 'utf8')).toBe(before)
     } finally {
-      await chmod(fileOf(root, created.id), 0o600)
+      await chmod(directory, 0o700)
+    }
+  })
+
+  test('an append after a failed repair rewrites the kept lines instead of gluing the torn tail', async () => {
+    const { root, persistence } = isolated()
+    const created = await Effect.runPromise(persistence.create(header()))
+    const file = fileOf(root, created.id)
+    const directory = join(root, created.id)
+    const torn = '{"seq":2,"time":101,"type":"user/message"'
+    await appendFile(file, torn)
+    await chmod(directory, 0o500)
+    const opened = await Effect.runPromise(persistence.open(created.id))
+    await chmod(directory, 0o700)
+
+    await Effect.runPromise(
+      opened.sink.append({
+        seq: 3,
+        time: 102,
+        type: 'user/message',
+        data: { text: 'after', source: 'user' },
+      }),
+    )
+
+    const text = await readFile(file, 'utf8')
+    expect(text.includes(torn)).toBe(false)
+    const parsed = text
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { type: string; seq: number })
+    expect(parsed.map((event) => event.type)).toEqual([
+      'session/header',
+      'session/repaired',
+      'user/message',
+    ])
+    expect(parsed.map((event) => event.seq)).toEqual([1, 2, 3])
+    const again = await Effect.runPromise(persistence.open(created.id))
+    expect(again.events.map((event) => event.type)).toEqual([
+      'session/header',
+      'session/repaired',
+      'user/message',
+    ])
+  })
+
+  test('an append that cannot repair the torn log leaves the file unchanged', async () => {
+    const { root, persistence } = isolated()
+    const created = await Effect.runPromise(persistence.create(header()))
+    const file = fileOf(root, created.id)
+    const directory = join(root, created.id)
+    await appendFile(file, '{"seq":2,"time":101,"type":"user/message"')
+    await chmod(directory, 0o500)
+    const before = await readFile(file, 'utf8')
+
+    try {
+      const opened = await Effect.runPromise(persistence.open(created.id))
+      const error = await Effect.runPromise(
+        Effect.flip(
+          opened.sink.append({
+            seq: 3,
+            time: 102,
+            type: 'user/message',
+            data: { text: 'after', source: 'user' },
+          }),
+        ),
+      )
+
+      expect(error.message).toContain('cannot append')
+      expect(await readFile(file, 'utf8')).toBe(before)
+    } finally {
+      await chmod(directory, 0o700)
     }
   })
 

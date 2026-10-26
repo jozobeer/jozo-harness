@@ -12,21 +12,14 @@ import {
 } from '@jozo-harness/session'
 import { Effect } from 'effect'
 import type { Dirent } from 'node:fs'
-import {
-  appendFile,
-  mkdir,
-  open,
-  readdir,
-  readFile,
-  stat as statFile,
-  writeFile,
-} from 'node:fs/promises'
+import { appendFile, mkdir, open, readdir, readFile, stat as statFile } from 'node:fs/promises'
 import { upgradeHeaderLine } from './upgrade.ts'
 import { splitTornTail, type SplitLog } from './repair.ts'
 import { isMissing, notFound, persistenceError } from './errors.ts'
 import { readFirstLine } from './first-line.ts'
 import { readTitle } from './title.ts'
 import { expandHome, SESSION_FILE_NAME } from './paths.ts'
+import { replaceFile } from './replace-file.ts'
 import { join } from 'node:path'
 
 export interface JsonlSessionsOptions {
@@ -118,30 +111,45 @@ const upgradeFirstLine = (
     return event.data
   })
 
-const sinkFor = (path: string, id: SessionId): SessionSink => ({
-  append: (event) =>
-    Effect.tryPromise({
-      try: () => appendFile(path, JSON.stringify(event) + '\n'),
-      catch: (cause) => persistenceError(`cannot append to session ${id}`, cause),
-    }),
-  // The log is the only memory of a run, so a checkpoint waits for what was
-  // appended to reach the device. fsync covers the whole file, not one descriptor,
-  // so syncing a fresh append handle flushes the writes `appendFile` already made.
-  flush: () =>
-    Effect.tryPromise({
-      try: async () => {
-        // Open for update rather than append: a log that was deleted under the
-        // session must fail the checkpoint, not come back as an empty file.
-        const handle = await open(path, 'r+')
-        try {
-          await handle.sync()
-        } finally {
-          await handle.close()
-        }
-      },
-      catch: (cause) => persistenceError('cannot flush session ' + id, cause),
-    }),
-})
+const sinkFor = (path: string, id: SessionId, tornPrefix?: string): SessionSink => {
+  // Set when a repair could not be written. The next append rewrites this prefix
+  // first: appending would glue the new line onto the torn tail, and that line
+  // would then end in a newline, so the next open would parse it and refuse the log.
+  let pending = tornPrefix
+  return {
+    append: (event) =>
+      Effect.tryPromise({
+        try: async () => {
+          const line = JSON.stringify(event) + '\n'
+          const prefix = pending
+          if (prefix === undefined) {
+            await appendFile(path, line)
+            return
+          }
+          await replaceFile(path, prefix + line)
+          pending = undefined
+        },
+        catch: (cause) => persistenceError(`cannot append to session ${id}`, cause),
+      }),
+    // The log is the only memory of a run, so a checkpoint waits for what was
+    // appended to reach the device. fsync covers the whole file, not one descriptor,
+    // so syncing a fresh append handle flushes the writes `appendFile` already made.
+    flush: () =>
+      Effect.tryPromise({
+        try: async () => {
+          // Open for update rather than append: a log that was deleted under the
+          // session must fail the checkpoint, not come back as an empty file.
+          const handle = await open(path, 'r+')
+          try {
+            await handle.sync()
+          } finally {
+            await handle.close()
+          }
+        },
+        catch: (cause) => persistenceError('cannot flush session ' + id, cause),
+      }),
+  }
+}
 
 /** Stores each session as one JSONL file under `root/<id>/session.v1.jsonl`. */
 export function jsonlSessions(options: JsonlSessionsOptions): SessionPersistence {
@@ -187,27 +195,33 @@ export function jsonlSessions(options: JsonlSessionsOptions): SessionPersistence
         isMissing(cause) ? notFound(id) : persistenceError(`cannot look at session ${id}`, cause),
     })
 
-  /**
-   * Writes the kept prefix back, with a note that the log lost its torn tail. The
-   * note is an event of this log, so it comes back to the caller too: what the file
-   * holds and what the session holds must stay the same thing.
-   */
-  const repairLog = (
+  const openRepaired = (
     id: SessionId,
     split: SplitLog,
-    lastSeq: number,
-  ): Effect.Effect<SessionEvent, SessionError> => {
-    const note: SessionEvent = {
-      seq: lastSeq + 1,
-      time: Date.now(),
-      type: 'session/repaired',
-      data: { tornBytes: split.tornBytes },
-    }
-    return Effect.tryPromise({
-      try: () => writeFile(fileOf(id), split.keep + JSON.stringify(note) + '\n'),
-      catch: (cause) => persistenceError(`cannot repair session ${id}`, cause),
-    }).pipe(Effect.map(() => note))
-  }
+    events: ReadonlyArray<SessionEvent>,
+  ): Effect.Effect<OpenedSession, SessionError> =>
+    Effect.gen(function* () {
+      const lastSeq = events.reduce((most, event) => Math.max(most, event.seq), 0)
+      const note: SessionEvent = {
+        seq: lastSeq + 1,
+        time: Date.now(),
+        type: 'session/repaired',
+        data: { tornBytes: split.tornBytes },
+      }
+      const prefix = split.keep + JSON.stringify(note) + '\n'
+      const wrote = yield* Effect.tryPromise({
+        try: () => replaceFile(fileOf(id), prefix),
+        catch: (cause) => persistenceError(`cannot repair session ${id}`, cause),
+      }).pipe(Effect.match({ onFailure: () => false, onSuccess: () => true }))
+      // The note stays in the session when the disk write fails, so a later line
+      // does not reuse its seq. The sink then rewrites the kept prefix: appending
+      // onto the torn tail would hide every earlier line from the next open.
+      return {
+        id,
+        events: [...events, note],
+        sink: wrote ? sinkFor(fileOf(id), id) : sinkFor(fileOf(id), id, prefix),
+      }
+    })
 
   const open = (id: SessionId): Effect.Effect<OpenedSession, SessionError> =>
     Effect.gen(function* () {
@@ -222,16 +236,7 @@ export function jsonlSessions(options: JsonlSessionsOptions): SessionPersistence
       if (split.tornBytes === 0) {
         return { id, events: decoded.events, sink: sinkFor(fileOf(id), id) }
       }
-      const lastSeq = decoded.events.reduce((most, event) => Math.max(most, event.seq), 0)
-      // A repair that cannot be written still opens the session: the kept prefix is
-      // what matters, and a later append lands after the torn tail, which the next
-      // read repairs again.
-      const note = yield* repairLog(id, split, lastSeq).pipe(Effect.orElseSucceed(() => undefined))
-      return {
-        id,
-        events: note === undefined ? decoded.events : [...decoded.events, note],
-        sink: sinkFor(fileOf(id), id),
-      }
+      return yield* openRepaired(id, split, decoded.events)
     })
 
   const stat = (id: SessionId): Effect.Effect<SessionSummary, SessionError> =>
