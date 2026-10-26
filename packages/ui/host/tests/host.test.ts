@@ -350,6 +350,42 @@ describe('ui host', () => {
     )
   })
 
+  test('an event logged while history is read still reaches the subscriber', async () => {
+    const input = makeInput()
+    await withHost(input, (host) =>
+      Effect.gen(function* () {
+        yield* input.append('user/message', { text: 'before', source: 'user' })
+        // The snapshot is taken while the subscription is already live. An event
+        // published from that read used to miss the subscriber, because it was
+        // added only after every historical line had been queued.
+        let replayed = false
+        const stored = input.session.events.bind(input.session)
+        input.session.events = () => {
+          const snapshot = stored()
+          if (!replayed) {
+            replayed = true
+            const event = {
+              seq: snapshot.length + 1,
+              time: 1,
+              type: 'user/message',
+              data: { text: 'during', source: 'user' },
+            } as SessionEvent
+            Effect.runSync(input.hooks.emit('session/event', event, input.session))
+          }
+          return snapshot
+        }
+        const collected = yield* host.events.pipe(Stream.take(2), Stream.runCollect)
+        expect(
+          [...collected].flatMap((event) =>
+            event.kind === 'session' && event.event.type === 'user/message'
+              ? [(event.event.data as { text: string }).text]
+              : [],
+          ),
+        ).toEqual(['before', 'during'])
+      }),
+    )
+  })
+
   test('an approval waits for the command and the command answers it', async () => {
     const input = makeInput()
     await withHost(input, (host) =>
