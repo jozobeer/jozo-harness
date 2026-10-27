@@ -539,7 +539,7 @@ const tier1ToolList = (
     const sessionOf = (sessionId: string) => agents.get(sessionId)?.session
     const outputs = makeStructuredOutputs()
     list.push(
-      makeSubagentTool({ agents, route, routes, outputs }),
+      makeSubagentTool({ agents, route, outputs, ...(routes === undefined ? {} : { routes }) }),
       makeStructuredOutputTool(outputs),
       ...agentTools(agents),
       makeWorkflowTool({ agents, route }),
