@@ -332,7 +332,7 @@ team update id=task-1 state=done revision=1
 
 `team list` が roster（子の状態つき）と板を出す。板の revision は更新のたびに増え、古い revision での update は拒否される。
 
-子を 1 つだけ使うときは `subagent` で足りる。`model` で別の route（`provider/model`）を走らせ、`context=fresh` で親の履歴を渡さず、`task` を省くと起こしたまま idle で残せる（あとから `send_message` で仕事を渡す）。
+子を 1 つだけ使うときは `subagent` で足りる。`model` で別の route（`provider/model`）を走らせられるが、その run が設定に置いている route に限る。候補はその run の既定 route と、`agent-loop` 行の `models` が値を持つモデル名（既定 route が provider を持つなら `<provider>/<model>` の形も）である。一覧に無い route は子を起こす前に `invalid-arguments` で拒否する。`context=fresh` で親の履歴を渡さず、`task` を省くと起こしたまま idle で残せる（あとから `send_message` で仕事を渡す）。
 
 ## モデルにプログラムを書かせて tool を束ねる（run_code）
 
