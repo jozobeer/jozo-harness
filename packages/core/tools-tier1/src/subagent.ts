@@ -20,7 +20,8 @@ const Parameters = Schema.Struct({
   ),
   model: Schema.optionalKey(
     Schema.String.annotate({
-      description: "The route the child runs on, provider/model. Defaults to this agent's route.",
+      description:
+        "The route the child runs on, provider/model. It has to be one this run offers. Defaults to this agent's route.",
     }),
   ),
   context: Schema.optionalKey(
@@ -43,17 +44,44 @@ const Parameters = Schema.Struct({
   ),
 })
 
-/** The route a child runs on: the one asked for, checked, or this agent's own. */
-const routeFor = (asked: string | undefined, fallback: string): string | ToolError => {
-  if (asked === undefined) return fallback
+/** The asked route with the repeated separator taken out, when it names a provider and a model. */
+const shapedRoute = (asked: string): string | undefined => {
   const slash = asked.indexOf('/')
-  if (slash <= 0 || slash === asked.length - 1) {
+  if (slash <= 0 || slash === asked.length - 1) return undefined
+  return asked.slice(0, slash) + '/' + asked.slice(slash + 1)
+}
+
+/** The refusal a run gives a route it does not offer children. */
+const routeRefusal = (route: string, offered: ReadonlyArray<string>): ToolError =>
+  new ToolError({
+    code: 'invalid-arguments',
+    message:
+      'not a route this run offers children: ' +
+      route +
+      (offered.length === 0 ? '' : ' (offered: ' + offered.join(', ') + ')'),
+  })
+
+/** The route a child runs on: the one asked for, checked against what the run offers, or this agent's own. */
+const routeFor = (
+  asked: string | undefined,
+  fallback: string,
+  offered: ReadonlyArray<string> | undefined,
+): string | ToolError => {
+  if (asked === undefined) return fallback
+  // The run's own settings name routes both with and without a provider, so an
+  // offered route is taken exactly as the run spells it.
+  if (offered?.includes(asked) === true) return asked
+  const route = shapedRoute(asked)
+  if (route === undefined) {
     return new ToolError({
       code: 'invalid-arguments',
       message: 'a route names a provider and a model, like provider/model: ' + asked,
     })
   }
-  return asked.slice(0, slash) + '/' + asked.slice(slash + 1)
+  // A host that cannot list its routes leaves the shape as the only check, so a
+  // child can still be pointed at a route the host did not enumerate.
+  if (offered !== undefined && !offered.includes(route)) return routeRefusal(route, offered)
+  return route
 }
 
 export type SubagentArgs = Schema.Schema.Type<typeof Parameters>
@@ -72,6 +100,12 @@ export interface SubagentValue {
 export interface SubagentHost {
   readonly agents: AgentsShape
   readonly route: string
+  /**
+   * The routes this run lets a child take, as the run's model settings name
+   * them. A host without the list checks only the shape, because it has
+   * nothing to offer the model.
+   */
+  readonly routes?: ReadonlyArray<string>
   /**
    * The agent presets this host offers children: `allowed` names what the
    * model may ask for, and `default` is what it gets when it asks for nothing.
@@ -231,7 +265,7 @@ export const makeSubagentTool = (
       Effect.gen(function* () {
         const refused = delegationRefusal(agents, context.sessionId)
         if (refused !== undefined) return yield* Effect.fail(refused)
-        const route = routeFor(args.model, host.route)
+        const route = routeFor(args.model, host.route, host.routes)
         if (route instanceof ToolError) return yield* Effect.fail(route)
         const preset = presetFor(args.preset, host.presets)
         if (preset instanceof ToolError) return yield* Effect.fail(preset)

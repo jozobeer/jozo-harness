@@ -281,6 +281,33 @@ const stringFromRows = (rows: ReadonlyArray<PluginRow>, key: string): string => 
 /** A profile may carry the route on a row's config, as model: provider/model. */
 const routeFromRows = (rows: ReadonlyArray<PluginRow>): string => stringFromRows(rows, MODEL_KEY)
 
+/**
+ * The routes this run lets a child take: the one the run started with, and the
+ * models the agent-loop row prices. A row that names no models still offers the
+ * parent's route, so a child can always stay where the parent runs.
+ */
+const childRoutes = (rows: ReadonlyArray<PluginRow>, route: string): ReadonlyArray<string> => {
+  // A route without a provider has no provider to prefix a configured model with.
+  const provider = route.indexOf('/') < 0 ? '' : route.slice(0, route.indexOf('/'))
+  return [
+    ...new Set([
+      ...(route === '' ? [] : [route]),
+      ...rows.flatMap(modelsOfRow).flatMap((model) => routesOfModel(model, provider)),
+    ]),
+  ]
+}
+
+/** The model names one row prices, as the agent-loop row spells them. */
+const modelsOfRow = (row: PluginRow): ReadonlyArray<string> => {
+  if (row.name !== '@jozo-harness/agent-loop' || !isRecord(row.config)) return []
+  const models = row.config['models']
+  return isRecord(models) ? Object.keys(models) : []
+}
+
+/** A priced model is offered as it is spelled and under the provider the run runs on. */
+const routesOfModel = (model: string, provider: string): ReadonlyArray<string> =>
+  model.includes('/') || provider === '' ? [model] : [model, provider + '/' + model]
+
 /** A profile may carry the effort on a row's config, as effort: high. */
 const effortFromRows = (rows: ReadonlyArray<PluginRow>): string => stringFromRows(rows, EFFORT_KEY)
 
@@ -408,6 +435,7 @@ const installTier1 = (
       options,
       agent,
       route,
+      childRoutes(rows, route),
       agents,
       jobs,
       skills,
@@ -436,6 +464,8 @@ const tier1ToolList = (
   options: CommandOptions,
   agent: Agent,
   route: string,
+  /** The routes a child may take, as this run's settings name them. */
+  routes: ReadonlyArray<string>,
   agents: AgentsShape,
   jobs: JobsShape,
   skills: ReadonlyArray<string>,
@@ -507,7 +537,7 @@ const tier1ToolList = (
     const sessionOf = (sessionId: string) => agents.get(sessionId)?.session
     const outputs = makeStructuredOutputs()
     list.push(
-      makeSubagentTool({ agents, route, outputs }),
+      makeSubagentTool({ agents, route, routes, outputs }),
       makeStructuredOutputTool(outputs),
       ...agentTools(agents),
       makeWorkflowTool({ agents, route }),

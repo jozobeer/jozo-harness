@@ -147,19 +147,56 @@ describe('subagent tool', () => {
     expect(seen[0]?.cwd).toBe('/elsewhere')
   })
 
-  test('a child can run on another route', async () => {
+  test('a child can run on another route the run offers', async () => {
     const seen: Array<Created> = []
     const result = await Effect.runPromise(
       call(
         makeSubagentTool({
           agents: fakeAgents(seen, 'child says hi'),
           route: 'stub/model',
+          routes: ['stub/model', 'other/cheap-model'],
         }),
         { task: 'look around', model: 'other/cheap-model' },
       ),
     )
 
     expect(seen[0]?.route).toBe('other/cheap-model')
+    expect(result?.isError).toBe(false)
+  })
+
+  test('a route the run does not offer refuses before a child starts', async () => {
+    const seen: Array<Created> = []
+    const result = await Effect.runPromise(
+      call(
+        makeSubagentTool({
+          agents: fakeAgents(seen, 'child says hi'),
+          route: 'stub/model',
+          routes: ['stub/model', 'other/cheap-model'],
+        }),
+        { task: 'look around', model: 'other/unlisted' },
+      ),
+    )
+
+    expect(result?.isError).toBe(true)
+    expect(JSON.stringify(result?.content)).toContain('not a route this run offers children')
+    expect(JSON.stringify(result?.content)).toContain('offered: stub/model, other/cheap-model')
+    expect(seen).toEqual([])
+  })
+
+  test('the route of the parent is taken as the run spells it', async () => {
+    const seen: Array<Created> = []
+    const result = await Effect.runPromise(
+      call(
+        makeSubagentTool({
+          agents: fakeAgents(seen, 'ok'),
+          route: 'deepseek-v4.1-flash',
+          routes: ['deepseek-v4.1-flash'],
+        }),
+        { task: 'look around', model: 'deepseek-v4.1-flash' },
+      ),
+    )
+
+    expect(seen[0]?.route).toBe('deepseek-v4.1-flash')
     expect(result?.isError).toBe(false)
   })
 
