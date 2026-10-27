@@ -309,6 +309,12 @@ sudo apparmor_parser -r /etc/apparmor.d/bwrap
 bwrap --ro-bind / / --dev /dev --proc /proc --unshare-pid true && echo ok
 ```
 
+## PowerShell でコマンドを走らせる
+
+`bash` tool は `shell` 引数で PowerShell を選べる。既定は `bash` で、`shell: powershell` を渡すと `pwsh -NoProfile -Command <script>` として走る。sandbox は bash と同じで、`sandbox-exec` / `bwrap` の内側で `pwsh` が起動する。
+
+`pwsh` が PATH に無い環境では、その呼び出しは理由を添えた `execution` の tool 失敗になる。turn は落ちないので、モデルは `shell: bash` でやり直せる。
+
 ## チームで分担させる
 
 `ralph` は `--subagents` を要さず、tier1 行がある run で既定でモデルに渡る。objective と前 round の handoff だけを受け取る fresh な子を round ごとに起こすので、親の会話を長期記憶にしない反復に向く。通常の長い仕事は同じ session を続ける `goal` を使う。
