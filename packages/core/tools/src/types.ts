@@ -11,6 +11,8 @@ export const TOOL_ERROR_CODES = [
   'denied',
   'duplicate-tool',
   'execution',
+  // The run has no backend for what the call asked for; the same call may work elsewhere.
+  'unavailable',
 ] as const
 
 export type ToolErrorCode = (typeof TOOL_ERROR_CODES)[number]
