@@ -23,9 +23,29 @@ export interface ShellSession {
   readonly close: () => void
 }
 
+/**
+ * The confinement a live shell was spawned with. The process stays inside it for
+ * its whole life, so a later call can reuse the shell only when it matches.
+ */
+export interface ShellLaunch {
+  readonly shell: 'bash' | 'powershell'
+  readonly mode: string
+  readonly cwd: string
+}
+
+/** A shell the call can use, or the live one it must not reuse. */
+export type OpenedSession =
+  | { readonly kind: 'ready'; readonly session: ShellSession }
+  | { readonly kind: 'mismatch'; readonly launch: ShellLaunch }
+
 export interface ShellSessions {
-  /** The live shell under this name, started by `start` when there is none. */
-  readonly open: (name: string, start: () => Child) => ShellSession
+  /** The launch of the live shell under this name, when one is still running. */
+  readonly launchOf: (name: string) => ShellLaunch | undefined
+  /**
+   * The live shell under this name, started by `start` when there is none.
+   * A live shell whose launch differs is not started over and not reused.
+   */
+  readonly open: (name: string, launch: ShellLaunch, start: () => Child) => OpenedSession
   /** Whether a live shell is held under this name. */
   readonly has: (name: string) => boolean
   /** Ends every held shell; a run calls this when it stops. */
@@ -79,6 +99,15 @@ interface Live {
   readonly child: Child
   readonly session: ShellSession
 }
+
+interface Held {
+  readonly launch: ShellLaunch
+  readonly live: Live
+}
+
+/** True when a later call would run inside the same confinement the shell was spawned with. */
+const sameLaunch = (running: ShellLaunch, next: ShellLaunch): boolean =>
+  running.shell === next.shell && running.mode === next.mode && running.cwd === next.cwd
 
 /** One live shell: the process, the buffers it fills, and the call waiting on its end. */
 const liveOf = (child: Child, forget: () => void): Live => {
@@ -179,29 +208,38 @@ const liveOf = (child: Child, forget: () => void): Live => {
 
 /** The shells one run keeps alive, by the name each call asked for. */
 export const makeShellSessions = (): ShellSessions => {
-  const held = new Map<string, Live>()
+  const held = new Map<string, Held>()
 
   const closeAll = (): void => {
     // A close drops its own entry, which a Map allows while it is being walked.
-    for (const live of held.values()) live.session.close()
+    for (const entry of held.values()) entry.live.session.close()
     held.clear()
   }
 
+  const liveHeld = (name: string): Held | undefined => {
+    const entry = held.get(name)
+    if (entry === undefined || entry.live.session.ended) return undefined
+    return entry
+  }
+
   return {
-    open: (name, start) => {
-      const existing = held.get(name)
-      if (existing !== undefined && !existing.session.ended) return existing.session
+    launchOf: (name) => liveHeld(name)?.launch,
+    open: (name, launch, start) => {
+      const existing = liveHeld(name)
+      // The running process cannot be re-wrapped, so a different launch is refused.
+      if (existing !== undefined) {
+        return sameLaunch(existing.launch, launch)
+          ? { kind: 'ready', session: existing.live.session }
+          : { kind: 'mismatch', launch: existing.launch }
+      }
       const live = liveOf(start(), () => {
         const current = held.get(name)
-        if (current !== undefined && current.session.ended) held.delete(name)
+        if (current !== undefined && current.live.session.ended) held.delete(name)
       })
-      held.set(name, live)
-      return live.session
+      held.set(name, { launch, live })
+      return { kind: 'ready', session: live.session }
     },
-    has: (name) => {
-      const live = held.get(name)
-      return live !== undefined && !live.session.ended
-    },
+    has: (name) => liveHeld(name) !== undefined,
     closeAll,
   }
 }

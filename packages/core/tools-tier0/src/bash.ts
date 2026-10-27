@@ -16,7 +16,14 @@ import {
 } from '@jozo-harness/safety'
 import { spawn, type Child } from '@jozo-harness/process'
 import { escalates, escalationFields, modeOfCall } from './escalation.ts'
-import { makeShellSessions, sessionArgv, type ShellSession, type ShellSessions } from './shells.ts'
+import {
+  makeShellSessions,
+  sessionArgv,
+  type OpenedSession,
+  type ShellLaunch,
+  type ShellSession,
+  type ShellSessions,
+} from './shells.ts'
 import { resolveInside } from './workspace.ts'
 import { exitSummaryOf } from './present.ts'
 
@@ -110,7 +117,7 @@ const Parameters = Schema.Struct({
   session: Schema.optionalKey(
     Schema.String.annotate({
       description:
-        'Keep one shell alive under this name, so the next call with the same name still sees its directory and variables. Omit it for a shell of its own that ends with the call.',
+        'Keep one shell alive under this name, so the next call with the same name still sees its directory and variables, when it uses the same shell, directory, and sandbox mode. A different one is refused. Omit it for a shell of its own that ends with the call.',
     }),
   ),
   ...escalationFields('a command', 'command'),
@@ -152,9 +159,10 @@ interface Run {
 const openSession = (
   sessions: ShellSessions,
   session: string,
+  launch: ShellLaunch,
   wrapped: { readonly argv: ReadonlyArray<string>; readonly cwd: string },
-): ReturnType<ShellSessions['open']> =>
-  sessions.open(session, () =>
+): OpenedSession =>
+  sessions.open(session, launch, () =>
     spawn([...wrapped.argv], {
       cwd: wrapped.cwd,
       stdin: 'pipe',
@@ -162,6 +170,67 @@ const openSession = (
       stderr: 'pipe',
     }),
   )
+
+/**
+ * Why a call cannot reuse a session. The process was spawned inside one sandbox,
+ * so a later call that names another shell, directory, or mode would skip the
+ * confinement this call just computed.
+ */
+const sessionReuseRefusal = (name: string, launch: ShellLaunch): string =>
+  'session ' +
+  name +
+  ' is already a ' +
+  launch.shell +
+  ' shell under ' +
+  launch.mode +
+  ' in ' +
+  launch.cwd +
+  '. A different shell, directory, or sandbox mode needs a new session name.'
+
+/**
+ * A refusal known before approval. An explicit wider mode that the live shell
+ * cannot apply is refused here, so the user is not asked to approve a call that
+ * will not run.
+ */
+const reusedSessionRefusal = (
+  sessions: ShellSessions,
+  name: string | undefined,
+  shell: ShellLaunch['shell'],
+  cwd: string,
+  requested: string | undefined,
+): ToolError | undefined => {
+  if (name === undefined) return undefined
+  const running = sessions.launchOf(name)
+  if (running === undefined) return undefined
+  if (
+    running.shell === shell &&
+    running.cwd === cwd &&
+    (requested === undefined || requested === running.mode)
+  ) {
+    return undefined
+  }
+  return new ToolError({ code: 'invalid-arguments', message: sessionReuseRefusal(name, running) })
+}
+
+/** The live shell for this call, or a refusal when its launch does not match. */
+const adoptSession = (
+  sessions: ShellSessions,
+  name: string | undefined,
+  launch: ShellLaunch,
+  wrapped: { readonly argv: ReadonlyArray<string>; readonly cwd: string },
+): Effect.Effect<ShellSession | undefined, ToolError> => {
+  if (name === undefined) return Effect.succeed(undefined)
+  const opened = openSession(sessions, name, launch, wrapped)
+  if (opened.kind === 'mismatch') {
+    return Effect.fail(
+      new ToolError({
+        code: 'invalid-arguments',
+        message: sessionReuseRefusal(name, opened.launch),
+      }),
+    )
+  }
+  return Effect.succeed(opened.session)
+}
 
 /** The output of a child that has stopped, read without locking the streams of one still running. */
 const outputOf = async (child: Child): Promise<{ stdout: string; stderr: string }> => {
@@ -318,7 +387,7 @@ export const makeBashTool = (
     }),
     presentResult: (_args, result) => ({ ...result, summary: exitSummaryOf(result.summary) }),
     description:
-      'Runs a shell command in the workspace through the configured sandbox and returns what it printed. The shell is bash unless the call asks for powershell, which needs pwsh installed. Check the [exit code: N] marker: a non-zero exit means the command failed. A command still running at the timeout is handed to a background job and marked with its id, so read it with job_output; without a job registry it is killed and marked. Pass session to keep one shell alive between calls: the next call with the same name starts from that directory and those variables. A call that times out in a session ends that shell. When the output was spilled, read the saved file with offset and limit to see the rest.' +
+      'Runs a shell command in the workspace through the configured sandbox and returns what it printed. The shell is bash unless the call asks for powershell, which needs pwsh installed. Check the [exit code: N] marker: a non-zero exit means the command failed. A command still running at the timeout is handed to a background job and marked with its id, so read it with job_output; without a job registry it is killed and marked. Pass session to keep one shell alive between calls: the next call with the same name starts from that directory and those variables, but only if it names the same shell, directory, and sandbox mode. Anything else is refused and needs a new session name. A call that times out in a session ends that shell. When the output was spilled, read the saved file with offset and limit to see the rest.' +
       (sandbox.confines
         ? ' A file effect the sandbox refuses is reported as `[sandbox: file access denied under <mode> mode]`: that is a policy denial, so do not retry another way.'
         : ''),
@@ -349,6 +418,14 @@ export const makeBashTool = (
         }
         const cwd =
           args.cwd === undefined ? context.cwd : yield* resolveInside(context.cwd, args.cwd)
+        const refused = reusedSessionRefusal(
+          sessions,
+          args.session,
+          shell,
+          cwd,
+          args.sandbox_permissions,
+        )
+        if (refused !== undefined) return yield* Effect.fail(refused)
         const mode = yield* modeOfCall({
           args: args,
           callId: context.callId,
@@ -373,11 +450,14 @@ export const makeBashTool = (
         // A sandbox that refuses the command is an infrastructure failure; a command
         // that runs and exits non-zero is not.
         const timeoutMs = clampTimeout(args.timeoutMs)
+        // The mode is known only after approval, so a standing mode the live shell
+        // was not spawned with is refused here, before the command is written.
+        const session = yield* adoptSession(sessions, args.session, { shell, mode, cwd }, wrapped)
         const run = yield* Effect.tryPromise({
           try: () =>
-            args.session === undefined
+            session === undefined
               ? runWrapped(wrapped, timeoutMs, args.command, jobs)
-              : runInSession(openSession(sessions, args.session, wrapped), args.command, timeoutMs),
+              : runInSession(session, args.command, timeoutMs),
           catch: () => new ToolError({ code: 'execution', message: 'cannot run: ' + args.command }),
         })
         return {
