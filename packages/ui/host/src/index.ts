@@ -6,12 +6,52 @@ import {
   type CommandsShape,
   type Session,
   type SessionError,
+  type SessionEvent,
 } from '@jozo-harness/session'
 import { loadSkill, type LoadedSkill } from '@jozo-harness/tools-tier1'
 import type { SubmitMode, UiEvent, UiHost } from '@jozo-harness/ui-protocol'
 import { Deferred, Effect, Queue, Stream, type Scope } from 'effect'
 
 export type { UiHost } from '@jozo-harness/ui-protocol'
+
+/** One live subscription. History is queued before `replaying` flips, so events that arrive during the replay stay behind it. */
+interface Subscriber {
+  readonly queue: Queue.Queue<UiEvent>
+  replaying: boolean
+  readonly pending: Array<UiEvent>
+}
+
+/** True when this live event is already in the history snapshot just queued. */
+const alreadyQueued = (event: UiEvent, seen: ReadonlySet<number>): boolean =>
+  event.kind === 'session' && seen.has(event.event.seq)
+
+/**
+ * Moves events buffered during the replay onto the queue, behind the history.
+ * The handoff does not yield, so a publish cannot land between the buffer and the flag.
+ */
+const releaseReplay = (subscriber: Subscriber, seen: ReadonlySet<number>): void => {
+  while (subscriber.pending.length > 0) {
+    const caught = subscriber.pending.splice(0)
+    for (const event of caught) {
+      if (alreadyQueued(event, seen)) continue
+      Queue.offerUnsafe(subscriber.queue, event)
+    }
+  }
+  subscriber.replaying = false
+}
+
+/** Queues the snapshot, then anything that arrived while that was happening. */
+const queueHistory = (
+  subscriber: Subscriber,
+  history: ReadonlyArray<SessionEvent>,
+): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const seen = new Set(history.map((event) => event.seq))
+    for (const event of history) {
+      yield* Queue.offer(subscriber.queue, { kind: 'session', event })
+    }
+    releaseReplay(subscriber, seen)
+  })
 
 export interface MakeUiHostOptions {
   readonly session: Session
@@ -37,12 +77,15 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
     // Closing it here keeps the page from drawing a dead approval card or a
     // running marker that no answer can clear.
     yield* repairInterruptedRun(options.agent)
-    const subscribers = new Set<Queue.Queue<UiEvent>>()
+    const subscribers = new Set<Subscriber>()
     const approvals = new Map<string, Deferred.Deferred<boolean>>()
     const asks = new Map<string, Deferred.Deferred<string>>()
 
     const publish = (event: UiEvent): void => {
-      for (const queue of subscribers.values().toArray()) Queue.offerUnsafe(queue, event)
+      for (const subscriber of subscribers.values().toArray()) {
+        if (subscriber.replaying) subscriber.pending.push(event)
+        else Queue.offerUnsafe(subscriber.queue, event)
+      }
     }
 
     yield* options.hooks.on('session/event', (event, session) => {
@@ -171,15 +214,16 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
         Stream.unwrap(
           Effect.gen(function* () {
             const queue = yield* Queue.unbounded<UiEvent>()
-            for (const event of options.session.events()) {
-              yield* Queue.offer(queue, { kind: 'session', event })
-            }
-            subscribers.add(queue)
+            // Subscribe before the snapshot. An event that lands while history is
+            // queued would otherwise miss this subscriber and never be delivered.
+            const subscriber: Subscriber = { queue, replaying: true, pending: [] }
+            subscribers.add(subscriber)
             yield* Effect.addFinalizer(() =>
               Effect.sync(() => {
-                subscribers.delete(queue)
+                subscribers.delete(subscriber)
               }),
             )
+            yield* queueHistory(subscriber, options.session.events())
             return Stream.fromQueue(queue)
           }),
         ),
