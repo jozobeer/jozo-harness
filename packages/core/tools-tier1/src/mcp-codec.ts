@@ -64,7 +64,9 @@ export const decodeResponse = (line: string): McpResponse | undefined => {
     : { jsonrpc: '2.0', id: envelope.id, error }
 }
 
-/** The MCP handshake and the two calls v1 uses. */
+/** The MCP handshake and the calls v1 uses. */
 export const INITIALIZE = 'initialize'
 export const TOOLS_LIST = 'tools/list'
 export const TOOLS_CALL = 'tools/call'
+export const RESOURCES_LIST = 'resources/list'
+export const RESOURCES_READ = 'resources/read'
