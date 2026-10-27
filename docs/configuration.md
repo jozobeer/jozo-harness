@@ -69,6 +69,8 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 
 `@jozo-harness/artifact` はキーを持たない。行を足すと、そのセッションのモデルに `artifact` tool が渡り、モデルは 1 枚の HTML ページを session root の隣の `artifacts/<sessionId>/<name>.html` に書ける。ページは `images` に渡した png / jpeg / webp / gif のパスを data URL に畳んだ 1 ファイルで（1 枚 2MB・合計 10MB まで）、`http://` / `https://` / `//` の外部サブリソースを参照する HTML は保存時に拒否する。preset が `read-only` の run では書かず、`denied` を返す。配信は jzh web の `/artifact/<sessionId>/<name>` が行う。同梱 profile に入れていないのは、ページを書かないセッションの tool 一覧を太らせないためである（既定では入らない）。
 
+`@jozo-harness/lsp` もキーを持たない。行を足すと `lsp` tool が渡り、モデルは `action`（`definition` / `references` / `implementation` / `hover`）と 1 始まりの `line` / `column` でファイルの位置を聞ける。この版はまだ言語サーバを起動しないため、どの拡張子でも呼び出しは `unavailable` と「その拡張子の言語サーバがこの run に無い」を返す。既定で入れていないのは、`artifact` と同じく全セッションの tool 一覧を太らせないためである。
+
 同梱の `base` profile は `root` に `~/.jzh/sessions`、`preset` に `workspace-write`、`baseUrl` に `https://ollama.com/v1`、`localBaseUrl` に `http://127.0.0.1:11434/v1`、`apiKeyEnv` に `OLLAMA_API_KEY` を置いている。`localBaseUrl` があるので送信は常に local daemon へ行き、`baseUrl` は `jzh models` の一覧取得に使う。`agent-loop` 行は既定ルート `deepseek-v4.1-flash` の窓を 1048576、出力予約を 393216 とし、発火点を 589824 にする。`models` のキーは route の model 名であり、local daemon へ送るときだけ付く `:cloud` は含めない。route に local daemon の名前（`deepseek-v4.1-flash:cloud`）を明示した場合のために、同じ値を持つキーも置いている。
 
 発火点は `min(窓 × thresholdRatio, 窓 − maxTokens − headroomTokens)` である。既定ルートでは 1M の窓から 589824 になり、60k 程度のセッションは compaction しない。`--model` で別のモデルに変えたときは `models` のそのモデルの値を使い、名前が無ければ単一の `contextWindow` と `maxTokens` に落ちる。窓が分からないモデルでは 128000 を使う。

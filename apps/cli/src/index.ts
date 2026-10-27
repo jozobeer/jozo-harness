@@ -105,6 +105,7 @@ import {
   TEAM_IDENTITY_CONTEXT_ORDER,
   delegationLine,
   ArtifactTools,
+  LspTools,
   teamIdentityLine,
   teamIdentityOf,
   makeScheduleTool,
@@ -859,6 +860,13 @@ const planModeFromProfile = (
  * The artifact row is opt-in, and its page belongs beside the sessions root, so it
  * takes that root from the profile rather than one of its own.
  */
+/** The lsp tool is opt-in: a run that does not name the row never sees it. */
+const installLsp = (tools: ToolRegistry, wiring: ProfileWiring) =>
+  Effect.gen(function* () {
+    if (!hasEnabledRow(wiring.rows, '@jozo-harness/lsp')) return
+    for (const tool of Context.get(wiring.context, LspTools)) yield* tools.register(tool)
+  })
+
 const installArtifact = (tools: ToolRegistry, wiring: ProfileWiring) =>
   Effect.gen(function* () {
     if (!hasEnabledRow(wiring.rows, '@jozo-harness/artifact')) return
@@ -936,6 +944,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
       yield* installDelegationContext(wiring)
       yield* installTeamIdentityContext(wiring)
     }
+    yield* installLsp(tools, wiring)
     yield* installArtifact(tools, wiring)
     // A failed provider attempt is retried for the codes the loop row lists; the
     // loop only decides what to do when a listener answers, so this is the wiring
