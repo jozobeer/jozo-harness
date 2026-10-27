@@ -3,6 +3,7 @@ export * from './write.ts'
 export * from './workspace.ts'
 export * from './present.ts'
 export * from './bash.ts'
+export * from './shells.ts'
 export * from './edit.ts'
 export * from './glob.ts'
 export * from './grep.ts'
@@ -19,6 +20,7 @@ import { makeEditTool } from './edit.ts'
 import { globTool } from './glob.ts'
 import { grepTool } from './grep.ts'
 import { makeBashTool, type TimeoutJobs } from './bash.ts'
+import type { ShellSessions } from './shells.ts'
 import { makeObservedFiles, type ObservedFiles } from './observed-files.ts'
 import { makeWorktreeTool, type WorktreeHost } from './worktree.ts'
 
@@ -34,13 +36,15 @@ export const tier0Tools = (
   jobs?: TimeoutJobs,
   /** Present when the session can change its workspace; the worktree tool needs it. */
   worktree?: WorktreeHost,
+  /** The shells a named bash session keeps alive; the run closes them when it ends. */
+  sessions?: ShellSessions,
 ): ReadonlyArray<ToolDefinition<any, any>> => [
   makeReadTool(observed),
   makeWriteTool(observed, sandbox, approval),
   makeEditTool(observed, sandbox, approval),
   globTool,
   grepTool,
-  makeBashTool(sandbox, approval, jobs),
+  makeBashTool(sandbox, approval, jobs, undefined, sessions),
   ...(worktree === undefined ? [] : [makeWorktreeTool(sandbox, approval, worktree)]),
 ]
 export * from './plugin.ts'
