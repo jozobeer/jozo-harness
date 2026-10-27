@@ -55,7 +55,12 @@ import {
   type SessionError,
   type TokenBudget,
 } from '@jozo-harness/session'
-import { Tier0Tools, type Tier0ToolBuilder, type WorktreeHost } from '@jozo-harness/tools-tier0'
+import {
+  Tier0Tools,
+  makeShellSessions,
+  type Tier0ToolBuilder,
+  type WorktreeHost,
+} from '@jozo-harness/tools-tier0'
 import {
   agentLoopConfigSchema,
   checkpointHelpersFor,
@@ -398,8 +403,14 @@ const installTier0 = (
   worktree: WorktreeHost,
 ) =>
   Effect.gen(function* () {
+    // A named bash session keeps one shell alive across calls; the run's scope is
+    // what ends it, so a session cannot outlive the run that opened it.
+    const sessions = yield* Effect.acquireRelease(
+      Effect.sync(() => makeShellSessions()),
+      (held) => Effect.sync(() => held.closeAll()),
+    )
     // The registry lets a timed-out bash call keep running as a job instead of dying.
-    for (const tool of tier0(approval, jobs, worktree)) yield* tools.register(tool)
+    for (const tool of tier0(approval, jobs, worktree, sessions)) yield* tools.register(tool)
   })
 
 /** Tier 1 tools ask the user; their questions and answers join the log. */

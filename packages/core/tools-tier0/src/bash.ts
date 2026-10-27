@@ -16,6 +16,7 @@ import {
 } from '@jozo-harness/safety'
 import { spawn, type Child } from '@jozo-harness/process'
 import { escalates, escalationFields, modeOfCall } from './escalation.ts'
+import { makeShellSessions, sessionArgv, type ShellSession, type ShellSessions } from './shells.ts'
 import { resolveInside } from './workspace.ts'
 import { exitSummaryOf } from './present.ts'
 
@@ -106,6 +107,12 @@ const Parameters = Schema.Struct({
         'The shell that runs the command, inside the same sandbox either way. Defaults to bash; powershell runs it through pwsh -NoProfile -Command.',
     }),
   ),
+  session: Schema.optionalKey(
+    Schema.String.annotate({
+      description:
+        'Keep one shell alive under this name, so the next call with the same name still sees its directory and variables. Omit it for a shell of its own that ends with the call.',
+    }),
+  ),
   ...escalationFields('a command', 'command'),
 })
 
@@ -140,6 +147,21 @@ interface Run {
   readonly timeoutMs: number
   readonly jobId?: string
 }
+
+/** A live shell of the named session, started by the sandbox-wrapped argv the first call built. */
+const openSession = (
+  sessions: ShellSessions,
+  session: string,
+  wrapped: { readonly argv: ReadonlyArray<string>; readonly cwd: string },
+): ReturnType<ShellSessions['open']> =>
+  sessions.open(session, () =>
+    spawn([...wrapped.argv], {
+      cwd: wrapped.cwd,
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    }),
+  )
 
 /** The output of a child that has stopped, read without locking the streams of one still running. */
 const outputOf = async (child: Child): Promise<{ stdout: string; stderr: string }> => {
@@ -230,6 +252,16 @@ const runWrapped = async (
     ? runToKill(wrapped, timeoutMs)
     : runToPromote(wrapped, timeoutMs, command, jobs)
 
+/**
+ * Runs the command in a live session. A timeout ends that shell: a command still
+ * running when the call returns would write into the next call's output.
+ */
+const runInSession = async (
+  session: ShellSession,
+  command: string,
+  timeoutMs: number,
+): Promise<Run> => ({ ...(await session.run(command, timeoutMs)), timeoutMs })
+
 /** The output as the model reads it, before anything is said about the run. */
 const bodyOf = (value: BashValue): string => {
   if (value.stderr === '') {
@@ -275,6 +307,8 @@ export const makeBashTool = (
   approval?: ApprovalShape,
   jobs?: TimeoutJobs,
   shells: ShellAvailability = shellOnPath,
+  /** The live shells a named session keeps; one run owns them and closes them at its end. */
+  sessions: ShellSessions = makeShellSessions(),
 ): ToolDefinition<BashArgs, BashValue> => {
   const canEscalate = escalates(sandbox, approval)
   return {
@@ -284,7 +318,7 @@ export const makeBashTool = (
     }),
     presentResult: (_args, result) => ({ ...result, summary: exitSummaryOf(result.summary) }),
     description:
-      'Runs a shell command in the workspace through the configured sandbox and returns what it printed. The shell is bash unless the call asks for powershell, which needs pwsh installed. Check the [exit code: N] marker: a non-zero exit means the command failed. A command still running at the timeout is handed to a background job and marked with its id, so read it with job_output; without a job registry it is killed and marked. When the output was spilled, read the saved file with offset and limit to see the rest.' +
+      'Runs a shell command in the workspace through the configured sandbox and returns what it printed. The shell is bash unless the call asks for powershell, which needs pwsh installed. Check the [exit code: N] marker: a non-zero exit means the command failed. A command still running at the timeout is handed to a background job and marked with its id, so read it with job_output; without a job registry it is killed and marked. Pass session to keep one shell alive between calls: the next call with the same name starts from that directory and those variables. A call that times out in a session ends that shell. When the output was spilled, read the saved file with offset and limit to see the rest.' +
       (sandbox.confines
         ? ' A file effect the sandbox refuses is reported as `[sandbox: file access denied under <mode> mode]`: that is a policy denial, so do not retry another way.'
         : ''),
@@ -323,8 +357,14 @@ export const makeBashTool = (
           sandbox,
           approval,
         })
+        // A named session keeps one shell alive, so the sandbox wraps the shell
+        // rather than the one command it would otherwise run and exit with.
         const wrapped = yield* sandbox
-          .wrap({ argv: shellArgv(shell, args.command), cwd, mode })
+          .wrap({
+            argv: args.session === undefined ? shellArgv(shell, args.command) : sessionArgv(shell),
+            cwd,
+            mode,
+          })
           .pipe(
             Effect.mapError(
               (error) => new ToolError({ code: 'execution', message: 'sandbox: ' + error.message }),
@@ -332,8 +372,12 @@ export const makeBashTool = (
           )
         // A sandbox that refuses the command is an infrastructure failure; a command
         // that runs and exits non-zero is not.
+        const timeoutMs = clampTimeout(args.timeoutMs)
         const run = yield* Effect.tryPromise({
-          try: () => runWrapped(wrapped, clampTimeout(args.timeoutMs), args.command, jobs),
+          try: () =>
+            args.session === undefined
+              ? runWrapped(wrapped, timeoutMs, args.command, jobs)
+              : runInSession(openSession(sessions, args.session, wrapped), args.command, timeoutMs),
           catch: () => new ToolError({ code: 'execution', message: 'cannot run: ' + args.command }),
         })
         return {
