@@ -1,3 +1,5 @@
+import { accessSync, constants, statSync } from 'node:fs'
+import { delimiter, join } from 'node:path'
 import { Schema, Effect } from 'effect'
 import { ToolError, oneLine, type ToolDefinition } from '@jozo-harness/tools'
 import {
@@ -24,6 +26,57 @@ export const BASH_MAX_TIMEOUT_MS = 600_000
 /** After the soft kill, a command that ignores it gets this long before the hard one. */
 export const BASH_HARD_KILL_GRACE_MS = 5_000
 
+/** The shells one call can run in. PowerShell goes through the same executor and sandbox as bash. */
+export const SHELLS = ['bash', 'powershell'] as const
+
+export type ShellName = (typeof SHELLS)[number]
+
+/** The program a shell runs, and the flags that carry one script to it. */
+const SHELL_INVOCATION: Record<
+  ShellName,
+  { readonly program: string; readonly flags: ReadonlyArray<string> }
+> = {
+  bash: { program: 'bash', flags: ['-c'] },
+  // A PowerShell profile would read a host file the workspace does not hold, and -Command takes one string.
+  powershell: { program: 'pwsh', flags: ['-NoProfile', '-Command'] },
+}
+
+/** The argv that runs one script in the chosen shell, before any sandbox wraps it. */
+export const shellArgv = (shell: ShellName, script: string): ReadonlyArray<string> => [
+  SHELL_INVOCATION[shell].program,
+  ...SHELL_INVOCATION[shell].flags,
+  script,
+]
+
+/** Whether a shell can run here; tests replace this so they need no real pwsh. */
+export type ShellAvailability = (shell: ShellName) => boolean
+
+/** True when the program is an executable file on PATH. */
+const executableOnPath = (program: string): boolean =>
+  (process.env.PATH ?? '').split(delimiter).some((directory) => {
+    const candidate = join(directory, program)
+    try {
+      accessSync(candidate, constants.X_OK)
+      return statSync(candidate).isFile()
+    } catch {
+      return false
+    }
+  })
+
+/**
+ * The default availability: bash is what the executor has always spawned, while
+ * an added shell is looked up first so a host without it fails with a reason.
+ */
+export const shellOnPath: ShellAvailability = (shell) =>
+  shell === 'bash' || executableOnPath(SHELL_INVOCATION[shell].program)
+
+/** What a call says when the shell it asked for is not installed: the missing program and the way out. */
+export const missingShellMessage = (shell: ShellName): string =>
+  shell +
+  ': ' +
+  SHELL_INVOCATION[shell].program +
+  ' was not found on PATH. Install PowerShell 7, or run the command in bash.'
+
 /** A live child the job registry takes over when a call runs out of time. */
 export interface TimeoutJobs {
   readonly promote: (
@@ -45,6 +98,12 @@ const Parameters = Schema.Struct({
     Schema.Int.annotate({
       description:
         'Kill the command after this many milliseconds. Defaults to 120000; the most allowed is 600000.',
+    }),
+  ),
+  shell: Schema.optionalKey(
+    Schema.Literals(SHELLS).annotate({
+      description:
+        'The shell that runs the command, inside the same sandbox either way. Defaults to bash; powershell runs it through pwsh -NoProfile -Command.',
     }),
   ),
   ...escalationFields('a command', 'command'),
@@ -215,14 +274,17 @@ export const makeBashTool = (
   sandbox: SandboxShape = noneSandbox,
   approval?: ApprovalShape,
   jobs?: TimeoutJobs,
+  shells: ShellAvailability = shellOnPath,
 ): ToolDefinition<BashArgs, BashValue> => {
   const canEscalate = escalates(sandbox, approval)
   return {
     name: 'bash',
-    presentCall: (args) => ({ summary: 'bash ' + oneLine(args.command).slice(0, 120) }),
+    presentCall: (args) => ({
+      summary: (args.shell ?? 'bash') + ' ' + oneLine(args.command).slice(0, 120),
+    }),
     presentResult: (_args, result) => ({ ...result, summary: exitSummaryOf(result.summary) }),
     description:
-      'Runs a shell command in the workspace through the configured sandbox and returns what it printed. Check the [exit code: N] marker: a non-zero exit means the command failed. A command still running at the timeout is handed to a background job and marked with its id, so read it with job_output; without a job registry it is killed and marked. When the output was spilled, read the saved file with offset and limit to see the rest.' +
+      'Runs a shell command in the workspace through the configured sandbox and returns what it printed. The shell is bash unless the call asks for powershell, which needs pwsh installed. Check the [exit code: N] marker: a non-zero exit means the command failed. A command still running at the timeout is handed to a background job and marked with its id, so read it with job_output; without a job registry it is killed and marked. When the output was spilled, read the saved file with offset and limit to see the rest.' +
       (sandbox.confines
         ? ' A file effect the sandbox refuses is reported as `[sandbox: file access denied under <mode> mode]`: that is a policy denial, so do not retry another way.'
         : ''),
@@ -244,6 +306,13 @@ export const makeBashTool = (
     },
     execute: (args, context) =>
       Effect.gen(function* () {
+        const shell = args.shell ?? 'bash'
+        // A missing shell is the call's failure, not an infrastructure one: the model can pick bash instead.
+        if (!shells(shell)) {
+          return yield* Effect.fail(
+            new ToolError({ code: 'execution', message: missingShellMessage(shell) }),
+          )
+        }
         const cwd =
           args.cwd === undefined ? context.cwd : yield* resolveInside(context.cwd, args.cwd)
         const mode = yield* modeOfCall({
@@ -255,7 +324,7 @@ export const makeBashTool = (
           approval,
         })
         const wrapped = yield* sandbox
-          .wrap({ argv: ['bash', '-c', args.command], cwd, mode })
+          .wrap({ argv: shellArgv(shell, args.command), cwd, mode })
           .pipe(
             Effect.mapError(
               (error) => new ToolError({ code: 'execution', message: 'sandbox: ' + error.message }),

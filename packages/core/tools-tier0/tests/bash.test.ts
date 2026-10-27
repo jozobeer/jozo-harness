@@ -10,7 +10,7 @@ import {
 } from '@jozo-harness/tools'
 import { Context, Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
-import { BASH_MAX_TIMEOUT_MS, clampTimeout, makeBashTool } from '../src/index.ts'
+import { BASH_MAX_TIMEOUT_MS, clampTimeout, makeBashTool, shellArgv } from '../src/index.ts'
 
 const call = (
   tool: ToolDefinition<any, any>,
@@ -168,5 +168,66 @@ describe('bash tool', () => {
     expect(clampTimeout(500)).toBe(500)
     expect(clampTimeout(10_000_000)).toBe(BASH_MAX_TIMEOUT_MS)
     expect(clampTimeout(0)).toBe(1)
+  })
+})
+
+/** A sandbox that records what it was asked to run and answers with a fixed command. */
+const recordingSandbox = (seen: { argv: ReadonlyArray<string> }): SandboxShape => ({
+  name: 'test',
+  confines: true,
+  mode: 'workspace-write',
+  wrap: (command) => {
+    seen.argv = command.argv
+    return Effect.succeed({
+      argv: ['bash', '-c', 'echo wrapped'],
+      cwd: command.cwd,
+      mode: command.mode ?? 'workspace-write',
+      denialSignatures: [],
+    })
+  },
+})
+
+describe('shell selection', () => {
+  test('builds the argv of each shell from one script', () => {
+    expect(shellArgv('bash', 'echo hi')).toEqual(['bash', '-c', 'echo hi'])
+    expect(shellArgv('powershell', 'Get-Date')).toEqual([
+      'pwsh',
+      '-NoProfile',
+      '-Command',
+      'Get-Date',
+    ])
+  })
+
+  test('runs PowerShell inside the sandbox the caller chose', async () => {
+    const seen: { argv: ReadonlyArray<string> } = { argv: [] }
+
+    const result = await Effect.runPromise(
+      call(
+        makeBashTool(recordingSandbox(seen), undefined, undefined, () => true),
+        { command: 'Get-Date', shell: 'powershell' },
+        '/tmp',
+      ),
+    )
+
+    // The sandbox wraps the shell it is given, so PowerShell is confined the same way as bash.
+    expect(seen.argv).toEqual(['pwsh', '-NoProfile', '-Command', 'Get-Date'])
+    expect(result?.value).toMatchObject({ exitCode: 0, stdout: 'wrapped\n' })
+  })
+
+  test('a machine without pwsh fails the call with a reason instead of running a shell', async () => {
+    const seen: { argv: ReadonlyArray<string> } = { argv: [] }
+
+    const result = await Effect.runPromise(
+      call(
+        makeBashTool(recordingSandbox(seen), undefined, undefined, () => false),
+        { command: 'Get-Date', shell: 'powershell' },
+        '/tmp',
+      ),
+    )
+
+    expect(result?.isError).toBe(true)
+    expect(result?.error).toEqual({ name: 'ToolError', code: 'execution' })
+    expect(textOf(result)).toContain('pwsh')
+    expect(seen.argv).toEqual([])
   })
 })
