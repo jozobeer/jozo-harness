@@ -286,15 +286,17 @@ const routeFromRows = (rows: ReadonlyArray<PluginRow>): string => stringFromRows
  * models the agent-loop row prices. A row that names no models still offers the
  * parent's route, so a child can always stay where the parent runs.
  */
-const childRoutes = (rows: ReadonlyArray<PluginRow>, route: string): ReadonlyArray<string> => {
+const childRoutes = (
+  rows: ReadonlyArray<PluginRow>,
+  route: string,
+): ReadonlyArray<string> | undefined => {
   // A route without a provider has no provider to prefix a configured model with.
   const provider = route.indexOf('/') < 0 ? '' : route.slice(0, route.indexOf('/'))
-  return [
-    ...new Set([
-      ...(route === '' ? [] : [route]),
-      ...rows.flatMap(modelsOfRow).flatMap((model) => routesOfModel(model, provider)),
-    ]),
-  ]
+  const priced = rows.flatMap(modelsOfRow).flatMap((model) => routesOfModel(model, provider))
+  // A run that prices no models cannot say what a child may take, so the shape is
+  // the only check; listing just the parent's route would refuse every other one.
+  if (priced.length === 0) return undefined
+  return [...new Set([...(route === '' ? [] : [route]), ...priced])]
 }
 
 /** The model names one row prices, as the agent-loop row spells them. */
@@ -464,8 +466,8 @@ const tier1ToolList = (
   options: CommandOptions,
   agent: Agent,
   route: string,
-  /** The routes a child may take, as this run's settings name them. */
-  routes: ReadonlyArray<string>,
+  /** The routes a child may take, as this run's settings name them; absent when none are priced. */
+  routes: ReadonlyArray<string> | undefined,
   agents: AgentsShape,
   jobs: JobsShape,
   skills: ReadonlyArray<string>,
