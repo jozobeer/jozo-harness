@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { noneSandbox, type SandboxShape } from '@jozo-harness/safety'
 import type { ToolError } from '@jozo-harness/tools'
-import { makeArtifactTool, type ArtifactValue } from '../src/index.ts'
+import { makeArtifactTool, type ArtifactResult } from '../src/index.ts'
 
 const withHome = async (body: (home: string) => Promise<void>): Promise<void> => {
   const home = await mkdtemp(join(tmpdir(), 'jzh-artifact-'))
@@ -30,7 +30,7 @@ const publish = (
   sandbox: SandboxShape = noneSandbox,
   images?: ReadonlyArray<string>,
 ): Promise<{
-  value: ArtifactValue | undefined
+  value: ArtifactResult | undefined
   error: ToolError | undefined
   added: ReadonlyArray<string>
 }> => {
@@ -56,6 +56,20 @@ const publish = (
 }
 
 const withMode = (mode: SandboxShape['mode']): SandboxShape => ({ ...noneSandbox, mode })
+
+const declare = (
+  home: string,
+  deliverable: { path: string; title?: string },
+  sandbox: SandboxShape = noneSandbox,
+): Promise<{ value: ArtifactResult | undefined; error: ToolError | undefined }> => {
+  const tool = makeArtifactTool(join(home, 'sessions'), sandbox)
+  return Effect.runPromise(
+    Effect.match(tool.execute({ deliverable }, { sessionId: 's1', cwd: home, callId: 'c1' }), {
+      onFailure: (error) => ({ value: undefined, error }),
+      onSuccess: (value) => ({ value, error: undefined }),
+    }),
+  )
+}
 
 describe('artifact tool', () => {
   test('writes the page beside the sessions root', async () => {
@@ -100,7 +114,7 @@ describe('artifact tool', () => {
       )
 
       expect(error).toBeUndefined()
-      expect(value?.url).toBe('/artifact/s1/report')
+      expect(value).toMatchObject({ url: '/artifact/s1/report' })
       expect(await readFile(join(home, 'artifacts', 's1', 'report.html'), 'utf8')).toBe(
         '<h1>report</h1>',
       )
@@ -262,6 +276,60 @@ describe('artifact tool', () => {
 
       expect(error).toBeUndefined()
       expect(await readFile(value!.path, 'utf8')).toBe(html)
+    })
+  })
+
+  test('declares an existing file inside the working directory', async () => {
+    await withHome(async (home) => {
+      await writeFile(join(home, 'report.md'), 'done')
+      const { value, error } = await declare(home, { path: 'report.md', title: 'Report' })
+
+      expect(error).toBeUndefined()
+      expect(value).toEqual({ path: join(home, 'report.md'), title: 'Report' })
+      await expect(stat(join(home, 'artifacts'))).rejects.toThrow()
+    })
+  })
+
+  test('renders a declared file as its path on one line', async () => {
+    await withHome(async (home) => {
+      await writeFile(join(home, 'report.md'), 'done')
+      const tool = makeArtifactTool(join(home, 'sessions'))
+      const { value } = await declare(home, { path: 'report.md' })
+
+      expect(tool.output.render({ deliverable: { path: 'report.md' } }, value!)).toEqual([
+        { type: 'text', text: 'deliverable: ' + join(home, 'report.md') },
+      ])
+    })
+  })
+
+  test('refuses a path outside the working directory', async () => {
+    await withHome(async (home) => {
+      const outside = await mkdtemp(join(tmpdir(), 'jzh-artifact-outside-'))
+      try {
+        await writeFile(join(outside, 'secret.txt'), 'x')
+        const { value, error } = await declare(home, { path: join(outside, 'secret.txt') })
+
+        expect(value).toBeUndefined()
+        expect(error).toMatchObject({ code: 'invalid-arguments' })
+        expect(error?.message).toContain('working directory')
+      } finally {
+        await rm(outside, { recursive: true, force: true })
+      }
+    })
+  })
+
+  test('refuses a missing path and a directory', async () => {
+    await withHome(async (home) => {
+      const missing = await declare(home, { path: 'missing.md' })
+      expect(missing.value).toBeUndefined()
+      expect(missing.error).toMatchObject({ code: 'invalid-arguments' })
+      expect(missing.error?.message).toContain('missing.md')
+
+      await mkdir(join(home, 'folder'))
+      const directory = await declare(home, { path: 'folder' })
+      expect(directory.value).toBeUndefined()
+      expect(directory.error).toMatchObject({ code: 'invalid-arguments' })
+      expect(directory.error?.message).toContain('folder')
     })
   })
 

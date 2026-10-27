@@ -91,6 +91,8 @@ plugins:
 この調査結果を report という名前の HTML ページにまとめて。表と図を 1 枚に入れて。
 ```
 
+モデルが `artifact` に `{ deliverable: { path, title? } }` を渡すと、ページを書かずに作業ディレクトリ内の既存ファイルをその turn の成果物として宣言し、`deliverable: <path>` の 1 行を返す。`path` は cwd の中の実在するファイルに限り、cwd の外・存在しないパス・ディレクトリは `invalid-arguments` になる。宣言は読み取りだけで、preset が `read-only` でも拒否しない。
+
 モデルが `artifact` に `{ name, html, images? }` を渡すと、run の session root の隣の `artifacts/<sessionId>/<name>.html` に書き、結果に `page: /artifact/<sessionId>/<name>` の 1 行を返す。preset が `read-only` の run では書かず、`denied` を返す。`name` は英数字と `.` `_` `-` だけで、`.html` は付けない。ページは CSS と JavaScript を中に持つ 1 枚の HTML にする。`images` は png / jpeg / webp / gif のパスを配列で受け、絶対パスか作業ディレクトリからの相対パスで書く。保存時に、HTML の `src` がそのパスを指す箇所を data URL へ畳むので、画像もページの中に入り、成果物は 1 ファイルで閉じる。1 枚は 2MB、合計は 10MB までで、超えると `invalid-arguments` になる。`img` の `src` や `link` の `href` など、ブラウザがサブリソースとして読む箇所に `http://` / `https://` / `//` を書くと `invalid-arguments` で拒否し、`images` に渡したのに HTML から参照していないパスも拒否する。外部ファイルを参照するページを保存しないので、保存された HTML は単体で完結する。
 
 jzh web でそのセッションを開くと、結果の下にページが iframe で出る。iframe は `allow-scripts` だけを持つ sandbox なので、ページは jzh web の origin にも cookie にも触れない。`Open in a new tab` を押すと別タブで開く。
