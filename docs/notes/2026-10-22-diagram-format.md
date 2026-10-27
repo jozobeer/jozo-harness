@@ -34,6 +34,7 @@ markdown の画像記法の src には、http(s) の URL と base64 の data URL
 - 通す要素: svg, g, path, rect, circle, ellipse, line, polyline, polygon, text, tspan, title, desc, defs, marker, linearGradient, radialGradient, stop, clipPath, use
 - 通す属性: viewBox, width, height, d, x, y, x1, y1, x2, y2, cx, cy, r, rx, ry, points, fill, stroke, stroke-width, stroke-linecap, stroke-linejoin, font-size, font-family, text-anchor, dominant-baseline, transform, opacity, id, class, marker-start, marker-end, offset, stop-color, stop-opacity, gradientUnits, preserveAspectRatio, role, aria-label
 - 落とすもの: script, foreignObject, iframe, image, a, style, animate 系, `on*` の属性, href / xlink:href
+- 属性値の `url()` は `url(#id)` だけ残す。`fill` や `marker-start` の `http:` / `https:` / `//` は、コメントや CSS の十六進エスケープで隠してあっても落とす。インライン SVG はそれをブラウザに取りに行かせるためである
 - サイズ: 100KB を超えるものは描かず、コードブロックのまま見せる
 - パースに失敗したもの、閉じタグの無い `<svg` は、エスケープしたテキストとして出す
 

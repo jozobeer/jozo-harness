@@ -107,6 +107,39 @@ const dom = (): DomGlobal => globalThis as unknown as DomGlobal
 /** How many UTF-8 bytes a string is; the limit counts bytes, not characters. */
 const bytesOf = (text: string): number => new TextEncoder().encode(text).length
 
+const CSS_COMMENT = /\/\*[\s\S]*?\*\//g
+const CSS_HEX = /\\([0-9a-fA-F]{1,6})[ \t\n\r\f]?/g
+const URL_REF = /url\s*\(\s*['"]?\s*([^)'"\s]*)/gi
+
+const withoutComments = (value: string): string => value.replace(CSS_COMMENT, '')
+
+/** One CSS hex escape as a character; an out-of-range escape contributes nothing. */
+const hexChar = (hex: string): string => {
+  const code = Number.parseInt(hex, 16)
+  if (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return ''
+  return String.fromCodePoint(code)
+}
+
+/**
+ * The value a browser resolves. Comments are removed, hex escapes are decoded,
+ * and comments are removed again, because an escape can hide a comment's markers.
+ */
+const cssValue = (value: string): string =>
+  withoutComments(withoutComments(value).replace(CSS_HEX, (_match, hex: string) => hexChar(hex)))
+
+/**
+ * True when a value would make the browser fetch something other than a fragment
+ * of this diagram. Inline SVG resolves `url()` in fill, stroke, and marker-*, so
+ * an external one is a request the page did not mean to send. `url(#id)` stays.
+ */
+const loadsOutside = (value: string): boolean => {
+  const pattern = new RegExp(URL_REF.source, URL_REF.flags)
+  for (const match of cssValue(value).matchAll(pattern)) {
+    if (!(match[1] ?? '').startsWith('#')) return true
+  }
+  return false
+}
+
 /**
  * Copies one parsed element into a new node that carries only allowlisted tags
  * and attributes. Children are rebuilt the same way, so the source is never
@@ -114,7 +147,8 @@ const bytesOf = (text: string): number => new TextEncoder().encode(text).length
  */
 const copyAttributes = (source: SvgNode, target: SvgNode): void => {
   for (const attribute of Array.from(source.attributes)) {
-    if (ATTRIBUTES.has(attribute.name)) target.setAttribute(attribute.name, attribute.value)
+    if (!ATTRIBUTES.has(attribute.name) || loadsOutside(attribute.value)) continue
+    target.setAttribute(attribute.name, attribute.value)
   }
 }
 
@@ -146,7 +180,8 @@ const copyOf = (source: SvgNode, target: SvgNode): void => {
  * A diagram built from an SVG fence through this module's allowlist, or nothing
  * when the fence is empty, past the size limit, or not an SVG document. The
  * source is only ever parsed, never assigned to innerHTML, so scripts, event
- * handlers, foreignObject, and links cannot survive into the page.
+ * handlers, foreignObject, links, and external url() values cannot survive
+ * into the page.
  */
 export const svgOf = (source: string): SvgNode | undefined => {
   const body = source.trim()
