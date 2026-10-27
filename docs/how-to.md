@@ -245,6 +245,8 @@ bash: /etc/hosts: Operation not permitted
 
 モデルは同じ呼び出しを `sandbox_permissions`（より広いモード）と `justification`（1文の理由）付きでやり直せる。端末 UI と Web UI はそこで y/n を尋ね、`y` のときだけその1回が広いモードで走る。拒否されれば呼び出しは拒否されたままで、`safety/approval/requested` と `answered` がセッションログに残る。`write` / `edit` も同じ引数を持ち、ワークスペースの外を指すパスで同じ往復になる。
 
+`bash` の `session` は同じ名前の次の呼び出しにシェルを残し、ディレクトリと変数を持ち越す。残るのは起動したときのシェル・ディレクトリ・sandbox モードだけである。広いモードを承認したあとに同じ名前を指定しても、その広いモードでは走らない。シェル・ディレクトリ・モードのどれかが違う呼び出しはコマンドを走らせず `invalid-arguments` を返し、別の session 名を要する。
+
 ## worktree に移って続ける
 
 モデルが `create_worktree` を呼ぶと、今の HEAD（か `base` で指名した commit）から新しい branch の worktree を作り、session の cwd とワークスペースの根をそこへ移す。以後の `bash` / `write` / `edit` はその中で走り、元の checkout は branch も commit も変えない。
