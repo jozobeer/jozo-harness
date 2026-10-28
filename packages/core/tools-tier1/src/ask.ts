@@ -117,43 +117,61 @@ const render = (
 const invalid = (message: string): ToolError =>
   new ToolError({ code: 'invalid-arguments', message })
 
-const questionsOf = (args: AskArgs): Effect.Effect<ReadonlyArray<AskQuestion>, ToolError> =>
+/** The repeated or empty id, or undefined when every id is usable. */
+const repeatedIdOf = (questions: NonNullable<AskArgs['questions']>): string | undefined => {
+  const ids = new Set<string>()
+  for (const question of questions) {
+    if (question.id === '' || ids.has(question.id)) return question.id
+    ids.add(question.id)
+  }
+  return undefined
+}
+
+const questionsOf = (
+  questions: NonNullable<AskArgs['questions']>,
+): Effect.Effect<ReadonlyArray<AskQuestion>, ToolError> =>
+  Effect.gen(function* () {
+    if (questions.length === 0) {
+      return yield* Effect.fail(invalid('questions must not be empty'))
+    }
+    const repeated = repeatedIdOf(questions)
+    if (repeated !== undefined) {
+      return yield* Effect.fail(
+        invalid(
+          repeated === ''
+            ? 'every question needs a non-empty id'
+            : 'question id "' + repeated + '" must be unique within one ask_user call',
+        ),
+      )
+    }
+    return questions.map((question) => ({
+      id: question.id,
+      question: question.question,
+      ...(question.header === undefined ? {} : { header: question.header }),
+      options: (question.options ?? []).map((label) => ({ label })),
+      multiSelect: question.multi_select ?? false,
+    }))
+  })
+
+type AskInput =
+  | { readonly kind: 'single'; readonly question: string; readonly options: ReadonlyArray<string> }
+  | { readonly kind: 'batch'; readonly questions: ReadonlyArray<AskQuestion> }
+
+/** Reads the one form the call passed; mixing both is a mistake rather than a preference. */
+const inputOf = (args: AskArgs): Effect.Effect<AskInput, ToolError> =>
   Effect.gen(function* () {
     if (args.questions !== undefined) {
-      if (args.questions.length === 0) {
-        return yield* Effect.fail(invalid('questions must not be empty'))
+      if (args.question !== undefined) {
+        return yield* Effect.fail(invalid('pass questions or question, not both'))
       }
-      const ids = new Set<string>()
-      for (const question of args.questions) {
-        if (question.id === '') {
-          return yield* Effect.fail(invalid('every question needs a non-empty id'))
-        }
-        if (ids.has(question.id)) {
-          return yield* Effect.fail(
-            invalid('question id "' + question.id + '" must be unique within one ask_user call'),
-          )
-        }
-        ids.add(question.id)
-      }
-      return args.questions.map((question) => ({
-        id: question.id,
-        question: question.question,
-        ...(question.header === undefined ? {} : { header: question.header }),
-        options: (question.options ?? []).map((label) => ({ label })),
-        multiSelect: question.multi_select ?? false,
-      }))
+      return { kind: 'batch', questions: yield* questionsOf(args.questions) }
     }
-    if (args.question !== undefined) {
-      return [
-        {
-          id: 'question',
-          question: args.question,
-          options: (args.options ?? []).map((label) => ({ label })),
-          multiSelect: false,
-        },
-      ]
+    if (args.question === undefined) {
+      return yield* Effect.fail(
+        invalid('pass questions, or a question for the single-question form'),
+      )
     }
-    return yield* Effect.fail(invalid('pass questions, or a question for the single-question form'))
+    return { kind: 'single', question: args.question, options: args.options ?? [] }
   })
 
 /** Asks one question; a question nobody can answer fails the call rather than hanging it. */
@@ -190,23 +208,20 @@ export const askUserToolFor = (
   },
   execute: (args, context) =>
     Effect.gen(function* () {
-      if (args.questions !== undefined && args.question !== undefined) {
-        return yield* Effect.fail(invalid('pass questions or question, not both'))
-      }
-      const timeLimitMs = args.time_limit_ms ?? defaultTimeLimitMs
-      if (args.questions === undefined) {
-        if (args.question === undefined) {
-          return yield* Effect.fail(invalid('questions or question is required'))
-        }
+      const input = yield* inputOf(args)
+      if (input.kind === 'single') {
         const answer = yield* askOrFail(ask, {
           id: context.callId,
-          question: args.question,
-          options: args.options ?? [],
+          question: input.question,
+          options: input.options,
         })
-        return { id: context.callId, question: args.question, answer }
+        return { id: context.callId, question: input.question, answer }
       }
-      const questions = yield* questionsOf(args)
-      const result = yield* askBatchOrFail(ask, { callId: context.callId, questions }, timeLimitMs)
+      const result = yield* askBatchOrFail(
+        ask,
+        { callId: context.callId, questions: input.questions },
+        args.time_limit_ms ?? defaultTimeLimitMs,
+      )
       return result._tag === 'answered'
         ? { callId: context.callId, answers: result.answers }
         : {
