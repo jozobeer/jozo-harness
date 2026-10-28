@@ -8,7 +8,7 @@ import {
 } from '@jozo-harness/tools'
 import { Context, Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { makeEditTool, makeObservedFiles, makeReadTool } from '../src/index.ts'
@@ -233,6 +233,53 @@ describe('edit tool', () => {
     expect(edit?.isError).toBe(true)
     expect(textOf(edit)).toContain('read')
     expect((await readFile(path)).byteLength).toBe(4)
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('leaves no temporary file after an edit', async () => {
+    const { dir, call } = await withReadFile('one\ntwo\n')
+
+    const result = await Effect.runPromise(
+      call('edit', { path: 'a.txt', oldString: 'one', newString: 'ONE' }),
+    )
+
+    expect(result?.isError).toBe(false)
+    expect(await readFile(join(dir, 'a.txt'), 'utf8')).toBe('ONE\ntwo\n')
+    expect((await readdir(dir)).filter((name) => name.startsWith('.tmp-'))).toEqual([])
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('refuses an edit when only the mtime changed, leaving the text alone', async () => {
+    const { dir, call } = await withReadFile('same\n')
+    await utimes(join(dir, 'a.txt'), new Date(), new Date(Date.now() + 5_000))
+
+    const result = await Effect.runPromise(
+      call('edit', { path: 'a.txt', oldString: 'same', newString: 'next' }),
+    )
+
+    expect(result?.isError).toBe(true)
+    expect(textOf(result)).toContain('changed')
+    expect(await readFile(join(dir, 'a.txt'), 'utf8')).toBe('same\n')
+    expect((await readdir(dir)).filter((name) => name.startsWith('.tmp-'))).toEqual([])
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('refuses an edit over a same-size rewrite that restored the mtime', async () => {
+    const { dir, call } = await withReadFile('original\n')
+    const path = join(dir, 'a.txt')
+    const stamp = new Date(1_700_000_000_000)
+    await utimes(path, stamp, stamp)
+    await Effect.runPromise(call('read', { path: 'a.txt' }))
+    await writeFileDeep(path, 'tampered\n')
+    await utimes(path, stamp, stamp)
+
+    const result = await Effect.runPromise(
+      call('edit', { path: 'a.txt', oldString: 'tampered', newString: 'clobber' }),
+    )
+
+    expect(result?.isError).toBe(true)
+    expect(textOf(result)).toContain('changed')
+    expect(await readFile(path, 'utf8')).toBe('tampered\n')
     await rm(dir, { recursive: true, force: true })
   })
 })

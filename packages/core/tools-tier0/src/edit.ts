@@ -1,4 +1,3 @@
-import { writeFile } from 'node:fs/promises'
 import { noneSandbox, type ApprovalShape, type SandboxShape } from '@jozo-harness/safety'
 import { Schema, Effect } from 'effect'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
@@ -8,6 +7,7 @@ import { readForEdit, restoreLineEndings } from './text.ts'
 import { changedLines } from './present.ts'
 import { resolveInside } from './workspace.ts'
 import { editDiffs } from './diff.ts'
+import { stageFile } from './atomic.ts'
 
 const Parameters = Schema.Struct({
   path: Schema.String.annotate({
@@ -123,10 +123,13 @@ export const makeEditTool = (
         const updated = all
           ? source.text.split(args.oldString).join(args.newString)
           : source.text.replace(args.oldString, () => args.newString)
-        yield* Effect.tryPromise({
-          try: () => writeFile(path, restoreLineEndings(updated, source.lineEndings)),
-          catch: () => new ToolError({ code: 'execution', message: 'cannot write ' + path }),
-        })
+        const staged = yield* stageFile(path, restoreLineEndings(updated, source.lineEndings))
+        // Staging the replacement does not touch the file, so a change that landed
+        // during the read-modify-write is caught here and the staged copy is dropped.
+        yield* guardEdit(observed, context.sessionId, path).pipe(
+          Effect.onError(() => staged.discard),
+        )
+        yield* staged.commit
         const written = yield* look(path)
         if (written !== undefined) observed.observe(context.sessionId, path, written)
         for (const diff of editDiffs(path, source.text, args.oldString, args.newString)) {

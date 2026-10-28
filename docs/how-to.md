@@ -525,6 +525,8 @@ jzh --dump-config --patch full.yml   # 効いた行を確かめる
 
 `sandbox` 自体を外す（`sandbox: none`）と、preset に関わらず封じ込めは無くなる。`auto` で使える backend が無い場合や、明示した backend（`seatbelt` / `bwrap`）がその platform で動かない場合は、無制限に落ちずに起動が失敗する。
 
+`write` と `edit` は、このセッションが `read` した版からファイルが変わっていないときだけ書き込む。バイト列のハッシュか mtime が読んだときと違えば `denied` で拒否し、ファイルには触れない（mtime だけが変わって中身が同じ場合も拒否する）。置き換えは同じディレクトリの `.tmp-<pid>-<random>` に書いて `fsync` し、`rename` で行うので、成功後のファイルは旧内容か新内容のどちらかになる。失敗したときは一時ファイルを消す。まだ `read` していないファイルは今までどおり上書きしない。
+
 ## 副作用のある呼び出しを実行前に審査する（auto）
 
 `preset: auto` は `workspace-write` と同じ sandbox で走る。sandbox を緩めず、読み取り専用（`read` / `glob` / `grep` / `read_image` / `web_search`）以外の呼び出しだけ、実行前にモデルへ 1 往復して可否を取る。

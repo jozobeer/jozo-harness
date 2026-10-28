@@ -9,7 +9,17 @@ import {
 } from '@jozo-harness/tools'
 import { Context, Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { makeEditTool, makeObservedFiles, makeReadTool, makeWriteTool } from '../src/index.ts'
@@ -200,6 +210,98 @@ describe('write tool', () => {
     await Effect.runPromise(call('write', { path: 'crlf.txt', content: 'one\r\ntwo\r\n' }))
 
     expect(await readFile(join(dir, 'crlf.txt'), 'utf8')).toBe('one\ntwo\n')
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('replaces the file by renaming a staged one, leaving no temporary file behind', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-write-'))
+    const path = join(dir, 'notes.txt')
+    await writeFileDeep(path, 'the original\n')
+    const call = makeSession(dir)
+    const before = await stat(path)
+
+    await Effect.runPromise(call('read', { path: 'notes.txt' }))
+    const result = await Effect.runPromise(
+      call('write', { path: 'notes.txt', content: 'replaced\n' }),
+    )
+
+    expect(result?.isError).toBe(false)
+    expect(await readFile(path, 'utf8')).toBe('replaced\n')
+    expect((await stat(path)).ino).not.toBe(before.ino)
+    expect((await readdir(dir)).filter((name) => name.startsWith('.tmp-'))).toEqual([])
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('refuses a file whose mtime alone changed, even when the text is the same', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-write-'))
+    const path = join(dir, 'notes.txt')
+    await writeFileDeep(path, 'same\n')
+    const call = makeSession(dir)
+
+    await Effect.runPromise(call('read', { path: 'notes.txt' }))
+    await utimes(path, new Date(), new Date(Date.now() + 5_000))
+    const result = await Effect.runPromise(call('write', { path: 'notes.txt', content: 'next\n' }))
+
+    expect(result?.isError).toBe(true)
+    expect(JSON.stringify(result?.content)).toContain('changed')
+    expect(await readFile(path, 'utf8')).toBe('same\n')
+    expect((await readdir(dir)).filter((name) => name.startsWith('.tmp-'))).toEqual([])
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('refuses a same-size rewrite that restored the mtime after the read', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-write-'))
+    const path = join(dir, 'notes.txt')
+    const stamp = new Date(1_700_000_000_000)
+    await writeFileDeep(path, 'original\n')
+    await utimes(path, stamp, stamp)
+    const call = makeSession(dir)
+
+    await Effect.runPromise(call('read', { path: 'notes.txt' }))
+    await writeFileDeep(path, 'tampered\n')
+    await utimes(path, stamp, stamp)
+    const result = await Effect.runPromise(
+      call('write', { path: 'notes.txt', content: 'clobber!\n' }),
+    )
+
+    expect(result?.isError).toBe(true)
+    expect(JSON.stringify(result?.content)).toContain('changed')
+    expect(await readFile(path, 'utf8')).toBe('tampered\n')
+    expect((await readdir(dir)).filter((name) => name.startsWith('.tmp-'))).toEqual([])
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('leaves the file and no temporary file when staging fails', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-write-'))
+    const path = join(dir, 'notes.txt')
+    await writeFileDeep(path, 'the original\n')
+    const call = makeSession(dir)
+    await Effect.runPromise(call('read', { path: 'notes.txt' }))
+
+    await chmod(dir, 0o500)
+    try {
+      const result = await Effect.runPromise(
+        call('write', { path: 'notes.txt', content: 'next\n' }),
+      )
+      expect(result?.isError).toBe(true)
+      expect(await readFile(path, 'utf8')).toBe('the original\n')
+      expect((await readdir(dir)).filter((name) => name.startsWith('.tmp-'))).toEqual([])
+    } finally {
+      await chmod(dir, 0o700)
+    }
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('leaves the old path and no temporary file when the rename cannot happen', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-write-'))
+    await mkdir(join(dir, 'blocked'))
+    const call = makeSession(dir)
+
+    const result = await Effect.runPromise(call('write', { path: 'blocked', content: 'x' }))
+
+    expect(result?.isError).toBe(true)
+    expect((await stat(join(dir, 'blocked'))).isDirectory()).toBe(true)
+    expect((await readdir(dir)).filter((name) => name.startsWith('.tmp-'))).toEqual([])
     await rm(dir, { recursive: true, force: true })
   })
 })

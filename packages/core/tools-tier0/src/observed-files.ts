@@ -1,4 +1,5 @@
-import { stat } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { readFile, stat } from 'node:fs/promises'
 import { Effect } from 'effect'
 import { ToolError } from '@jozo-harness/tools'
 
@@ -6,6 +7,8 @@ import { ToolError } from '@jozo-harness/tools'
 export interface FileObservation {
   readonly bytes: number
   readonly mtimeMs: number
+  /** SHA-256 of the bytes, so a same-size write with a restored mtime is still a change. */
+  readonly digest: string
 }
 
 /** What one session has observed about the files it may change. */
@@ -29,14 +32,27 @@ export function makeObservedFiles(): ObservedFiles {
   }
 }
 
-/** What the file on disk looks like now, or undefined when it is not there. */
+/**
+ * What the file on disk looks like now, or undefined when it is not there. A
+ * regular file that exists but cannot be read still gets an observation, so it
+ * never looks like new work that a write may create.
+ */
 export const look = (path: string): Effect.Effect<FileObservation | undefined> =>
-  Effect.promise(() =>
-    stat(path).then(
-      (info) => ({ bytes: info.size, mtimeMs: info.mtimeMs }),
-      () => undefined,
-    ),
-  )
+  Effect.promise(async () => {
+    const info = await stat(path).catch(() => undefined)
+    if (info === undefined) return undefined
+    const bytes = await readFile(path).catch(() => undefined)
+    if (bytes === undefined) {
+      return info.isFile()
+        ? { bytes: info.size, mtimeMs: info.mtimeMs, digest: 'unreadable' }
+        : undefined
+    }
+    return {
+      bytes: bytes.byteLength,
+      mtimeMs: info.mtimeMs,
+      digest: createHash('sha256').update(bytes).digest('hex'),
+    }
+  })
 
 /** A file this session may not change because somebody else has been there. */
 const changed = (path: string): ToolError =>
@@ -44,6 +60,21 @@ const changed = (path: string): ToolError =>
     code: 'denied',
     message: path + ' changed on disk since you read it; read it again before you write',
   })
+
+/**
+ * Refuses when the bytes differ, and also when only the mtime does: a touched
+ * file may be the same text, but the safe answer is still to read it again.
+ */
+const unchanged = (
+  seen: FileObservation,
+  current: FileObservation,
+  path: string,
+): Effect.Effect<void, ToolError> => {
+  if (seen.digest !== current.digest || seen.mtimeMs !== current.mtimeMs) {
+    return Effect.fail(changed(path))
+  }
+  return Effect.void
+}
 
 /**
  * Guards a write: a file that exists must have been read in this session and be
@@ -66,9 +97,7 @@ export const guardWrite = (
         }),
       )
     }
-    if (seen.bytes !== current.bytes || seen.mtimeMs !== current.mtimeMs) {
-      return yield* Effect.fail(changed(path))
-    }
+    yield* unchanged(seen, current, path)
   })
 
 /**
@@ -93,7 +122,5 @@ export const guardEdit = (
         new ToolError({ code: 'denied', message: 'cannot edit ' + path + ': it is not there' }),
       )
     }
-    if (seen.bytes !== current.bytes || seen.mtimeMs !== current.mtimeMs) {
-      return yield* Effect.fail(changed(path))
-    }
+    yield* unchanged(seen, current, path)
   })
