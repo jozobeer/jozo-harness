@@ -351,6 +351,9 @@ importers:
       '@jozo-harness/session-jsonl':
         specifier: workspace:*
         version: link:../../core/session-jsonl
+      '@jozo-harness/session-telemetry-otlp':
+        specifier: workspace:*
+        version: link:../../core/session-telemetry-otlp
       '@jozo-harness/system-prompt':
         specifier: workspace:*
         version: link:../../core/system-prompt

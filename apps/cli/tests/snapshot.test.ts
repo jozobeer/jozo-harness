@@ -6,6 +6,7 @@ import { Llm, type LlmAdapter, type StreamChunk } from '@jozo-harness/llm'
 import { askPlugin, safetyPlugin } from '@jozo-harness/safety'
 import { sessionPlugin } from '@jozo-harness/session'
 import { jsonlSessions, sessionJsonlPlugin } from '@jozo-harness/session-jsonl'
+import { sessionTelemetryPlugin } from '@jozo-harness/session-telemetry-otlp'
 import { systemPromptPlugin } from '@jozo-harness/system-prompt'
 import { toolsPlugin } from '@jozo-harness/tools'
 import { tier0Plugin } from '@jozo-harness/tools-tier0'
@@ -159,6 +160,7 @@ const runner = async (run: {
         plugins: [
           kernelPlugin,
           sessionJsonlPlugin,
+          sessionTelemetryPlugin,
           sessionPlugin,
           toolsPlugin,
           systemPromptPlugin,

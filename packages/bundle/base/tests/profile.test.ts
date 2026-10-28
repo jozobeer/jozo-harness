@@ -15,6 +15,7 @@ describe('base profile', () => {
       'kernel',
       'sessions',
       'session-jsonl',
+      'telemetry',
       'tools',
       'system-prompt',
       'safety',
