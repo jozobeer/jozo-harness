@@ -131,6 +131,22 @@ const createLock = async (path: string): Promise<LockRecord> => {
   return record
 }
 
+/** Creates the lock, or reports EEXIST as no record so the caller can look at the holder. */
+const tryCreateLock = async (path: string): Promise<LockRecord | undefined> => {
+  try {
+    return await createLock(path)
+  } catch (error) {
+    if (codeOf(error) === 'EEXIST') return undefined
+    throw error
+  }
+}
+
+/** Whether the lock's holder is gone, including one that died writing its record. */
+const staleAt = async (path: string): Promise<boolean> => {
+  const record = recordOf(await readFile(path, 'utf8').catch(() => ''))
+  return record === undefined || !isProcessAlive(record.pid)
+}
+
 const takeLock = async (logPath: string, id: SessionId): Promise<SessionLock> => {
   const path = logPath + LOCK_SUFFIX
   const shared = registry.get(path)
@@ -139,20 +155,14 @@ const takeLock = async (logPath: string, id: SessionId): Promise<SessionLock> =>
     return { path, release: releaseOf(path, shared.record) }
   }
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const record = await createLock(path)
+    const record = await tryCreateLock(path)
+    if (record !== undefined) {
       registry.set(path, { record, holders: 1 })
       armExit()
       return { path, release: releaseOf(path, record) }
-    } catch (error) {
-      if (codeOf(error) !== 'EEXIST') throw error
     }
-    const record = recordOf(await readFile(path, 'utf8').catch(() => ''))
-    if (record !== undefined && isProcessAlive(record.pid)) {
-      throw held(id, path)
-    }
-    // The holder is gone, or died halfway through writing its record. Both
-    // contenders unlink; the one that creates second reads a live lock next round.
+    if (!(await staleAt(path))) throw held(id, path)
+    // Both contenders unlink; the one that creates second reads a live lock next round.
     await unlink(path).catch(() => undefined)
   }
   throw held(id, path)
