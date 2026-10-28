@@ -2373,3 +2373,131 @@
     cursor: pointer;
   }
 }
+
+/*
+ * A plan stays where it was proposed: one card carries the verdict, the plan
+ * itself, and the same choices the question offers, so a reader can answer it
+ * from the conversation or open the whole text in the pane.
+ */
+@layer client {
+  .plan-card {
+    margin: var(--s3) 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg-raise);
+    overflow: hidden;
+  }
+
+  .plan-card.approved {
+    border-color: color-mix(in srgb, var(--foam) 55%, var(--line));
+  }
+
+  .plan-card.kept {
+    border-color: var(--line-strong);
+  }
+
+  .plan-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    align-items: center;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--line);
+    font-size: var(--text-xs);
+  }
+
+  .plan-head .plan-icon {
+    color: var(--dim);
+  }
+
+  .plan-title {
+    font-weight: 650;
+  }
+
+  .plan-verdict {
+    padding: 1px 8px;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    color: var(--dim);
+    font-size: var(--text-xs);
+  }
+
+  .plan-card.approved .plan-verdict {
+    border-color: color-mix(in srgb, var(--foam) 55%, var(--line));
+    color: var(--text);
+  }
+
+  .plan-open {
+    margin-left: auto;
+    border: 0;
+    background: none;
+    color: var(--dim);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .plan-open:hover {
+    color: var(--text);
+    text-decoration: underline;
+  }
+
+  .plan-body {
+    padding: 0 10px 8px;
+  }
+
+  .plan-fold {
+    padding: 6px 0 2px;
+    color: var(--dim);
+    font-size: var(--text-xs);
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .plan-fold::-webkit-details-marker {
+    display: none;
+  }
+
+  .plan-body[open] .plan-fold {
+    display: none;
+  }
+
+  .plan-card .markdown {
+    font-size: var(--text-sm);
+    line-height: 1.65;
+  }
+
+  .plan-reason {
+    margin: 0 10px 8px;
+    color: var(--dim);
+    font-size: var(--text-xs);
+  }
+
+  .plan-reason-label {
+    color: var(--text);
+  }
+
+  .plan-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 10px 10px;
+  }
+
+  .plan-pane {
+    padding: var(--s4);
+    overflow: auto;
+  }
+
+  .plan-pane-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
+    align-items: baseline;
+    margin-bottom: var(--s3);
+  }
+
+  .plan-pane .markdown {
+    font-size: var(--text-sm);
+    line-height: 1.7;
+  }
+}

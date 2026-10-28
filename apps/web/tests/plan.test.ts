@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import type { UiSessionEvent } from '@jozo-harness/ui-protocol'
-import { planOf, planToolOf } from '../src/ui/plan.ts'
+import { FOLD_LINES, isLongPlan, planOf, planToolOf } from '../src/ui/plan.ts'
 import { toolsOf, traceOf } from '../src/ui/trace.ts'
 
 const event = (type: string, data: unknown, time: number): UiSessionEvent => ({
@@ -115,6 +115,13 @@ describe('a plan a call proposed', () => {
     ])
 
     expect(tool === undefined ? undefined : planOf(tool)).toBeUndefined()
+  })
+
+  test('folds a plan only once it runs past a screenful of lines', () => {
+    expect(isLongPlan('- one\n- two')).toBe(false)
+    expect(isLongPlan(Array.from({ length: FOLD_LINES + 1 }, () => '- a line').join('\n'))).toBe(
+      true,
+    )
   })
 
   test('finds the call again by id, as a pane reopened after a reload needs', () => {

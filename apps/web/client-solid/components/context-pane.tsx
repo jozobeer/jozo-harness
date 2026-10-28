@@ -11,6 +11,7 @@ import type {
   SettingsView,
 } from '../../src/shared/rpc.ts'
 import type { Pane } from '../../src/ui/state.ts'
+import { planOf, planToolOf } from '../../src/ui/plan.ts'
 import { FONT_FAMILIES, FONT_SIZES, type FontFamily, type FontSize } from '../../src/ui/font.ts'
 import { THEMES, type Theme } from '../../src/ui/theme.ts'
 import type { TurnView } from '../../src/ui/trajectory.ts'
@@ -22,6 +23,8 @@ import type { ScheduleDraft, SessionStore } from '../store.ts'
 import { BrowserPane } from './browser-pane.tsx'
 import { FilePreview } from './file-preview.tsx'
 import { FileTree } from './file-tree.tsx'
+import { Markdown } from './markdown.tsx'
+import { PLAN_VERDICTS } from './plan-card.tsx'
 import { Review } from './review.tsx'
 import { Inspector } from './inspector.tsx'
 import { Button } from './ui/button.tsx'
@@ -1483,6 +1486,35 @@ const Job = (props: { store: SessionStore; pane: Extract<Pane, { kind: 'job' }> 
   )
 }
 
+/** One plan in full: the verdict, the reason plan mode stayed, and the Markdown body. */
+const PlanPane = (props: { store: SessionStore; callId: string }) => {
+  const t = useTranslate()
+  const plan = () => {
+    const tool = planToolOf(props.store.state().trace, props.callId)
+    return tool === undefined ? undefined : planOf(tool)
+  }
+  return (
+    <article class="plan-pane">
+      <Show when={plan()} fallback={<p class="preview-hint">{t('plan.gone')}</p>}>
+        {(shown) => (
+          <>
+            <header class="plan-pane-head">
+              <span class="plan-verdict">{t(PLAN_VERDICTS[shown().verdict])}</span>
+              <Show when={shown().reason !== ''}>
+                <span class="plan-reason">
+                  <span class="plan-reason-label">{t('plan.reason')}</span>
+                  {shown().reason}
+                </span>
+              </Show>
+            </header>
+            <Markdown text={shown().text} class="body" />
+          </>
+        )}
+      </Show>
+    </article>
+  )
+}
+
 const PANES = [
   { kind: 'changes', label: 'pane.changes', icon: 'changes' },
   { kind: 'files', label: 'pane.files', icon: 'folder' },
@@ -1585,6 +1617,11 @@ export const ContextPane = (props: { store: SessionStore }) => {
               </button>
             )}
           </Show>
+          <Show when={ofKind(pane(), 'plan')}>
+            <button class="tab active" type="button">
+              {t('pane.plan')}
+            </button>
+          </Show>
         </nav>
         <button
           id="panel-close"
@@ -1630,6 +1667,9 @@ export const ContextPane = (props: { store: SessionStore }) => {
           </Match>
           <Match when={ofKind(body(), 'preview')}>
             {(preview) => <FilePreview store={props.store} path={preview().path} />}
+          </Match>
+          <Match when={ofKind(body(), 'plan')}>
+            {(plan) => <PlanPane store={props.store} callId={plan().callId} />}
           </Match>
         </Switch>
       </div>

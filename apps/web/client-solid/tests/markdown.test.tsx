@@ -1,6 +1,6 @@
 import { cleanup, render } from '@solidjs/testing-library'
 import { afterEach, describe, expect, test } from 'vitest'
-import { Markdown } from '../components/turns.tsx'
+import { Markdown } from '../components/markdown.tsx'
 
 afterEach(cleanup)
 

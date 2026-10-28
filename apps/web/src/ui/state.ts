@@ -39,6 +39,7 @@ export type Pane =
   | { readonly kind: 'trajectory' }
   | { readonly kind: 'job'; readonly id: string; readonly detail: JobDetailView | undefined }
   | { readonly kind: 'preview'; readonly path: string }
+  | { readonly kind: 'plan'; readonly callId: string }
 
 /** What the browser shows: the conversation, the socket, the draft, and the sessions. */
 export interface WebState {

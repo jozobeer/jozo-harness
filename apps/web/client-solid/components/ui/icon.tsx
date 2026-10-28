@@ -112,6 +112,8 @@ const SHAPES = {
   effort: () => line('M2.5 12a5.5 5.5 0 1 1 11 0M8 12l2.6-3.2'),
   approval: () =>
     line('M8 1.8l5 2v4.3c0 3-2.2 5-5 6.1-2.8-1.1-5-3.1-5-6.1V3.8zM5.8 8.2l1.5 1.5 3-3'),
+  // A page with lines: a plan is something to read before anything is done.
+  plan: () => line('M3.5 2h6l3 3v9h-9zM9 2v3h3M6 8h4M6 10.5h4'),
 } satisfies Record<string, (id: string) => JSX.Element>
 
 export type IconName = keyof typeof SHAPES

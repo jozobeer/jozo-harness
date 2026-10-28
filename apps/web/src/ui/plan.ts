@@ -43,6 +43,12 @@ const verdictOf = (ask: TraceTool['ask']): PlanVerdict => {
   return approval !== '' && answer === approval.trim().toLowerCase() ? 'approved' : 'kept'
 }
 
+/** The lines past which a card folds its plan; the pane still shows every one. */
+export const FOLD_LINES = 24
+
+/** True when a plan is long enough that the card should start folded. */
+export const isLongPlan = (text: string): boolean => text.split('\n').length > FOLD_LINES
+
 /** The plan a call proposed; undefined for a call that proposed none. */
 export const planOf = (tool: TraceTool): PlanView | undefined => {
   const text = tool.name === PLAN_TOOL ? textOf(tool.args) : ''
