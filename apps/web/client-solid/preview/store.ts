@@ -8,6 +8,9 @@ import {
   withDraft,
   withFontFamily,
   withFontSize,
+  withPane,
+  withPreviewReading,
+  withPreviewView,
   withQuotes,
   withSelection,
   withSession,
@@ -25,6 +28,7 @@ import type {
   SessionSummary,
   SettingsView,
   WorkspaceEntry,
+  WorkspacePreview,
 } from '../../src/shared/rpc.ts'
 import { draftWithReference } from '../../src/ui/references.ts'
 import type { SessionStore } from '../store.ts'
@@ -40,6 +44,12 @@ const PREVIEW_TREE: Readonly<Record<string, ReadonlyArray<WorkspaceEntry>>> = {
     { name: 'main.ts', kind: 'file' },
     { name: 'app.ts', kind: 'file' },
   ],
+}
+
+/** What the preview's files hold: enough to show each renderer without a disk. */
+const PREVIEW_TEXT: Readonly<Record<string, string>> = {
+  'README.md': '# Workspace preview\n\nThe tree opens a file here, and the sheet draws it.',
+  'src/main.ts': 'export const preview = true\n',
 }
 import { fixtureSessions, type FixtureSession } from './fixture.ts'
 
@@ -268,6 +278,25 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
     closeFolder: (path) => setState((now) => withTreeClosed(now, path)),
     refreshTree: () => undefined,
     referencePath: (path) => setState((now) => withDraft(now, draftWithReference(now.draft, path))),
+    // The preview has no disk, so a file opens with made-up text under its real renderer.
+    previewPath: (path) => {
+      const text = PREVIEW_TEXT[path] ?? 'The preview fixture does not read ' + path + ' from disk.'
+      const kind = path.endsWith('.md') ? 'markdown' : 'text'
+      const view: WorkspacePreview = {
+        path,
+        kind,
+        mediaType: kind === 'markdown' ? 'text/markdown' : 'text/plain',
+        size: text.length,
+        text,
+        truncated: false,
+      }
+      setState((now) =>
+        withPane(withPreviewView(withPreviewReading(now, path), now.sessionId, path, view), {
+          kind: 'preview',
+          path,
+        }),
+      )
+    },
     // The preview has no disk to read: the dialog opens on the made-up folder alone.
     browseDirectories: (path, reply) =>
       reply({

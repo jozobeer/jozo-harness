@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import type { UiEvent } from '@jozo-harness/ui-protocol'
+import type { WorkspacePreview } from '../src/shared/rpc.ts'
 import {
   applyUiEvent,
   initialState,
@@ -12,6 +13,9 @@ import {
   withFontSize,
   withModels,
   withPane,
+  withPreviewProblem,
+  withPreviewReading,
+  withPreviewView,
   withProblem,
   withRun,
   withSession,
@@ -209,5 +213,56 @@ describe('the browser state', () => {
     // None of the moves names the conversation or the trace, so both stay as they were.
     expect(state.conversation).toBe(initialState.conversation)
     expect(state.trace).toBe(initialState.trace)
+  })
+})
+
+describe('the file preview state', () => {
+  const view: WorkspacePreview = {
+    path: 'README.md',
+    kind: 'markdown',
+    mediaType: 'text/markdown',
+    size: 8,
+    text: '# Title\n',
+    truncated: false,
+  }
+
+  test('a picked file starts reading, and its answer replaces that reading', () => {
+    const reading = withPreviewReading(withSession(initialState, a), 'README.md')
+    expect(reading.preview).toEqual({ path: 'README.md', view: undefined, problem: '' })
+
+    const answered = withPreviewView(reading, 'a', 'README.md', view)
+    expect(answered.preview).toEqual({ path: 'README.md', view, problem: '' })
+  })
+
+  test('an answer that names another path or session lands nowhere', () => {
+    const reading = withPreviewReading(withSession(initialState, a), 'README.md')
+    expect(withPreviewView(reading, 'a', 'src/app.ts', view)).toBe(reading)
+    expect(withPreviewView(reading, 'b', 'README.md', view)).toBe(reading)
+  })
+
+  test('a refused read keeps the path and says why', () => {
+    const reading = withPreviewReading(withSession(initialState, a), 'README.md')
+    const failed = withPreviewProblem(
+      reading,
+      'a',
+      'README.md',
+      'the file is outside the workspace',
+    )
+    expect(failed.preview).toEqual({
+      path: 'README.md',
+      view: undefined,
+      problem: 'the file is outside the workspace',
+    })
+  })
+
+  test('moving to another session forgets the file it showed', () => {
+    const reading = withPreviewView(
+      withPreviewReading(withSession(initialState, a), 'README.md'),
+      'a',
+      'README.md',
+      view,
+    )
+    expect(withSession(reading, b).preview).toBeUndefined()
+    expect(withSession(reading, a).preview).toEqual(reading.preview)
   })
 })
