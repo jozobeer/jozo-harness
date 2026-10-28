@@ -27,6 +27,7 @@ plugin ごとの config キー、フラグ、環境変数の一覧は `jzh --dum
 | `deepseekToolsBaseUrl` | URL | DeepSeek Search / Fetch API の base。既定は `https://api.deepseek.com/v1/tools`。provider は `/search` を足す |
 | `skills` | 文字列の配列 | `<name>/SKILL.md` を持つディレクトリを追加する。```/x``` は展開する |
 | `plugins` | 行の配列 | 層3として重なる |
+| `webhooks` | webhook 規則の配列 | 外部イベントからセッションを起こす経路。未設定なら `/hooks/` 以下はすべて 404（既定で無効） |
 
 `profile` が指せるのは同梱の `base` / `headless` / `repl` だけである。同梱に無い名前は `no bundled profile named <name>` で起動が止まる。
 
@@ -44,6 +45,31 @@ plugin ごとの config キー、フラグ、環境変数の一覧は `jzh --dum
 `modelInvocable` と `userInvocable` は既定 `true` で、`false` と書くとモデルのカタログと `/` の候補のそれぞれから外れる。`true` / `false` として読めない値は無視して `true` に倒す。同梱 skills は探索の最後に置くので、同じ名前の自作 skill が勝つ。
 
 探索先の直下にある symlink は、リンク先がディレクトリなら 1 段だけ辿る。壊れたリンクとファイルへのリンクは、`SKILL.md` を持たないディレクトリと同じく無視する。リンク先の中のディレクトリやリンクは辿らない。
+
+## webhook
+
+`webhooks` は、外部の HTTP POST からセッションを起こす規則の配列である。規則が無ければこの経路は開かない。`jzh web` だけが経路を持ち、`--public-url` などで外部から届くアドレスを用意していなければ、送信元はそもそも届かない。
+
+| キー | 必須 | 効果 |
+|---|---|---|
+| `path` | はい | POST を受ける経路。`/hooks/` で始まり、そのあとに英数字・`.`・`_`・`-` だけを置ける |
+| `cwd` | はい | セッションを開くワークスペース |
+| `prompt` | はい | 最初の user メッセージの先頭に置く指示。空でもよい |
+| `secret` | はい | 本文の HMAC-SHA256 を確かめる共有秘密。空は設定エラーになる |
+
+```yaml
+webhooks:
+  - path: /hooks/deploy
+    cwd: /home/me/src/app
+    prompt: 配備の結果を読み、失敗していれば原因を調べる。
+    secret: '<GitHub の webhook に設定したのと同じ秘密>'
+```
+
+github 形式の `X-Hub-Signature-256: sha256=<hex>` を、受け取った本文のバイト列に対して検証する。署名が無い・合わない配送は 401 で、セッションを作らない。秘密は設定ファイルに平文で置くので、このファイルを commit しない。
+
+経路は page の cookie や origin の gate を通らない。代わりに上の署名だけを信じる。Host の検査はページと同じく受ける。
+
+本文は 1 MiB まで、10 秒以内に届かなければ 408、30 秒以内にセッションが turn を始めなければ 504 になる。本文が JSON の object でないとき、大きすぎるときは 400。受け付けた配送は 202 と `{ "sessionId": "..." }` を返す。
 
 ## 行
 

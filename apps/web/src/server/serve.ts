@@ -39,6 +39,7 @@ import {
 import { answerArtifact } from './artifacts.ts'
 import { answerSessionExport } from './session-export.ts'
 import { answerPlugins, type PluginsPort } from './plugins.ts'
+import { answerWebhook, type WebhookGate, type WebhookRule } from './webhooks.ts'
 import { searchWorkspaceFiles } from './files.ts'
 import {
   resolveReferences,
@@ -73,6 +74,11 @@ export interface ServeWebOptions {
   readonly settings: SettingsPort
   /** The folders a page may start a session in. */
   readonly workspaces: WorkspacesPort
+  /**
+   * Rules an external event may start a session with. Absent refuses every
+   * /hooks/ path, so the route is off until the settings file names a rule.
+   */
+  readonly webhooks?: ReadonlyArray<WebhookRule>
   /**
    * One session's log, as an @ reference may quote it. The resolver decides which
    * sessions a message can reach; this only reads the one it names.
@@ -474,6 +480,7 @@ const respondTo = async (
   codes: CodeExchange,
   plugins: PluginsPort,
   readSessionEvents: (id: string) => Effect.Effect<ReadonlyArray<SessionEvent>, SessionError>,
+  webhooks: WebhookGate,
 ): Promise<void> => {
   // A page served under another name could read this one through a rebinding
   // proxy; the name the request asked for must be one this server answers to.
@@ -483,6 +490,9 @@ const respondTo = async (
   }
   if (exchangeCode(request, response, token, codes, secureExchange(request, publicOrigin))) return
   const path = pathOf(request)
+  // A delivery comes from a service, so it is answered before the page routes and
+  // outside their cookie and origin gate; its secret is checked in the route.
+  if (await answerWebhook(request, response, path, webhooks)) return
   if (
     await answerArtifact(request, response, path, {
       root: artifactRoot,
@@ -517,6 +527,15 @@ const respondTo = async (
     })
   )
     return
+  await answerPage(response, staticRoot, path)
+}
+
+/** Serves the browser app's own files; every other path is 404. */
+const answerPage = async (
+  response: ServerResponse,
+  staticRoot: string,
+  path: string,
+): Promise<void> => {
   if (path === UI_PATH) {
     endWith(response, 426, 'websocket required')
     return
@@ -576,6 +595,26 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
       })
       const { protocol, attach } = yield* makeWebProtocol
       const store = makeStoreEvents()
+      // A delivery starts the same session a page's first line does: one core in
+      // the rule's workspace, and one turn carrying the event. The route has no
+      // cookie, so the rule's secret is what stands in for it.
+      const webhooks: WebhookGate = {
+        rules: options.webhooks ?? [],
+        start: (rule, prompt) =>
+          Effect.runPromise(
+            registry.open(undefined, rule.cwd).pipe(
+              Effect.tap(() => Effect.sync(() => store.notify())),
+              Effect.flatMap((session) =>
+                sendCommand(session.host, { kind: 'submit', text: prompt }).pipe(
+                  Effect.as({ kind: 'started' as const, sessionId: session.summary.id }),
+                ),
+              ),
+              Effect.catch(() => Effect.succeed({ kind: 'unavailable' as const })),
+            ),
+            // A defect would otherwise leave the caller without an answer; the
+            // sender reads a 502 and may retry the delivery.
+          ).catch(() => ({ kind: 'unavailable' as const })),
+      }
       const connections = new Map<WebSocket, Connection>()
       // One token per run, kept out of the ready URL: that URL carries a code
       // which trades for the token in an HttpOnly cookie and then dies.
@@ -609,6 +648,7 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
           codes,
           options.plugins,
           options.readSessionEvents,
+          webhooks,
         ).catch(() => {
           response.destroy()
         })

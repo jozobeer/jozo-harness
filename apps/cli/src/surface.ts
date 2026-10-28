@@ -146,6 +146,25 @@ export const SETTINGS_KEYS: ReadonlyArray<SettingsNote> = [
     ],
     items: (settings) => (settings?.plugins ?? []).map(rowText),
   },
+  {
+    name: 'webhooks',
+    summary: 'routes an external event starts a session on; unset closes every /hooks/ path',
+    value: (settings) =>
+      countOr(
+        'not set, so no webhook route is open',
+        settings?.webhooks?.length,
+        'route',
+        'routes',
+      ),
+    example: [
+      'webhooks:',
+      '  - path: /hooks/deploy',
+      '    cwd: ~/src/app',
+      '    prompt: read the delivery and report what changed',
+      "    secret: '<shared secret>'",
+    ],
+    items: (settings) => (settings?.webhooks ?? []).map((rule) => rule.path + ' → ' + rule.cwd),
+  },
 ]
 
 /** The route and effort the command resolved, and the layers each looked through. */

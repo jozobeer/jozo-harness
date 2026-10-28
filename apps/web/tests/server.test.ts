@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { execFileSync } from 'node:child_process'
+import { createHmac } from 'node:crypto'
 import { request } from 'node:http'
 import { makeArtifactTool, makeScheduleStore } from '@jozo-harness/tools-tier1'
 import type { SessionEvent, UiCommand, UiEvent, UiHost } from '@jozo-harness/ui-protocol'
@@ -25,6 +26,7 @@ import {
   type SettingsPort,
   type SettingsView,
   type TailnetAddresses,
+  type WebhookRule,
   type WorkspacesPort,
 } from '../src/server/index.ts'
 import {
@@ -432,6 +434,8 @@ const start = (
   },
   /** The log read the session export route folds; tests that never export leave it empty. */
   readSessionEvents: ServeWebOptions['readSessionEvents'] = () => Effect.succeed([]),
+  /** The rules the webhook route may start sessions from; empty refuses every /hooks/ path. */
+  webhooks: ReadonlyArray<WebhookRule> = [],
 ): Effect.Effect<Started, never, Scope.Scope> =>
   Effect.gen(function* () {
     const ready = yield* Deferred.make<ReadyUrls>()
@@ -451,6 +455,7 @@ const start = (
         workspaces: workspaces.port,
         commands: web.initial.commands,
         plugins,
+        ...(webhooks.length === 0 ? {} : { webhooks }),
         port: 0,
         staticRoot,
         ...(publicUrl === undefined ? {} : { publicUrl }),
@@ -2434,6 +2439,226 @@ describe('the web transport', () => {
 
     expect(observed.tailnetUrls).toEqual([])
     expect(observed.nameAtPort.status).toBe(403)
+    await rm(root, { recursive: true, force: true })
+  })
+})
+
+describe('a webhook delivery', () => {
+  const rule: WebhookRule = {
+    path: '/hooks/deploy',
+    cwd: '/work/hooked',
+    prompt: 'Read the delivery and say what changed.',
+    secret: 's3cret',
+  }
+
+  const bodyOf = (padding = ''): string =>
+    JSON.stringify({
+      action: 'completed',
+      repository: { full_name: 'acme/app' },
+      sender: { login: 'octocat' },
+      ...(padding === '' ? {} : { padding }),
+    })
+
+  const signatureOf = (secret: string, body: string): string =>
+    'sha256=' + createHmac('sha256', secret).update(body).digest('hex')
+
+  /** The session the answer names; the route always answers JSON on a 202. */
+  const sessionOf = (text: string): string => {
+    const parsed: unknown = JSON.parse(text)
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      !('sessionId' in parsed) ||
+      typeof parsed.sessionId !== 'string'
+    ) {
+      throw new Error('the webhook answer names no session')
+    }
+    return parsed.sessionId
+  }
+
+  const post = (
+    started: Started,
+    path: string,
+    body: string,
+    headers: Record<string, string> = {},
+  ): Promise<Response> =>
+    fetch(started.origin + path, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-github-event': 'workflow_run',
+        ...headers,
+      },
+      body,
+    })
+
+  test('a signed POST starts one session in the rule workspace, and the page lists and opens it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-hook-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const body = bodyOf()
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(
+            root,
+            web,
+            makeSettings(),
+            makeWorkspaces(),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            [rule],
+          )
+          const answer = yield* Effect.promise(() =>
+            post(started, rule.path, body, {
+              'x-hub-signature-256': signatureOf(rule.secret, body),
+            }),
+          )
+          const text = yield* Effect.promise(() => answer.text())
+          const sessionId = sessionOf(text)
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const listed = yield* client.sessions()
+            const opened = yield* client.open({ sessionId })
+            return { listed, opened }
+          }).pipe(clientLayers(started.wsUrl))
+          const page = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return { status: answer.status, text, sessionId, page }
+        }),
+      ),
+    )
+
+    const made = web.hosts.get(observed.sessionId)
+    expect(observed.status).toBe(202)
+    expect(web.hosts.size).toBe(2)
+    expect(made?.summary.cwd).toBe(rule.cwd)
+    expect(made?.commands[0]?.kind).toBe('submit')
+    const sent = made?.commands[0]?.kind === 'submit' ? made.commands[0].text : ''
+    expect(sent).toContain('Read the delivery and say what changed.')
+    expect(sent).toContain('GitHub event "workflow_run"')
+    expect(sent).toContain('acme/app')
+    expect(observed.page.listed.items.map((item) => item.id)).toContain(observed.sessionId)
+    expect(observed.page.opened.id).toBe(observed.sessionId)
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('a signature that does not match starts no session', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-hook-signature-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const body = bodyOf()
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(
+            root,
+            web,
+            makeSettings(),
+            makeWorkspaces(),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            [rule],
+          )
+          const wrong = yield* Effect.promise(() =>
+            post(started, rule.path, body, {
+              'x-hub-signature-256': signatureOf('another secret', body),
+            }),
+          )
+          const missing = yield* Effect.promise(() => post(started, rule.path, body))
+          yield* Deferred.succeed(started.stop, undefined)
+          return { wrong: wrong.status, missing: missing.status }
+        }),
+      ),
+    )
+
+    expect(observed).toEqual({ wrong: 401, missing: 401 })
+    expect(web.hosts.size).toBe(1)
+    expect(web.hosts.get('a')?.commands).toEqual([])
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('a path no rule names is not found', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-hook-path-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const body = bodyOf()
+
+    const status = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(
+            root,
+            web,
+            makeSettings(),
+            makeWorkspaces(),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            [rule],
+          )
+          const answer = yield* Effect.promise(() =>
+            post(started, '/hooks/other', body, {
+              'x-hub-signature-256': signatureOf(rule.secret, body),
+            }),
+          )
+          yield* Deferred.succeed(started.stop, undefined)
+          return answer.status
+        }),
+      ),
+    )
+
+    expect(status).toBe(404)
+    expect(web.hosts.size).toBe(1)
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('a body that is too large or not a JSON object is refused, and starts nothing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-hook-body-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const oversized = bodyOf('x'.repeat(1024 * 1024))
+    const notAnObject = '[]'
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(
+            root,
+            web,
+            makeSettings(),
+            makeWorkspaces(),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            [rule],
+          )
+          const large = yield* Effect.promise(() =>
+            post(started, rule.path, oversized, {
+              'x-hub-signature-256': signatureOf(rule.secret, oversized),
+            }),
+          )
+          const shape = yield* Effect.promise(() =>
+            post(started, rule.path, notAnObject, {
+              'x-hub-signature-256': signatureOf(rule.secret, notAnObject),
+            }),
+          )
+          yield* Deferred.succeed(started.stop, undefined)
+          return { large: large.status, shape: shape.status }
+        }),
+      ),
+    )
+
+    expect(observed).toEqual({ large: 400, shape: 400 })
+    expect(web.hosts.size).toBe(1)
     await rm(root, { recursive: true, force: true })
   })
 })
