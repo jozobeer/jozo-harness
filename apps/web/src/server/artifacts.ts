@@ -1,8 +1,7 @@
 import { readFile, readdir, stat, unlink } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join } from 'node:path'
-import { originAllowed, refusedBy, type CodeExchange, type PublicOrigin } from './auth.ts'
-import type { TailnetAddresses } from './tailnet.ts'
+import { originAllowed, refusedBy, type ReadGate } from './auth.ts'
 
 /** A session id or artifact name the route may hand to the filesystem. */
 const safeSegment = (value: string): boolean =>
@@ -39,16 +38,8 @@ const routeOf = (path: string): ArtifactRoute => {
   return { kind: 'other' }
 }
 
-/** The gate the artifact route shares with the page: same host, origin, and token. */
-export interface ArtifactGate {
-  /** Absent when the run could not read where its sessions live. */
-  readonly root: string | undefined
-  readonly port: number
-  readonly publicOrigin: PublicOrigin | undefined
-  readonly tailnet: TailnetAddresses | undefined
-  readonly token: string
-  readonly codes: CodeExchange
-}
+/** The gate the artifact route shares with the page: same host, origin, and credential. */
+export type ArtifactGate = ReadGate
 
 const refuse = (response: ServerResponse, status: number, body: string): void => {
   response.writeHead(status, { 'content-type': 'text/plain; charset=utf-8' })

@@ -119,6 +119,19 @@ jzh web --public-url https://<machine>.<tailnet>.ts.net
 
 起動 URL はその run を開ける credential である。code は 60 秒・1 回限りで、開けば `HttpOnly; SameSite=Strict` の cookie に変わり URL からは消える。**開く前の URL をチャットや issue に貼らない。** `--public-url` は https origin だけを受け付け、パス・query・fragment・userinfo が付いた値と `jzh web` 以外での指定は起動前にエラーになる。
 
+### 別の人に同じセッションを操作させる
+
+設定シートの `share this run` で、同じ run を操作できるリンクを発行する。ラベルは誰に渡したかを見分けるためのもので、`Invite` を押すと `http://.../?join=...` がその場に並ぶ。リンクを開いたブラウザは `jzh_join` cookie を受け取り、所有者と同じセッション一覧・会話・composer を使える。入力はすべて同じセッションの host に届くので、ログの書き手は 1 つのままである。
+
+`Cut` を押すとその招待は即座に失効する。その招待でつないでいた socket は 4001 で閉じられ、同じリンクと cookie は以後 401 になる。招待は run のメモリにだけあり、`jzh web` を終えるとすべて消える。参加者は新しい招待を発行できない（`/share` は 403 を返す）。
+
+ページを持たないクライアントからは HTTP でも同じ操作ができる。所有者の cookie か token を付ける。
+
+```sh
+curl -s -b 'jzh_web=<token>' 'http://127.0.0.1:4310/share?label=Alice'
+curl -s -X DELETE -b 'jzh_web=<token>' 'http://127.0.0.1:4310/share/<id>'
+```
+
 ### モデルにページを書かせる
 
 `artifact` tool は opt-in である。使う run だけ、設定ファイルか `--patch` の `plugins:` に次の行を足す（profile に書くときも同じ形である）。

@@ -5,10 +5,16 @@ import {
   codeFromUrl,
   cookieOf,
   hostAllowed,
+  JOIN_COOKIE_NAME,
+  joinCookie,
+  joinFromUrl,
   originAllowed,
+  participantOf,
+  requestAuthorized,
   tokenFromUrl,
   tokenMatches,
 } from '../src/server/auth.ts'
+import { makeParticipantRegistry } from '../src/server/participants.ts'
 
 describe('the gate in front of the web socket', () => {
   test('reads the token a url carries, and nothing when it names none', () => {
@@ -135,5 +141,37 @@ describe('the gate in front of the web socket', () => {
   test('builds a strict cookie, secure only where the page was https', () => {
     expect(authCookie('abc', false)).toBe('jzh_web=abc; Path=/; HttpOnly; SameSite=Strict')
     expect(authCookie('abc', true)).toBe('jzh_web=abc; Path=/; HttpOnly; SameSite=Strict; Secure')
+  })
+
+  test('reads the invitation a join link carries, under its own cookie', () => {
+    expect(joinFromUrl('/?join=def')).toBe('def')
+    expect(joinFromUrl('/?session=s-1&join=def')).toBe('def')
+    expect(joinFromUrl('/')).toBeUndefined()
+    expect(joinFromUrl('/?join=')).toBeUndefined()
+    expect(joinCookie('def', false)).toBe(
+      JOIN_COOKIE_NAME + '=def; Path=/; HttpOnly; SameSite=Strict',
+    )
+    expect(joinCookie('def', true)).toBe(
+      JOIN_COOKIE_NAME + '=def; Path=/; HttpOnly; SameSite=Strict; Secure',
+    )
+  })
+
+  test('admits a live invitation and refuses one the owner cut', () => {
+    const participants = makeParticipantRegistry(() => 0)
+    const guest = participants.issue('Alice')
+    const gate = { token: 'owner', codes: codeExchange(() => 0), participants }
+    const owner = 'other=1; jzh_web=owner'
+    const joined = 'other=1; ' + JOIN_COOKIE_NAME + '=' + guest.token
+    expect(requestAuthorized('/', owner, gate)).toBe(true)
+    expect(requestAuthorized('/', joined, gate)).toBe(true)
+    expect(requestAuthorized('/?join=' + guest.token, undefined, gate)).toBe(true)
+    expect(requestAuthorized('/', 'jzh_join=' + 'f'.repeat(64), gate)).toBe(false)
+    expect(requestAuthorized('/', undefined, gate)).toBe(false)
+    expect(participantOf('/', joined, gate)?.id).toBe(guest.id)
+    expect(participantOf('/', owner, gate)).toBeUndefined()
+
+    participants.revoke(guest.id)
+    expect(requestAuthorized('/', joined, gate)).toBe(false)
+    expect(participantOf('/', joined, gate)).toBeUndefined()
   })
 })

@@ -1,5 +1,6 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage } from 'node:http'
+import type { Participant, ParticipantRegistry } from './participants.ts'
 import type { TailnetAddresses } from './tailnet.ts'
 
 /**
@@ -10,7 +11,8 @@ import type { TailnetAddresses } from './tailnet.ts'
  * the page this server served, and the socket must repeat the token, either
  * from the HttpOnly cookie the startup code traded for or from `?token=` for
  * scripts. The ready URL carries only the one-time code, so a copied link stops
- * working once it has opened a page.
+ * working once it has opened a page. An invitation token the owner issued
+ * stands in for the run token while the owner keeps it live.
  */
 
 /**
@@ -76,8 +78,14 @@ export const tokenFromUrl = (url: string): string | undefined => queryParam(url,
 /** The one-time code a startup URL carries; a missing or empty one reads the same. */
 export const codeFromUrl = (url: string): string | undefined => queryParam(url, 'code')
 
+/** The invitation token a join link carries; a missing or empty one reads the same. */
+export const joinFromUrl = (url: string): string | undefined => queryParam(url, 'join')
+
 /** The cookie a page repeats once the startup code traded it for one. */
 export const COOKIE_NAME = 'jzh_web'
+
+/** The cookie a joined browser repeats once it traded the owner's link for one. */
+export const JOIN_COOKIE_NAME = 'jzh_join'
 
 /** How long a startup code may be redeemed; long enough to open a copied link. */
 export const CODE_TTL_MS = 60_000
@@ -145,6 +153,18 @@ export const cookieOf = (header: string | undefined, name: string): string | und
 export const authCookie = (token: string, secure: boolean): string =>
   COOKIE_NAME + '=' + token + '; Path=/; HttpOnly; SameSite=Strict' + (secure ? '; Secure' : '')
 
+/**
+ * The cookie that stands for an invitation. It is a different name from the
+ * owner's, so joining never replaces the owner's credential in a browser that
+ * already holds one, and cutting the invitation cannot cut the owner's page.
+ */
+export const joinCookie = (token: string, secure: boolean): string =>
+  JOIN_COOKIE_NAME +
+  '=' +
+  token +
+  '; Path=/; HttpOnly; SameSite=Strict' +
+  (secure ? '; Secure' : '')
+
 /** True only for a loopback name, a detected tailnet name, or the published host, at this port. */
 export const hostAllowed = (
   host: string | undefined,
@@ -175,10 +195,37 @@ export const originAllowed = (
 export const requestAuthorized = (
   url: string,
   cookie: string | undefined,
+  gate: {
+    readonly token: string
+    readonly codes: CodeExchange
+    readonly participants?: ParticipantRegistry
+  },
+): boolean => ownerAuthorized(url, cookie, gate) || participantOf(url, cookie, gate) !== undefined
+
+/**
+ * True only for the credential this run started with: its token, or a startup
+ * code still worth trading. Sharing and cutting invitations sit behind this one,
+ * so a participant can type in the session but cannot hand out more invitations.
+ */
+export const ownerAuthorized = (
+  url: string,
+  cookie: string | undefined,
   gate: { readonly token: string; readonly codes: CodeExchange },
 ): boolean =>
   tokenMatches(cookieOf(cookie, COOKIE_NAME) ?? tokenFromUrl(url), gate.token) ||
   gate.codes.peek(codeFromUrl(url))
+
+/**
+ * The invitation a request carries, or undefined for the owner, a startup code,
+ * and a token the owner already cut. The socket remembers this so cutting one
+ * invitation can close the sockets that joined through it and no other.
+ */
+export const participantOf = (
+  url: string,
+  cookie: string | undefined,
+  gate: { readonly participants?: ParticipantRegistry },
+): Participant | undefined =>
+  gate.participants?.find(cookieOf(cookie, JOIN_COOKIE_NAME) ?? joinFromUrl(url))
 
 /** The names and the credential a read route checks before it answers. */
 export interface RequestGate {
@@ -187,6 +234,14 @@ export interface RequestGate {
   readonly tailnet: TailnetAddresses | undefined
   readonly token: string
   readonly codes: CodeExchange
+  /** The invitations that may read and type as the owner does; absent refuses them. */
+  readonly participants?: ParticipantRegistry
+}
+
+/** The gate a read route shares with the page: the same host, origin, credential, and invitations. */
+export interface ReadGate extends RequestGate {
+  /** Absent when the run could not read where its sessions live. */
+  readonly root: string | undefined
 }
 
 /** What a refused read would answer: the status and the one line the page shows. */
@@ -198,8 +253,8 @@ export interface GateRefusal {
 /**
  * Why the shared gate refuses this request, or undefined when it admits it.
  * The artifact, plugin, and session export routes all sit behind this check, so
- * a foreign origin and a request without the cookie, a code, or the token are
- * refused the same way before any route reads a file.
+ * a foreign origin and a request without a cookie, a code, a token, or a live
+ * invitation are refused the same way before any route reads a file.
  */
 export const refusedBy = (request: IncomingMessage, gate: RequestGate): GateRefusal | undefined => {
   if (!originAllowed(request.headers.origin, gate.port, gate.publicOrigin, gate.tailnet)) {

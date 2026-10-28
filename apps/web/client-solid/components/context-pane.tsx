@@ -903,6 +903,179 @@ const row = (name: string, value: string) => (
   </div>
 )
 
+/** One invitation the owner issued, as /share lists it. */
+interface Invitation {
+  readonly id: string
+  readonly label: string
+  readonly joinedAt: number
+  readonly url: string
+}
+
+/** One JSON object's fields, or undefined for a value that is not an object. */
+const fieldsOf = (value: unknown): Readonly<Record<string, unknown>> | undefined => {
+  if (typeof value !== 'object' || value === null) return undefined
+  const entries: ReadonlyArray<[string, unknown]> = Object.entries(value)
+  return Object.fromEntries(entries)
+}
+
+/** One invitation as the share route lists it; undefined for a row this page cannot read. */
+const invitationOf = (value: unknown): Invitation | undefined => {
+  const fields = fieldsOf(value)
+  if (fields === undefined) return undefined
+  const { id, label, joinedAt, url } = fields
+  if (typeof id !== 'string' || typeof label !== 'string' || typeof url !== 'string') {
+    return undefined
+  }
+  if (typeof joinedAt !== 'number') return undefined
+  return { id, label, joinedAt, url }
+}
+
+/** The invitations a share reply names; undefined for a reply this page cannot read. */
+const invitationsOf = (value: unknown): ReadonlyArray<Invitation> | undefined => {
+  const fields = fieldsOf(value)
+  if (fields === undefined) return undefined
+  const items = fields['items']
+  if (!Array.isArray(items)) return undefined
+  const listed: Array<Invitation> = []
+  for (const item of items) {
+    const invitation = invitationOf(item)
+    if (invitation === undefined) return undefined
+    listed.push(invitation)
+  }
+  return listed
+}
+
+/**
+ * The owner's invitation controls. A participant's page asks the same route and
+ * is refused, so it never draws them: an invitation can be used but not passed on.
+ * The link is the whole credential, so it is shown rather than copied silently.
+ */
+const Share = () => {
+  const [items, setItems] = createSignal<ReadonlyArray<Invitation>>([])
+  const [owner, setOwner] = createSignal(false)
+  const [label, setLabel] = createSignal('')
+  const [failed, setFailed] = createSignal('')
+  const [copied, setCopied] = createSignal('')
+  const [busy, setBusy] = createSignal(false)
+
+  const ask = async (method: string, url: string): Promise<Response | undefined> => {
+    try {
+      return await fetch(url, { method, headers: { 'X-Requested-With': 'fetch' } })
+    } catch {
+      setFailed('the server did not answer')
+      return undefined
+    }
+  }
+
+  const read = async (): Promise<void> => {
+    try {
+      const answer = await ask('GET', '/share')
+      if (answer?.status !== 200) return
+      const listed = invitationsOf(await answer.json())
+      if (listed === undefined) return
+      setItems(listed)
+      setOwner(true)
+    } catch {
+      // A page served without the share route simply keeps the controls hidden.
+    }
+  }
+  onMount(() => void read())
+
+  const invite = async (): Promise<void> => {
+    setFailed('')
+    setBusy(true)
+    const answer = await ask('POST', '/share?label=' + encodeURIComponent(label()))
+    setBusy(false)
+    if (answer?.status !== 201) {
+      setFailed('the server answered ' + String(answer?.status ?? 0))
+      return
+    }
+    const added = invitationOf(await answer.json())
+    if (added === undefined) {
+      setFailed('the server answered an invitation this page cannot read')
+      return
+    }
+    setItems((now) => [...now, added])
+    setLabel('')
+  }
+
+  const cut = async (id: string): Promise<void> => {
+    setFailed('')
+    const answer = await ask('DELETE', '/share/' + encodeURIComponent(id))
+    if (answer?.status !== 200) {
+      setFailed('the server answered ' + String(answer?.status ?? 0))
+      return
+    }
+    setItems((now) => now.filter((one) => one.id !== id))
+  }
+
+  const copy = async (invitation: Invitation): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(invitation.url)
+      setCopied(invitation.id)
+    } catch {
+      setCopied('')
+      setFailed('select the link and copy it')
+    }
+  }
+
+  return (
+    <Show when={owner()}>
+      <span class="pane-label">share this run</span>
+      <div class="panel-actions">
+        <input
+          class="share-label"
+          type="text"
+          value={label()}
+          placeholder="who is joining"
+          aria-label="who is joining"
+          onInput={(event) => setLabel(event.currentTarget.value)}
+        />
+        <Button
+          id="invite"
+          variant="primary"
+          type="button"
+          disabled={busy()}
+          onClick={() => void invite()}
+        >
+          Invite
+        </Button>
+      </div>
+      <Show when={failed() !== ''}>
+        <div class="card-hint">{failed()}</div>
+      </Show>
+      <Show
+        when={items().length > 0}
+        fallback={<div class="card-hint">nobody else can open this run yet</div>}
+      >
+        <ul class="share-list">
+          <For each={items()}>
+            {(invitation) => (
+              <li class="share-row">
+                <span class="share-name">{invitation.label}</span>
+                <input
+                  class="share-link"
+                  type="text"
+                  readOnly
+                  value={invitation.url}
+                  aria-label={'invitation link for ' + invitation.label}
+                  onFocus={(event) => event.currentTarget.select()}
+                />
+                <Button type="button" variant="quiet" onClick={() => void copy(invitation)}>
+                  {copied() === invitation.id ? 'Copied' : 'Copy'}
+                </Button>
+                <Button type="button" variant="quiet" onClick={() => void cut(invitation.id)}>
+                  Cut
+                </Button>
+              </li>
+            )}
+          </For>
+        </ul>
+      </Show>
+    </Show>
+  )
+}
+
 const Settings = (props: { store: SessionStore; settings: SettingsView | undefined }) => (
   <>
     <h2 class="pane-title">Settings</h2>
@@ -972,6 +1145,7 @@ const Settings = (props: { store: SessionStore; settings: SettingsView | undefin
         </>
       )}
     </Show>
+    <Share />
   </>
 )
 

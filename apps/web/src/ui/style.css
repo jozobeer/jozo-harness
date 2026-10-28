@@ -1156,6 +1156,51 @@ body {
   padding: 0 12px 10px;
 }
 
+.share-label {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.share-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  margin: var(--s4) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.share-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.share-name {
+  min-width: 4.5rem;
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.share-link {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+
 .turns {
   display: flex;
   flex-direction: column;
