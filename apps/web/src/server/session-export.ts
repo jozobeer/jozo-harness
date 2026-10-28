@@ -5,8 +5,7 @@ import { deflateRawSync } from 'node:zlib'
 import { renderTranscriptMarkdown } from '@jozo-harness/session'
 import type { SessionError, SessionEvent } from '@jozo-harness/ui-protocol'
 import { Effect, Exit } from 'effect'
-import { refusedBy, type CodeExchange, type PublicOrigin } from './auth.ts'
-import type { TailnetAddresses } from './tailnet.ts'
+import { refusedBy, type ReadGate } from './auth.ts'
 
 /** A session id the route may hand to the filesystem. */
 const safeSegment = (value: string): boolean =>
@@ -35,16 +34,9 @@ const routeOf = (path: string): ExportRoute => {
   return { kind: 'invalid' }
 }
 
-/** The sessions root, and the log read the transcript route folds. */
-export interface SessionExportGate {
-  /** Absent when the run could not read where its sessions live. */
-  readonly root: string | undefined
+/** The gate the transcript route shares with the page, and the log it folds. */
+export interface SessionExportGate extends ReadGate {
   readonly events: (id: string) => Effect.Effect<ReadonlyArray<SessionEvent>, SessionError>
-  readonly port: number
-  readonly publicOrigin: PublicOrigin | undefined
-  readonly tailnet: TailnetAddresses | undefined
-  readonly token: string
-  readonly codes: CodeExchange
 }
 
 const refuse = (response: ServerResponse, status: number, body: string): void => {

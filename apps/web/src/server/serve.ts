@@ -22,13 +22,18 @@ import {
   codeFromUrl,
   cookieOf,
   hostAllowed,
+  joinCookie,
+  joinFromUrl,
   originAllowed,
+  participantOf,
   tokenFromUrl,
   tokenMatches,
   type CodeExchange,
   type PublicOrigin,
 } from './auth.ts'
+import { makeParticipantRegistry, type ParticipantRegistry } from './participants.ts'
 import { makeWebProtocol, type Connection } from './protocol.ts'
+import { answerShare } from './share.ts'
 import { applyMeta, readMeta, sessionActionOf, withMeta } from './session-meta.ts'
 import {
   makeSessionRegistry,
@@ -455,6 +460,32 @@ const exchangeCode = (
 }
 
 /**
+ * Trades a live invitation for its own cookie and a redirect to a clean address.
+ * The link stays usable while the owner keeps the invitation, so a colleague can
+ * reopen it after a reload; cutting it ends both the cookie and the link.
+ */
+const exchangeJoin = (
+  request: IncomingMessage,
+  response: ServerResponse,
+  participants: ParticipantRegistry,
+  secure: boolean,
+): boolean => {
+  const join = joinFromUrl(request.url ?? '')
+  if (pathOf(request) !== '/' || join === undefined) return false
+  if (participants.find(join) === undefined) {
+    endWith(response, 401, 'the invitation is no longer live')
+    return true
+  }
+  response.writeHead(303, {
+    location: '/',
+    'set-cookie': joinCookie(join, secure),
+    'cache-control': 'no-store',
+  })
+  response.end()
+  return true
+}
+
+/**
  * True when the browser that repeats this cookie reached the page over https:
  * either the proxy says so, or the request names the published host, which is
  * only reachable through the https origin the command was given.
@@ -466,68 +497,103 @@ const secureExchange = (
   request.headers['x-forwarded-proto'] === 'https' ||
   (publicOrigin !== undefined && request.headers.host?.toLowerCase() === publicOrigin.host)
 
-/** Answers one HTTP request: the socket path refuses plain HTTP, everything else is a file. */
+/** What the routes beside the page read, check, and change for this run. */
+interface RouteContext {
+  readonly staticRoot: string
+  readonly artifactRoot: string | undefined
+  readonly sessionRoot: string | undefined
+  readonly port: number
+  readonly publicOrigin: PublicOrigin | undefined
+  readonly tailnet: TailnetAddresses | undefined
+  readonly token: string
+  readonly codes: CodeExchange
+  readonly plugins: PluginsPort
+  readonly readSessionEvents: (
+    id: string,
+  ) => Effect.Effect<ReadonlyArray<SessionEvent>, SessionError>
+  readonly webhooks: WebhookGate
+  readonly participants: ParticipantRegistry
+  readonly onRevoked: (id: string) => void
+}
+
+/** Answers the routes beside the page; false leaves the request to the page's own files. */
+const answerRoutes = async (
+  request: IncomingMessage,
+  response: ServerResponse,
+  path: string,
+  routes: RouteContext,
+): Promise<boolean> => {
+  const gate = {
+    port: routes.port,
+    publicOrigin: routes.publicOrigin,
+    tailnet: routes.tailnet,
+    token: routes.token,
+    codes: routes.codes,
+    participants: routes.participants,
+  }
+  // Sharing is the owner's, not a participant's: the route checks that itself.
+  if (await answerShare(request, response, path, routes.participants, gate, routes.onRevoked)) {
+    return true
+  }
+  // A delivery comes from a service, so it is answered before the page routes and
+  // outside their cookie and origin gate; its secret is checked in the route.
+  if (await answerWebhook(request, response, path, routes.webhooks)) return true
+  if (
+    await answerArtifact(request, response, path, {
+      root: routes.artifactRoot,
+      port: routes.port,
+      publicOrigin: routes.publicOrigin,
+      tailnet: routes.tailnet,
+      token: routes.token,
+      codes: routes.codes,
+      participants: routes.participants,
+    })
+  ) {
+    return true
+  }
+  if (
+    await answerSessionExport(request, response, path, {
+      root: routes.sessionRoot,
+      events: routes.readSessionEvents,
+      port: routes.port,
+      publicOrigin: routes.publicOrigin,
+      tailnet: routes.tailnet,
+      token: routes.token,
+      codes: routes.codes,
+      participants: routes.participants,
+    })
+  ) {
+    return true
+  }
+  return answerPlugins(request, response, path, {
+    plugins: routes.plugins,
+    port: routes.port,
+    publicOrigin: routes.publicOrigin,
+    tailnet: routes.tailnet,
+    token: routes.token,
+    codes: routes.codes,
+    participants: routes.participants,
+  })
+}
+
+/** Answers one HTTP request: the gate, the two exchanges, the routes, then the page. */
 const respondTo = async (
   request: IncomingMessage,
   response: ServerResponse,
-  staticRoot: string,
-  artifactRoot: string | undefined,
-  sessionRoot: string | undefined,
-  port: number,
-  publicOrigin: PublicOrigin | undefined,
-  tailnet: TailnetAddresses | undefined,
-  token: string,
-  codes: CodeExchange,
-  plugins: PluginsPort,
-  readSessionEvents: (id: string) => Effect.Effect<ReadonlyArray<SessionEvent>, SessionError>,
-  webhooks: WebhookGate,
+  routes: RouteContext,
 ): Promise<void> => {
   // A page served under another name could read this one through a rebinding
   // proxy; the name the request asked for must be one this server answers to.
-  if (!hostAllowed(request.headers.host, port, publicOrigin, tailnet)) {
+  if (!hostAllowed(request.headers.host, routes.port, routes.publicOrigin, routes.tailnet)) {
     endWith(response, 403, 'forbidden')
     return
   }
-  if (exchangeCode(request, response, token, codes, secureExchange(request, publicOrigin))) return
+  const secure = secureExchange(request, routes.publicOrigin)
+  if (exchangeCode(request, response, routes.token, routes.codes, secure)) return
+  if (exchangeJoin(request, response, routes.participants, secure)) return
   const path = pathOf(request)
-  // A delivery comes from a service, so it is answered before the page routes and
-  // outside their cookie and origin gate; its secret is checked in the route.
-  if (await answerWebhook(request, response, path, webhooks)) return
-  if (
-    await answerArtifact(request, response, path, {
-      root: artifactRoot,
-      port,
-      publicOrigin,
-      tailnet,
-      token,
-      codes,
-    })
-  )
-    return
-  if (
-    await answerSessionExport(request, response, path, {
-      root: sessionRoot,
-      events: readSessionEvents,
-      port,
-      publicOrigin,
-      tailnet,
-      token,
-      codes,
-    })
-  )
-    return
-  if (
-    await answerPlugins(request, response, path, {
-      plugins,
-      port,
-      publicOrigin,
-      tailnet,
-      token,
-      codes,
-    })
-  )
-    return
-  await answerPage(response, staticRoot, path)
+  if (await answerRoutes(request, response, path, routes)) return
+  await answerPage(response, routes.staticRoot, path)
 }
 
 /** Serves the browser app's own files; every other path is 404. */
@@ -615,7 +681,24 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
             // sender reads a 502 and may retry the delivery.
           ).catch(() => ({ kind: 'unavailable' as const })),
       }
-      const connections = new Map<WebSocket, Connection>()
+      const participants = makeParticipantRegistry(() => Date.now())
+      /** One accepted socket, and the invitation it joined through (undefined for the owner). */
+      interface JoinedConnection {
+        readonly connection: Connection
+        readonly participant: string | undefined
+      }
+      const connections = new Map<WebSocket, JoinedConnection>()
+      /** Cuts the sockets a revoked invitation opened, and no other. */
+      const closeJoined = (id: string): void => {
+        for (const [client, entry] of connections) {
+          if (entry.participant !== id) continue
+          // Detach from the RPC protocol before the close handshake finishes, so
+          // a message already in flight cannot use the invitation after the cut.
+          entry.connection.close()
+          connections.delete(client)
+          client.close(4001, 'the invitation was cut')
+        }
+      }
       // One token per run, kept out of the ready URL: that URL carries a code
       // which trades for the token in an HttpOnly cookie and then dies.
       const token = randomBytes(32).toString('hex')
@@ -635,21 +718,21 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
       // bind that fails leaves the run on loopback rather than printing a dead URL.
       let tailnet: TailnetAddresses | undefined
       const requestHandler = (request: IncomingMessage, response: ServerResponse): void => {
-        void respondTo(
-          request,
-          response,
-          options.staticRoot,
+        void respondTo(request, response, {
+          staticRoot: options.staticRoot,
           artifactRoot,
           sessionRoot,
-          boundPort,
+          port: boundPort,
           publicOrigin,
           tailnet,
           token,
           codes,
-          options.plugins,
-          options.readSessionEvents,
+          plugins: options.plugins,
+          readSessionEvents: options.readSessionEvents,
           webhooks,
-        ).catch(() => {
+          participants,
+          onRevoked: closeJoined,
+        }).catch(() => {
           response.destroy()
         })
       }
@@ -657,6 +740,21 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
       const detectedIp = options.tailnet?.ip
       const tailnetServer = detectedIp === undefined ? undefined : createServer(requestHandler)
       const sockets = new WebSocketServer({ noServer: true })
+
+      /**
+       * Whether this handshake repeats an owner credential, a fresh startup code,
+       * or a live invitation. A page repeats the cookie; a script may name the
+       * token or redeem a code, so an e2e can connect with the printed URL.
+       */
+      const admittedUpgrade = (request: IncomingMessage): boolean => {
+        const offered =
+          cookieOf(request.headers.cookie, COOKIE_NAME) ?? tokenFromUrl(request.url ?? '')
+        if (tokenMatches(offered, token)) return true
+        if (codes.peek(codeFromUrl(request.url ?? ''))) return true
+        return (
+          participantOf(request.url ?? '', request.headers.cookie, { participants }) !== undefined
+        )
+      }
 
       /** Why this handshake is refused; undefined when the gate lets it through. */
       const refusalOf = (
@@ -668,20 +766,16 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
         if (!originAllowed(request.headers.origin, boundPort, publicOrigin, tailnet)) {
           return { status: 403, message: 'forbidden origin' }
         }
-        // A page repeats the cookie; a script may name the token or redeem a fresh
-        // startup code, so an e2e can connect with the URL the command printed.
-        const offered =
-          cookieOf(request.headers.cookie, COOKIE_NAME) ?? tokenFromUrl(request.url ?? '')
-        if (tokenMatches(offered, token)) return undefined
-        return codes.peek(codeFromUrl(request.url ?? ''))
+        return admittedUpgrade(request)
           ? undefined
-          : { status: 401, message: 'a token or a code is required' }
+          : { status: 401, message: 'a token, a code, or a live invitation is required' }
       }
 
       /** Wires one accepted socket as the page's RPC connection. */
-      const attachUi = (client: WebSocket): void => {
+      const attachUi = (request: IncomingMessage, client: WebSocket): void => {
+        const joined = participantOf(request.url ?? '', request.headers.cookie, { participants })
         const connection = attach((text) => client.send(text))
-        connections.set(client, connection)
+        connections.set(client, { connection, participant: joined?.id })
         client.on('message', (data) => connection.message(payloadOf(data)))
         client.on('close', () => {
           connection.close()
@@ -699,7 +793,7 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
           refuseUpgrade(socket, refusal.status, refusal.message)
           return
         }
-        sockets.handleUpgrade(request, socket, head, (client) => attachUi(client))
+        sockets.handleUpgrade(request, socket, head, (client) => attachUi(request, client))
       }
       server.on('upgrade', onUpgrade)
       tailnetServer?.on('upgrade', onUpgrade)

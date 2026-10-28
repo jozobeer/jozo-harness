@@ -1,7 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { PluginChangeRequest, PluginsView } from '../shared/rpc.ts'
-import { refusedBy, type CodeExchange, type PublicOrigin } from './auth.ts'
-import type { TailnetAddresses } from './tailnet.ts'
+import { refusedBy, type RequestGate } from './auth.ts'
 
 /** What one change left behind; a refusal names the status and the reason the page shows. */
 export type PluginChangeAnswer =
@@ -21,13 +20,8 @@ export interface PluginsPort {
   readonly change: (change: PluginChangeRequest) => Promise<PluginChangeAnswer>
 }
 
-/** The gate the plugin views share with the artifact route: same host, origin, and token. */
-export interface PluginsGate {
-  readonly port: number
-  readonly publicOrigin: PublicOrigin | undefined
-  readonly tailnet: TailnetAddresses | undefined
-  readonly token: string
-  readonly codes: CodeExchange
+/** The gate the plugin views share with the artifact route, and the port they change. */
+export interface PluginsGate extends RequestGate {
   readonly plugins: PluginsPort
 }
 

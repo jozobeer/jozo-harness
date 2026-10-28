@@ -200,10 +200,20 @@ export const requestAuthorized = (
     readonly codes: CodeExchange
     readonly participants?: ParticipantRegistry
   },
+): boolean => ownerAuthorized(url, cookie, gate) || participantOf(url, cookie, gate) !== undefined
+
+/**
+ * True only for the credential this run started with: its token, or a startup
+ * code still worth trading. Sharing and cutting invitations sit behind this one,
+ * so a participant can type in the session but cannot hand out more invitations.
+ */
+export const ownerAuthorized = (
+  url: string,
+  cookie: string | undefined,
+  gate: { readonly token: string; readonly codes: CodeExchange },
 ): boolean =>
   tokenMatches(cookieOf(cookie, COOKIE_NAME) ?? tokenFromUrl(url), gate.token) ||
-  gate.codes.peek(codeFromUrl(url)) ||
-  participantOf(url, cookie, gate) !== undefined
+  gate.codes.peek(codeFromUrl(url))
 
 /**
  * The invitation a request carries, or undefined for the owner, a startup code,
@@ -226,6 +236,12 @@ export interface RequestGate {
   readonly codes: CodeExchange
   /** The invitations that may read and type as the owner does; absent refuses them. */
   readonly participants?: ParticipantRegistry
+}
+
+/** The gate a read route shares with the page: the same host, origin, credential, and invitations. */
+export interface ReadGate extends RequestGate {
+  /** Absent when the run could not read where its sessions live. */
+  readonly root: string | undefined
 }
 
 /** What a refused read would answer: the status and the one line the page shows. */

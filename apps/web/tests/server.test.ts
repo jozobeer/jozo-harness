@@ -331,6 +331,68 @@ const localAddress = (): string => {
   return address
 }
 
+/** One JSON round trip with a method and an optional cookie, as the owner's page makes it. */
+interface HttpCall {
+  readonly status: number
+  readonly body: string
+  readonly location: string | undefined
+  readonly setCookie: string | undefined
+}
+
+const httpCall = (url: string, method: string, cookie?: string): Promise<HttpCall> =>
+  new Promise((resolve, reject) => {
+    const target = new URL(url)
+    const asked = request(
+      {
+        hostname: target.hostname,
+        port: target.port,
+        path: target.pathname + target.search,
+        method,
+        ...(cookie === undefined ? {} : { headers: { cookie } }),
+      },
+      (response) => {
+        const chunks: Array<Buffer> = []
+        response.on('data', (chunk: Buffer) => chunks.push(chunk))
+        response.on('end', () => {
+          const location = response.headers.location
+          const setCookie = response.headers['set-cookie']?.[0]
+          resolve({
+            status: response.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString('utf8'),
+            location: typeof location === 'string' ? location : undefined,
+            setCookie: typeof setCookie === 'string' ? setCookie : undefined,
+          })
+        })
+      },
+    )
+    asked.on('error', reject)
+    asked.end()
+  })
+
+/** One invitation as the share route answers it, checked before a test reads a field. */
+interface SharedInvitation {
+  readonly id: string
+  readonly label: string
+  readonly url: string
+}
+
+const sharedInvitation = (text: string): SharedInvitation => {
+  const parsed: unknown = JSON.parse(text)
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    !('id' in parsed) ||
+    typeof parsed.id !== 'string' ||
+    !('label' in parsed) ||
+    typeof parsed.label !== 'string' ||
+    !('url' in parsed) ||
+    typeof parsed.url !== 'string'
+  ) {
+    throw new Error('the share route answered a malformed invitation')
+  }
+  return { id: parsed.id, label: parsed.label, url: parsed.url }
+}
+
 /** Asks one URL the way a browser first opens the startup URL; `host` overrides its Host header. */
 const httpGet = (url: string, host?: string): Promise<HttpObservation> =>
   new Promise((resolve, reject) => {
@@ -2659,6 +2721,155 @@ describe('a webhook delivery', () => {
 
     expect(observed).toEqual({ large: 400, shape: 400 })
     expect(web.hosts.size).toBe(1)
+    await rm(root, { recursive: true, force: true })
+  })
+})
+
+describe('sharing a run with another browser', () => {
+  test('an invited browser reads and types in the same session through the one host', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-share-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, makeSettings())
+          const created = yield* Effect.promise(() =>
+            httpCall(started.origin + '/share?label=Alice', 'POST', started.cookie),
+          )
+          const shared = sharedInvitation(created.body)
+          const join = new URL(shared.url).searchParams.get('join')
+          if (join === null) throw new Error('the share link carries no invitation')
+          const exchanged = yield* Effect.promise(() => httpGet(shared.url))
+          const joinedCookie = exchanged.setCookie?.split(';')[0]
+          if (joinedCookie === undefined) throw new Error('joining set no cookie')
+
+          const useJoined = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const listed = yield* client.sessions()
+            const accepted = yield* client.command({
+              sessionId: 'a',
+              command: { kind: 'submit', text: 'hello from Alice', mode: 'steer' },
+            })
+            return { listed, accepted }
+          })
+          const joined = yield* useJoined.pipe(
+            clientLayers('ws://' + new URL(started.origin).host + '/ui?join=' + join),
+          )
+
+          const useOwner = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            return yield* client.command({
+              sessionId: 'a',
+              command: { kind: 'submit', text: 'hello from the owner', mode: 'steer' },
+            })
+          })
+          const ownerAccepted = yield* useOwner.pipe(clientLayers(started.wsUrl))
+
+          // An invitation types in the session but cannot hand the run on.
+          const refusedShare = yield* Effect.promise(() =>
+            httpCall(started.origin + '/share?label=Mallory', 'POST', joinedCookie),
+          )
+          const anonymous = yield* Effect.promise(() =>
+            attemptSocket('ws://' + new URL(started.origin).host + '/ui'),
+          )
+          yield* Deferred.succeed(started.stop, undefined)
+          return {
+            status: created.status,
+            shared,
+            exchangedStatus: exchanged.status,
+            joined,
+            ownerAccepted,
+            refusedShare: refusedShare.status,
+            anonymous: anonymous.status,
+          }
+        }),
+      ),
+    )
+
+    expect(observed.status).toBe(201)
+    expect(observed.shared.label).toBe('Alice')
+    expect(observed.exchangedStatus).toBe(303)
+    expect(observed.joined.listed.initial).toBe('a')
+    expect(observed.joined.listed.opened).toEqual(['a'])
+    expect(observed.joined.accepted).toBe(true)
+    expect(observed.ownerAccepted).toBe(true)
+    expect(observed.refusedShare).toBe(403)
+    expect(observed.anonymous).toBe(401)
+    // Both people's lines landed on the one host the session owns, so the log
+    // still has one writer and the store still holds one session.
+    expect(web.hosts.size).toBe(1)
+    expect(
+      web.hosts
+        .get('a')
+        ?.commands.map((command) => (command.kind === 'submit' ? command.text : command.kind)),
+    ).toEqual(['hello from Alice', 'hello from the owner'])
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('cutting an invitation closes its page and refuses the link', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-cut-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, makeSettings())
+          const created = yield* Effect.promise(() =>
+            httpCall(started.origin + '/share?label=Bob', 'POST', started.cookie),
+          )
+          const shared = sharedInvitation(created.body)
+          const join = new URL(shared.url).searchParams.get('join')
+          if (join === null) throw new Error('the share link carries no invitation')
+          const exchanged = yield* Effect.promise(() => httpGet(shared.url))
+          const joinedCookie = exchanged.setCookie?.split(';')[0]
+          if (joinedCookie === undefined) throw new Error('joining set no cookie')
+
+          const socket = new WebSocket('ws://' + new URL(started.origin).host + '/ui', {
+            headers: { cookie: joinedCookie },
+          })
+          const opened = new Promise<boolean>((resolve) => {
+            socket.once('open', () => resolve(true))
+            socket.once('error', () => resolve(false))
+          })
+          const closed = new Promise<number>((resolve) => {
+            socket.once('close', (code) => resolve(code))
+          })
+          const live = yield* Effect.promise(() => opened)
+          const cut = yield* Effect.promise(() =>
+            httpCall(started.origin + '/share/' + shared.id, 'DELETE', started.cookie),
+          )
+          const closeCode = yield* Effect.promise(() => closed)
+          const retry = yield* Effect.promise(() =>
+            attemptSocket('ws://' + new URL(started.origin).host + '/ui?join=' + join),
+          )
+          const stale = yield* Effect.promise(() => httpCall(shared.url, 'GET'))
+          const listed = yield* Effect.promise(() =>
+            httpCall(started.origin + '/share', 'GET', started.cookie),
+          )
+          yield* Deferred.succeed(started.stop, undefined)
+          return {
+            live,
+            cut: cut.status,
+            closeCode,
+            retry: retry.status,
+            stale: stale.status,
+            listed: listed.body,
+          }
+        }),
+      ),
+    )
+
+    expect(observed).toEqual({
+      live: true,
+      cut: 200,
+      closeCode: 4001,
+      retry: 401,
+      stale: 401,
+      listed: '{"items":[]}',
+    })
     await rm(root, { recursive: true, force: true })
   })
 })
