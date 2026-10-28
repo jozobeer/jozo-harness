@@ -1051,8 +1051,8 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
       }
       if (name === '@jozo-harness/browser') {
         // The browser runs through the run's sandbox, so an unconfined run wraps nothing.
-        return (source) =>
-          Effect.succeed(Context.get(source, BrowserTools)(sandboxOf(wiring) ?? noneSandbox))
+        // Its session tools register a finalizer, so the row's scope owns the process.
+        return (source) => Context.get(source, BrowserTools)(sandboxOf(wiring) ?? noneSandbox)
       }
       if (name === '@jozo-harness/delegate') {
         // A delegated CLI runs through the run's sandbox too; the row fixes what it may start.
