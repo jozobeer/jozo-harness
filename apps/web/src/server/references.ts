@@ -284,8 +284,11 @@ export const sessionCandidateTargets = (
   source: SessionDigestSource,
 ): Effect.Effect<ReadonlyArray<string>> =>
   Effect.gen(function* () {
-    const word = query.trim().toLowerCase()
-    if (word === '') return []
+    const typed = query.trim().toLowerCase()
+    // `@session:` is the word that asks for sessions, so the prefix itself is not
+    // matched against ids and titles; what follows it narrows them.
+    const word = typed.startsWith('session:') ? typed.slice('session:'.length) : typed
+    if (typed === '') return []
     const summaries = yield* source
       .list()
       .pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<SessionSummary>))
@@ -299,7 +302,8 @@ export const sessionCandidateTargets = (
       .filter(
         (one) =>
           one.readable &&
-          (one.summary.id.toLowerCase().includes(word) ||
+          (word === '' ||
+            one.summary.id.toLowerCase().includes(word) ||
             one.summary.title.toLowerCase().includes(word)),
       )
       .map((one) => one.summary)

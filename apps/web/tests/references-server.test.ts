@@ -243,12 +243,16 @@ describe('reading an @session', () => {
       )
 
       const candidates = await Effect.runPromise(sessionCandidateTargets(root, 'work', source))
+      // The prefix alone asks for sessions, so it lists the readable ones without
+      // needing part of an id or a title first.
+      const all = await Effect.runPromise(sessionCandidateTargets(root, 'session:', source))
       const [reference] = await Effect.runPromise(
         resolveReferences(root, 'see @session:theirs', source),
       )
 
       expect(candidates).toContain('session:mine')
       expect(candidates).not.toContain('session:theirs')
+      expect(all).toEqual(['session:mine'])
       expect(reference).toBeUndefined()
     } finally {
       await rm(root, { recursive: true, force: true })
