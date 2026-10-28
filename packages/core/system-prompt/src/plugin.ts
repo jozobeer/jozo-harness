@@ -9,6 +9,11 @@ export const systemPromptConfigSchema = Schema.Struct({
   includeToolGuidance: Schema.optionalKey(Schema.Boolean),
   /** Adds the tmux session, window, and pane to the runtime snapshot; off by default. */
   tmuxContext: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Adds the browser UI URL to a web session's runtime snapshot; on by default.
+   * The URL is a new user context, never part of the system prompt.
+   */
+  devContext: Schema.optionalKey(Schema.Boolean),
   /** Deployment prose around the identity; a blank part renders no section. */
   persona: Schema.optionalKey(
     Schema.Struct({

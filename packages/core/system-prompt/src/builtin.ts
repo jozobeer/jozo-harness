@@ -142,6 +142,8 @@ export interface BuiltinOptions {
   readonly includeRuntimeContext?: boolean
   /** Adds the tmux session, window, and pane; off because most sessions have no tmux. */
   readonly tmuxContext?: boolean
+  /** Lets a session carry the browser UI URL it serves; on unless turned off. */
+  readonly devContext?: boolean
   /** The tmux reader; tests replace it so they do not need a tmux server. */
   readonly tmux?: TmuxProbe
 }

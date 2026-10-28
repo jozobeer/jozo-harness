@@ -26,6 +26,11 @@ export interface SystemPromptShape {
   runtimeContext(subject: RuntimeContextSubject): Effect.Effect<string>
   /** The system text plus the model-facing tools of the current context. */
   build(context: AssembleContext): Effect.Effect<PromptBuild, PromptError, Tools>
+  /**
+   * Whether this registry may carry the GUI fact. The run decides it from the
+   * system-prompt row; a session registers the fact only when a page serves it.
+   */
+  readonly devContext: boolean
 }
 
 const VARIABLE = /\{\{([A-Za-z0-9_-]+)\}\}/g
@@ -70,7 +75,9 @@ const interpolate = (
 }
 
 /** Builds an in-memory prompt section and runtime context registry. */
-export function makeSystemPrompt(): SystemPromptShape {
+export function makeSystemPrompt(
+  options: { readonly devContext?: boolean } = {},
+): SystemPromptShape {
   const registered = new Map<string, PromptSection>()
   const contexts = new Map<string, RuntimeContextEntry>()
 
@@ -109,6 +116,8 @@ export function makeSystemPrompt(): SystemPromptShape {
     Effect.map(assemble(context), (built) => built.text)
 
   return {
+    devContext: options.devContext ?? true,
+
     section: (section) =>
       Effect.gen(function* () {
         if (registered.has(section.name)) {
@@ -191,7 +200,9 @@ export const systemPromptLayerWith = (options: BuiltinOptions = {}): Layer.Layer
   Layer.effect(
     SystemPrompt,
     Effect.gen(function* () {
-      const prompt = makeSystemPrompt()
+      const prompt = makeSystemPrompt(
+        options.devContext === undefined ? {} : { devContext: options.devContext },
+      )
       for (const section of builtinSections(options)) yield* prompt.section(section)
       for (const entry of builtinContexts(options)) yield* prompt.context(entry)
       return prompt
