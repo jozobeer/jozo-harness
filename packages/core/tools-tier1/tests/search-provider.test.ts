@@ -213,6 +213,22 @@ describe('exaSearch', () => {
     expect(message).toContain('EXA_API_KEY')
   })
 
+  test('a body that is not JSON keeps the endpoint in the failure', async () => {
+    const server = await startStubServer(() => new Response('not json', { status: 200 }))
+    const baseUrl = server.origin
+
+    const message = await Effect.runPromise(
+      Effect.match(exaSearch({ apiKey: 'secret', baseUrl }).search('jozo-harness', 1), {
+        onFailure: (error) => error.message,
+        onSuccess: () => 'ok',
+      }),
+    )
+    await server.stop()
+
+    expect(message).toContain('/search')
+    expect(message).toContain('not JSON')
+  })
+
   test('an invalid body is a tool error, not an empty result', async () => {
     const server = await startStubServer(() => Response.json({ results: [{ title: 'x' }] }))
     const baseUrl = server.origin
@@ -322,6 +338,22 @@ describe('perplexitySearch', () => {
     expect(message).toContain('/chat/completions')
     expect(message).toContain('HTTP 401')
     expect(message).toContain('PERPLEXITY_API_KEY')
+  })
+
+  test('a body that is not JSON keeps the endpoint in the failure', async () => {
+    const server = await startStubServer(() => new Response('not json', { status: 200 }))
+    const baseUrl = server.origin
+
+    const message = await Effect.runPromise(
+      Effect.match(perplexitySearch({ apiKey: 'secret', baseUrl }).search('jozo-harness', 1), {
+        onFailure: (error) => error.message,
+        onSuccess: () => 'ok',
+      }),
+    )
+    await server.stop()
+
+    expect(message).toContain('/chat/completions')
+    expect(message).toContain('not JSON')
   })
 
   test('an invalid body is a tool error, not an empty result', async () => {
