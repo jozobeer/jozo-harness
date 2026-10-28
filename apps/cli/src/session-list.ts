@@ -1,5 +1,7 @@
 import type { PluginRow } from '@jozo-harness/kernel'
-import { deriveMessages, type SessionEvent, type SessionSummary } from '@jozo-harness/session'
+import type { SessionSummary } from '@jozo-harness/session'
+
+export { renderTranscript } from '@jozo-harness/session'
 import { expandHome, type SearchHit } from '@jozo-harness/session-jsonl'
 
 /** Where the session logs live: the profile's row, or the place jozo-harness keeps them. */
@@ -54,29 +56,6 @@ export const renderSearchHits = (hits: ReadonlyArray<SearchHit>): string => {
       .map((hit) => hit.sessionId + '  ' + hit.type + ':' + String(hit.seq) + '  ' + hit.text)
       .join('\n') + '\n'
   )
-}
-
-const textOf = (
-  content: ReadonlyArray<{ readonly type: string; readonly text?: string }>,
-): string =>
-  content
-    .flatMap((block) => (block.type === 'text' && block.text !== undefined ? [block.text] : []))
-    .join('\n')
-
-/**
- * A session as it is read back: the messages the log folds to, one per paragraph.
- * Tool messages name the call they answer, so a transcript shows what was done.
- */
-export const renderTranscript = (events: ReadonlyArray<SessionEvent>): string => {
-  const lines = deriveMessages(events).flatMap((message) => {
-    const text = textOf(message.content)
-    if (text.trim() === '') return []
-    if (message.role === 'tool') return ['[tool result] ' + text]
-    if (message.role === 'assistant') return ['[assistant] ' + text]
-    if (message.role === 'user') return ['[user] ' + text]
-    return ['[' + message.role + '] ' + text]
-  })
-  return lines.length === 0 ? '(nothing was said yet)\n' : lines.join('\n\n') + '\n'
 }
 
 /** The header line a browse starts with. */
