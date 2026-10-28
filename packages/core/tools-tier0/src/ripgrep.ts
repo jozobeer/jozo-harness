@@ -164,15 +164,21 @@ const runWith = async (
   return { exitCode, stderr: stderrText, stopped }
 }
 
+/**
+ * The seam over one executable. Tests point it at any program that prints
+ * lines, so streaming and stopping can run without an installed rg.
+ */
+export const ripgrepAt = (executable: string | undefined): Ripgrep => ({
+  executable,
+  run: (argv, cwd, onLine) =>
+    executable === undefined
+      ? Promise.resolve({ exitCode: 127, stderr: 'rg is not on PATH', stopped: false })
+      : runWith(executable, argv, cwd, onLine),
+})
+
 const located = findRipgrep()
 
-export const defaultRipgrep: Ripgrep = {
-  executable: located,
-  run: (argv, cwd, onLine) =>
-    located === undefined
-      ? Promise.resolve({ exitCode: 127, stderr: 'rg is not on PATH', stopped: false })
-      : runWith(located, argv, cwd, onLine),
-}
+export const defaultRipgrep: Ripgrep = ripgrepAt(located)
 
 /** The note a result carries when the built-in walker stood in for ripgrep. */
 export const fallbackNote = (reason: string): string =>

@@ -17,6 +17,7 @@ import {
   grepTool,
   makeGlobTool,
   makeGrepTool,
+  ripgrepAt,
   type Ripgrep,
 } from '../src/index.ts'
 /** Writes a file, making the directories above it, because the file may not be there yet. */
@@ -397,7 +398,7 @@ describe('ripgrep search', () => {
 
   test('asks ripgrep to honour ignore rules instead of disabling them', async () => {
     const calls: Array<ReadonlyArray<string>> = []
-    const rg = fakeRipgrep('/fake/rg', { stdout: [] }, calls)
+    const rg = fakeRipgrep('/fake/rg', { stdout: ['sub/kept.ts', ''] }, calls)
     await Effect.runPromise(call(makeGlobTool(rg), { pattern: '**/*.ts', path: 'sub' }, tmpdir()))
     await Effect.runPromise(
       call(makeGrepTool(rg), { pattern: 'needle', include: '**/*.ts', path: 'sub' }, tmpdir()),
@@ -422,5 +423,42 @@ describe('ripgrep search', () => {
     const result = await Effect.runPromise(call(tool, { pattern: 'needle' }, tmpdir()))
 
     expect(result?.value).toEqual({ matches: [], seen: 0, truncated: false })
+  })
+
+  test('streams the lines of a program and stops it at the limit', async () => {
+    const rg = ripgrepAt(process.execPath)
+    const lines: Array<string> = []
+
+    const script = String.raw`process.stdout.write('one\ntwo\nthree\n')`
+
+    const run = await rg.run(['-e', script], tmpdir(), (line) => {
+      lines.push(line)
+      return lines.length < 2
+    })
+
+    expect(lines).toEqual(['one', 'two'])
+    expect(run.stopped).toBe(true)
+  })
+
+  test('the seam without a program answers without spawning', async () => {
+    const run = await ripgrepAt(undefined).run([], tmpdir(), () => true)
+
+    expect(run).toEqual({ exitCode: 127, stderr: 'rg is not on PATH', stopped: false })
+  })
+
+  test('a seam that throws falls back with its message', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-ripgrep-'))
+    await writeFileDeep(join(dir, 'a.txt'), 'needle\n')
+    const broken: Ripgrep = {
+      executable: '/fake/rg',
+      run: async () => {
+        throw new Error('boom')
+      },
+    }
+
+    const result = await Effect.runPromise(call(makeGrepTool(broken), { pattern: 'needle' }, dir))
+
+    expect(result?.value).toMatchObject({ fallback: 'failed: boom', seen: 1 })
+    await rm(dir, { recursive: true, force: true })
   })
 })
