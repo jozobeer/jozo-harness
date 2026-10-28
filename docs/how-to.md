@@ -66,6 +66,30 @@ plugins:
 
 設定シートの `model` は「これから開くセッション」に効く。選んで `Use for new sessions` を押すと、そのあと開くセッションはそのモデルで始まり、同時に設定ファイルにも書かれるので次の run も同じモデルで始まる。すでに開いているセッションのモデルは、そのときには変わらない（下の「モデルを選ぶ」で変える）。
 
+### GUI の URL をモデルに渡す
+
+`jzh web` のセッションには、その run が配信している GUI の URL が runtime context の 1 行として届く。既定で有効で、同梱 profile のままでも出る。
+
+```
+- gui: http://127.0.0.1:4310
+```
+
+URL は起動時に決まる。`--public-url` を付けた run ではその origin、付けていなければ listen した loopback の URL になる。同じ run の間は変わらないので、モデルは「今どのページで聞かれているか」を推測せずに答えられる。
+
+行は system prompt ではなく、`runtime-context` の user メッセージとして届く。したがって、ポートや origin が変わっても provider に送る system prompt のバイト列は変わらない。`jzh web` 以外のセッションには付かない。
+
+出したくないときは system-prompt の行で `devContext` を `false` にする。
+
+```yaml
+plugins:
+  - id: system-prompt
+    name: '@jozo-harness/system-prompt'
+    config:
+      devContext: false
+```
+
+チェックアウトの場所は従来どおり runtime context の `cwd` 行が伝える。
+
 ### tailnet の別端末から開く
 
 `jzh web` は起動時に Tailscale を検出する。`tailscale status --json` からこのマシンの tailnet IPv4 と MagicDNS 名が取れたときは、`127.0.0.1` に加えてその IPv4 でも同じポートを listen する。`0.0.0.0` や `::` では受けない。Tailscale が無い・落ちている・CLI が PATH に無い・応答が遅いときは検出なしとして、従来どおり loopback だけで動く。
