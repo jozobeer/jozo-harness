@@ -12,7 +12,6 @@ import type {
   SessionError,
   SessionEvent,
 } from '@jozo-harness/session'
-import { FEEDBACK_RATINGS } from '@jozo-harness/session'
 import { Effect, Schema, Stream } from 'effect'
 
 /**
@@ -45,7 +44,9 @@ export const UiCommandSchema = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal('feedback'),
     target: Schema.Int,
-    rating: Schema.Literals(FEEDBACK_RATINGS),
+    // The page must not pull the whole session package in for the two words it
+    // checks; the type import still makes the host read them as FeedbackRating.
+    rating: Schema.Literals(['like', 'dislike']),
     memo: Schema.optionalKey(Schema.String),
   }),
 ])
