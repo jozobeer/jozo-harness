@@ -165,6 +165,29 @@ plugins:
 
 モデルは `delegate` を `command`（設定の `name`）、`task`、任意の `cwd` で呼ぶ。実行される argv は設定の `argv` に `task` を最後の引数として足したもので、設定に無い名前は `invalid-arguments` になる。CLI が PATH に無ければ `unavailable` と探したコマンド名を返し、コマンドは run の sandbox を通した子プロセスで走る。出力は最大 100,000 文字で切り、終了コードが 0 でなければ `unavailable` と stderr の理由を返す。既定の profile に入れないのは、全セッションの tool 一覧を太らせないためである。
 
+### モデルに同梱のランタイムを渡す
+
+`workspace_dependencies` tool も opt-in である。ランタイムを同梱した配布では、payload のディレクトリを設定で名指しした run だけ、次の行を足す。
+
+```yaml
+plugins:
+  - id: workspace-dependencies
+    name: '@jozo-harness/workspace-dependencies'
+    config:
+      dir: /opt/jzh/runtimes
+```
+
+`dir` の `runtime.json` が、payload からの相対パスで `python`（必須）、`node`、`pnpm` を並べる。
+
+```json
+{
+  "python": "dependencies/python/bin/python3",
+  "node": "dependencies/node/bin/node"
+}
+```
+
+行を足した run では、モデルは `workspace_dependencies` を引数なしで呼び、返った絶対パスをそのまま bash から起動できる。payload が持たないランタイムは `missing` に並ぶので、モデルは PATH の別の版へ黙って落ちない。`runtime.json` が無い、JSON でない、`python` を欠く、指したファイルが無い・実行できない、payload の外を指す（symlink の解決先も含む）ときは `unavailable` と理由を返す。返すパスは payload の中だけであり、PATH も package manager の設定も変えない。既定の profile に入れないのは、全セッションの tool 一覧を太らせないためである。
+
 ### モデルを選ぶ（走っているセッションと、これから開くセッション）
 
 composer のモデルのチップを押すと、その endpoint が持つモデルの一覧が開く。選ぶと**そのセッションの route が変わり**、同時に**この run でこれから開くセッションもその route で始まる**。効くのは次のリクエストから（turn の途中なら次の step、待っていれば次の turn）。いま効いているモデルには印が付く。

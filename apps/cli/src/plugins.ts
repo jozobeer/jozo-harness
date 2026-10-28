@@ -17,6 +17,7 @@ import {
   screenCapturePlugin,
   sessionSearchPlugin,
   tier1Plugin,
+  workspaceDependenciesPlugin,
 } from '@jozo-harness/tools-tier1'
 
 /**
@@ -45,4 +46,5 @@ export const bundledPlugins: ReadonlyArray<Plugin<any, any, any>> = [
   mcpPlugin,
   lspPlugin,
   sessionSearchPlugin,
+  workspaceDependenciesPlugin,
 ]

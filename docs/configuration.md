@@ -57,7 +57,7 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 
 ## plugin が受け取る config キー
 
-同梱の plugin のうち `config` にキーを持つのは6つで、残りはキーを持たない。
+同梱の plugin のうち `config` にキーを持つのは7つで、残りはキーを持たない。
 
 | plugin | キー |
 |---|---|
@@ -67,6 +67,7 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 | `@jozo-harness/agent-loop` | `models` — ルートのモデル名（`provider/model` の model 部分）をキーに、`contextWindow` と `maxTokens` をモデルごとに持つ（同じ行の単一値より優先する）、`contextWindow` — ルートしたモデルの context window（トークン）。`models` のそのモデルの値、この値、adapter の値、128000 の順に使う、`thresholdRatio` — 推定が窓のこの割合に達したら compaction する（既定 0.8）、`headroomTokens` — 発火点と窓の間に必ず空けるトークン（既定 65536）、`maxTokens` — 1 リクエストが答えのために予約するトークン。`models` にそのモデルの値があればそちらを使う。provider へ `max_tokens` として送り、発火点から先に引く（既定は無し＝予約しない）、`retainTokens` — 末尾で内容を置き換えない範囲を、推定トークンで表した目標（既定は窓の 16%。最新の 1 件は大きさによらず残る）、`maxBytes` — これを超える text block を、保持の外でスタブに置き換える（バイト、既定 32000）、`maxParallelToolCalls` — 並列に走らせる tool call の上限（既定 10。0 以下でも 1 件ずつ） |
 | `@jozo-harness/mcp` | `command`（必須）、`prefix` |
 | `@jozo-harness/delegate` | `tools`（必須）— 委譲してよい外部 CLI の配列。各要素は `name`（tool の `command` に渡す名前）と `argv`（起動する argv。タスクは最後の引数として足す） |
+| `@jozo-harness/workspace-dependencies` | `dir`（必須）— この配布が同梱するランタイムの payload ディレクトリ（絶対パス、または `~` で始める）。`dir/runtime.json` が payload からの相対パスで `python`（必須）、`node`、`pnpm` を並べる |
 
 `@jozo-harness/artifact` はキーを持たない。行を足すと、そのセッションのモデルに `artifact` tool が渡り、モデルは 1 枚の HTML ページを session root の隣の `artifacts/<sessionId>/<name>.html` に書ける。`deliverable: { path, title? }` を渡したときはページを書かず、cwd 内の既存ファイルを成果物として宣言して `deliverable: <path>` の 1 行を返す（cwd 外・不在・ディレクトリは `invalid-arguments`）。ページは `images` に渡した png / jpeg / webp / gif のパスを data URL に畳んだ 1 ファイルで（1 枚 2MB・合計 10MB まで）、`http://` / `https://` / `//` の外部サブリソースを参照する HTML は保存時に拒否する。preset が `read-only` の run では書かず、`denied` を返す。配信は jzh web の `/artifact/<sessionId>/<name>` が行う。同梱 profile に入れていないのは、ページを書かないセッションの tool 一覧を太らせないためである（既定では入らない）。
 
@@ -77,6 +78,8 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 `@jozo-harness/browser` もキーを持たない。行を足すと `browser` tool が渡り、モデルは `url`（http(s) のみ。`file:` や `data:` は `invalid-arguments`）と任意の `action`（この版は `text` だけ）でページを開き、DOM の本文をテキストで読める。`google-chrome` / `chromium` などを PATH から、macOS では Chrome の app bundle も探し、見つかったものの `--headless --dump-dom` で DOM を取る。コマンドは run の sandbox で wrap して走らせ、script・style・head を除いた本文を最大 100,000 文字で返す（超えた分は切り、`truncated` を立てる）。headless ブラウザが無いとき、sandbox が拒否したとき、終了コードが 0 でないときは `unavailable` と理由を返す。既定の tool を増やさないため、同梱 profile には入れていない。
 
 `@jozo-harness/delegate` は `tools` を持つ。行を足すと `delegate` tool が渡り、モデルは `command`（設定の `tools[].name` のどれか）、`task`、任意の `cwd` で外部のエージェント CLI に仕事を渡せる。設定に無い名前は `invalid-arguments`、CLI が PATH に無いときは `unavailable` と探したコマンド名を返す。コマンドは run の sandbox で wrap して走らせ、timeout は 10 分、出力は最大 100,000 文字で切る（超えた分は切り、`truncated` を立てる）。終了コードが 0 でないとき、sandbox が拒否したときは `unavailable` と理由を返す。既定の tool を増やさないため、同梱 profile には入れていない。
+
+`@jozo-harness/workspace-dependencies` は `dir` を持つ。行を足すと `workspace_dependencies` tool が渡り、モデルは payload の `runtime.json` が指す Python / Node / pnpm の絶対パスを受け取る。payload が持たないランタイムは `missing` に並ぶ。`runtime.json` が無い、JSON でない、`python` を欠く、指したファイルが無い・実行できない、payload の外を指す（symlink の解決先も含む）ときは `unavailable` と理由を返す。返すパスは payload の中だけなので、モデルはそのまま bash から起動できる。PATH も package manager の設定も変えない。既定の tool を増やさないため、同梱 profile には入れていない。
 
 `@jozo-harness/session-search` もキーを持たない。行を足すと `session_search` / `session_trace` / `session_event_read` の 3 tool が渡る。`session_search` は `query`（と任意の `limit`、既定 10・最大 50）で過去セッションのログを全文検索し、セッション id と一致した抜粋を得る。検索は `jzh sessions --search` と同じ index を使う。`session_trace` は `sessionId`（と任意の `limit`、既定 20・最大 200）で直近のイベントを古い順に seq / type / 短い要約で返す。`session_event_read` は `sessionId` と `seq`（と任意の `before` / `after`、既定 3・最大 20）で、そのイベントと前後のイベントを本文つきで返す。3 tool とも、セッションの header が記録した cwd がこの run の cwd と一致するものだけを扱うので、別のワークスペースで走ったログは返らない。存在しないセッションや seq は `invalid-arguments` になる。既定の tool を増やさないため、同梱 profile には入れていない。
 
