@@ -24,6 +24,7 @@ import {
   COMPACT_SUMMARY_INSTRUCTION,
   DEFAULT_COMPACT_MAX_BYTES,
   checkpointOf,
+  clipQuotes,
   cwdOf,
   deriveMessages,
   IMAGE_REFERENCE_TOKENS,
@@ -471,6 +472,18 @@ export const agentLoopEffect = (
       })
 
     /**
+     * The user message as the log keeps it. Quotes over the limit are cut here,
+     * the one boundary every sender passes, so a long selection reaches neither
+     * the log nor the next request.
+     */
+    const loggedMessage = (message: UserMessage): SessionEventMap['user/message'] => {
+      const quotes = message.quotes === undefined ? [] : clipQuotes(message.quotes)
+      return quotes.length === 0
+        ? { text: message.text, source: message.source }
+        : { text: message.text, source: message.source, quotes }
+    }
+
+    /**
      * Appends the settled system prompt when it changed and the input that started
      * the step; the runtime snapshot follows the prompt and precedes the input, and
      * is recorded on every step so a mid-turn change reaches the next request. The
@@ -493,7 +506,7 @@ export const agentLoopEffect = (
         }
         yield* recordRuntimeContext(agent, cwd)
         for (const message of input) {
-          yield* append(agent, 'user/message', { text: message.text, source: message.source })
+          yield* append(agent, 'user/message', loggedMessage(message))
         }
       })
 

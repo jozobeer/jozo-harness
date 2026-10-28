@@ -9,6 +9,7 @@ import {
 import { Hooks, makeHooks, type HookRegistry } from '@jozo-harness/kernel'
 import { Llm, LlmFailure, type LlmAdapter, type StreamChunk } from '@jozo-harness/llm'
 import {
+  QUOTE_LIMITS,
   SessionError,
   sessionsLayer,
   shortenTitle,
@@ -188,6 +189,33 @@ describe('agent loop', () => {
       .events()
       .flatMap((event) => (event.type === 'assistant/message' ? [event.data.content] : []))
     expect(assistant).toEqual([[{ type: 'text', text }]])
+  })
+
+  test('a quoted passage is logged with the message, cut to the size a log keeps', async () => {
+    const passage = 'p'.repeat(QUOTE_LIMITS.maxQuoteChars + 40)
+    const events = await scenario([chunks(textTurn('it holds'))], (ctx) =>
+      Effect.gen(function* () {
+        const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+        yield* agent.followup({
+          text: 'does this hold?',
+          source: 'user',
+          quotes: [{ text: passage, sourceSeq: 4 }],
+        })
+        yield* agent.whenIdle
+        return agent
+      }),
+    )
+
+    const logged = events.session
+      .events()
+      .flatMap((event) =>
+        event.type === 'user/message' && event.data.source === 'user' ? [event.data] : [],
+      )
+    expect(logged).toHaveLength(1)
+    expect(logged[0]?.text).toBe('does this hold?')
+    expect(logged[0]?.quotes).toEqual([
+      { text: passage.slice(0, QUOTE_LIMITS.maxQuoteChars) + '…', sourceSeq: 4 },
+    ])
   })
 
   test('names a session with a shorter title from the first message', async () => {

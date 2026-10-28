@@ -2,9 +2,11 @@ import type { Agent } from '@jozo-harness/agent'
 import { repairInterruptedRun } from '@jozo-harness/agent-loop'
 import type { HookRegistry } from '@jozo-harness/kernel'
 import {
+  clipQuotes,
   parseCommand,
   rateFeedback,
   type CommandsShape,
+  type Quote,
   type Session,
   type SessionError,
   type SessionEvent,
@@ -195,7 +197,11 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
      * turn a followup would have started, so the fallback needs no check here.
      */
     const deliver = (
-      message: { readonly text: string; readonly source: 'user' },
+      message: {
+        readonly text: string
+        readonly source: 'user'
+        readonly quotes?: ReadonlyArray<Quote>
+      },
       mode: SubmitMode,
     ): Effect.Effect<void, SessionError> =>
       mode === 'steer' ? options.agent.steer(message) : options.agent.followup(message)
@@ -263,8 +269,11 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
       // through the session events, so a reconnecting client sees it too. That is
       // why the mode only reaches a message: a command or a skill load answers or
       // writes now either way, and steering it would wait for a step it does not need.
-      submit: (text, mode = 'queue') =>
+      submit: (text, mode = 'queue', quotes) =>
         Effect.gen(function* () {
+          // Quotations travel with the body, and both empty is nothing to send.
+          const selected = clipQuotes(quotes ?? [])
+          if (text.trim() === '' && selected.length === 0) return
           // A slash the registry does not answer may still name a skill; the loaded
           // skill becomes the turn's input, and its arguments become the message.
           const loaded = yield* forcedSkillOf(text)
@@ -281,7 +290,12 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
             })
             if (outcome !== undefined) return
           }
-          yield* deliver({ text, source: 'user' }, mode)
+          yield* deliver(
+            selected.length === 0
+              ? { text, source: 'user' }
+              : { text, source: 'user', quotes: selected },
+            mode,
+          )
         }),
       approve: (callId, approved) => Effect.asVoid(settle(approvals, callId, approved)),
       /**

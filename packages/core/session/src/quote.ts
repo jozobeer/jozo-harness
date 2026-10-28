@@ -1,9 +1,17 @@
+import { Schema } from 'effect'
+
 /** One passage the human selected from an earlier turn to quote in a message. */
 export interface Quote {
   readonly text: string
   /** The seq of the event the passage was selected from; absent when the page cannot name it. */
   readonly sourceSeq?: number
 }
+
+/** The wire and log shape of one passage; the transports and the decoder share it. */
+export const QuoteSchema = Schema.Struct({
+  text: Schema.String,
+  sourceSeq: Schema.optionalKey(Schema.Int),
+})
 
 /**
  * How much quoted text one message may carry. A selection is bounded because it

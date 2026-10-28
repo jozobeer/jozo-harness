@@ -6,12 +6,17 @@ import type {
   AskBatchRequested,
   AskRequested,
 } from '@jozo-harness/safety'
-import type {
-  FeedbackError,
-  FeedbackRating,
-  SessionError,
-  SessionEvent,
+import {
+  QuoteSchema,
+  type FeedbackError,
+  type FeedbackRating,
+  type Quote,
+  type SessionError,
+  type SessionEvent,
 } from '@jozo-harness/session'
+
+/** The passage shape a page sends with a message; the session owns it. */
+export { QuoteSchema, type Quote }
 import { Effect, Schema, Stream } from 'effect'
 
 /**
@@ -28,6 +33,8 @@ export const UiCommandSchema = Schema.Union([
     kind: Schema.Literal('submit'),
     text: Schema.String,
     mode: Schema.optionalKey(SubmitModeSchema),
+    /** Passages the human selected from earlier turns; they ride with the text. */
+    quotes: Schema.optionalKey(Schema.Array(QuoteSchema)),
   }),
   Schema.Struct({
     kind: Schema.Literal('approve'),
@@ -108,7 +115,11 @@ export interface UiHost {
    * turn's next step when the mode is 'steer'. The line still falls back to the
    * next turn when nothing is running, because a steer starts one.
    */
-  readonly submit: (text: string, mode?: SubmitMode) => Effect.Effect<void, SessionError>
+  readonly submit: (
+    text: string,
+    mode?: SubmitMode,
+    quotes?: ReadonlyArray<Quote>,
+  ) => Effect.Effect<void, SessionError>
   /** Answers one approval request. */
   readonly approve: (callId: string, approved: boolean) => Effect.Effect<void>
   /** Answers one question; the answer may have to be written down, so it can fail. */
@@ -150,7 +161,7 @@ export const sendCommand = (
 ): Effect.Effect<void, SessionError | FeedbackError> => {
   switch (command.kind) {
     case 'submit':
-      return host.submit(command.text, command.mode)
+      return host.submit(command.text, command.mode, command.quotes)
     case 'approve':
       return host.approve(command.callId, command.approved)
     case 'answer':
