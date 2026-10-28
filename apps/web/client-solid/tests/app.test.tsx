@@ -2318,6 +2318,18 @@ describe('the Solid page', () => {
     expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'trajectory' } })
   })
 
+  test('the pane strip offers a browser tab beside the session readings', () => {
+    const { store, calls } = makeStore()
+    const { container } = render(() => <ContextPane store={store} />)
+
+    const browser = [...container.querySelectorAll('button.tab')].find(
+      (tab) => tab.textContent === 'browser',
+    )
+    fireEvent.click(browser as Element)
+
+    expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'browser' } })
+  })
+
   test('the browser pane opens an http address in a frame and keeps each page on its own tab', () => {
     const { store } = makeStore({ pane: { kind: 'browser' } })
     const { container } = render(() => <ContextPane store={store} />)
