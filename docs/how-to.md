@@ -193,7 +193,7 @@ plugins:
 このリポジトリの失敗しているテストを、codex に直させて。
 ```
 
-モデルは `delegate` を `command`（設定の `name`）、`task`、任意の `cwd` で呼ぶ。実行される argv は設定の `argv` に `task` を最後の引数として足したもので、設定に無い名前は `invalid-arguments` になる。CLI が PATH に無ければ `unavailable` と探したコマンド名を返し、コマンドは run の sandbox を通した子プロセスで走る。出力は最大 100,000 文字で切り、終了コードが 0 でなければ `unavailable` と stderr の理由を返す。既定の profile に入れないのは、全セッションの tool 一覧を太らせないためである。
+モデルは `delegate` を `command`（設定の `name`）、`task`、任意の `cwd` で呼ぶ。`task` と `cwd` は `subagent` と同じ意味で、`cwd` を省くと run の作業ディレクトリになる。`subagent` の `model` / `context` / `preset` はプロセス内の子だけの引数なので、外部 CLI には渡さない。実行される argv は設定の `argv` に `task` を最後の引数として足したもので、設定に無い名前は `invalid-arguments` になる。CLI が PATH に無ければ `unavailable` と探したコマンド名を返し、コマンドは run の sandbox を通した子プロセスで走る。stdout は最大 100,000 文字、stderr は最大 10,000 文字で切り、結果には終了コードと両方の stream が入るので、セッションログから子の入出力を辿れる。終了コードが 0 でない、signal で死んだ、起動できない、timeout したときは、その呼び出しだけが失敗として返り、turn は落ちない。既定の profile に入れないのは、全セッションの tool 一覧を太らせないためである。
 
 ### モデルに同梱のランタイムを渡す
 
