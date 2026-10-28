@@ -20,6 +20,15 @@ import {
   watchWidth,
 } from './rail.ts'
 import { keepBusyEnter, keptBusyEnter } from './dom.ts'
+import { LocaleContext } from './i18n.ts'
+import {
+  LOCALE_KEY,
+  browserLanguages,
+  localeFrom,
+  message,
+  type Locale,
+  type MessageKey,
+} from './locale.ts'
 import { createSessionStore, type SessionStore } from './store.ts'
 import { SeenContext, createSeen } from './seen.ts'
 
@@ -40,13 +49,6 @@ const NARROW_QUERY = '(max-width: 720px)'
 const narrowQueryOf = (): MediaQueryList | undefined =>
   typeof window.matchMedia === 'function' ? window.matchMedia(NARROW_QUERY) : undefined
 
-/** The rail's control says what pressing it does in the rail the page draws. */
-const foldLabel = (state: 'open' | 'collapsed'): string =>
-  state === 'open' ? 'Hide sessions' : 'Show sessions'
-
-const foldTitle = (state: 'open' | 'collapsed'): string =>
-  (state === 'open' ? 'Hide' : 'Show') + ' sessions (Mod+B)'
-
 /** The room the folded pane's strip keeps in the status bar. */
 const stripRoom = (width: number): string | undefined =>
   width === 0 ? undefined : '--context-strip-w: ' + String(width) + 'px'
@@ -57,6 +59,16 @@ const drawerAttr = (open: boolean): string | undefined => (open ? '' : undefined
 /** The page: the strip, the board of sessions, the answers or the trace, and the pane. */
 export const App = (props: { store?: SessionStore; lens?: Lens }) => {
   const store = props.store ?? createSessionStore()
+  const [locale, setLocale] = createSignal(
+    localeFrom(localStorage.getItem(LOCALE_KEY), browserLanguages()),
+  )
+  /** The language stays as the reader left it, so a reload speaks the same one. */
+  const chooseLocale = (next: Locale): void => {
+    setLocale(next)
+    localStorage.setItem(LOCALE_KEY, next)
+    document.documentElement.lang = next
+  }
+  const t = (key: MessageKey): string => message(locale(), key)
   const [lens, setLens] = createSignal(props.lens ?? lensFrom(localStorage.getItem(LENS_KEY)))
   const [busyEnter, setBusyEnter] = createSignal(keptBusyEnter())
   const [railWidth, setRailWidth] = createSignal(railWidthFrom(localStorage.getItem(RAIL_KEY)))
@@ -121,6 +133,7 @@ export const App = (props: { store?: SessionStore; lens?: Lens }) => {
   }
   onMount(() => {
     store.start()
+    document.documentElement.lang = locale()
     const onKey = (event: KeyboardEvent): void => {
       if (!foldCombo(event) || inField(event.target)) return
       event.preventDefault()
@@ -143,67 +156,69 @@ export const App = (props: { store?: SessionStore; lens?: Lens }) => {
   // Both readings stay mounted, so switching back finds the place and the open steps it left.
   const seen = createSeen(() => store.state().sessionId)
   return (
-    <SeenContext.Provider value={seen}>
-      <header id="status" aria-live="polite" style={stripRoom(stripWidth())}>
-        <button
-          id="rail-fold"
-          class="rail-fold"
-          type="button"
-          aria-controls="sidebar"
-          aria-expanded={railOpen()}
-          aria-label={foldLabel(railState())}
-          title={foldTitle(railState())}
-          onClick={toggleRail}
-        >
-          {folded() ? '»' : '«'}
-        </button>
-        <Status
-          store={store}
-          drawer={drawer()}
-          onDrawer={() => {
-            setDrawer(!drawer())
-          }}
-        />
-      </header>
-      <div
-        id="shell"
-        data-rail={railState()}
-        data-drawer={drawerAttr(drawer())}
-        style={'--rail-w: ' + String(railWidth()) + 'px'}
-      >
-        <aside id="sidebar">
-          <Board store={store} />
-        </aside>
+    <LocaleContext.Provider value={{ locale, choose: chooseLocale }}>
+      <SeenContext.Provider value={seen}>
+        <header id="status" aria-live="polite" style={stripRoom(stripWidth())}>
+          <button
+            id="rail-fold"
+            class="rail-fold"
+            type="button"
+            aria-controls="sidebar"
+            aria-expanded={railOpen()}
+            aria-label={t(railState() === 'open' ? 'rail.hide' : 'rail.show')}
+            title={t(railState() === 'open' ? 'rail.hideHint' : 'rail.showHint')}
+            onClick={toggleRail}
+          >
+            {folded() ? '»' : '«'}
+          </button>
+          <Status
+            store={store}
+            drawer={drawer()}
+            onDrawer={() => {
+              setDrawer(!drawer())
+            }}
+          />
+        </header>
         <div
-          id="rail-resize"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize sessions"
-          aria-valuemin={RAIL_MIN}
-          aria-valuemax={RAIL_MAX}
-          aria-valuenow={railWidth()}
-          tabIndex={0}
-          onPointerDown={drag}
-          onKeyDown={resizeKeys}
-        />
-        <div id="main" data-lens={lens()}>
-          <div class="column-head">
-            <LensSwitch lens={lens()} onChoose={choose} />
-          </div>
-          <Conversation store={store} />
-          <Waterfall store={store} live={lens() === 'timeline'} />
-          <Composer store={store} busyEnter={busyEnter()} onBusyEnter={chooseBusyEnter} />
-        </div>
-        <aside
-          id="context"
-          aria-label="Context"
-          ref={(element) => {
-            context = element
-          }}
+          id="shell"
+          data-rail={railState()}
+          data-drawer={drawerAttr(drawer())}
+          style={'--rail-w: ' + String(railWidth()) + 'px'}
         >
-          <ContextPane store={store} />
-        </aside>
-      </div>
-    </SeenContext.Provider>
+          <aside id="sidebar">
+            <Board store={store} />
+          </aside>
+          <div
+            id="rail-resize"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t('rail.resize')}
+            aria-valuemin={RAIL_MIN}
+            aria-valuemax={RAIL_MAX}
+            aria-valuenow={railWidth()}
+            tabIndex={0}
+            onPointerDown={drag}
+            onKeyDown={resizeKeys}
+          />
+          <div id="main" data-lens={lens()}>
+            <div class="column-head">
+              <LensSwitch lens={lens()} onChoose={choose} />
+            </div>
+            <Conversation store={store} />
+            <Waterfall store={store} live={lens() === 'timeline'} />
+            <Composer store={store} busyEnter={busyEnter()} onBusyEnter={chooseBusyEnter} />
+          </div>
+          <aside
+            id="context"
+            aria-label={t('context.title')}
+            ref={(element) => {
+              context = element
+            }}
+          >
+            <ContextPane store={store} />
+          </aside>
+        </div>
+      </SeenContext.Provider>
+    </LocaleContext.Provider>
   )
 }

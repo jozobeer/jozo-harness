@@ -25,6 +25,7 @@ import {
   type RecentGroup,
   type Waiting,
 } from '../../src/ui/board.ts'
+import { useLocaleChoice, useTranslate, type Translate } from '../i18n.ts'
 import { basenameOf, whenOf } from '../lib.ts'
 import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY, keepPaths, pathsFrom } from '../recent.ts'
 import { useSeen } from '../seen.ts'
@@ -60,8 +61,12 @@ const copyId = async (id: string): Promise<Copied> => {
 }
 
 /** The menu item's label, which reports the try once the reader has made one. */
-const copyLabel = (copied: Copied): string =>
-  copied === 'copied' ? 'Copied' : copied === 'failed' ? 'Copy failed' : 'Copy session ID'
+const copyLabel = (copied: Copied, t: Translate): string =>
+  copied === 'copied'
+    ? t('menu.copied')
+    : copied === 'failed'
+      ? t('menu.copyFailed')
+      : t('menu.copyId')
 
 /** The sessions whose title or folder says what was typed, ignoring case. */
 const matching = (
@@ -90,6 +95,7 @@ const inField = (target: EventTarget | null): boolean =>
 
 /** The field that narrows the rail: / or Mod+K opens it, Escape empties it. */
 const Search = (props: { query: string; onQuery: (query: string) => void }) => {
+  const t = useTranslate()
   let field: HTMLInputElement | undefined
   const open = (): void => {
     field?.focus()
@@ -116,8 +122,8 @@ const Search = (props: { query: string; onQuery: (query: string) => void }) => {
         id="session-search"
         class="session-search"
         type="search"
-        placeholder="Search sessions…"
-        aria-label="Search sessions"
+        placeholder={t('board.search')}
+        aria-label={t('board.searchLabel')}
         value={props.query}
         ref={(node) => {
           field = node
@@ -161,6 +167,7 @@ const SessionMark = (props: { entry: BoardEntry }) => {
  * a double-click puts the name itself in reach.
  */
 const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) => {
+  const t = useTranslate()
   const id = () => props.entry.summary.id
   const pinned = () => props.entry.summary.pinned === true
   const archived = () => props.entry.summary.archived === true
@@ -229,7 +236,7 @@ const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) 
         fallback={
           <input
             class="session-rename"
-            aria-label="Session name"
+            aria-label={t('session.name')}
             value={draft()}
             ref={(node) => {
               queueMicrotask(() => {
@@ -282,7 +289,7 @@ const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) 
       <button
         class="session-menu"
         type="button"
-        aria-label="Session actions"
+        aria-label={t('session.actions')}
         aria-expanded={menu()}
         onClick={() => {
           if (menu()) close()
@@ -294,24 +301,24 @@ const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) 
       <Show when={menu()}>
         <div class="session-menu-panel" role="menu">
           <button class="session-menu-item" type="button" onClick={askRename}>
-            Rename
+            {t('menu.rename')}
           </button>
           <button
             class="session-menu-item"
             type="button"
             onClick={() => act({ kind: 'pin', pinned: !pinned() })}
           >
-            {pinned() ? 'Unpin' : 'Pin'}
+            {t(pinned() ? 'menu.unpin' : 'menu.pin')}
           </button>
           <button
             class="session-menu-item"
             type="button"
             onClick={() => act({ kind: 'archive', archived: !archived() })}
           >
-            {archived() ? 'Unarchive' : 'Archive'}
+            {t(archived() ? 'menu.unarchive' : 'menu.archive')}
           </button>
           <button class="session-menu-item" type="button" onClick={copySessionId}>
-            {copyLabel(copied())}
+            {copyLabel(copied(), t)}
           </button>
           <Show when={copied() === 'failed'}>
             <span class="session-id-fallback">{id()}</span>
@@ -324,7 +331,7 @@ const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) 
               setConfirming(true)
             }}
           >
-            Delete
+            {t('menu.delete')}
           </button>
         </div>
       </Show>
@@ -332,20 +339,20 @@ const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) 
         <div
           class="session-menu-panel session-confirm"
           role="alertdialog"
-          aria-label="Delete session"
+          aria-label={t('menu.deleteAria')}
         >
-          <p class="session-confirm-asked">Delete this session?</p>
-          <p class="session-confirm-hint">Its log is removed. Pages it published remain.</p>
+          <p class="session-confirm-asked">{t('menu.deleteAsked')}</p>
+          <p class="session-confirm-hint">{t('menu.deleteHint')}</p>
           <div class="session-confirm-actions">
             <button
               class="session-delete-confirm"
               type="button"
               onClick={() => act({ kind: 'delete' })}
             >
-              Delete permanently
+              {t('menu.deleteForever')}
             </button>
             <button class="session-delete-cancel" type="button" onClick={close}>
-              Cancel
+              {t('menu.cancel')}
             </button>
           </div>
         </div>
@@ -460,9 +467,6 @@ const Section = (props: {
   </Show>
 )
 
-/** The mark says how a session stands; the same cell says when it last did. */
-const restDetail = (entry: BoardEntry, now: number): string => whenOf(entry.since, now)
-
 /**
  * One workspace of Recent. Its header folds the folder; Show more draws the rows
  * past the first page. The folder holding the open session stays open, however
@@ -479,6 +483,8 @@ const RecentFolder = (props: {
   onShown: (cwd: string) => void
   now: number
 }) => {
+  const t = useTranslate()
+  const locale = useLocaleChoice().locale
   const open = (): boolean =>
     props.group.entries.some((entry) => entry.summary.id === props.store.state().sessionId)
   const folded = (): boolean => !open() && props.folded.has(props.group.cwd)
@@ -510,7 +516,11 @@ const RecentFolder = (props: {
             {(id) => {
               const entry = () => atKey(props.rows, id)
               return (
-                <Row entry={entry()} store={props.store} detail={restDetail(entry(), props.now)} />
+                <Row
+                  entry={entry()}
+                  store={props.store}
+                  detail={whenOf(entry().since, props.now, t, locale())}
+                />
               )
             }}
           </For>
@@ -520,7 +530,7 @@ const RecentFolder = (props: {
               type="button"
               onClick={() => props.onShown(props.group.cwd)}
             >
-              Show more
+              {t('board.showMore')}
             </button>
           </Show>
           <Show when={more() && expanded() && !open()}>
@@ -545,6 +555,7 @@ const RecentFolder = (props: {
  * list again.
  */
 const WorkspacePicker = (props: { store: SessionStore }) => {
+  const t = useTranslate()
   const [choice, setChoice] = createSignal('')
   const [browsing, setBrowsing] = createSignal(false)
   const [folder, setFolder] = createSignal<DirectoryView | undefined>()
@@ -638,12 +649,12 @@ const WorkspacePicker = (props: { store: SessionStore }) => {
       <select
         id="workspace"
         class="workspace-select"
-        aria-label="Workspace for a new session"
+        aria-label={t('workspace.label')}
         value={value()}
         onChange={(event) => setChoice(event.currentTarget.value)}
       >
         <Show when={folders().length === 0}>
-          <option value={listed()?.cwd ?? ''}>{listed()?.cwd ?? 'No workspace yet'}</option>
+          <option value={listed()?.cwd ?? ''}>{listed()?.cwd ?? t('workspace.none')}</option>
         </Show>
         <For each={folders()}>
           {(item) => (
@@ -660,7 +671,7 @@ const WorkspacePicker = (props: { store: SessionStore }) => {
         onClick={() => props.store.moveTo(undefined, value() === '' ? undefined : value())}
       >
         <Icon name="plus" />
-        New session
+        {t('workspace.newSession')}
       </Button>
       <Button
         class="workspace-add-open"
@@ -672,7 +683,7 @@ const WorkspacePicker = (props: { store: SessionStore }) => {
         onClick={openBrowser}
       >
         <Icon name="folder" />
-        Add workspace
+        {t('workspace.add')}
       </Button>
       <Show when={browsing()}>
         <Portal>
@@ -696,10 +707,10 @@ const WorkspacePicker = (props: { store: SessionStore }) => {
               onKeyDown={holdKeys}
             >
               <h2 class="workspace-dialog-title" id="workspace-dialog-title">
-                Add workspace
+                {t('workspace.addTitle')}
               </h2>
               <p class="workspace-browse-path" title={folder()?.path}>
-                {folder()?.path ?? 'Reading folders…'}
+                {folder()?.path ?? t('workspace.reading')}
               </p>
               <Show when={browseProblem() !== ''}>
                 <p class="workspace-browse-error" role="alert">
@@ -716,7 +727,7 @@ const WorkspacePicker = (props: { store: SessionStore }) => {
                           type="button"
                           onClick={() => browse(view().parent ?? '')}
                         >
-                          ↑ Up
+                          {t('workspace.up')}
                         </button>
                       </Show>
                       <For each={view().items}>
@@ -732,7 +743,7 @@ const WorkspacePicker = (props: { store: SessionStore }) => {
                         )}
                       </For>
                       <Show when={view().items.length === 0}>
-                        <p class="workspace-browse-empty">No folders here</p>
+                        <p class="workspace-browse-empty">{t('workspace.empty')}</p>
                       </Show>
                     </div>
                     <div class="workspace-browse-actions">
@@ -770,6 +781,7 @@ const WorkspacePicker = (props: { store: SessionStore }) => {
  * live; the others read as closed until opened.
  */
 export const Board = (props: { store: SessionStore }) => {
+  const t = useTranslate()
   const [query, setQuery] = createSignal('')
   const [showArchived, setShowArchived] = createSignal(false)
   const [showEmpty, setShowEmpty] = createSignal(false)
@@ -833,7 +845,7 @@ export const Board = (props: { store: SessionStore }) => {
   const now = createNow()
   return (
     <>
-      <div class="brand">jozo-harness</div>
+      <div class="brand">{t('app.name')}</div>
       <WorkspacePicker store={props.store} />
       <Search query={query()} onQuery={setQuery} />
       <Show when={archivedCount() > 0}>
@@ -844,7 +856,10 @@ export const Board = (props: { store: SessionStore }) => {
           aria-pressed={showArchived()}
           onClick={() => setShowArchived(!showArchived())}
         >
-          {showArchived() ? 'Hide archived' : 'Show archived (' + String(archivedCount()) + ')'}
+          {(showArchived() ? t('board.hideArchived') : t('board.showArchived')) +
+            ' (' +
+            String(archivedCount()) +
+            ')'}
         </button>
       </Show>
       <Show when={emptyCount() > 0}>
@@ -855,16 +870,27 @@ export const Board = (props: { store: SessionStore }) => {
           aria-pressed={showEmpty()}
           onClick={() => setShowEmpty(!showEmpty())}
         >
-          {showEmpty() ? 'Hide empty' : 'Show empty (' + String(emptyCount()) + ')'}
+          {(showEmpty() ? t('board.hideEmpty') : t('board.showEmpty')) +
+            ' (' +
+            String(emptyCount()) +
+            ')'}
         </button>
       </Show>
-      <nav id="session-list" aria-label="Sessions">
-        <Section title="Waiting on you" icon={<Mug state="full" />} count={board().waiting.length}>
+      <nav id="session-list" aria-label={t('board.sessions')}>
+        <Section
+          title={t('board.waiting')}
+          icon={<Mug state="full" />}
+          count={board().waiting.length}
+        >
           <For each={keysOf(board().waiting, (entry) => entry.summary.id)}>
             {(id) => <WaitingCard entry={atKey(rows(), id)} store={props.store} />}
           </For>
         </Section>
-        <Section title="Recent" icon={<Icon name="clock" />} count={recentEntries().length}>
+        <Section
+          title={t('board.recent')}
+          icon={<Icon name="clock" />}
+          count={recentEntries().length}
+        >
           <For each={keysOf(recent(), (group) => group.cwd)}>
             {(cwd) => (
               <RecentFolder
@@ -881,7 +907,9 @@ export const Board = (props: { store: SessionStore }) => {
           </For>
         </Section>
         <Show when={noMatch()}>
-          <p class="board-empty">No sessions match “{query().trim()}”.</p>
+          <p class="board-empty">
+            {t('board.noMatch')} “{query().trim()}”.
+          </p>
         </Show>
       </nav>
     </>

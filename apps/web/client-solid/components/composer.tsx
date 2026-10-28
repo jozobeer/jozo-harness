@@ -22,6 +22,7 @@ import {
   type CommandToken,
 } from '../../src/ui/commands.ts'
 import { renderMarkdown } from '../../src/ui/markdown.ts'
+import { useTranslate } from '../i18n.ts'
 import { Linkify } from './linkify.tsx'
 import {
   completedReference,
@@ -663,6 +664,7 @@ export const Composer = (props: {
   /** The browser facts speech is read from; absent reads this page. */
   voice?: VoiceScope
 }) => {
+  const t = useTranslate()
   let textarea: HTMLTextAreaElement | undefined
   let row: HTMLDivElement | undefined
   const [compact, setCompact] = createSignal(false)
@@ -1000,7 +1002,7 @@ export const Composer = (props: {
             props.store.state().quotes.length > 0 || props.store.state().selection.trim() !== ''
           }
         >
-          <div id="quotes" aria-label="passages the next message quotes">
+          <div id="quotes" aria-label={t('composer.quotes')}>
             <Index each={props.store.state().quotes}>
               {(quote, index) => (
                 <span class="quote-chip">
@@ -1008,8 +1010,8 @@ export const Composer = (props: {
                   <button
                     type="button"
                     class="quote-remove"
-                    aria-label={'Remove quoted passage ' + String(index + 1)}
-                    title="remove this quotation"
+                    aria-label={t('composer.removeQuoteAria') + String(index + 1)}
+                    title={t('composer.removeQuote')}
                     onClick={() => props.store.removeQuote(index)}
                   >
                     ×
@@ -1021,17 +1023,17 @@ export const Composer = (props: {
               <button
                 type="button"
                 id="quote-selection"
-                title="quote the selected text in the next message"
+                title={t('composer.quoteSelectionHint')}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => props.store.addQuote(props.store.state().selection)}
               >
-                Quote selection
+                {t('composer.quoteSelection')}
               </button>
             </Show>
           </div>
         </Show>
         <Show when={attachments().length > 0}>
-          <div id="attachments" aria-label="files the next message attaches">
+          <div id="attachments" aria-label={t('composer.attachments')}>
             <Index each={attachments()}>
               {(attachment, index) => (
                 <span class="attachment-chip">
@@ -1042,8 +1044,8 @@ export const Composer = (props: {
                   <button
                     type="button"
                     class="attachment-remove"
-                    aria-label={'Remove attached file ' + attachment().name}
-                    title="remove this attachment"
+                    aria-label={t('composer.removeAttachmentAria') + attachment().name}
+                    title={t('composer.removeAttachment')}
                     onClick={() => props.store.removeAttachment(index)}
                   >
                     ×
@@ -1066,7 +1068,7 @@ export const Composer = (props: {
         </Show>
         <Show when={listening()}>
           <p id="voice-listening" role="status">
-            Listening… the words go into the draft. Stop when you are done.
+            {t('composer.listening')}
           </p>
         </Show>
         <Show when={voiceReason()}>
@@ -1079,7 +1081,7 @@ export const Composer = (props: {
         <textarea
           id="input"
           rows="1"
-          placeholder="Message jozo-harness…  (Enter sends, Shift+Enter adds a line)"
+          placeholder={t('composer.placeholder')}
           value={props.store.state().draft}
           ref={(node) => {
             textarea = node
@@ -1134,8 +1136,8 @@ export const Composer = (props: {
             id="attach"
             size="icon"
             type="button"
-            aria-label="Attach files"
-            title="Attach images or text files (or drop them here)"
+            aria-label={t('composer.attach')}
+            title={t('composer.attachHint')}
             onClick={() => picker?.click()}
           >
             <Icon name="paperclip" />
@@ -1144,13 +1146,9 @@ export const Composer = (props: {
             id="voice"
             size="icon"
             type="button"
-            aria-label={listening() ? 'Stop dictation' : 'Start dictation'}
+            aria-label={t(listening() ? 'composer.dictateStop' : 'composer.dictateStart')}
             aria-pressed={listening() ? 'true' : 'false'}
-            title={
-              listening()
-                ? 'Stop dictation and keep the words in the draft'
-                : 'Turn speech into text in this draft'
-            }
+            title={t(listening() ? 'composer.dictateStopHint' : 'composer.dictateStartHint')}
             onClick={toggleVoice}
           >
             <Icon name="mic" />
@@ -1163,8 +1161,8 @@ export const Composer = (props: {
             size="icon"
             variant={takeover() ? 'default' : 'primary'}
             type="submit"
-            aria-label="Send the message"
-            title="Send the message (Enter)"
+            aria-label={t('composer.send')}
+            title={t('composer.sendHint')}
           >
             <Icon name="send" />
           </Button>
@@ -1172,8 +1170,8 @@ export const Composer = (props: {
             id="cancel"
             size="icon"
             type="button"
-            aria-label="Stop the run"
-            title="Stop the run"
+            aria-label={t('composer.stop')}
+            title={t('composer.stop')}
             disabled={!running()}
             onClick={() => props.store.send({ kind: 'cancel' })}
           >

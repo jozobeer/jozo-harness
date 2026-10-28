@@ -11,7 +11,9 @@ import type {
 import type { Pane } from '../../src/ui/state.ts'
 import { THEMES, type Theme } from '../../src/ui/theme.ts'
 import type { TurnView } from '../../src/ui/trajectory.ts'
+import { useLocaleChoice, useTranslate } from '../i18n.ts'
 import { basenameOf, childSessionsOf, elapsedOf, pagesOf } from '../lib.ts'
+import { LOCALES } from '../locale.ts'
 import type { ScheduleDraft, SessionStore } from '../store.ts'
 import { Review } from './review.tsx'
 import { Inspector } from './inspector.tsx'
@@ -1076,78 +1078,102 @@ const Share = () => {
   )
 }
 
-const Settings = (props: { store: SessionStore; settings: SettingsView | undefined }) => (
-  <>
-    <h2 class="pane-title">Settings</h2>
-    <span class="pane-label">theme</span>
-    <div class="theme-choice">
-      <For each={THEMES}>
-        {(theme: Theme) => (
-          <button
-            class={'theme' + (theme === props.store.state().theme ? ' active' : '')}
-            type="button"
-            data-theme={theme}
-            onClick={() => props.store.chooseTheme(theme)}
-          >
-            {theme}
-          </button>
-        )}
-      </For>
-    </div>
-    <Show when={props.settings} fallback={<div class="card-hint">reading the settings…</div>}>
-      {(settings) => (
-        <>
-          <span class="pane-label">run</span>
-          <div class="panel-rows">
-            {row('model', settings().model)}
-            {row('effort', settings().effort === '' ? '(the provider chooses)' : settings().effort)}
-            {row('cwd', settings().cwd)}
-            {row('sessions', settings().sessionRoot)}
-            {row('settings', settings().settingsPath === '' ? '(none)' : settings().settingsPath)}
-          </div>
-          <Show
-            when={props.store.state().models}
-            fallback={
-              <div class="panel-actions">
-                <Button id="ask-models" type="button" onClick={() => props.store.askModels()}>
-                  List models
-                </Button>
-              </div>
-            }
-          >
-            {(models) => (
-              <>
+const Settings = (props: { store: SessionStore; settings: SettingsView | undefined }) => {
+  const t = useTranslate()
+  const choice = useLocaleChoice()
+  return (
+    <>
+      <h2 class="pane-title">{t('settings.title')}</h2>
+      <span class="pane-label">{t('settings.theme')}</span>
+      <div class="theme-choice">
+        <For each={THEMES}>
+          {(theme: Theme) => (
+            <button
+              class={'theme' + (theme === props.store.state().theme ? ' active' : '')}
+              type="button"
+              data-theme={theme}
+              onClick={() => props.store.chooseTheme(theme)}
+            >
+              {theme}
+            </button>
+          )}
+        </For>
+      </div>
+      <span class="pane-label">{t('settings.language')}</span>
+      <div class="theme-choice" role="group" aria-label={t('settings.language')}>
+        <For each={LOCALES}>
+          {(known) => (
+            <button
+              class={'theme' + (known.id === choice.locale() ? ' active' : '')}
+              type="button"
+              data-locale={known.id}
+              lang={known.id}
+              aria-pressed={known.id === choice.locale()}
+              onClick={() => choice.choose(known.id)}
+            >
+              {known.label}
+            </button>
+          )}
+        </For>
+      </div>
+      <Show when={props.settings} fallback={<div class="card-hint">{t('settings.reading')}</div>}>
+        {(settings) => (
+          <>
+            <span class="pane-label">{t('settings.run')}</span>
+            <div class="panel-rows">
+              {row(t('settings.model'), settings().model)}
+              {row(
+                t('settings.effort'),
+                settings().effort === '' ? t('settings.providerChooses') : settings().effort,
+              )}
+              {row(t('settings.cwd'), settings().cwd)}
+              {row(t('settings.sessions'), settings().sessionRoot)}
+              {row(
+                t('settings.settingsPath'),
+                settings().settingsPath === '' ? t('settings.none') : settings().settingsPath,
+              )}
+            </div>
+            <Show
+              when={props.store.state().models}
+              fallback={
                 <div class="panel-actions">
-                  <select id="model-choice">
-                    <For each={models()}>{(route) => <option value={route}>{route}</option>}</For>
-                  </select>
-                  <Button
-                    id="use-model"
-                    variant="primary"
-                    type="button"
-                    onClick={() => {
-                      const choice = document.getElementById('model-choice')
-                      if (choice instanceof HTMLSelectElement && choice.value !== '') {
-                        props.store.setModel(choice.value)
-                      }
-                    }}
-                  >
-                    Use for new sessions
+                  <Button id="ask-models" type="button" onClick={() => props.store.askModels()}>
+                    {t('settings.listModels')}
                   </Button>
                 </div>
-                <div class="card-hint">
-                  each session opened from now on starts from it; the settings file keeps it for
-                  later runs, and the seat switches the session in front of you
-                </div>
-              </>
-            )}
-          </Show>
-        </>
-      )}
-    </Show>
-    <Share />
-  </>
-)
+              }
+            >
+              {(models) => (
+                <>
+                  <div class="panel-actions">
+                    <select id="model-choice">
+                      <For each={models()}>{(route) => <option value={route}>{route}</option>}</For>
+                    </select>
+                    <Button
+                      id="use-model"
+                      variant="primary"
+                      type="button"
+                      onClick={() => {
+                        const choice = document.getElementById('model-choice')
+                        if (choice instanceof HTMLSelectElement && choice.value !== '') {
+                          props.store.setModel(choice.value)
+                        }
+                      }}
+                    >
+                      {t('settings.useForNewSessions')}
+                    </Button>
+                  </div>
+                  <div class="card-hint">{t('settings.useHint')}</div>
+                </>
+              )}
+            </Show>
+          </>
+        )}
+      </Show>
+      <Share />
+    </>
+  )
+}
 
 const durationOf = (turn: TurnView): string =>
   turn.endedAt === undefined ? 'running' : ((turn.endedAt - turn.startedAt) / 1000).toFixed(1) + 's'

@@ -1,16 +1,18 @@
 import type { Conversation, ConversationBlock } from '@jozo-harness/ui-view'
+import type { Translate } from './i18n.ts'
+import { formatShortDate, type Locale } from './locale.ts'
 import type { WebState } from '../src/ui/state.ts'
 import { toolsOf, type TraceTool, type TraceTurn } from '../src/ui/trace.ts'
 
 /** How long ago a session started, the way a rail usually says it. */
-export const whenOf = (at: number, now: number): string => {
+export const whenOf = (at: number, now: number, t: Translate, locale: Locale): string => {
   const minutes = Math.floor((now - at) / 60_000)
-  if (minutes < 1) return 'now'
+  if (minutes < 1) return t('when.now')
   if (minutes < 60) return String(minutes) + 'm'
   const hours = Math.floor(minutes / 60)
   if (hours < 24) return String(hours) + 'h'
-  if (hours < 48) return 'yesterday'
-  return new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  if (hours < 48) return t('when.yesterday')
+  return formatShortDate(locale, new Date(at))
 }
 
 /** How long something has been running, short enough for the Run pane. */
@@ -85,11 +87,11 @@ export const pagesOf = (turns: ReadonlyArray<TraceTurn>): ReadonlyArray<string> 
 }
 
 /** What the status strip says the page is doing. */
-export const hintOf = (state: WebState): string => {
+export const hintOf = (state: WebState, t: Translate): string => {
   if (state.problem !== '') return state.problem
-  if (!state.connected) return 'reconnecting…'
+  if (!state.connected) return t('status.reconnecting')
   const conversation: Conversation = state.conversation
-  if (conversation.approval !== undefined) return 'waiting for your approval'
-  if (conversation.ask !== undefined) return 'answer the question and press Enter'
-  return conversation.running ? 'working…' : 'ready'
+  if (conversation.approval !== undefined) return t('status.approval')
+  if (conversation.ask !== undefined) return t('status.ask')
+  return conversation.running ? t('status.working') : t('status.ready')
 }

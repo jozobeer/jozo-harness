@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatCompact, formatDate, localeFrom, message } from '../locale.ts'
+import { formatCompact, formatDate, formatShortDate, localeFrom, message } from '../locale.ts'
 
 describe('the language a page opens in', () => {
   it('opens in the language the reader chose, whatever the browser asks for', () => {
@@ -35,6 +35,11 @@ describe('the formats a language reads dates and counts in', () => {
   it('writes a day in the language order', () => {
     expect(formatDate('en', day)).toBe('Oct 29, 2026')
     expect(formatDate('ja', day)).toBe('2026年10月29日')
+  })
+
+  it('writes a day without the year the way the language does', () => {
+    expect(formatShortDate('en', day)).toBe('Oct 29')
+    expect(formatShortDate('ja', day)).toBe('10月29日')
   })
 
   it('writes a large count the short way the language does', () => {

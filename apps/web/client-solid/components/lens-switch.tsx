@@ -1,12 +1,18 @@
 import { For, createEffect, onCleanup, onMount } from 'solid-js'
+import { useTranslate } from '../i18n.ts'
 import { LENSES, type Lens } from '../lens.ts'
+import type { MessageKey } from '../locale.ts'
 import { Icon, type IconName } from './ui/icon.tsx'
 
-const LABELS: Readonly<Record<Lens, string>> = { answers: 'Chat', timeline: 'Timeline' }
+const LABELS: Readonly<Record<Lens, MessageKey>> = {
+  answers: 'lens.answers',
+  timeline: 'lens.timeline',
+}
 const ICONS: Readonly<Record<Lens, IconName>> = { answers: 'answers', timeline: 'timeline' }
 
 /** The strip's switch between the two ways the middle column reads a session. */
 export const LensSwitch = (props: { lens: Lens; onChoose: (lens: Lens) => void }) => {
+  const t = useTranslate()
   let strip: HTMLDivElement | undefined
 
   // The labels differ in width, so the pill reads the pressed option's place
@@ -30,7 +36,7 @@ export const LensSwitch = (props: { lens: Lens; onChoose: (lens: Lens) => void }
     <div
       class="lens"
       role="group"
-      aria-label="How the session reads"
+      aria-label={t('lens.group')}
       ref={(element) => (strip = element)}
     >
       <For each={LENSES}>
@@ -43,7 +49,7 @@ export const LensSwitch = (props: { lens: Lens; onChoose: (lens: Lens) => void }
             onClick={() => props.onChoose(lens)}
           >
             <Icon name={ICONS[lens]} />
-            {LABELS[lens]}
+            {t(LABELS[lens])}
           </button>
         )}
       </For>
