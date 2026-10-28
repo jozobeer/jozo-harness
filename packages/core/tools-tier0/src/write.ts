@@ -1,5 +1,5 @@
 import { dirname } from 'node:path'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir } from 'node:fs/promises'
 import { noneSandbox, type ApprovalShape, type SandboxShape } from '@jozo-harness/safety'
 import { Schema, Effect } from 'effect'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
@@ -8,6 +8,7 @@ import { guardWrite, look, type ObservedFiles } from './observed-files.ts'
 import { resolveInside } from './workspace.ts'
 import { normalizeNewlines, readForEdit } from './text.ts'
 import { writeDiffs } from './diff.ts'
+import { stageFile } from './atomic.ts'
 
 const Parameters = Schema.Struct({
   path: Schema.String.annotate({
@@ -72,12 +73,16 @@ export const makeWriteTool = (
         )
         const content = normalizeNewlines(args.content)
         yield* Effect.tryPromise({
-          try: async () => {
-            await mkdir(dirname(path), { recursive: true })
-            await writeFile(path, content)
-          },
+          try: () => mkdir(dirname(path), { recursive: true }),
           catch: () => new ToolError({ code: 'execution', message: 'cannot write ' + path }),
         })
+        const staged = yield* stageFile(path, content)
+        // The bytes are already staged, but nothing has replaced the file yet:
+        // re-check after staging so a change during the diff read still refuses.
+        yield* guardWrite(observed, context.sessionId, path).pipe(
+          Effect.onError(() => staged.discard),
+        )
+        yield* staged.commit
         const written = yield* look(path)
         if (written !== undefined) observed.observe(context.sessionId, path, written)
         for (const diff of writeDiffs(path, before, content)) context.changes?.record(diff)
