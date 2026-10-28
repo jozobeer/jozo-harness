@@ -5,8 +5,12 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { Effect, Result } from 'effect'
 import {
   ATTACHMENT_LIMITS,
+  attachmentLabel,
   clipAttachments,
   displayNameOf,
+  isImageMediaType,
+  isSupportedMediaType,
+  isTextMediaType,
   mediaTypeOf,
   type Attachment,
 } from '../src/index.ts'
@@ -106,6 +110,30 @@ describe('the attachment store', () => {
     expect(Result.isFailure(answer)).toBe(true)
   })
 
+  test('refuses a file with no display name', async () => {
+    const root = await makeRoot()
+    const answer = await store(root, '   ', 'text/plain', new TextEncoder().encode('x'))
+
+    expect(Result.isFailure(answer)).toBe(true)
+    if (Result.isFailure(answer)) expect(answer.failure.code).toBe('invalid')
+  })
+
+  test('refuses to read an object whose name is not a sha256', async () => {
+    const root = await makeRoot()
+    const answer = await Effect.runPromise(
+      Effect.result(
+        readAttachment(root, {
+          hash: '../../etc/passwd',
+          mediaType: 'text/plain',
+          name: 'passwd',
+          bytes: 1,
+        }),
+      ),
+    )
+
+    expect(Result.isFailure(answer)).toBe(true)
+  })
+
   test('reads a missing object as a reason rather than empty bytes', async () => {
     const root = await makeRoot()
     const answer = await Effect.runPromise(
@@ -141,6 +169,26 @@ describe('attachment metadata', () => {
     expect(mediaTypeOf('notes.md', '')).toBe('text/markdown')
     expect(mediaTypeOf('shot.png', 'application/octet-stream')).toBe('image/png')
     expect(mediaTypeOf('thing.bin', 'application/octet-stream')).toBe('application/octet-stream')
+  })
+
+  test('tells the model what a label names, and which types it can take', () => {
+    expect(
+      attachmentLabel({ hash: 'a'.repeat(64), mediaType: 'text/plain', name: 'a.txt', bytes: 3 }),
+    ).toBe('Attachment: a.txt (text/plain, 3 bytes)')
+    expect(isImageMediaType('image/webp')).toBe(true)
+    expect(isTextMediaType('text/markdown')).toBe(true)
+    expect(isTextMediaType('application/json')).toBe(true)
+    expect(isSupportedMediaType('application/pdf')).toBe(false)
+  })
+
+  test('tells the model what a label names, and which types it can take', () => {
+    expect(
+      attachmentLabel({ hash: 'a'.repeat(64), mediaType: 'text/plain', name: 'a.txt', bytes: 3 }),
+    ).toBe('Attachment: a.txt (text/plain, 3 bytes)')
+    expect(isImageMediaType('image/webp')).toBe(true)
+    expect(isTextMediaType('text/markdown')).toBe(true)
+    expect(isTextMediaType('application/json')).toBe(true)
+    expect(isSupportedMediaType('application/pdf')).toBe(false)
   })
 
   test('drops attachments past the count or byte budget', () => {
