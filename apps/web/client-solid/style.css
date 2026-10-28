@@ -956,6 +956,109 @@
     font-weight: 600;
   }
 
+  /* The key list stands on the page for the same reason the folder list does. */
+  .shortcuts-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--s4);
+    background: rgb(0 0 0 / 45%);
+  }
+
+  .shortcuts-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+    width: min(520px, 92vw);
+    max-height: min(80vh, 640px);
+    padding: var(--s4);
+    overflow-y: auto;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    background: var(--bg-sunken);
+    box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
+  }
+
+  .shortcuts-dialog:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .shortcuts-title {
+    margin: 0;
+    color: var(--text);
+    font-size: var(--text-md);
+    font-weight: 600;
+  }
+
+  .shortcuts-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .shortcut-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: var(--s3);
+  }
+
+  .shortcut-key {
+    padding: 2px 6px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    background: var(--bg-hover);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: var(--text-sm);
+    white-space: nowrap;
+  }
+
+  .shortcuts-problem {
+    margin: 0;
+    color: var(--error);
+    font-size: var(--text-sm);
+  }
+
+  .shortcuts-note {
+    margin: 0;
+    color: var(--dim);
+    font-size: var(--text-sm);
+  }
+
+  .shortcuts-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--s2);
+  }
+
+  /* The header's key button carries a word, so it cannot keep the fold's square. */
+  .shortcuts-open {
+    flex: none;
+    height: 24px;
+    padding: 0 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--dim);
+    font: inherit;
+    font-size: var(--text-sm);
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .shortcuts-open:hover {
+    border-color: var(--select);
+    color: var(--text);
+  }
+
   .workspace-browse-path {
     margin: 0;
     overflow-wrap: anywhere;

@@ -28,11 +28,13 @@ import {
 import { useLocaleChoice, useTranslate, type Translate } from '../i18n.ts'
 import { basenameOf, whenOf } from '../lib.ts'
 import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY, keepPaths, pathsFrom } from '../recent.ts'
+import { matches } from '../shortcuts.ts'
 import { useSeen } from '../seen.ts'
 import type { BrowseAnswer, SessionStore } from '../store.ts'
 import { Button } from './ui/button.tsx'
 import { Fizz } from './ui/fizz.tsx'
 import { EndMark } from './ui/end-mark.tsx'
+import { useShortcuts } from './shortcuts.tsx'
 import { Icon } from './ui/icon.tsx'
 import { Mug } from './ui/mug.tsx'
 
@@ -81,21 +83,14 @@ const matching = (
   )
 }
 
-/** Mod+K opens the field from anywhere, even while another field has the keys. */
-const searchCombo = (event: KeyboardEvent): boolean =>
-  (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k'
-
-/** A bare / opens the field, as long as the page is not already taking the keys. */
-const searchSlash = (event: KeyboardEvent): boolean =>
-  event.key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey
-
 const inField = (target: EventTarget | null): boolean =>
   target instanceof HTMLElement &&
   target.closest('input, textarea, select, [contenteditable="true"]') !== null
 
-/** The field that narrows the rail: / or Mod+K opens it, Escape empties it. */
+/** The field that narrows the rail: its two keys open it, Escape empties it. */
 const Search = (props: { query: string; onQuery: (query: string) => void }) => {
   const t = useTranslate()
+  const shortcuts = useShortcuts()
   let field: HTMLInputElement | undefined
   const open = (): void => {
     field?.focus()
@@ -103,12 +98,13 @@ const Search = (props: { query: string; onQuery: (query: string) => void }) => {
   }
   onMount(() => {
     const onKey = (event: KeyboardEvent): void => {
-      if (searchCombo(event)) {
+      if (matches(shortcuts.bindings(), 'board.search', event)) {
         event.preventDefault()
         open()
         return
       }
-      if (!searchSlash(event) || inField(event.target)) return
+      const bare = matches(shortcuts.bindings(), 'board.searchBare', event)
+      if (!bare || inField(event.target)) return
       event.preventDefault()
       open()
     }

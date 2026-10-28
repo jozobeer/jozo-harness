@@ -31,9 +31,11 @@ import {
   type ReferenceToken,
 } from '../../src/ui/references.ts'
 import { watchWidth } from '../rail.ts'
+import { matches } from '../shortcuts.ts'
 import type { SessionStore } from '../store.ts'
 import { acceleratedSend, oppositeMode, submitModeFor } from '../submission.ts'
 import { browserVoice, listen, voiceSupport, type Listening, type VoiceScope } from '../voice.ts'
+import { useShortcuts } from './shortcuts.tsx'
 import { Button } from './ui/button.tsx'
 import { Fizz } from './ui/fizz.tsx'
 import { GoalMark, roundsOf } from './ui/goal-mark.tsx'
@@ -681,6 +683,7 @@ export const Composer = (props: {
   voice?: VoiceScope
 }) => {
   const t = useTranslate()
+  const shortcuts = useShortcuts()
   let textarea: HTMLTextAreaElement | undefined
   let row: HTMLDivElement | undefined
   const [compact, setCompact] = createSignal(false)
@@ -709,14 +712,15 @@ export const Composer = (props: {
   onCleanup(stopAsking)
 
   onMount(() => {
-    // y and n answer a pending approval, as long as the composer does not have the keys.
+    // The two approval keys answer a pending call, as long as the composer does not have the keys.
     const onKey = (event: KeyboardEvent): void => {
       const approval = props.store.state().conversation.approval
       if (approval === undefined || document.activeElement === textarea) return
-      const key = event.key.toLowerCase()
-      if (key !== 'y' && key !== 'n') return
+      const bindings = shortcuts.bindings()
+      const approved = matches(bindings, 'approval.approve', event)
+      if (!approved && !matches(bindings, 'approval.reject', event)) return
       event.preventDefault()
-      props.store.send({ kind: 'approve', callId: approval.callId, approved: key === 'y' })
+      props.store.send({ kind: 'approve', callId: approval.callId, approved })
     }
     document.addEventListener('keydown', onKey)
     const stopWidth = watchWidth(row, (next) => {

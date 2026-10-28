@@ -48,6 +48,7 @@ import {
 } from '../rail.ts'
 import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY } from '../recent.ts'
 import { LOCALE_KEY } from '../locale.ts'
+import { SHORTCUTS, SHORTCUTS_KEY } from '../shortcuts.ts'
 import { BUSY_ENTER_KEY } from '../submission.ts'
 import {
   INSECURE_PAGE,
@@ -4358,5 +4359,128 @@ describe('the language of the page', () => {
     expect(calls.filter((call) => call.kind === 'command' || call.kind === 'sendTo')).toHaveLength(
       0,
     )
+  })
+})
+
+describe('the shortcut list', () => {
+  beforeEach(() => localStorage.clear())
+
+  /** Opens the list the way a reader does, then hands it back. */
+  const openList = (): HTMLElement => {
+    fireEvent.keyDown(document, { key: '/', metaKey: true })
+    const dialog = document.querySelector('.shortcuts-dialog')
+    if (!(dialog instanceof HTMLElement)) throw new Error('the shortcut list did not open')
+    return dialog
+  }
+
+  const rowOf = (label: string): HTMLElement => {
+    const row = Array.from(document.querySelectorAll('.shortcut-row')).find((node) =>
+      node.textContent?.includes(label),
+    )
+    if (!(row instanceof HTMLElement)) throw new Error('no row for ' + label)
+    return row
+  }
+
+  const keyOfRow = (label: string): string | undefined =>
+    rowOf(label).querySelector('.shortcut-key')?.textContent ?? undefined
+
+  const changeOf = (label: string): HTMLElement => {
+    const button = rowOf(label).querySelector('.shortcut-change')
+    if (!(button instanceof HTMLElement)) throw new Error('no Change button for ' + label)
+    return button
+  }
+
+  test('the list opens on Mod+/ and names every action with the key it answers to now', () => {
+    const { store } = makeStore()
+    render(() => <App store={store} />)
+
+    const dialog = openList()
+
+    expect(dialog.querySelectorAll('.shortcut-row')).toHaveLength(SHORTCUTS.length)
+    expect(keyOfRow('Show or hide sessions')).toBe('Ctrl+B')
+    expect(keyOfRow('Search sessions')).toBe('Ctrl+K')
+    expect(keyOfRow('Search sessions from the page')).toBe('/')
+    expect(keyOfRow('Approve the waiting call')).toBe('Y')
+    expect(keyOfRow('Reject the waiting call')).toBe('N')
+  })
+
+  test('a key another action uses is refused before it is saved, naming that action', () => {
+    const { store } = makeStore()
+    render(() => <App store={store} />)
+
+    const dialog = openList()
+    fireEvent.click(changeOf('Show or hide sessions'))
+    fireEvent.keyDown(dialog, { key: 'k', metaKey: true })
+
+    expect(dialog.querySelector('[role="alert"]')?.textContent).toContain('Search sessions')
+    expect(localStorage.getItem(SHORTCUTS_KEY)).toBeNull()
+
+    // Escape gives up on the change and leaves the old key in place.
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    expect(keyOfRow('Show or hide sessions')).toBe('Ctrl+B')
+  })
+
+  test('a changed key folds the rail, keeps across a reload, and the old key stops', () => {
+    const { store } = makeStore()
+    const first = render(() => <App store={store} />)
+
+    const dialog = openList()
+    fireEvent.click(changeOf('Show or hide sessions'))
+    fireEvent.keyDown(dialog, { key: 'j', metaKey: true })
+
+    expect(JSON.parse(localStorage.getItem(SHORTCUTS_KEY) ?? 'null')).toEqual({
+      'rail.toggle': 'Mod+j',
+    })
+    expect(keyOfRow('Show or hide sessions')).toBe('Ctrl+J')
+
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    expect(document.querySelector('.shortcuts-dialog')).toBeNull()
+    const shell = first.container.querySelector('#shell')
+    expect(shell?.getAttribute('data-rail')).toBe('open')
+    fireEvent.keyDown(document, { key: 'b', metaKey: true })
+    expect(shell?.getAttribute('data-rail')).toBe('open')
+    fireEvent.keyDown(document, { key: 'j', metaKey: true })
+    expect(shell?.getAttribute('data-rail')).toBe('collapsed')
+
+    cleanup()
+    const next = render(() => <App store={store} />)
+
+    // The keys nobody changed still do what they did.
+    fireEvent.keyDown(document, { key: 'k', metaKey: true })
+    expect(document.activeElement?.id).toBe('session-search')
+    // And the key changed in the last visit answers on this one, without asking again.
+    fireEvent.keyDown(document, { key: 'j', metaKey: true })
+    expect(next.container.querySelector('#shell')?.getAttribute('data-rail')).toBe('open')
+  })
+
+  test('the header key opens the list and Close gives the page back', () => {
+    const { store } = makeStore()
+    const { container } = render(() => <App store={store} />)
+
+    fireEvent.click(container.querySelector('#shortcuts-open') as Element)
+    expect(document.querySelector('.shortcuts-dialog')).not.toBeNull()
+
+    fireEvent.click(document.querySelector('.shortcut-close') as Element)
+    expect(document.querySelector('.shortcuts-dialog')).toBeNull()
+
+    // The key that opens the list closes it again, and the page keeps the key.
+    fireEvent.keyDown(document, { key: '/', metaKey: true })
+    expect(document.querySelector('.shortcuts-dialog')).not.toBeNull()
+    fireEvent.keyDown(document, { key: '/', metaKey: true })
+    expect(document.querySelector('.shortcuts-dialog')).toBeNull()
+  })
+
+  test('Reset puts every action back on the key it ships with', () => {
+    localStorage.setItem(SHORTCUTS_KEY, '{"rail.toggle":"Mod+J"}')
+    const { store } = makeStore()
+    render(() => <App store={store} />)
+
+    openList()
+    expect(keyOfRow('Show or hide sessions')).toBe('Ctrl+J')
+
+    fireEvent.click(document.querySelector('.shortcut-reset') as Element)
+
+    expect(keyOfRow('Show or hide sessions')).toBe('Ctrl+B')
+    expect(localStorage.getItem(SHORTCUTS_KEY)).toBe('{}')
   })
 })
