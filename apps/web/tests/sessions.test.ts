@@ -69,6 +69,7 @@ const makeFactory = (): Fake => {
             jobOutput,
             stopJob: () => Effect.void,
             stopSubagent: () => Effect.void,
+            messageSubagent: (childId: string) => Effect.succeed({ id: childId, queued: false }),
             busy: () => false,
           }
         }),
@@ -104,6 +105,7 @@ const sessionFor = (id: string): OpenSession => ({
   jobOutput,
   stopJob: () => Effect.void,
   stopSubagent: () => Effect.void,
+  messageSubagent: (childId: string) => Effect.succeed({ id: childId, queued: false }),
   busy: () => false,
 })
 
@@ -116,6 +118,7 @@ const initial = (id: string): InitialSession => ({
     jobOutput,
     stopJob: () => Effect.void,
     stopSubagent: () => Effect.void,
+    messageSubagent: (childId: string) => Effect.succeed({ id: childId, queued: false }),
     busy: () => false,
   },
   close: () => Effect.void,

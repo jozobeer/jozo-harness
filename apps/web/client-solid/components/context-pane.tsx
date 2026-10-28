@@ -263,9 +263,30 @@ const StopButton = (props: {
   )
 }
 
-/** One child: its role, what it does now, and how long it has taken. */
+/** Where a child sits in the delegation tree, and whether it may still start one of its own. */
+const depthText = (child: RunStateView['subagents'][number]): string =>
+  'depth ' +
+  String(child.depth) +
+  '/' +
+  String(child.maxDepth) +
+  (child.depth < child.maxDepth ? ' · may delegate' : ' · no deeper')
+
+/**
+ * One child: its role, where it sits, what it does now, and how long it has taken.
+ * The line under it sends the child a follow-up, the way the model's send_message
+ * does, and stops it; opening the child stays a click on the row.
+ */
 const SubagentRow = (props: { store: SessionStore; child: RunStateView['subagents'][number] }) => {
   const duration = () => elapsedOf(props.child.startedAt, props.child.endedAt ?? Date.now())
+  const [draft, setDraft] = createSignal('')
+  const send = (event: Event) => {
+    event.preventDefault()
+    const text = draft().trim()
+    if (text === '') return
+    props.store.messageSubagent(props.child.id, text)
+    // The child now owns the words, so the field clears for the next one.
+    setDraft('')
+  }
   return (
     <li class={'run-child-row ' + props.child.status} data-subagent-id={props.child.id}>
       <button
@@ -278,16 +299,38 @@ const SubagentRow = (props: { store: SessionStore; child: RunStateView['subagent
         <span class="run-child-preset">{props.child.preset ?? 'subagent'}</span>
         <span class="run-child-state">{props.child.status}</span>
         <span class="run-child-id">{props.child.id.slice(0, 8)}</span>
+        <span
+          class="run-child-depth"
+          data-depth={props.child.depth}
+          data-delegates={props.child.depth < props.child.maxDepth ? 'true' : 'false'}
+        >
+          {depthText(props.child)}
+        </span>
         <span class="run-child-activity">{activityOf(props.child.status)}</span>
         <span class="run-child-elapsed">{duration()}</span>
       </button>
-      <Show when={isWorking(props.child)}>
-        <StopButton
-          class="run-child-stop"
-          target={{ kind: 'subagent', id: props.child.id }}
-          onStop={() => props.store.stopSubagent(props.child.id)}
-        />
-      </Show>
+      <div class="run-child-actions">
+        <form class="run-child-followup" onSubmit={send}>
+          <input
+            class="run-child-message"
+            type="text"
+            aria-label={'follow-up for ' + props.child.id}
+            placeholder="follow-up"
+            value={draft()}
+            onInput={(event) => setDraft(event.currentTarget.value)}
+          />
+          <button class="run-child-send" type="submit" disabled={draft().trim() === ''}>
+            send
+          </button>
+        </form>
+        <Show when={isWorking(props.child)}>
+          <StopButton
+            class="run-child-stop"
+            target={{ kind: 'subagent', id: props.child.id }}
+            onStop={() => props.store.stopSubagent(props.child.id)}
+          />
+        </Show>
+      </div>
     </li>
   )
 }

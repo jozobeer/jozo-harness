@@ -287,6 +287,10 @@ export const SubagentViewSchema = Schema.Struct({
   preset: Schema.optionalKey(Schema.String),
   /** When the child stopped, in ms; absent while it still works. */
   endedAt: Schema.optionalKey(Schema.Number),
+  /** How many delegations below this session the child sits; a direct child is 1. */
+  depth: Schema.Int,
+  /** The deepest level this run allows, so a row can say whether a child may start one. */
+  maxDepth: Schema.Int,
 })
 
 /** One step of the plan the session recorded with todo_write. */
@@ -462,6 +466,22 @@ export const JobStopRpc = Rpc.make('stopJob', {
 export const SubagentStopRpc = Rpc.make('stopSubagent', {
   payload: Schema.Struct({ sessionId: Schema.String, id: Schema.String }),
   success: Schema.Boolean,
+  error: Schema.String,
+})
+
+/** What a follow-up to a child did: a new turn when idle, the next step while it works. */
+export const SubagentMessageViewSchema = Schema.Struct({
+  id: Schema.String,
+  /** True when the child was working and reads the message at its next step boundary. */
+  queued: Schema.Boolean,
+})
+
+export type SubagentMessageView = typeof SubagentMessageViewSchema.Type
+
+/** Sends a child agent this session started a follow-up message. */
+export const SubagentMessageRpc = Rpc.make('messageSubagent', {
+  payload: Schema.Struct({ sessionId: Schema.String, id: Schema.String, message: Schema.String }),
+  success: SubagentMessageViewSchema,
   error: Schema.String,
 })
 
@@ -678,6 +698,7 @@ export const UiRpcs = RpcGroup.make(
   JobDetailRpc,
   JobStopRpc,
   SubagentStopRpc,
+  SubagentMessageRpc,
   SettingsRpc,
   ModelsRpc,
   SetModelRpc,

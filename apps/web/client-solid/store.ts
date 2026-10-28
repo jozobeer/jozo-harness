@@ -249,6 +249,7 @@ type PanelAsk =
   | { readonly kind: 'job'; readonly id: string }
   | { readonly kind: 'stopJob'; readonly id: string }
   | { readonly kind: 'stopSubagent'; readonly id: string }
+  | { readonly kind: 'messageSubagent'; readonly id: string; readonly message: string }
   | {
       readonly kind: 'scheduleCreate'
       readonly sessionId: string
@@ -300,7 +301,7 @@ interface PreviewAsk {
 }
 
 /** The panel asks about one running job or child agent. */
-type RunAsk = Extract<PanelAsk, { kind: 'job' | 'stopJob' | 'stopSubagent' }>
+type RunAsk = Extract<PanelAsk, { kind: 'job' | 'stopJob' | 'stopSubagent' | 'messageSubagent' }>
 
 /** The panel asks that write the host's schedule store. */
 type ScheduleAsk = Extract<
@@ -318,7 +319,10 @@ const isSettingsAsk = (asked: PanelAsk): asked is SettingsAsk =>
   asked.kind === 'saveRunSettings'
 
 const isRunAsk = (asked: PanelAsk): asked is RunAsk =>
-  asked.kind === 'job' || asked.kind === 'stopJob' || asked.kind === 'stopSubagent'
+  asked.kind === 'job' ||
+  asked.kind === 'stopJob' ||
+  asked.kind === 'stopSubagent' ||
+  asked.kind === 'messageSubagent'
 
 /** One schedule a page builds: the model's schedule tool takes the same fields. */
 export interface ScheduleDraft {
@@ -376,6 +380,8 @@ export interface SessionStore {
   readonly stopJob: (id: string) => void
   /** Stops one child agent the session on screen started. */
   readonly stopSubagent: (id: string) => void
+  /** Sends one child agent the session on screen started a follow-up message. */
+  readonly messageSubagent: (id: string, message: string) => void
   /** Creates a schedule in the host store, the same one the model's tool writes. */
   readonly createSchedule: (draft: ScheduleDraft) => void
   /** Stops or restarts one schedule of the session on screen. */
@@ -1032,6 +1038,15 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
             yield* client.stopSubagent({ sessionId: state().sessionId, id: asked.id })
             yield* relist()
           })
+        case 'messageSubagent':
+          return Effect.gen(function* () {
+            yield* client.messageSubagent({
+              sessionId: state().sessionId,
+              id: asked.id,
+              message: asked.message,
+            })
+            yield* relist()
+          })
       }
     }
 
@@ -1388,6 +1403,8 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     },
     stopJob: (id) => Queue.offerUnsafe(panelAsks, { kind: 'stopJob', id }),
     stopSubagent: (id) => Queue.offerUnsafe(panelAsks, { kind: 'stopSubagent', id }),
+    messageSubagent: (id, message) =>
+      Queue.offerUnsafe(panelAsks, { kind: 'messageSubagent', id, message }),
     createSchedule: (draft) =>
       Queue.offerUnsafe(panelAsks, { kind: 'scheduleCreate', sessionId: state().sessionId, draft }),
     pauseSchedule: (id, paused) =>

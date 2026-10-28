@@ -97,6 +97,7 @@ type Call =
   | { readonly kind: 'openWorkspace'; readonly app: string }
   | { readonly kind: 'browseDirectories'; readonly path: string }
   | { readonly kind: 'stopSubagent'; readonly id: string }
+  | { readonly kind: 'messageSubagent'; readonly id: string; readonly message: string }
   | { readonly kind: 'openJob'; readonly id: string }
   | { readonly kind: 'stopJob'; readonly id: string }
   | { readonly kind: 'openFolder'; readonly path: string }
@@ -168,6 +169,7 @@ const makeStore = (
     openJob: (id) => calls.push({ kind: 'openJob', id }),
     stopJob: (id) => calls.push({ kind: 'stopJob', id }),
     stopSubagent: (id) => calls.push({ kind: 'stopSubagent', id }),
+    messageSubagent: (id, message) => calls.push({ kind: 'messageSubagent', id, message }),
     createSchedule: () => undefined,
     pauseSchedule: () => undefined,
     deleteSchedule: () => undefined,
@@ -3184,6 +3186,8 @@ describe('the Solid page', () => {
             status: 'running',
             startedAt: Date.now() - 3_000,
             preset: 'reviewer',
+            depth: 1,
+            maxDepth: 2,
           },
           {
             id: 'child-9abcdef0',
@@ -3191,6 +3195,8 @@ describe('the Solid page', () => {
             startedAt: Date.now() - 90_000,
             preset: 'builder',
             endedAt: Date.now() - 30_000,
+            depth: 2,
+            maxDepth: 2,
           },
         ],
         todos: [],
@@ -3229,6 +3235,9 @@ describe('the Solid page', () => {
     expect(textOf(idle, '.run-child-preset')).toBe('builder')
     expect(textOf(idle, '.run-child-activity')).toBe('idle')
     expect(textOf(idle, '.run-child-elapsed')).toBe('1m')
+    // A row says where the child sits and whether this run still lets it start one.
+    expect(textOf(running, '.run-child-depth')).toBe('depth 1/2 · may delegate')
+    expect(textOf(idle, '.run-child-depth')).toBe('depth 2/2 · no deeper')
     // Only a child that still works offers a stop; an idle one has nothing to stop.
     expect(running.querySelector('.run-child-stop')).not.toBeNull()
     expect(idle.querySelector('.run-child-stop')).toBeNull()
@@ -3244,6 +3253,17 @@ describe('the Solid page', () => {
     expect(calls).not.toContainEqual({ kind: 'stopSubagent', id: 'child-12345678' })
     fireEvent.click(stop)
     expect(calls).toContainEqual({ kind: 'stopSubagent', id: 'child-12345678' })
+
+    // The field under the row sends that child the words and clears for the next one.
+    const field = running.querySelector('.run-child-message') as HTMLInputElement
+    fireEvent.input(field, { target: { value: 'try the second test' } })
+    fireEvent.submit(field.closest('form') as Element)
+    expect(calls).toContainEqual({
+      kind: 'messageSubagent',
+      id: 'child-12345678',
+      message: 'try the second test',
+    })
+    expect(field.value).toBe('')
   })
 
   test('the run pane lists a running job with its elapsed time, tail, and a stop', () => {
@@ -5183,8 +5203,8 @@ describe('the workflow a call ran', () => {
     const { store, calls } = withWorkflow(
       FAN_OUT,
       runWith([
-        { id: 'child-1', status: 'idle', startedAt: 1_000, endedAt: 2_500 },
-        { id: 'child-2', status: 'idle', startedAt: 1_000, endedAt: 1_000 },
+        { id: 'child-1', status: 'idle', startedAt: 1_000, endedAt: 2_500, depth: 1, maxDepth: 1 },
+        { id: 'child-2', status: 'idle', startedAt: 1_000, endedAt: 1_000, depth: 1, maxDepth: 1 },
       ]),
     )
 

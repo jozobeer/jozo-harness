@@ -951,6 +951,8 @@ team update id=task-2 state=done revision=1   # task-1 が未完了なら拒否
 
 子を 1 つだけ使うときは `subagent` で足りる。`model` で別の route（`provider/model`）を走らせられるが、その run が設定に置いている route に限る。候補はその run の既定 route と、`agent-loop` 行の `models` が値を持つモデル名（既定 route が provider を持つなら `<provider>/<model>` の形も）である。一覧に無い route は子を起こす前に `invalid-arguments` で拒否する。`context=fresh` で親の履歴を渡さず、`task` を省くと起こしたまま idle で残せる（あとから `send_message` で仕事を渡す）。
 
+`jzh web` の Run ペインの `subagents` は、その session が起こした子を live の順に並べる。行を押すと子の session を開く。`depth n/m` は親から何段下かと、その run が許す深さの上限で、`may delegate` が付く子はさらに子を起こせる。行の下の入力欄は `send_message` と同じ経路で子へメッセージを渡す。idle の子はその場で新しい turn を始め、動いている子は次の step の境目で読む。`stop` は動いている子にだけ出る。
+
 ## スクリプトで子エージェントを編成する（workflow の script）
 
 `workflow` は `tasks` の配列を渡す扇状実行のほかに、`script` を渡して子を順に起こせる。`script` は async 関数の本体で、引数の `workflow` から `spawn` を呼ぶ。`spawn` は子を 1 体起こし、その最終テキストと使った tool の要約を返すので、次の子の task をその場で決められる。

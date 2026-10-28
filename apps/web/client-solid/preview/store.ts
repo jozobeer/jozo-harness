@@ -114,7 +114,15 @@ const RUN: RunStateView = {
       tail: '✓ 42 tests passed',
     },
   ],
-  subagents: [{ id: 'child-9f2a1c3d', status: 'running', startedAt: Date.now() - 42_000 }],
+  subagents: [
+    {
+      id: 'child-9f2a1c3d',
+      status: 'running',
+      startedAt: Date.now() - 42_000,
+      depth: 1,
+      maxDepth: 2,
+    },
+  ],
   todos: [
     { content: '失敗する再現テストを書く', status: 'completed' },
     { content: 'runStateOf に射影を足す', status: 'in_progress' },
@@ -262,6 +270,7 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
     openJob: () => undefined,
     stopJob: () => undefined,
     stopSubagent: () => undefined,
+    messageSubagent: () => undefined,
     createSchedule: () => undefined,
     pauseSchedule: () => undefined,
     deleteSchedule: () => undefined,
