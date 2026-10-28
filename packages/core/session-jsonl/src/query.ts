@@ -250,15 +250,18 @@ export function makeSessionQuery(options: SessionQueryOptions): SessionQuery {
         known.refs += 1
         return leaseOf(known)
       }
-      const opened = yield* options.sessions.open(id)
-      const header = opened.events[0]
+      const events =
+        options.sessions.read === undefined
+          ? (yield* options.sessions.open(id)).events
+          : yield* options.sessions.read(id)
+      const header = events[0]
       if (header === undefined || header.type !== 'session/header') {
         return yield* Effect.fail(
           persistenceError(`session ${id} does not start with session/header`),
         )
       }
       const entry: CacheEntry = {
-        cut: { id, header: header.data, events: opened.events, revision },
+        cut: { id, header: header.data, events, revision },
         refs: 1,
       }
       cached.set(id, entry)

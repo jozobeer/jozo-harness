@@ -34,6 +34,12 @@ export interface SessionSummary {
 export interface SessionPersistence {
   readonly create: (header: SessionHeader) => Effect.Effect<OpenedSession, SessionError>
   readonly open: (id: SessionId) => Effect.Effect<OpenedSession, SessionError>
+  /**
+   * Reads a session without claiming it for writing, so a reader can look at a
+   * log another process is appending to. Absent means the store only opens it
+   * for writing, and a reader then has to take that same path.
+   */
+  readonly read?: (id: SessionId) => Effect.Effect<ReadonlyArray<SessionEvent>, SessionError>
   readonly stat: (id: SessionId) => Effect.Effect<SessionSummary, SessionError>
   readonly list: () => Effect.Effect<ReadonlyArray<SessionSummary>, SessionError>
 }
