@@ -3,7 +3,7 @@ import { Effect } from 'effect'
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { makeSpillWriter, pruneSpills } from '../src/index.ts'
+import { makeImageSpillWriter, makeSpillWriter, pruneSpills } from '../src/index.ts'
 /** Writes a file, making the directories above it, because the file may not be there yet. */
 const writeFileDeep = async (path: string, text: string | Uint8Array): Promise<void> => {
   await mkdir(dirname(path), { recursive: true })
@@ -51,6 +51,32 @@ describe('makeSpillWriter', () => {
 
     expect(await readdir(store)).toEqual(expect.arrayContaining(['fresh-session', 'new-session']))
     expect(await readdir(store)).not.toContain('old-session')
+    await rm(store, { recursive: true, force: true })
+  })
+})
+
+describe('makeImageSpillWriter', () => {
+  test('writes the image bytes where read_image can open them', async () => {
+    const store = await root()
+    const write = makeImageSpillWriter({ root: store, sessionId: 'session-1' })
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3])
+
+    const path = await Effect.runPromise(write('call-1', bytes.toString('base64'), 'image/png'))
+
+    expect(path).toBe(join(store, 'session-1', 'call-1.png'))
+    expect(await readFile(path)).toEqual(bytes)
+    await rm(store, { recursive: true, force: true })
+  })
+
+  test('keeps a media type it does not know as bytes with a neutral extension', async () => {
+    const store = await root()
+    const write = makeImageSpillWriter({ root: store, sessionId: 'session-1' })
+
+    const path = await Effect.runPromise(
+      write('call-1', Buffer.from([1, 2]).toString('base64'), 'image/avif'),
+    )
+
+    expect(path).toBe(join(store, 'session-1', 'call-1.bin'))
     await rm(store, { recursive: true, force: true })
   })
 })

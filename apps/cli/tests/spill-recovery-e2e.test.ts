@@ -72,7 +72,8 @@ const stubLlm = (seen: Array<string>): Plugin<{}, Llm, never> => {
           call += 1
           if (call === 1) return Stream.fromIterable(callTool('bash', { command: 'cat .big.txt' }))
           if (call === 2) {
-            const path = /\[spilled to (.+?): \d+ lines/.exec(text)?.[1] ?? 'missing'
+            const path =
+              /… middle omitted \(\d+ bytes\); read ([^\n]+)/.exec(text)?.[1] ?? 'missing'
             return Stream.fromIterable(callTool('read', { path, offset: 396, limit: 5 }))
           }
           if (call === 3) return Stream.fromIterable(callTool('read', { path: '.big.txt' }))
@@ -166,7 +167,7 @@ describe('recovering a spilled result', () => {
     )
     const last = results[results.length - 1]
     expect(last?.isError).toBe(false)
-    expect(JSON.stringify(last?.content)).not.toContain('[spilled to ')
+    expect(JSON.stringify(last?.content)).not.toContain('middle omitted')
     expect(JSON.stringify(last?.content)).toContain(TAIL)
 
     await rm(root, { recursive: true, force: true })

@@ -504,6 +504,29 @@ jzh config                         # 入ったことを確かめる
 
 `rg` が無い実行では組み込みの walker に落ちる。walker はワークスペース直下の `.gitignore` / `.ignore` しか読まないため、入れ子の ignore ファイルは効かない。結果の末尾にその理由と制限が出る。`rg` を入れるには `brew install ripgrep` などで PATH に置く。
 
+## 退避した結果を読む
+
+tool の結果が予算（`maxSpillTokens`、既定 8000 トークン、4 バイト = 1 トークンの概算）を超えると、全文は jzh home の `spill/<sessionId>/` に置かれ、会話には頭 2000 文字と尾 500 文字だけが残る。間は次の 1 行で示される。
+
+```
+… middle omitted (12000 bytes); read /path/to/spill/<sessionId>/<callId>.txt
+```
+
+中間はそのパスを `read` の `offset` と `limit` で辿る。`read` 自身の結果は退避しないので、退避先を読む呼び出しがさらに退避されることはない。
+
+予算を超えた画像は base64 のまま本文に残らず、`[image /path/to/spill/<sessionId>/<callId>.png; show it again with the read_image tool]` の形になる。`read_image` にそのパスを渡せば表示に戻る。`read` と `read_image` 自身の結果は退避しない。前者は読み直しが戻り道であり、後者は locator を開く手段そのものだから。
+
+予算は profile の tools 行で変える。
+
+```yaml
+- id: tools
+  name: '@jozo-harness/tools'
+  config:
+    maxSpillTokens: 16000
+```
+
+退避先は 7 日触られなければセッションごと掃除される。
+
 ## 書き込みと実行の許可を変える
 
 `preset` はコマンドを走らせる sandbox モードを決める。`read-only` は書き込み不可、`workspace-write` はコマンドの cwd と一時ディレクトリと `writableRoots` に書き込み可、`full` は封じ込めなし、`auto` は `workspace-write` と同じ sandbox で副作用のある呼び出しを実行前に審査する。同梱 `base` profile の `safety` 行に、変えたいキーだけを重ねる。

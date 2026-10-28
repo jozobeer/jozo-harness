@@ -212,7 +212,7 @@ import {
   EFFORT_KEY,
   MODEL_KEY,
   PLAN_MODE_KEY,
-  SPILL_BYTES_KEY,
+  SPILL_TOKENS_KEY,
   renderEffective,
   renderModelInEffect,
   renderSurface,
@@ -284,10 +284,10 @@ export interface CommandOptions {
 }
 
 /** Exit codes: completed 0, error 1. SIGINT (130) lands with the signal handling slice. */
-const spillBytesOf = (rows: ReadonlyArray<PluginRow>): number | undefined => {
+const spillTokensOf = (rows: ReadonlyArray<PluginRow>): number | undefined => {
   for (const row of rows) {
-    if (isRecord(row.config) && typeof row.config[SPILL_BYTES_KEY] === 'number') {
-      return row.config[SPILL_BYTES_KEY]
+    if (isRecord(row.config) && typeof row.config[SPILL_TOKENS_KEY] === 'number') {
+      return row.config[SPILL_TOKENS_KEY]
     }
   }
   return undefined
@@ -701,7 +701,7 @@ const createAgent = (
   agents: AgentsShape,
   options: CommandOptions,
   route: string,
-  spillBytes: number | undefined,
+  spillTokens: number | undefined,
   effort: string,
   resume: SessionId | undefined,
   cwd: string,
@@ -712,7 +712,7 @@ const createAgent = (
       route,
       // The effort the run resolved: '' leaves the choice to the provider.
       ...(effort === '' ? {} : { reasoningEffort: effort }),
-      ...(spillBytes === undefined ? {} : { maxSpillBytes: spillBytes }),
+      ...(spillTokens === undefined ? {} : { maxSpillTokens: spillTokens }),
       // Spilled text belongs in the jzh home, under the session that owns it.
       ...(options.jzhHome === undefined ? {} : { spillDir: join(options.jzhHome, 'spill') }),
       // Attachments sit beside the session logs, so the store and the model read one place.
@@ -1516,7 +1516,7 @@ const sessionFactoryOf = (
   options: CommandOptions,
   rows: ReadonlyArray<PluginRow>,
   choice: RunChoice,
-  spillBytes: number | undefined,
+  spillTokens: number | undefined,
   layer: Layer.Layer<any, PluginError, never>,
   listSessions: SessionRuntime['listSessions'],
   plugins: PluginWiringState,
@@ -1533,7 +1533,7 @@ const sessionFactoryOf = (
         rows,
         choice.route,
         choice.effort,
-        spillBytes,
+        spillTokens,
         layer,
         true,
         id,
@@ -1716,7 +1716,7 @@ const serveWebUi = (
   rows: ReadonlyArray<PluginRow>,
   route: string,
   effort: string,
-  spillBytes: number | undefined,
+  spillTokens: number | undefined,
   layer: Layer.Layer<any, PluginError, never>,
   work: Extract<Work, { kind: 'web' }>,
   /** The session the page opens first, when the command named one to resume. */
@@ -1764,7 +1764,7 @@ const serveWebUi = (
             options,
             rows,
             choice,
-            spillBytes,
+            spillTokens,
             layer,
             reading.listSessions,
             wiring,
@@ -1886,7 +1886,7 @@ interface SessionRuntime {
   readonly efforts: ReadonlyArray<string>
   /** The skills the catalog lists now, as the composer offers them beside commands. */
   readonly skillCatalog: () => ReadonlyArray<SkillSummary>
-  readonly spillBytes: number | undefined
+  readonly spillTokens: number | undefined
   /** The budget the loop compacts with, so a page reads the same line it fires on. */
   readonly budget: TokenBudget
   readonly layer: Layer.Layer<any, PluginError, never>
@@ -2108,7 +2108,7 @@ const buildSession = (
   rows: ReadonlyArray<PluginRow>,
   route: string,
   effort: string,
-  spillBytes: number | undefined,
+  spillTokens: number | undefined,
   layer: Layer.Layer<any, PluginError, never>,
   wantsUi: boolean,
   resume: SessionId | undefined,
@@ -2135,7 +2135,7 @@ const buildSession = (
       agents,
       options,
       route,
-      spillBytes,
+      spillTokens,
       effort,
       resume,
       cwd,
@@ -2271,7 +2271,7 @@ const buildSession = (
         effort,
         efforts,
         skillCatalog: () => skillCatalog,
-        spillBytes,
+        spillTokens,
         budget,
         layer,
       },
@@ -2287,7 +2287,7 @@ const serveWebWork = (
   rows: ReadonlyArray<PluginRow>,
   route: string,
   effort: string,
-  spillBytes: number | undefined,
+  spillTokens: number | undefined,
   layer: Layer.Layer<any, PluginError, never>,
   work: Extract<Work, { kind: 'web' }>,
 ) =>
@@ -2308,7 +2308,7 @@ const serveWebWork = (
               rows,
               route,
               effort,
-              spillBytes,
+              spillTokens,
               layer,
               true,
               options.resume,
@@ -2343,7 +2343,7 @@ const serveWebWork = (
       rows,
       route,
       effort,
-      spillBytes,
+      spillTokens,
       layer,
       work,
       initial,
@@ -2362,7 +2362,7 @@ const serveAcpWork = (
   rows: ReadonlyArray<PluginRow>,
   route: string,
   effort: string,
-  spillBytes: number | undefined,
+  spillTokens: number | undefined,
   layer: Layer.Layer<any, PluginError, never>,
 ): Effect.Effect<number, PluginError, Scope.Scope> =>
   Effect.gen(function* () {
@@ -2378,7 +2378,7 @@ const serveAcpWork = (
             rows,
             route,
             effort,
-            spillBytes,
+            spillTokens,
             layer,
             true,
             undefined,
@@ -2410,7 +2410,7 @@ const runSession = (
   rows: ReadonlyArray<PluginRow>,
   route: string,
   effort: string,
-  spillBytes: number | undefined,
+  spillTokens: number | undefined,
   layer: Layer.Layer<any, PluginError, never>,
   work: Work,
 ) =>
@@ -2421,17 +2421,17 @@ const runSession = (
       options.schedules ?? makeScheduleStore(options.schedulesPath ?? configPaths().schedules)
     const runOptions: CommandOptions = { ...options, schedules: store }
     if (work.kind === 'web') {
-      return yield* serveWebWork(runOptions, rows, route, effort, spillBytes, layer, work)
+      return yield* serveWebWork(runOptions, rows, route, effort, spillTokens, layer, work)
     }
     if (work.kind === 'acp') {
-      return yield* serveAcpWork(runOptions, rows, route, effort, spillBytes, layer)
+      return yield* serveAcpWork(runOptions, rows, route, effort, spillTokens, layer)
     }
     const built = yield* buildSession(
       runOptions,
       rows,
       route,
       effort,
-      spillBytes,
+      spillTokens,
       layer,
       ownsTheScreen(work),
       options.resume,
@@ -2495,8 +2495,8 @@ export function runCommand(options: CommandOptions): Effect.Effect<number> {
       return 1
     }
     const layer = yield* loadProfile({ plugins: options.plugins, layers: [rows] })
-    const spillBytes = spillBytesOf(rows)
-    return yield* Effect.scoped(runSession(options, rows, route, effort, spillBytes, layer, work))
+    const spillTokens = spillTokensOf(rows)
+    return yield* Effect.scoped(runSession(options, rows, route, effort, spillTokens, layer, work))
   }).pipe(
     Effect.catchCause((cause) =>
       Effect.sync(() => {

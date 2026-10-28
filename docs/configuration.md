@@ -127,13 +127,13 @@ route は `opencode/<model>`、wire に送る model は `<model>` そのもの�
 
 ## plugin の schema に無い行キー
 
-次の4つは plugin の schema ではなく CLI が行から直接読む。`model`、`effort`、`maxSpillBytes` は複数の行に書いた場合に最初の行が勝ち、`planMode` は1つの行でも `true` なら効く。
+次の4つは plugin の schema ではなく CLI が行から直接読む。`model`、`effort`、`maxSpillTokens` は複数の行に書いた場合に最初の行が勝ち、`planMode` は1つの行でも `true` なら効く。
 
 | キー | 置ける行 | 効果 |
 |---|---|---|
 | `model` | どの行でも | `provider/model`。`--model` と設定ファイルの `model` が無いときにルートになる |
 | `effort` | どの行でも | provider に渡す reasoning effort。`--effort` と設定ファイルの `effort` が無いときに効く |
-| `maxSpillBytes` | どの行でも | tool の出力がこの大きさを超えたら、ファイルに退避して参照と要点だけをモデルに返す。退避先は jzh home の `spill/<sessionId>/`（0700、7日で掃除）、jzh home が無ければ一時ディレクトリ。`read` の結果は対象外で、注記のパスを `read` の offset/limit で読み直せる |
+| `maxSpillTokens` | どの行でも | tool の出力がこのトークン数を超えたら、ファイルに退避して頭と尾だけをモデルに返す。推定は 4 バイト = 1 トークン。既定は 8000。退避先は jzh home の `spill/<sessionId>/`（0700、7日で掃除）、jzh home が無ければ一時ディレクトリ。`read` と `read_image` の結果は対象外で、`… middle omitted` の行にあるパスを `read` の offset/limit で読み直せる。画像は base64 を本文に残さず、`read_image` に渡せるパスの locator に置き換える |
 | `planMode` | `@jozo-harness/safety` の行 | `true` でワークスペースを変える tool を外す。モデルは `exit_plan_mode` で計画を出し、ユーザーが承認したときだけ解除される。解除は `plan/mode` としてログに残るので、`--resume` したセッションは解除済みで始まる |
 
 ## コマンドライン
