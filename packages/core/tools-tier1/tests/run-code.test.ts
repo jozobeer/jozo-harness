@@ -360,18 +360,98 @@ describe('run_code', () => {
     expect(outcome.value).toMatchObject({ toolCalls: 0 })
   })
 
-  test('a python program is told that tools are out of reach', async () => {
-    const tool = makeRunCodeTool(host(() => Effect.succeed(ok('unused', {}))))
+  test('a python program calls a tool and reads the value it returns', async () => {
+    const seen: Array<{ name: string; args: string; callId: string }> = []
+    const tool = makeRunCodeTool(
+      host((name, args, nested) => {
+        seen.push({ name, args, callId: nested.callId })
+        return Effect.succeed(ok('hi', { text: 'hi' }))
+      }),
+    )
 
     const outcome = await runWith(tool, {
       runtime: 'python',
-      code: 'tools.echo(text="hi")',
+      code: "result = tools.echo(text='hi')\nprint('got ' + result['text'])",
     })
 
-    // A program that reaches for a tool the runtime does not offer fails the call,
-    // the same way a throwing node program does.
-    expect(outcome.isError).toBe(true)
-    expect(textOf(outcome.content)).toContain('tools are not available in the python runtime')
+    expect(outcome.isError).toBe(false)
+    expect(seen).toEqual([{ name: 'echo', args: '{"text":"hi"}', callId: 'call-1.1' }])
+    expect(outcome.value).toMatchObject({ toolCalls: 1 })
+    expect(textOf(outcome.content)).toContain('got hi')
+  })
+
+  test('a failed python tool call raises inside the program', async () => {
+    const tool = makeRunCodeTool(host(() => Effect.succeed(failed('denied: no'))))
+
+    const outcome = await runWith(tool, {
+      runtime: 'python',
+      code:
+        'try:\n' +
+        "    tools.echo(text='x')\n" +
+        'except RuntimeError as error:\n' +
+        "    print('caught ' + str(error))",
+    })
+
+    expect(outcome.isError).toBe(false)
+    expect(textOf(outcome.content)).toContain('caught denied: no')
+  })
+
+  test('a python program records its nested calls in the log under the parent call id', async () => {
+    const appended: Array<SessionEvent> = []
+    const sink: SessionSink = {
+      append: (event) =>
+        Effect.sync(() => {
+          appended.push(event)
+        }),
+      flush: () => Effect.void,
+    }
+    const session = await Effect.runPromise(
+      makeSession({
+        id: 's-1',
+        events: [
+          {
+            seq: 1,
+            time: 1,
+            type: 'session/header',
+            data: { formatVersion: 1, createdAt: 1, cwd: process.cwd() },
+          },
+        ],
+        sink,
+        now: () => 50,
+      }),
+    )
+    const tool = makeRunCodeTool(
+      host(
+        () => Effect.succeed(ok('first', {})),
+        undefined,
+        [echo],
+        (type, data) => session.append(type, data),
+      ),
+    )
+
+    const outcome = await runWith(tool, { runtime: 'python', code: "tools.echo(text='one')" })
+
+    expect(outcome.isError).toBe(false)
+    expect(appended).toEqual([
+      {
+        seq: 2,
+        time: 50,
+        type: 'tool/ptc-dispatch-start',
+        data: { callId: 'call-1.1', name: 'echo', arguments: '{"text":"one"}' },
+      },
+      {
+        seq: 3,
+        time: 50,
+        type: 'tool/ptc-dispatch',
+        data: {
+          callId: 'call-1.1',
+          name: 'echo',
+          arguments: '{"text":"one"}',
+          isError: false,
+          summary: 'first',
+        },
+      },
+    ])
   })
 
   test('the python runtime runs python3, and node stays the default', () => {
