@@ -11,11 +11,12 @@ import type {
   SettingsView,
 } from '../../src/shared/rpc.ts'
 import type { Pane } from '../../src/ui/state.ts'
+import { FONT_FAMILIES, FONT_SIZES, type FontFamily, type FontSize } from '../../src/ui/font.ts'
 import { THEMES, type Theme } from '../../src/ui/theme.ts'
 import type { TurnView } from '../../src/ui/trajectory.ts'
 import { useLocaleChoice, useTranslate } from '../i18n.ts'
 import { basenameOf, childSessionsOf, elapsedOf, pagesOf } from '../lib.ts'
-import { LOCALES } from '../locale.ts'
+import { LOCALES, type MessageKey } from '../locale.ts'
 import type { ScheduleDraft, SessionStore } from '../store.ts'
 import { Review } from './review.tsx'
 import { Inspector } from './inspector.tsx'
@@ -1281,6 +1282,13 @@ const EditableSettings = (props: { store: SessionStore }) => {
   )
 }
 
+/** Each face is named by the sheet's own word for it, so the buttons read alike in both languages. */
+const familyLabel: Record<FontFamily, MessageKey> = {
+  sans: 'settings.font.sans',
+  serif: 'settings.font.serif',
+  mono: 'settings.font.mono',
+}
+
 const Settings = (props: { store: SessionStore; settings: SettingsView | undefined }) => {
   const t = useTranslate()
   const choice = useLocaleChoice()
@@ -1298,6 +1306,38 @@ const Settings = (props: { store: SessionStore; settings: SettingsView | undefin
               onClick={() => props.store.chooseTheme(theme)}
             >
               {theme}
+            </button>
+          )}
+        </For>
+      </div>
+      <span class="pane-label">{t('settings.font')}</span>
+      <div class="theme-choice" role="group" aria-label={t('settings.font')}>
+        <For each={FONT_FAMILIES}>
+          {(family: FontFamily) => (
+            <button
+              class={'theme' + (family === props.store.state().fontFamily ? ' active' : '')}
+              type="button"
+              data-font={family}
+              aria-pressed={family === props.store.state().fontFamily}
+              onClick={() => props.store.chooseFontFamily(family)}
+            >
+              {t(familyLabel[family])}
+            </button>
+          )}
+        </For>
+      </div>
+      <span class="pane-label">{t('settings.fontSize')}</span>
+      <div class="theme-choice" role="group" aria-label={t('settings.fontSize')}>
+        <For each={FONT_SIZES}>
+          {(size: FontSize) => (
+            <button
+              class={'theme' + (size === props.store.state().fontSize ? ' active' : '')}
+              type="button"
+              data-font-size={String(size)}
+              aria-pressed={size === props.store.state().fontSize}
+              onClick={() => props.store.chooseFontSize(size)}
+            >
+              {String(size) + 'px'}
             </button>
           )}
         </For>
