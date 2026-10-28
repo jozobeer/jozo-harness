@@ -76,7 +76,7 @@ UI と核の間は、プロセス境界を越えられる形に保つ。核の�
 | `str_replace_editor` | 対応済み。jozo-harness の `edit` が同じ操作で、名前だけが違う |
 | `ralph` | **2026-10-18 改訂**: 採用。dsh 同様、round ごとに親の会話を seed しない子を起こす。既定の tier1 に登録し、通常の長い仕事は引き続き `goal`（C1）が担う |
 | `create_worktree` | **2026-10-18 改訂**: 採用。新しい branch の worktree を作り、session の cwd とワークスペースの根をそこへ移す（issue #157）。削除・マージ・subagent ごとの自動分割は持たない |
-| `team_*` | **2026-10-14 改訂**: 採用。[dsh のギャップ表](../../notes/2026-10-14-dsh-gap-backlog.md)の C8 が roster・task board・inbox を求めるので、名前つきの子（roster）と共有の task board を 1 つの `team` ツールで持つ。メッセージ（inbox）は既存の `send_message` / `list_agents` / `wait_agent` / `interrupt_agent` が担う。dsh の Lead / teammate の権限制御（team:policy）と compare-and-set の remote 面は持たない（jozo-harness は 1 親とその子だけで、board の revision はログから導出する） |
+| `team_*` | **2026-10-28 改訂**: 採用。[dsh のギャップ表](../../notes/2026-10-14-dsh-gap-backlog.md)の C8 が roster・task board・inbox を求めるので、名前つきの子（roster）と共有の task board、teammate 同士の inbox を 1 つの `team` ツールで持つ。task は `blockedBy` で他の task を待ち、依存が未完了の完了は拒否する。権限は roster の内側だけに分け、spawn・create・割当・依存の変更は Lead、自分の task の完了・peer への `send`・`inbox` は teammate も呼べる。dsh の team:policy のような session をまたぐ ACL と compare-and-set の remote 面は持たない（jozo-harness は 1 親とその子だけで、board の revision はログから導出する） |
 
 **2026-10-14 追記（ギャップ表の「除外したツールの方針変更」）**: 除外は変えない。再検討したのは 2 つで、どちらも v1 では持たない: `present` は提示層の判断（[S8 の追記](2026-10-13-jozo-harness-web-design.md)）と同じで、カードを描く client 契約を v1 は持たない。`terminal`（PTY）は `bash` と `job_*` が日常の用を足しており、端末セッションを持つと画面状態・再描画・入力の所有が増える。`lsp`・`computer` / browser・`pwsh`・MCP resources・`plugin_manager` は当初の理由のままである（`plugin_manager` の代わりは承認つきの `plugin` ツール）。
 

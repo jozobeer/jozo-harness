@@ -125,6 +125,8 @@ import {
   WorkspaceDependenciesTools,
   teamIdentityLine,
   teamIdentityOf,
+  teamInboxLine,
+  unreadMessages,
   makeScheduleTool,
   fireSchedule,
   makeWorkflowTool,
@@ -632,6 +634,22 @@ const tier1ToolList = (
               ? Effect.void
               : session.append('team/task/updated', { task })
           },
+          sendMessage: (sessionId, message) => {
+            const session = sessionOf(sessionId)
+            return session === undefined
+              ? Effect.fail(
+                  new ToolError({ code: 'execution', message: 'no session for ' + sessionId }),
+                )
+              : session.append('team/message', message)
+          },
+          markMessagesRead: (sessionId, count) => {
+            const session = sessionOf(sessionId)
+            return session === undefined
+              ? Effect.fail(
+                  new ToolError({ code: 'execution', message: 'no session for ' + sessionId }),
+                )
+              : session.append('team/message/read', { count })
+          },
           nextId: (sessionId) =>
             'task-' +
             String(
@@ -950,7 +968,10 @@ const installTeamIdentityContext = (
           Effect.sync(() => {
             if (subject.agentId === undefined) return undefined
             const identity = teamIdentityOf(agents, subject.agentId)
-            return identity === undefined ? undefined : teamIdentityLine(identity)
+            if (identity === undefined) return undefined
+            const session = agents.get(subject.agentId)?.session
+            const inbox = teamInboxLine(unreadMessages(session?.events() ?? []))
+            return [teamIdentityLine(identity), ...(inbox === undefined ? [] : [inbox])].join('\n')
           }),
       })
       .pipe(

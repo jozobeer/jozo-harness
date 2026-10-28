@@ -1,5 +1,5 @@
 import type { AgentsShape } from '@jozo-harness/agent'
-import { teamRoster } from './team-state.ts'
+import { teamRoster, type TeamMessage } from './team-state.ts'
 
 /** Sits between the workspace fact and the delegation fact in a runtime snapshot. */
 export const TEAM_IDENTITY_CONTEXT_ORDER = 15
@@ -27,6 +27,17 @@ export const teamIdentityOf = (
   }
   return undefined
 }
+
+/**
+ * The unread peer messages a teammate reads at the start of a step. The line asks
+ * for an inbox call so one long turn does not replay the same message every step.
+ */
+export const teamInboxLine = (messages: ReadonlyArray<TeamMessage>): string | undefined =>
+  messages.length === 0
+    ? undefined
+    : 'team inbox: ' +
+      messages.map((message) => message.from + ': ' + message.text).join(' | ') +
+      '. Reply with team send, or run team inbox to mark these read.'
 
 /** The line a teammate reads on every request, however many turns it has taken. */
 export const teamIdentityLine = (identity: TeamIdentity): string =>

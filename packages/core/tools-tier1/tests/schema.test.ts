@@ -65,6 +65,8 @@ describe('tier 1 tool schemas', () => {
           spawnMember: () => Effect.void,
           createTask: () => Effect.void,
           updateTask: () => Effect.void,
+          sendMessage: () => Effect.void,
+          markMessagesRead: () => Effect.void,
           nextId: () => 'task-1',
         },
       }),
