@@ -25,9 +25,15 @@ export interface SearchHost {
   ) => Effect.Effect<ReadonlyArray<SearchHit>, ToolError>
 }
 
+/** The provider in effect, or a reader of the run's current choice for the next call. */
+export type SearchHostSource = SearchHost | (() => SearchHost | undefined)
+
+const hostNow = (source: SearchHostSource): SearchHost | undefined =>
+  typeof source === 'function' ? source() : source
+
 /** Searches the web through the provider the caller injected. */
 export const makeWebSearchTool = (
-  host: SearchHost,
+  source: SearchHostSource,
 ): ToolDefinition<WebSearchArgs, ReadonlyArray<SearchHit>> => ({
   name: 'web_search',
   readOnly: true,
@@ -52,6 +58,15 @@ export const makeWebSearchTool = (
       if (args.query.trim() === '') {
         return yield* Effect.fail(
           new ToolError({ code: 'invalid-arguments', message: 'empty query' }),
+        )
+      }
+      const host = hostNow(source)
+      if (host === undefined) {
+        return yield* Effect.fail(
+          new ToolError({
+            code: 'unavailable',
+            message: 'web_search is off: the settings name no provider and no key is present',
+          }),
         )
       }
       return yield* host.search(args.query, args.limit ?? 5)

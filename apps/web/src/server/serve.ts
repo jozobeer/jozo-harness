@@ -350,6 +350,9 @@ const handlersOf = (
         Effect.as(true),
         Effect.mapError((error) => error.message),
       ),
+    runSettings: () => settings.editable().pipe(Effect.mapError((error) => error.message)),
+    saveRunSettings: (input) =>
+      settings.saveEditable(input).pipe(Effect.mapError((error) => error.message)),
   })
 }
 

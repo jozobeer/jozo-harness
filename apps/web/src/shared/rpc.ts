@@ -369,6 +369,69 @@ export const SettingsViewSchema = Schema.Struct({
 /** What a page reads about the run behind it; the schema is the one source. */
 export type SettingsView = typeof SettingsViewSchema.Type
 
+/** The web_search providers the settings file accepts. */
+export const SearchProviderSchema = Schema.Literals(['brave', 'deepseek', 'exa', 'perplexity'])
+
+export type SearchProvider = typeof SearchProviderSchema.Type
+
+/**
+ * One value the settings pane may edit, with where it came from. The value is
+ * always safe to show: a secret is represented by its reference and whether it
+ * is present, never by the secret itself.
+ */
+export const EditableLimitSchema = Schema.Struct({
+  value: Schema.Int,
+  /** The file or row the value in effect came from. */
+  source: Schema.String,
+})
+
+export const EditableSearchSchema = Schema.Struct({
+  provider: Schema.optionalKey(SearchProviderSchema),
+  /** The variable the chosen provider reads, for a page that says what is missing. */
+  keyName: Schema.String,
+  keyPresent: Schema.Boolean,
+  source: Schema.String,
+})
+
+export const EditableKeyRefSchema = Schema.Struct({
+  /** The reference name in the credentials store; '' when the row names none. */
+  ref: Schema.String,
+  /** Whether the store holds the reference; the value itself never leaves the server. */
+  present: Schema.Boolean,
+  source: Schema.String,
+})
+
+export const DelegateToolViewSchema = Schema.Struct({
+  name: Schema.String,
+  argv: Schema.Array(Schema.String),
+})
+
+/** The run's editable settings, resolved the way a run resolves them. */
+export const EditableSettingsViewSchema = Schema.Struct({
+  search: EditableSearchSchema,
+  apiKeyRef: EditableKeyRefSchema,
+  bashTimeoutMs: EditableLimitSchema,
+  maxParallelToolCalls: EditableLimitSchema,
+  subagentDepth: EditableLimitSchema,
+  delegateTools: Schema.Array(DelegateToolViewSchema),
+})
+
+export type EditableSettingsView = typeof EditableSettingsViewSchema.Type
+
+/** What a page asks to write: everything it can edit, with '' clearing a value. */
+export const RunSettingsInputSchema = Schema.Struct({
+  /** One of the search providers, or '' to leave the choice to the key present. */
+  search: Schema.String,
+  /** The credentials reference the llm row names, or '' for none. */
+  apiKeyRef: Schema.String,
+  bashTimeoutMs: Schema.Int,
+  maxParallelToolCalls: Schema.Int,
+  subagentDepth: Schema.Int,
+  delegateTools: Schema.Array(DelegateToolViewSchema),
+})
+
+export type RunSettingsInput = typeof RunSettingsInputSchema.Type
+
 /** One background command, opened: what it ran, whether it still runs, what it kept. */
 export const JobDetailViewSchema = Schema.Struct({
   id: Schema.String,
@@ -471,6 +534,19 @@ export const SetEffortRpc = Rpc.make('setEffort', {
   error: Schema.String,
 })
 
+/** Every editable value, with where it came from; secrets appear only as a reference. */
+export const RunSettingsRpc = Rpc.make('runSettings', {
+  success: EditableSettingsViewSchema,
+  error: Schema.String,
+})
+
+/** Validates and writes every editable value through the settings file in one go. */
+export const SaveRunSettingsRpc = Rpc.make('saveRunSettings', {
+  payload: RunSettingsInputSchema,
+  success: EditableSettingsViewSchema,
+  error: Schema.String,
+})
+
 export const UiRpcs = RpcGroup.make(
   SessionsRpc,
   OpenRpc,
@@ -496,6 +572,8 @@ export const UiRpcs = RpcGroup.make(
   ModelsRpc,
   SetModelRpc,
   SetEffortRpc,
+  RunSettingsRpc,
+  SaveRunSettingsRpc,
 )
 
 /**

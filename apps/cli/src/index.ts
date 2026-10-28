@@ -91,6 +91,10 @@ import {
   type ScheduleStore,
 } from '@jozo-harness/tools-tier1'
 import { runConfig } from './config-command.ts'
+import { searchFromEnv } from './search-env.ts'
+import { existsSync, readFileSync } from 'node:fs'
+import { writeFileAtomic } from './atomic-write.ts'
+import { editRunSettings, readEditableSettings, type EditableInputs } from './run-settings.ts'
 import { runContextOf } from './run-state.ts'
 import { jobDetailOf, jobRecorderOf, jobsOf, stopJobOf } from './jobs.ts'
 import { stopSubagentOf, subagentsOf } from './subagents.ts'
@@ -225,7 +229,7 @@ import {
   renderModelInEffect,
   renderSurface,
 } from './surface.ts'
-import type { JozoHarnessConfig } from './config-file.ts'
+import { loadConfigFile, type JozoHarnessConfig } from './config-file.ts'
 import { acpSessionPortOf, type AcpSessionSource } from './acp.ts'
 
 export interface CommandOptions {
@@ -450,6 +454,8 @@ const installTier0 = (
   jobs: JobsShape,
   /** The session state the worktree tool moves; without it the tool is not offered. */
   worktree: WorktreeHost,
+  /** The wait a bash call gets when it names none, read again for each call. */
+  live: LiveRunSettings,
 ) =>
   Effect.gen(function* () {
     // A named bash session keeps one shell alive across calls; the run's scope is
@@ -459,7 +465,9 @@ const installTier0 = (
       (held) => Effect.sync(() => held.closeAll()),
     )
     // The registry lets a timed-out bash call keep running as a job instead of dying.
-    for (const tool of tier0(approval, jobs, worktree, sessions)) yield* tools.register(tool)
+    // The default wait is read per call, so a page's save reaches the next command.
+    for (const tool of tier0(approval, jobs, worktree, sessions, () => live.bashTimeoutMs))
+      yield* tools.register(tool)
   })
 
 /** The ask tool's configured batch wait, when the tier1 row opts in. */
@@ -492,6 +500,8 @@ const installTier1 = (
   mount: (row: PluginRow) => Effect.Effect<ReadonlyArray<string>, ToolError>,
   /** Takes a wired row back out and reports the tools that left with it. */
   unmount: (id: string) => Effect.Effect<PluginUnmount, ToolError>,
+  /** The limits and search provider a call reads now. */
+  live: LiveRunSettings,
 ) =>
   Effect.gen(function* () {
     // A run_code child outlives one call; the run's scope is what ends it, so the
@@ -545,6 +555,7 @@ const installTier1 = (
       },
       sandbox,
       timeLimitMsOf(rows),
+      live,
     )) {
       yield* tools.register(tool)
     }
@@ -608,10 +619,14 @@ const tier1ToolList = (
   sandbox: SandboxShape | undefined,
   /** The ask tool's default wait for a batch; absent waits until answered. */
   timeLimitMs: number | undefined,
+  /** The values a call reads now: the delegation depth and the search provider. */
+  live: LiveRunSettings,
 ) => {
   const list = [...tier1Tools(ask, skills, runCode, timeLimitMs)]
   list.push(makePluginTool(pluginHost))
-  if (options.search !== undefined) list.push(makeWebSearchTool(options.search))
+  // A session opened while search is on keeps the tool, and reads the provider the
+  // run holds when the call is made, so changing the provider does not need a reload.
+  if (live.search !== undefined) list.push(makeWebSearchTool(() => live.search))
   for (const tool of jobTools(jobs)) list.push(tool)
   list.push(makeScheduleTool(scheduleHostOf(agent, scheduleStoreOf(options))))
   list.push(
@@ -650,7 +665,13 @@ const tier1ToolList = (
     const sessionOf = (sessionId: string) => agents.get(sessionId)?.session
     const outputs = makeStructuredOutputs()
     list.push(
-      makeSubagentTool({ agents, route, outputs, ...(routes === undefined ? {} : { routes }) }),
+      makeSubagentTool({
+        agents,
+        route,
+        outputs,
+        maxDepth: () => live.subagentDepth,
+        ...(routes === undefined ? {} : { routes }),
+      }),
       makeStructuredOutputTool(outputs),
       ...agentTools(agents),
       workflowToolFor(agents, route, sandbox),
@@ -917,6 +938,18 @@ export const installNestedAgentsMd = (input: {
     }),
   )
 
+/**
+ * The values a running session reads per call, so a save reaches the next call
+ * even in a session that was already open. A field that changes the plugin
+ * composition (the delegate row, the loop's parallelism) waits for the next session.
+ */
+interface LiveRunSettings {
+  bashTimeoutMs: number
+  subagentDepth: number
+  /** The provider in effect; a reader keeps the tool pointed at the current one. */
+  search: SearchHost | undefined
+}
+
 /** Everything the profile's rows install on one running agent. */
 interface ProfileWiring {
   readonly rows: ReadonlyArray<PluginRow>
@@ -936,6 +969,8 @@ interface ProfileWiring {
   readonly jobs: JobsShape
   /** The rows this run could not wire, when a page can report and retry them. */
   readonly plugins?: PluginWiringState
+  /** The limits and the search provider a call reads now. */
+  readonly live: LiveRunSettings
 }
 
 /** The optional field a session carries only when a page can report failed wirings. */
@@ -987,7 +1022,7 @@ const installDelegationContext = (
           Effect.sync(() =>
             subject.agentId === undefined
               ? undefined
-              : delegationLine(agents.depthOf(subject.agentId)),
+              : delegationLine(agents.depthOf(subject.agentId), () => wiring.live.subagentDepth),
           ),
       })
       .pipe(
@@ -1330,6 +1365,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
         Context.get(wiring.context, Approval),
         wiring.jobs,
         worktree,
+        wiring.live,
       )
     }
     if (hasEnabledRow(wiring.rows, '@jozo-harness/tools-tier1')) {
@@ -1349,6 +1385,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
         sandboxOf(wiring),
         mountRow,
         unmountRow,
+        wiring.live,
       )
       // A row the plugin tool took back out releases what it built before the next
       // request, after the calls this step already chose have finished.
@@ -1449,16 +1486,64 @@ interface RunChoice {
 
 /** What a page reads about the run behind it, which is known before any session is. */
 interface RunFacts {
-  readonly rows: ReadonlyArray<PluginRow>
+  /** The rows in effect; a page may save a settings change, so this is read again. */
+  rows: ReadonlyArray<PluginRow>
+  /** The layer the next session is built from, rebuilt after a save changes the rows. */
+  layer: Layer.Layer<any, PluginError, never>
   /** The effort words the provider takes, as a page offers them; empty declares none. */
   readonly efforts: ReadonlyArray<string>
 }
+
+/** The live values a session reads per call, seeded from the rows in effect. */
+const liveSettingsOf = (
+  options: CommandOptions,
+  rows: ReadonlyArray<PluginRow>,
+): LiveRunSettings => {
+  const view = readEditableSettings({
+    rows,
+    settings: options.settings ?? {},
+    settingsPath: options.settingsPath ?? '',
+    env: process.env,
+    credentialsPath: options.credentialsPath ?? configPaths().credentials,
+  })
+  return {
+    bashTimeoutMs: view.bashTimeoutMs.value,
+    subagentDepth: view.subagentDepth.value,
+    search: options.search,
+  }
+}
+
+/**
+ * The settings file and the rows in effect, read again so a change written by one
+ * page is what the next read and the next session see.
+ */
+const editableStateOf = (options: CommandOptions) =>
+  Effect.gen(function* () {
+    const path = options.settingsPath ?? configPaths().config
+    const settings = yield* loadConfigFile(path).pipe(
+      Effect.mapError((error) => new WebError({ message: error.message })),
+    )
+    const rows = yield* profileRows({
+      profiles: options.profiles,
+      extraRows: settings.plugins ?? [],
+      ...(options.patches === undefined ? {} : { patches: options.patches }),
+    }).pipe(Effect.mapError((error) => new WebError({ message: error.message })))
+    const inputs: EditableInputs = {
+      rows,
+      settings,
+      settingsPath: path,
+      env: process.env,
+      credentialsPath: options.credentialsPath ?? configPaths().credentials,
+    }
+    return { rows, inputs }
+  })
 
 /** What a page may read and change about this run: the settings file, and the provider's list. */
 const settingsPortOf = (
   options: CommandOptions,
   facts: RunFacts,
   choice: RunChoice,
+  live: LiveRunSettings,
 ): SettingsPort => ({
   read: () =>
     Effect.succeed({
@@ -1515,6 +1600,47 @@ const settingsPortOf = (
     Effect.sync(() => {
       choice.effort = effort
     }),
+  editable: () =>
+    editableStateOf(options).pipe(
+      Effect.map((state) => {
+        facts.rows = state.rows
+        return readEditableSettings(state.inputs)
+      }),
+    ),
+  // Every field is checked before the one writer touches the file, so a refused save
+  // names the field and leaves the file as it was.
+  saveEditable: (input) =>
+    Effect.gen(function* () {
+      const state = yield* editableStateOf(options)
+      const path = state.inputs.settingsPath
+      const text = yield* Effect.try({
+        try: () => (existsSync(path) ? readFileSync(path, 'utf8') : ''),
+        catch: (cause) => new WebError({ message: messageOf(cause) }),
+      })
+      const next = yield* editRunSettings(text, state.inputs, input).pipe(
+        Effect.mapError(
+          (problem) => new WebError({ message: problem.field + ': ' + problem.message }),
+        ),
+      )
+      if (next !== text) {
+        yield* Effect.try({
+          try: () => writeFileAtomic(path, next),
+          catch: (cause) => new WebError({ message: messageOf(cause) }),
+        })
+      }
+      const after = yield* editableStateOf(options)
+      // The next session is built from the rows the file now merges into, and the
+      // running session's per-call values are updated in place.
+      facts.rows = after.rows
+      facts.layer = yield* loadProfile({ plugins: options.plugins, layers: [after.rows] }).pipe(
+        Effect.mapError((error) => new WebError({ message: error.message })),
+      )
+      const view = readEditableSettings(after.inputs)
+      live.bashTimeoutMs = view.bashTimeoutMs.value
+      live.subagentDepth = view.subagentDepth.value
+      live.search = searchFromEnv(process.env, after.inputs.settings)
+      return view
+    }),
 })
 
 /** The address this run serves. The port is known only once the listeners are up. */
@@ -1525,10 +1651,10 @@ interface GuiEndpoint {
 /** Opens one more session for a UI that outlives its first: the same wiring, a new scope. */
 const sessionFactoryOf = (
   options: CommandOptions,
-  rows: ReadonlyArray<PluginRow>,
+  facts: RunFacts,
   choice: RunChoice,
   spillTokens: number | undefined,
-  layer: Layer.Layer<any, PluginError, never>,
+  live: LiveRunSettings,
   listSessions: SessionRuntime['listSessions'],
   plugins: PluginWiringState,
   gui: GuiEndpoint,
@@ -1539,13 +1665,15 @@ const sessionFactoryOf = (
     Effect.gen(function* () {
       // The choices are read per open: a page may have picked another model or
       // effort since.
+      // The rows and layer are read per open: a save may have added a row or
+      // changed a limit, and the next session should start from the new wiring.
       const built = yield* buildSession(
         options,
-        rows,
+        facts.rows,
         choice.route,
         choice.effort,
         spillTokens,
-        layer,
+        facts.layer,
         true,
         id,
         // A page that named no workspace gets the one this run was started in.
@@ -1553,6 +1681,7 @@ const sessionFactoryOf = (
         false,
         plugins,
         gui,
+        live,
       )
       if (built.kind === 'refused') {
         return yield* Effect.fail(new WebError({ message: built.message }))
@@ -1770,19 +1899,23 @@ const serveWebUi = (
     return yield* Effect.scoped(
       Effect.gen(function* () {
         const reading = yield* runReadingOf(layer)
+        // The facts are mutable: a save rebuilds the rows and the layer for the next
+        // session, and updates the values a running call reads.
+        const live = liveSettingsOf(options, rows)
+        const facts: RunFacts = { rows, layer, efforts: reading.efforts }
         return yield* serveWeb({
           ...(initial === undefined ? {} : { initial }),
           factory: sessionFactoryOf(
             options,
-            rows,
+            facts,
             choice,
             spillTokens,
-            layer,
+            live,
             reading.listSessions,
             wiring,
             gui,
           ),
-          settings: settingsPortOf(options, { rows, efforts: reading.efforts }, choice),
+          settings: settingsPortOf(options, facts, choice, live),
           schedules: scheduleStoreOf(options),
           workspaces: workspacesPortOf(options, reading.listSessions),
           readSessionEvents: reading.readSessionEvents,
@@ -2158,8 +2291,11 @@ const buildSession = (
   plugins?: PluginWiringState,
   /** The page this session serves, when a browser UI opened it. */
   gui?: GuiEndpoint,
+  /** The live limits; absent seeds them from the rows, as a one-shot run does. */
+  live?: LiveRunSettings,
 ) =>
   Effect.gen(function* () {
+    const liveSettings = live ?? liveSettingsOf(options, rows)
     const context = yield* Layer.build(Layer.mergeAll(layer, approvalServiceLayer, askServiceLayer))
     const hooks = Context.get(context, Hooks)
     // A UI owns the screen; only the non-interactive paths stream text out.
@@ -2295,6 +2431,7 @@ const buildSession = (
       ...answerersOf(ui, options),
       context,
       jobs,
+      live: liveSettings,
       ...wiringOf(plugins),
     })
 
@@ -2592,5 +2729,6 @@ export * from './auth.ts'
 export * from './auth-cli.ts'
 export * from './providers.ts'
 export * from './config-file.ts'
+export * from './run-settings.ts'
 
 export * from './acp.ts'

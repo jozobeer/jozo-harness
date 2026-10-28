@@ -444,6 +444,24 @@ const makeSettings = (): { readonly port: SettingsPort; readonly wrote: Array<st
               if (remember) wrote.push(model)
             }),
       setEffort: () => Effect.void,
+      editable: () =>
+        Effect.succeed({
+          search: { keyName: 'BRAVE_API_KEY', keyPresent: false, source: 'no provider is named' },
+          apiKeyRef: { ref: '', present: false, source: 'no reference is named' },
+          bashTimeoutMs: { value: 120_000, source: 'the default' },
+          maxParallelToolCalls: { value: 10, source: 'the default' },
+          subagentDepth: { value: 1, source: 'the default' },
+          delegateTools: [],
+        }),
+      saveEditable: () =>
+        Effect.succeed({
+          search: { keyName: 'BRAVE_API_KEY', keyPresent: false, source: 'no provider is named' },
+          apiKeyRef: { ref: '', present: false, source: 'no reference is named' },
+          bashTimeoutMs: { value: 120_000, source: 'the default' },
+          maxParallelToolCalls: { value: 10, source: 'the default' },
+          subagentDepth: { value: 1, source: 'the default' },
+          delegateTools: [],
+        }),
     },
   }
 }
@@ -2176,6 +2194,8 @@ describe('the web transport', () => {
       models: () => Effect.fail(new WebError({ message: 'no models here' })),
       setModel: () => Effect.fail(new WebError({ message: 'no writing here' })),
       setEffort: () => Effect.fail(new WebError({ message: 'no writing here' })),
+      editable: () => Effect.fail(new WebError({ message: 'no settings here' })),
+      saveEditable: () => Effect.fail(new WebError({ message: 'no writing here' })),
     }
 
     const observed = await Effect.runPromise(

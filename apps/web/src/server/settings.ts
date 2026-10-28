@@ -1,5 +1,5 @@
 import type { Effect } from 'effect'
-import type { SettingsView } from '../shared/rpc.ts'
+import type { EditableSettingsView, RunSettingsInput, SettingsView } from '../shared/rpc.ts'
 import type { WebError } from './errors.ts'
 
 /**
@@ -16,4 +16,14 @@ export interface SettingsPort {
   readonly setModel: (model: string, remember: boolean) => Effect.Effect<void, WebError>
   /** The effort a session opened from now asks for; '' leaves it to the provider. */
   readonly setEffort: (effort: string) => Effect.Effect<void, WebError>
+  /**
+   * The values the settings pane may edit, resolved from the same rows a run uses,
+   * with where each came from. A key is shown by reference and presence only.
+   */
+  readonly editable: () => Effect.Effect<EditableSettingsView, WebError>
+  /**
+   * Validates every field first and writes them through the one settings writer.
+   * A refusal names the field, so the page can point at it.
+   */
+  readonly saveEditable: (input: RunSettingsInput) => Effect.Effect<EditableSettingsView, WebError>
 }

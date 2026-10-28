@@ -36,6 +36,21 @@ export function readCredentials(path: string): Readonly<Record<string, string>> 
   return existsSync(path) ? parseCredentials(readFileSync(path, 'utf8'), path) : {}
 }
 
+/**
+ * Whether the store holds a value for this reference. Only the names are read,
+ * so a page can say a key is present without the value ever reaching it.
+ */
+export function hasCredential(path: string, ref: string): boolean {
+  if (ref === '' || !existsSync(path)) return false
+  try {
+    const value = readCredentials(path)[ref]
+    return value !== undefined && value !== ''
+  } catch {
+    // A store that cannot be read is not a key the run can use.
+    return false
+  }
+}
+
 /** Adds or replaces one reference without disturbing the others. */
 export function writeCredential(path: string, ref: string, value: string): void {
   const entries = readCredentials(path)
