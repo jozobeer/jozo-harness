@@ -28,9 +28,8 @@ import {
   type SessionFactory,
   type SessionRegistry,
 } from './sessions.ts'
-import type { PluginRowView } from '../shared/rpc.ts'
 import { answerArtifact } from './artifacts.ts'
-import { answerPlugins } from './plugins.ts'
+import { answerPlugins, type PluginsPort } from './plugins.ts'
 import { searchWorkspaceFiles } from './files.ts'
 import { branchOf } from './git-branch.ts'
 import type { SettingsPort } from './settings.ts'
@@ -61,10 +60,10 @@ export interface ServeWebOptions {
   /** What the run can be told before any session exists: the blank page's own list. */
   readonly commands: () => ReadonlyArray<CommandView>
   /**
-   * The rows this run was built from. The page lists them so a human sees what
-   * the next start reads before changing anything.
+   * The rows this run was built from, the optional bundles, and the failed
+   * wirings. The page lists them and writes one change at a time.
    */
-  readonly plugins: () => ReadonlyArray<PluginRowView>
+  readonly plugins: PluginsPort
   /** 0 picks a free port; the chosen one arrives through `onReady`. */
   readonly port: number
   /** Where the browser app to serve sits; the caller owns where its tree keeps it. */
@@ -356,7 +355,7 @@ const respondTo = async (
   tailnet: TailnetAddresses | undefined,
   token: string,
   codes: CodeExchange,
-  plugins: () => ReadonlyArray<PluginRowView>,
+  plugins: PluginsPort,
 ): Promise<void> => {
   // A page served under another name could read this one through a rebinding
   // proxy; the name the request asked for must be one this server answers to.
@@ -378,8 +377,8 @@ const respondTo = async (
   )
     return
   if (
-    answerPlugins(request, response, path, {
-      rows: plugins,
+    await answerPlugins(request, response, path, {
+      plugins,
       port,
       publicOrigin,
       tailnet,

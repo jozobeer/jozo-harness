@@ -89,6 +89,9 @@ import { sessionRootOf } from './session-list.ts'
 import { credentialSource, type SettingsSurface } from './settings.ts'
 import { configPaths } from './config.ts'
 import { makePluginHost } from './plugin-host.ts'
+import { makeWebPluginsPort } from './plugin-web.ts'
+import { makePluginWiringState, type PluginWiringState } from './plugin-wiring.ts'
+import { optionalBundles } from './plugins.ts'
 import {
   agentTools,
   jobTools,
@@ -145,6 +148,7 @@ import {
   askServiceLayer,
   currentPlanMode,
   installAsk,
+  makeAsk,
   makePlanMode,
   safetyConfigSchema,
   seatbeltStartupNotice,
@@ -823,7 +827,14 @@ interface ProfileWiring {
   readonly context: Context.Context<any>
   /** The background commands this session may start; a UI lists them. */
   readonly jobs: JobsShape
+  /** The rows this run could not wire, when a page can report and retry them. */
+  readonly plugins?: PluginWiringState
 }
+
+/** The optional field a session carries only when a page can report failed wirings. */
+const wiringOf = (
+  plugins: PluginWiringState | undefined,
+): { readonly plugins?: PluginWiringState } => (plugins === undefined ? {} : { plugins })
 
 /** A row this run wired: the tools it added, and how to take them back. */
 interface WiredRow {
@@ -1083,14 +1094,31 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
         return names
       })
 
-    /** Wires the one row of a plugin this run was built with, when its rows hold one. */
+    /**
+     * Wires the one row of a plugin this run was built with, when its rows hold
+     * one. A page that can report the failure keeps the row and its retry rather
+     * than failing the session it was opening.
+     */
     const installWiredRow = (name: string): Effect.Effect<void, ToolError> =>
       Effect.gen(function* () {
         const mounter = mounterOf(name)
         if (mounter === undefined) return
         const row = wiring.rows.find((each) => each.name === name && isRowEnabled(each))
         if (row === undefined) return
-        yield* wireRow(row, mounter, Effect.succeed(wiring.context), () => undefined)
+        const wiredRow = wireRow(row, mounter, Effect.succeed(wiring.context), () => undefined)
+        const state = wiring.plugins
+        if (state === undefined) {
+          yield* wiredRow
+          return
+        }
+        yield* wiredRow.pipe(
+          Effect.tap(() => Effect.sync(() => state.clear(row.id))),
+          Effect.catch((error: ToolError) =>
+            Effect.sync(() => {
+              state.record(row.id, row.name, error.message, () => installWiredRow(name))
+            }),
+          ),
+        )
       })
 
     /**
@@ -1371,6 +1399,7 @@ const sessionFactoryOf = (
   spillBytes: number | undefined,
   layer: Layer.Layer<any, PluginError, never>,
   listSessions: SessionRuntime['listSessions'],
+  plugins: PluginWiringState,
 ): SessionFactory => ({
   list: () =>
     listSessions().pipe(Effect.mapError((error) => new WebError({ message: messageOf(error) }))),
@@ -1389,6 +1418,7 @@ const sessionFactoryOf = (
         id,
         // A page that named no workspace gets the one this run was started in.
         cwd ?? options.cwd,
+        plugins,
       )
       if (built.kind === 'refused') {
         return yield* Effect.fail(new WebError({ message: built.message }))
@@ -1552,6 +1582,8 @@ const serveWebUi = (
   work: Extract<Work, { kind: 'web' }>,
   /** The session the page opens first, when the command named one to resume. */
   initial: InitialSession | undefined,
+  /** The rows this run could not wire, and the retries the page may ask for. */
+  wiring: PluginWiringState,
 ): Effect.Effect<number, PluginError> =>
   Effect.gen(function* () {
     const staticRoot = work.staticRoot ?? defaultStaticRoot
@@ -1570,6 +1602,16 @@ const serveWebUi = (
     // A page opened before any session exists still lists the skills this run's
     // roots would offer, so the first slash is not blind.
     const defaultCommands = commandViewsOf(runCommands, yield* discoverSkills(skillsOf(options)))
+    // The page writes settings through the same host the model's tool does; the
+    // asker is only here because the host carries one, and this path never asks.
+    const plugins = makeWebPluginsPort({
+      rows,
+      settingsPath: options.settingsPath ?? configPaths().config,
+      plugins: options.plugins,
+      catalog: optionalBundles,
+      wiring,
+      ask: yield* makeAsk(),
+    })
     // The store the rail lists from and the seat's effort words live as long as
     // the server they serve.
     return yield* Effect.scoped(
@@ -1577,12 +1619,19 @@ const serveWebUi = (
         const reading = yield* runReadingOf(layer)
         return yield* serveWeb({
           ...(initial === undefined ? {} : { initial }),
-          factory: sessionFactoryOf(options, rows, choice, spillBytes, layer, reading.listSessions),
+          factory: sessionFactoryOf(
+            options,
+            rows,
+            choice,
+            spillBytes,
+            layer,
+            reading.listSessions,
+            wiring,
+          ),
           settings: settingsPortOf(options, { rows, efforts: reading.efforts }, choice),
           workspaces: workspacesPortOf(options, reading.listSessions),
           commands: () => defaultCommands,
-          plugins: () =>
-            rows.map((row) => ({ id: row.id, name: row.name, enabled: row.disabled !== true })),
+          plugins,
           port: work.port,
           staticRoot,
           ...(work.publicUrl === undefined ? {} : { publicUrl: work.publicUrl }),
@@ -1788,6 +1837,8 @@ const buildSession = (
   resume: SessionId | undefined,
   /** Where a new session starts; a resumed one keeps the workspace its header has. */
   cwd: string,
+  /** The run's failed wirings, when a page can report and retry them. */
+  plugins?: PluginWiringState,
 ) =>
   Effect.gen(function* () {
     const context = yield* Layer.build(Layer.mergeAll(layer, approvalServiceLayer, askServiceLayer))
@@ -1903,6 +1954,7 @@ const buildSession = (
       ...answerersOf(ui, options),
       context,
       jobs,
+      ...wiringOf(plugins),
     })
 
     // A session keeps the composition it was started with: the tools behind its
@@ -1944,6 +1996,9 @@ const serveWebWork = (
   work: Extract<Work, { kind: 'web' }>,
 ) =>
   Effect.gen(function* () {
+    // The page reports a row that failed to wire and asks for the same wiring
+    // again; every session this run opens records into this one list.
+    const wiring = makePluginWiringState()
     const resumed =
       options.resume === undefined
         ? undefined
@@ -1961,6 +2016,7 @@ const serveWebWork = (
               true,
               options.resume,
               options.cwd,
+              wiring,
             ).pipe(
               Effect.provideService(Scope.Scope, scope),
               // A build that fails or is interrupted must not leave its scope open.
@@ -1983,7 +2039,7 @@ const serveWebWork = (
         initial = { session, close: () => Scope.close(scope, Exit.void) }
       }
     }
-    return yield* serveWebUi(options, rows, route, effort, spillBytes, layer, work, initial)
+    return yield* serveWebUi(options, rows, route, effort, spillBytes, layer, work, initial, wiring)
   })
 
 /** The scoped body that owns the built layer and serves one run. */

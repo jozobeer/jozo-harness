@@ -613,6 +613,7 @@ body {
 .run-schedules,
 .run-jobs,
 .run-plugins,
+.run-plugin-catalog,
 .run-children {
   display: flex;
   flex-direction: column;
@@ -667,12 +668,13 @@ body {
   overflow-wrap: anywhere;
 }
 
-.run-plugin {
+.run-plugin,
+.run-bundle {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--s2);
   align-items: baseline;
   padding: 0 var(--s2);
-  overflow: hidden;
 }
 
 .run-plugin-name {
@@ -692,6 +694,69 @@ body {
 
 .run-plugin-state.on {
   color: var(--text);
+}
+
+.run-bundle-summary,
+.run-plugin-next,
+.run-bundle-ask,
+.run-plugin-notice {
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.run-bundle-summary {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.run-bundle-ask {
+  color: var(--text);
+  flex-basis: 100%;
+}
+
+.run-plugin-failure,
+.run-plugin-problem {
+  color: var(--error);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.run-plugin-failure {
+  flex-basis: 100%;
+}
+
+.run-plugin-problem,
+.run-plugin-notice {
+  padding: var(--s2) var(--s2) 0;
+}
+
+.run-plugin-toggle,
+.run-plugin-retry,
+.run-plugin-install,
+.run-plugin-cancel {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--text-xs);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.run-plugin-toggle:hover:not(:disabled),
+.run-plugin-retry:hover:not(:disabled),
+.run-plugin-install:hover:not(:disabled),
+.run-plugin-cancel:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.run-plugin-toggle:disabled,
+.run-plugin-retry:disabled,
+.run-plugin-install:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 .run-job {

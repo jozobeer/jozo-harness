@@ -7,7 +7,41 @@ export interface PluginRowView {
   readonly id: string
   readonly name: string
   readonly enabled: boolean
+  /** True when this run was built from the row; a row installed on the page waits for the next start. */
+  readonly running: boolean
 }
+
+/** One optional bundle the page may install, as the build's catalog lists it. */
+export interface PluginCatalogView {
+  /** The row id the install writes. */
+  readonly id: string
+  readonly name: string
+  readonly summary: string
+  /** True when the plugin needs config an id-and-name row would not carry. */
+  readonly needsConfig: boolean
+  /** True when a row already names it, so there is nothing to install. */
+  readonly installed: boolean
+}
+
+/** A row this run tried to wire and could not, with the reason it gave. */
+export interface PluginFailureView {
+  readonly id: string
+  readonly name: string
+  readonly reason: string
+}
+
+/** What the plugin route answers: the run's rows, the opt-in catalog, and the failed wirings. */
+export interface PluginsView {
+  readonly rows: ReadonlyArray<PluginRowView>
+  readonly catalog: ReadonlyArray<PluginCatalogView>
+  readonly failures: ReadonlyArray<PluginFailureView>
+}
+
+/** What the plugin pane may ask the server to do. */
+export type PluginChangeRequest =
+  | { readonly action: 'set-enabled'; readonly id: string; readonly enabled: boolean }
+  | { readonly action: 'install'; readonly id: string; readonly name: string }
+  | { readonly action: 'retry'; readonly id: string }
 
 /** A session as a page lists it: what the store holds, without reading its log. */
 export const SessionSummarySchema = Schema.Struct({

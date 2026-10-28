@@ -450,6 +450,15 @@ add や remove が失敗したとき（config が不正、tool 名が既に登�
 
 行が増えて tool が増えても、そのセッションはそのまま続けられる（新しい構成が記録される）。tool が減る変更や profile を変えるときだけ `--allow-preset-change` が要る（[構成を変えてセッションを再開する](#構成を変えてセッションを再開する)）。
 
+## 画面からプラグイン行を変える
+
+`jzh web` の Run ペインには Plugins の一覧がある。行ごとに on / off を切り替えられ、起動時に行の tool を組めなかったときは理由と Retry が出る。下の optional bundles にはこの build が持つ任意バンドルが並び、Install を押して確認でもう一度押すと settings に row を書く。画面のクリックが承認である。
+
+- on / off と Install は settings に書くだけで、走っている run の Layer は組み替えない。効くのは次の起動から。
+- 失敗の Retry だけは走っている run に効く。同じ row の wiring をその場でやり直し、成功すると失敗の表示が消える。
+- 一覧に無い名前は POST でも拒否する。画面に出るのは build の catalog にある名前だけで、catalog は同梱名の検査を緩めない。
+- `mcp`・`delegate`・`workspace-dependencies` は config が要るので画面からは足せない。`jzh config add plugins ...` で設定ファイルに書く（[MCP サーバを繋ぐ](#mcp-サーバを繋ぐ)）。
+
 ## 構成を変えてセッションを再開する
 
 セッションは、始めたときの profile 名と tool の一覧を覚えている。

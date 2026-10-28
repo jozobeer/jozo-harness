@@ -140,6 +140,10 @@ const labelOf = (root: ParentNode, selector: string): string | null | undefined 
 const textOf = (root: ParentNode, selector: string): string | null | undefined =>
   root.querySelector(selector)?.textContent
 
+/** The JSON a test fetch sent in its body; a non-string body is not one the route sends. */
+const bodyOf = (init: RequestInit | undefined): unknown =>
+  typeof init?.body === 'string' ? JSON.parse(init.body) : undefined
+
 /** The Add workspace dialog, wherever the page put it. */
 const dialogOf = (): HTMLElement => {
   const node = document.querySelector('.workspace-dialog')
@@ -2023,9 +2027,11 @@ describe('the Solid page', () => {
         json: () =>
           Promise.resolve({
             rows: [
-              { id: 'lsp', name: '@jozo-harness/lsp', enabled: true },
-              { id: 'mcp', name: '@jozo-harness/mcp', enabled: false },
+              { id: 'lsp', name: '@jozo-harness/lsp', enabled: true, running: true },
+              { id: 'mcp', name: '@jozo-harness/mcp', enabled: false, running: true },
             ],
+            catalog: [],
+            failures: [],
           }),
       }),
     )
@@ -2039,6 +2045,256 @@ describe('the Solid page', () => {
       expect(
         [...container.querySelectorAll('.run-plugin-state')].map((state) => state.textContent),
       ).toEqual(['on', 'off'])
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  test('the plugin pane turns a row off over the plugin route', async () => {
+    const { store } = makeStore({
+      pane: { kind: 'run' },
+      run: {
+        goal: null,
+        schedules: [],
+        jobs: [],
+        subagents: [],
+        todos: [],
+        todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+        skills: [],
+        promptSections: [],
+        queued: [],
+        steering: [],
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+      },
+    })
+    const initial = {
+      rows: [{ id: 'lsp', name: '@jozo-harness/lsp', enabled: true, running: true }],
+      catalog: [],
+      failures: [],
+    }
+    const next = {
+      ...initial,
+      rows: [{ id: 'lsp', name: '@jozo-harness/lsp', enabled: false, running: true }],
+    }
+    const posted: Array<RequestInit | undefined> = []
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      expect(url).toBe('/plugins')
+      if (init?.method === 'POST') {
+        posted.push(init)
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(JSON.stringify(next)),
+        })
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(initial) })
+    })
+    try {
+      const { container } = render(() => <ContextPane store={store} />)
+      await vi.waitFor(() =>
+        expect(container.querySelector('[data-plugin-toggle="lsp"]')).not.toBeNull(),
+      )
+      fireEvent.click(container.querySelector('[data-plugin-toggle="lsp"]') as Element)
+
+      await vi.waitFor(() =>
+        expect(container.querySelector('.run-plugin-state')?.textContent).toBe('off'),
+      )
+      expect(posted.map(bodyOf)).toEqual([{ action: 'set-enabled', id: 'lsp', enabled: false }])
+      expect(container.querySelector('.run-plugin-notice')?.textContent).toContain(
+        'this run keeps the tools',
+      )
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  test('the plugin pane asks before it installs a catalog bundle', async () => {
+    const { store } = makeStore({
+      pane: { kind: 'run' },
+      run: {
+        goal: null,
+        schedules: [],
+        jobs: [],
+        subagents: [],
+        todos: [],
+        todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+        skills: [],
+        promptSections: [],
+        queued: [],
+        steering: [],
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+      },
+    })
+    const bundle = {
+      id: 'artifact',
+      name: '@jozo-harness/artifact',
+      summary: 'publish pages',
+      needsConfig: false,
+      installed: false,
+    }
+    const initial = { rows: [], catalog: [bundle], failures: [] }
+    const next = {
+      rows: [{ id: 'artifact', name: '@jozo-harness/artifact', enabled: true, running: false }],
+      catalog: [{ ...bundle, installed: true }],
+      failures: [],
+    }
+    const posted: Array<RequestInit | undefined> = []
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      expect(url).toBe('/plugins')
+      if (init?.method === 'POST') {
+        posted.push(init)
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(JSON.stringify(next)),
+        })
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(initial) })
+    })
+    try {
+      const { container } = render(() => <ContextPane store={store} />)
+      await vi.waitFor(() =>
+        expect(container.querySelector('[data-plugin-install="artifact"]')).not.toBeNull(),
+      )
+      fireEvent.click(container.querySelector('[data-plugin-install="artifact"]') as Element)
+
+      // The first click only asks; nothing reaches the route until the human confirms.
+      expect(container.querySelector('[data-plugin-confirm="artifact"]')).not.toBeNull()
+      expect(container.querySelector('.run-bundle-ask')?.textContent).toContain(
+        'for the next start',
+      )
+      expect(posted).toHaveLength(0)
+
+      fireEvent.click(container.querySelector('[data-plugin-confirm="artifact"]') as Element)
+
+      await vi.waitFor(() =>
+        expect(container.querySelector('.run-bundle .run-plugin-next')?.textContent).toBe(
+          'installed',
+        ),
+      )
+      expect(posted.map(bodyOf)).toEqual([
+        { action: 'install', id: 'artifact', name: '@jozo-harness/artifact' },
+      ])
+      expect(container.querySelector('.run-plugin-notice')?.textContent).toContain(
+        'takes effect at the next start',
+      )
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  test('a failed plugin row shows why and retries the same row', async () => {
+    const { store } = makeStore({
+      pane: { kind: 'run' },
+      run: {
+        goal: null,
+        schedules: [],
+        jobs: [],
+        subagents: [],
+        todos: [],
+        todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+        skills: [],
+        promptSections: [],
+        queued: [],
+        steering: [],
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+      },
+    })
+    const failure = {
+      id: 'lsp',
+      name: '@jozo-harness/lsp',
+      reason: 'the language server did not start',
+    }
+    const initial = {
+      rows: [{ id: 'lsp', name: '@jozo-harness/lsp', enabled: true, running: true }],
+      catalog: [],
+      failures: [failure],
+    }
+    const next = { ...initial, failures: [] }
+    const posted: Array<RequestInit | undefined> = []
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      expect(url).toBe('/plugins')
+      if (init?.method === 'POST') {
+        posted.push(init)
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(JSON.stringify(next)),
+        })
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(initial) })
+    })
+    try {
+      const { container } = render(() => <ContextPane store={store} />)
+      await vi.waitFor(() =>
+        expect(container.querySelector('.run-plugin-failure')?.textContent).toBe(failure.reason),
+      )
+      fireEvent.click(container.querySelector('[data-plugin-retry="lsp"]') as Element)
+
+      await vi.waitFor(() => expect(container.querySelector('.run-plugin-failure')).toBeNull())
+      expect(posted.map(bodyOf)).toEqual([{ action: 'retry', id: 'lsp' }])
+      expect(container.querySelector('.run-plugin-notice')?.textContent).toContain(
+        'wired into this run again',
+      )
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  test('a refused plugin change shows the reason and leaves the row as it was', async () => {
+    const { store } = makeStore({
+      pane: { kind: 'run' },
+      run: {
+        goal: null,
+        schedules: [],
+        jobs: [],
+        subagents: [],
+        todos: [],
+        todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+        skills: [],
+        promptSections: [],
+        queued: [],
+        steering: [],
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+      },
+    })
+    const initial = {
+      rows: [{ id: 'lsp', name: '@jozo-harness/lsp', enabled: true, running: true }],
+      catalog: [],
+      failures: [],
+    }
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      expect(url).toBe('/plugins')
+      if (init?.method === 'POST') {
+        return Promise.resolve({
+          ok: false,
+          status: 400,
+          text: () => Promise.resolve('the settings refused the change'),
+        })
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(initial) })
+    })
+    try {
+      const { container } = render(() => <ContextPane store={store} />)
+      await vi.waitFor(() =>
+        expect(container.querySelector('[data-plugin-toggle="lsp"]')).not.toBeNull(),
+      )
+      fireEvent.click(container.querySelector('[data-plugin-toggle="lsp"]') as Element)
+
+      await vi.waitFor(() =>
+        expect(container.querySelector('.run-plugin-problem')?.textContent).toBe(
+          'the settings refused the change',
+        ),
+      )
+      expect(container.querySelector('.run-plugin-state')?.textContent).toBe('on')
     } finally {
       vi.unstubAllGlobals()
     }

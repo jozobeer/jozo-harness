@@ -14,7 +14,10 @@ import {
   serveWeb,
   WebError,
   type OpenSession,
-  type PluginRowView,
+  type PluginChangeAnswer,
+  type PluginChangeRequest,
+  type PluginsPort,
+  type PluginsView,
   type PublicOrigin,
   type ReadyUrls,
   type SessionFactory,
@@ -412,8 +415,12 @@ const start = (
   publicUrl?: PublicOrigin,
   /** The tailnet addresses a detection would name, when the test drives one. */
   tailnet?: TailnetAddresses,
-  /** The rows the run was built from, as the plugin route lists them. */
-  plugins: ReadonlyArray<PluginRowView> = [],
+  /** The plugin route's port; a test that only lists rows may leave it empty. */
+  plugins: PluginsPort = {
+    view: () => ({ rows: [], catalog: [], failures: [] }),
+    known: () => [],
+    change: async () => ({ ok: true }),
+  },
 ): Effect.Effect<Started, never, Scope.Scope> =>
   Effect.gen(function* () {
     const ready = yield* Deferred.make<ReadyUrls>()
@@ -425,7 +432,7 @@ const start = (
         settings: settings.port,
         workspaces: workspaces.port,
         commands: web.initial.commands,
-        plugins: () => plugins,
+        plugins,
         port: 0,
         staticRoot,
         ...(publicUrl === undefined ? {} : { publicUrl }),
@@ -767,8 +774,321 @@ describe('the web transport', () => {
 
     expect(observed.status).toBe(200)
     expect(observed.type).toBe('application/json; charset=utf-8')
-    expect(JSON.parse(observed.text)).toEqual({ rows: [] })
+    expect(JSON.parse(observed.text)).toEqual({ rows: [], catalog: [], failures: [] })
     expect(observed.anonymous).toBe(401)
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('the plugin route refuses a change without the cookie or the token, and one from another origin', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-plugins-gate-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const settings = makeSettings()
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const change = JSON.stringify({ action: 'set-enabled', id: 'lsp', enabled: false })
+          const answer = (headers: Record<string, string>, url = started.origin + '/plugins') =>
+            Effect.promise(() =>
+              fetch(url, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', ...headers },
+                body: change,
+              }),
+            )
+          const withCookie = yield* answer({ cookie: started.cookie })
+          const withToken = yield* answer({}, started.origin + '/plugins?token=' + started.token)
+          const anonymous = yield* answer({})
+          const foreign = yield* answer({ cookie: started.cookie, origin: 'http://evil.example' })
+          yield* Deferred.succeed(started.stop, undefined)
+          return {
+            cookie: withCookie.status,
+            token: withToken.status,
+            anonymous: anonymous.status,
+            foreign: foreign.status,
+          }
+        }),
+      ),
+    )
+
+    expect(observed).toEqual({ cookie: 200, token: 200, anonymous: 401, foreign: 403 })
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('a plugin change answers the view the port leaves, and installs only a catalog bundle this build has', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-plugins-change-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const settings = makeSettings()
+    const changes: Array<PluginChangeRequest> = []
+    let current: PluginsView = {
+      rows: [{ id: 'lsp', name: '@jozo-harness/lsp', enabled: true, running: true }],
+      catalog: [
+        {
+          id: 'artifact',
+          name: '@jozo-harness/artifact',
+          summary: 'publish pages',
+          needsConfig: false,
+          installed: false,
+        },
+      ],
+      failures: [],
+    }
+    const port: PluginsPort = {
+      view: () => current,
+      known: () => ['@jozo-harness/lsp', '@jozo-harness/artifact'],
+      change: async (change) => {
+        changes.push(change)
+        current = {
+          ...current,
+          rows: [
+            { id: 'lsp', name: '@jozo-harness/lsp', enabled: false, running: true },
+            { id: 'artifact', name: '@jozo-harness/artifact', enabled: true, running: false },
+          ],
+          catalog: current.catalog.map((entry) => ({ ...entry, installed: true })),
+        }
+        return { ok: true }
+      },
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(
+            root,
+            web,
+            settings,
+            makeWorkspaces(),
+            undefined,
+            undefined,
+            port,
+          )
+          const post = (body: unknown): Promise<Response> =>
+            fetch(started.origin + '/plugins', {
+              method: 'POST',
+              headers: { cookie: started.cookie, 'content-type': 'application/json' },
+              body: JSON.stringify(body),
+            })
+          const toggled = yield* Effect.promise(() =>
+            post({ action: 'set-enabled', id: 'lsp', enabled: false }),
+          )
+          const toggledText = yield* Effect.promise(() => toggled.text())
+          const unknown = yield* Effect.promise(() =>
+            post({ action: 'install', id: 'nope', name: '@jozo-harness/nope' }),
+          )
+          const unknownText = yield* Effect.promise(() => unknown.text())
+          const installed = yield* Effect.promise(() =>
+            post({ action: 'install', id: 'artifact', name: '@jozo-harness/artifact' }),
+          )
+          const installedText = yield* Effect.promise(() => installed.text())
+          yield* Deferred.succeed(started.stop, undefined)
+          return {
+            toggled: toggled.status,
+            toggledText,
+            unknown: unknown.status,
+            unknownText,
+            installed: installed.status,
+            installedView: JSON.parse(installedText) as PluginsView,
+          }
+        }),
+      ),
+    )
+
+    expect(observed.toggled).toBe(200)
+    expect(JSON.parse(observed.toggledText)).toEqual({
+      rows: [
+        { id: 'lsp', name: '@jozo-harness/lsp', enabled: false, running: true },
+        { id: 'artifact', name: '@jozo-harness/artifact', enabled: true, running: false },
+      ],
+      catalog: [
+        {
+          id: 'artifact',
+          name: '@jozo-harness/artifact',
+          summary: 'publish pages',
+          needsConfig: false,
+          installed: true,
+        },
+      ],
+      failures: [],
+    })
+    expect(observed.unknown).toBe(400)
+    expect(observed.unknownText).toContain('this build does not have @jozo-harness/nope')
+    expect(observed.installed).toBe(200)
+    expect(observed.installedView.catalog[0]?.installed).toBe(true)
+    // The refused name never reached the port; the two accepted changes did.
+    expect(changes).toEqual([
+      { action: 'set-enabled', id: 'lsp', enabled: false },
+      { action: 'install', id: 'artifact', name: '@jozo-harness/artifact' },
+    ])
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('a plugin install the route cannot take is refused before the port changes anything', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-plugins-body-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const settings = makeSettings()
+    const changes: Array<PluginChangeRequest> = []
+    const port: PluginsPort = {
+      view: () => ({
+        rows: [],
+        catalog: [
+          {
+            id: 'mcp',
+            name: '@jozo-harness/mcp',
+            summary: 'connect MCP servers',
+            needsConfig: true,
+            installed: false,
+          },
+        ],
+        failures: [],
+      }),
+      known: () => ['@jozo-harness/mcp'],
+      change: async (change) => {
+        changes.push(change)
+        return { ok: true }
+      },
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(
+            root,
+            web,
+            settings,
+            makeWorkspaces(),
+            undefined,
+            undefined,
+            port,
+          )
+          const post = (body: string): Promise<Response> =>
+            fetch(started.origin + '/plugins', {
+              method: 'POST',
+              headers: { cookie: started.cookie, 'content-type': 'application/json' },
+              body,
+            })
+          const notJson = yield* Effect.promise(() => post('{'))
+          const notAChange = yield* Effect.promise(() =>
+            post(JSON.stringify({ action: 'set-enabled', id: 'lsp' })),
+          )
+          const needsConfig = yield* Effect.promise(() =>
+            post(JSON.stringify({ action: 'install', id: 'mcp', name: '@jozo-harness/mcp' })),
+          )
+          const wrongId = yield* Effect.promise(() =>
+            post(JSON.stringify({ action: 'install', id: 'other', name: '@jozo-harness/mcp' })),
+          )
+          yield* Deferred.succeed(started.stop, undefined)
+          return {
+            notJson: notJson.status,
+            notAChange: notAChange.status,
+            needsConfig: needsConfig.status,
+            needsConfigText: yield* Effect.promise(() => needsConfig.text()),
+            wrongId: wrongId.status,
+          }
+        }),
+      ),
+    )
+
+    expect(observed).toEqual({
+      notJson: 400,
+      notAChange: 400,
+      needsConfig: 400,
+      needsConfigText:
+        '@jozo-harness/mcp needs config in the settings file, so the page cannot install it',
+      wrongId: 400,
+    })
+    expect(changes).toEqual([])
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('a plugin change the port could not apply answers 500 without a view', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-plugins-broken-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const settings = makeSettings()
+    const port: PluginsPort = {
+      view: () => ({ rows: [], catalog: [], failures: [] }),
+      known: () => [],
+      change: async () => {
+        throw new Error('the store went away')
+      },
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(
+            root,
+            web,
+            settings,
+            makeWorkspaces(),
+            undefined,
+            undefined,
+            port,
+          )
+          const answer = yield* Effect.promise(() =>
+            fetch(started.origin + '/plugins', {
+              method: 'POST',
+              headers: { cookie: started.cookie, 'content-type': 'application/json' },
+              body: JSON.stringify({ action: 'retry', id: 'lsp' }),
+            }),
+          )
+          const text = yield* Effect.promise(() => answer.text())
+          yield* Deferred.succeed(started.stop, undefined)
+          return { status: answer.status, text }
+        }),
+      ),
+    )
+
+    expect(observed).toEqual({ status: 500, text: 'the plugin change failed' })
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('a refused plugin change answers with the reason the port gave', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-plugins-refused-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const settings = makeSettings()
+    const port: PluginsPort = {
+      view: () => ({ rows: [], catalog: [], failures: [] }),
+      known: () => [],
+      change: async (): Promise<PluginChangeAnswer> => ({
+        ok: false,
+        status: 409,
+        message: 'the settings refused the change',
+      }),
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(
+            root,
+            web,
+            settings,
+            makeWorkspaces(),
+            undefined,
+            undefined,
+            port,
+          )
+          const answer = yield* Effect.promise(() =>
+            fetch(started.origin + '/plugins', {
+              method: 'POST',
+              headers: { cookie: started.cookie, 'content-type': 'application/json' },
+              body: JSON.stringify({ action: 'retry', id: 'lsp' }),
+            }),
+          )
+          const text = yield* Effect.promise(() => answer.text())
+          yield* Deferred.succeed(started.stop, undefined)
+          return { status: answer.status, text }
+        }),
+      ),
+    )
+
+    expect(observed).toEqual({ status: 409, text: 'the settings refused the change' })
     await rm(root, { recursive: true, force: true })
   })
 
