@@ -62,7 +62,10 @@ import {
 } from '@jozo-harness/session'
 import {
   Tier0Tools,
+  childEnvironment,
+  logManagedEnv,
   makeShellSessions,
+  managedEnvOf,
   type Tier0ToolBuilder,
   type WorktreeHost,
 } from '@jozo-harness/tools-tier0'
@@ -535,6 +538,7 @@ const installTier1 = (
         append: (type, data) => agent.session.append(type, data),
         ...(sandbox === undefined ? {} : { sandbox }),
         sessions: runCodeSessions,
+        env: childEnvironment(managedEnvOf(rows)),
       },
       sandbox,
       timeLimitMsOf(rows),
@@ -2233,9 +2237,13 @@ const buildSession = (
     // What the composer lists follows the discovery the model reads: every step
     // refreshes it, so a skill added while the session runs reaches both.
     let skillCatalog = yield* discoverSkills(skills)
+    // The managed registry is one environment for every child of this session: bash,
+    // background jobs, and run_code all inherit it with the managed values applied last.
+    const environment = childEnvironment(managedEnvOf(rows))
+    logManagedEnv(environment)
     // The background commands of this session: the tier 1 tools start them, a UI lists
     // them, and their starts and ends stay in the log for a resumed run to read.
-    const jobs = yield* makeJobs({ record: jobRecorderOf(agent.session) })
+    const jobs = yield* makeJobs({ record: jobRecorderOf(agent.session), env: environment })
     const ui = wantsUi
       ? yield* makeUiHost({ session: agent.session, agent, hooks, commands, skills })
       : undefined

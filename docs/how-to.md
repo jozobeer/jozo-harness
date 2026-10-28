@@ -433,6 +433,24 @@ jzh auth list         # 入っている名前を見る
 
 `.env` に書く場合は `OLLAMA_API_KEY=` を作業ディレクトリかその祖先に置く。どれが勝つかは [configuration.md](configuration.md) の環境変数の節にある。
 
+## 管理した環境変数をすべてのコマンドに渡す
+
+profile か `--patch` の tier0 行に `env` を書く。`JZH_` で始まる名前だけを受け付ける。
+
+```yaml
+plugins:
+  - id: tier0
+    name: '@jozo-harness/tools-tier0'
+    config:
+      env:
+        JZH_PROFILE: repl
+        JZH_REPO: jozo-harness
+```
+
+bash、背景ジョブ、run_code の子はこの値を持つ。モデルが呼び出しの `env` で同じ名前を渡しても、ここに書いた値が勝つ。子を起動する前に、値ではなく名前の一覧を stderr に `[managed env] ...` として出す。
+
+値は設定のリテラルだけを書く。`secrets.env` や `.env` から読むことはない。API キーのような秘密はこのレジストリに載せず、`jzh auth add` か従来の secrets の経路に置く。
+
 ## Ollama の local daemon 経由で prompt cache を効かせる
 
 同梱の `base` profile は、`localBaseUrl` に `http://127.0.0.1:11434/v1` を置き、リクエストを常にその local daemon へ送る。dsh の web profile と同じく、daemon が動いている前提である。`baseUrl` の `https://ollama.com/v1` は `jzh models` がモデル一覧を読む先として残る。route のモデル名は cloud の名前（例 `deepseek-v4.1-flash`）のままで、local daemon へ送るときだけ Ollama の cloud 名（`deepseek-v4.1-flash:cloud`、タグ付きなら `deepseek-v4-pro:0813-cloud`）に直す。

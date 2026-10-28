@@ -1,8 +1,9 @@
-import type { Plugin } from '@jozo-harness/kernel'
+import { PluginError, type Plugin } from '@jozo-harness/kernel'
 import { Sandbox, type ApprovalShape } from '@jozo-harness/safety'
 import { Context, Effect, Layer, Schema } from 'effect'
 import type { ToolDefinition } from '@jozo-harness/tools'
 import type { TimeoutJobs } from './bash.ts'
+import { managedEnv } from './managed-env.ts'
 import type { ShellSessions } from './shells.ts'
 import type { WorktreeHost } from './worktree.ts'
 import { tier0Tools } from './index.ts'
@@ -25,19 +26,36 @@ export class Tier0Tools extends Context.Service<Tier0Tools, Tier0ToolBuilder>()(
   'jozo-harness/Tier0Tools',
 ) {}
 
-/** Loader definition for the Tier 0 tools; bash uses the profile's sandbox. */
-export const tier0Plugin: Plugin<{}, Tier0Tools, Sandbox> = {
+/** The harness-owned variables a profile registers for every command. */
+const tier0ConfigSchema = Schema.Struct({
+  env: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+})
+
+/** Loader definition for the Tier 0 tools; bash uses the profile's sandbox and env. */
+export const tier0Plugin: Plugin<
+  Schema.Schema.Type<typeof tier0ConfigSchema>,
+  Tier0Tools,
+  Sandbox
+> = {
   name: '@jozo-harness/tools-tier0',
-  config: Schema.Struct({}),
+  config: tier0ConfigSchema,
   provides: [Tier0Tools],
   requires: [Sandbox],
-  layer: () =>
+  layer: (config) =>
     Layer.effect(
       Tier0Tools,
-      Effect.map(
-        Sandbox,
-        (sandbox) => (approval, jobs, worktree, sessions) =>
-          tier0Tools(sandbox, undefined, approval, jobs, worktree, sessions),
-      ),
+      Effect.gen(function* () {
+        const sandbox = yield* Sandbox
+        const managed = yield* Effect.try({
+          try: () => managedEnv(config.env ?? {}),
+          catch: (error) =>
+            new PluginError({
+              code: 'config',
+              message: error instanceof Error ? error.message : String(error),
+            }),
+        })
+        return (approval, jobs, worktree, sessions) =>
+          tier0Tools(sandbox, undefined, approval, jobs, worktree, sessions, managed)
+      }),
     ),
 }

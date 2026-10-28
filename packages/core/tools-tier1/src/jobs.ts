@@ -49,6 +49,8 @@ export type JobRecord =
 export interface JobsOptions {
   /** Called once when a job starts and once when it settles, so the caller can log it. */
   readonly record?: (record: JobRecord) => void
+  /** The environment a background command inherits, with managed values already applied. */
+  readonly env?: NodeJS.ProcessEnv
 }
 
 export interface JobsShape {
@@ -180,13 +182,25 @@ export const makeJobs = (options: JobsOptions = {}): Effect.Effect<JobsShape> =>
 
     return {
       start: (command, cwd) =>
-        Effect.sync(() =>
-          register(
+        Effect.sync(() => {
+          const environment = options.env
+          if (environment !== undefined) {
+            const names = Object.keys(environment)
+              .filter((name) => name.startsWith('JZH_'))
+              .sort()
+            if (names.length > 0) process.stderr.write('[managed env] ' + names.join(', ') + '\n')
+          }
+          return register(
             command,
             cwd,
-            spawn(['bash', '-c', command], { cwd, stdout: 'pipe', stderr: 'pipe' }),
-          ),
-        ),
+            spawn(['bash', '-c', command], {
+              cwd,
+              ...(environment === undefined ? {} : { env: environment }),
+              stdout: 'pipe',
+              stderr: 'pipe',
+            }),
+          )
+        }),
       promote: (command, child, cwd) => Effect.sync(() => register(command, cwd, child)),
       read: (id, options) =>
         Effect.gen(function* () {

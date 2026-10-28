@@ -9,7 +9,7 @@ import {
   type ToolExecutionResult,
 } from '@jozo-harness/tools'
 import { Context, Effect, Layer } from 'effect'
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 import { BASH_MAX_TIMEOUT_MS, clampTimeout, makeBashTool, shellArgv } from '../src/index.ts'
 
 const call = (
@@ -229,5 +229,70 @@ describe('shell selection', () => {
     expect(result?.error).toEqual({ name: 'ToolError', code: 'execution' })
     expect(textOf(result)).toContain('pwsh')
     expect(seen.argv).toEqual([])
+  })
+})
+
+describe('managed environment', () => {
+  test('a registered variable reaches the command the tool runs', async () => {
+    const result = await Effect.runPromise(
+      call(
+        makeBashTool(undefined, undefined, undefined, undefined, undefined, {
+          JZH_WORKSPACE: 'managed-workspace',
+        }),
+        { command: 'printf %s "$JZH_WORKSPACE"' },
+        '/tmp',
+      ),
+    )
+
+    expect(result?.isError).toBe(false)
+    expect(result?.value).toMatchObject({ exitCode: 0, stdout: 'managed-workspace' })
+  })
+
+  test('a managed variable wins over the one the call passes', async () => {
+    const result = await Effect.runPromise(
+      call(
+        makeBashTool(undefined, undefined, undefined, undefined, undefined, {
+          JZH_MODE: 'managed',
+        }),
+        { command: 'printf %s "$JZH_MODE"', env: { JZH_MODE: 'caller' } },
+        '/tmp',
+      ),
+    )
+
+    expect(result?.value).toMatchObject({ stdout: 'managed' })
+  })
+
+  test('the log names the managed variables without their values', async () => {
+    const writes: Array<string> = []
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      writes.push(String(chunk))
+      return true
+    })
+    try {
+      await Effect.runPromise(
+        call(
+          makeBashTool(undefined, undefined, undefined, undefined, undefined, {
+            JZH_TOKEN: 's3cret-value',
+          }),
+          { command: 'true' },
+          '/tmp',
+        ),
+      )
+    } finally {
+      spy.mockRestore()
+    }
+
+    const log = writes.join('')
+    expect(log).toContain('JZH_TOKEN')
+    expect(log).not.toContain('s3cret-value')
+  })
+
+  test('refuses a call env name a shell cannot carry', async () => {
+    const result = await Effect.runPromise(
+      call(makeBashTool(), { command: 'true', env: { 'BAD NAME': 'x' } }, '/tmp'),
+    )
+
+    expect(result?.isError).toBe(true)
+    expect(result?.error).toEqual({ name: 'ToolError', code: 'invalid-arguments' })
   })
 })

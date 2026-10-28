@@ -12,6 +12,7 @@ export * from './walk.ts'
 export * from './text.ts'
 export * from './observed-files.ts'
 export * from './worktree.ts'
+export * from './managed-env.ts'
 
 import { noneSandbox, type ApprovalShape, type SandboxShape } from '@jozo-harness/safety'
 import type { ToolDefinition } from '@jozo-harness/tools'
@@ -22,6 +23,7 @@ import { globTool } from './glob.ts'
 import { grepTool } from './grep.ts'
 import { makeBashTool, type TimeoutJobs } from './bash.ts'
 import type { ShellSessions } from './shells.ts'
+import type { ManagedEnv } from './managed-env.ts'
 import { makeObservedFiles, type ObservedFiles } from './observed-files.ts'
 import { makeWorktreeTool, type WorktreeHost } from './worktree.ts'
 
@@ -39,13 +41,15 @@ export const tier0Tools = (
   worktree?: WorktreeHost,
   /** The shells a named bash session keeps alive; the run closes them when it ends. */
   sessions?: ShellSessions,
+  /** The harness-owned variables every command inherits. */
+  managed?: ManagedEnv,
 ): ReadonlyArray<ToolDefinition<any, any>> => [
   makeReadTool(observed),
   makeWriteTool(observed, sandbox, approval),
   makeEditTool(observed, sandbox, approval),
   globTool,
   grepTool,
-  makeBashTool(sandbox, approval, jobs, undefined, sessions),
+  makeBashTool(sandbox, approval, jobs, undefined, sessions, managed),
   ...(worktree === undefined ? [] : [makeWorktreeTool(sandbox, approval, worktree)]),
 ]
 export * from './plugin.ts'
