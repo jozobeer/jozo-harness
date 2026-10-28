@@ -351,16 +351,19 @@ tier1 行がある run では、モデルに `run_code` が渡る。モデルは
 
 モデルは `plugin` ツールで settings の `plugins` 行を list / add / remove / disable できる。1 回ごとに承認を求められ、足せるのは同梱のパッケージ名だけ。
 
-add した行の plugin をこの run の service の上に組めるなら、その tool は**次の step から**見える。設定ファイルには同時に書くので、次の起動でも同じ行が効く。組めるのは config が空の opt-in 行（`@jozo-harness/lsp`・`@jozo-harness/artifact`・`@jozo-harness/session-search`）である。組めない行、remove、disable は次の起動から効く。
+add した行の plugin をこの run の service の上に組めるなら、その tool は**次の step から**見える。設定ファイルには同時に書くので、次の起動でも同じ行が効く。組めるのは config が空の opt-in 行（`@jozo-harness/lsp`・`@jozo-harness/artifact`・`@jozo-harness/session-search`）である。
+
+remove はその逆で、この run が組んだ行なら settings から消すのと同じ呼び出しで、次の step から tool 一覧から外す。走っている step と tool 呼び出しはそのまま終わる。外した行は同じ id で add し直せる。config を持つ行（`mcp` など）を実行中の run から外す経路はまだ無いので、remove は拒否する。config が要る行の add も、次の起動で読めない行になるため拒否する。disable は次の起動から効く。
 
 ```
 plugin list                     この run が組まれた行
 plugin add id=lsp name=@jozo-harness/lsp
-plugin add id=mcp name=@jozo-harness/mcp     # config が要るので次の起動から
-plugin set id=mcp disabled=true
+plugin remove id=lsp                         # この run からも外れる
+plugin add id=mcp name=@jozo-harness/mcp     # config が要るので拒否される
+plugin set id=mcp disabled=true              # 次の起動から効く
 ```
 
-組める行の add が失敗したとき（config が不正、tool 名が既に登録済みなど）は、settings も走っている tool 一覧も変わらない。失敗は tool の結果としてモデルに返り、run はそのまま続く。
+add や remove が失敗したとき（config が不正、tool 名が既に登録済み、id が無い、config を持つ行、など）は、settings も走っている tool 一覧も変わらない。失敗は tool の結果としてモデルに返り、run はそのまま続く。
 
 行が増えて tool が増えても、そのセッションはそのまま続けられる（新しい構成が記録される）。tool が減る変更や profile を変えるときだけ `--allow-preset-change` が要る（[構成を変えてセッションを再開する](#構成を変えてセッションを再開する)）。
 

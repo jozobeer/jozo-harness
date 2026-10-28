@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { HooksLive, makeHooks } from '@jozo-harness/kernel'
-import { Effect, Schema } from 'effect'
+import { Effect, Exit, Schema, Scope } from 'effect'
 import {
   ToolError,
   Tools,
@@ -62,6 +62,39 @@ describe('registration', () => {
     await Effect.runPromise(Effect.scoped(tools.register(echo)))
 
     expect(tools.schemas()).toEqual([])
+  })
+
+  test('a retired tool leaves the schemas and still answers a call already chosen', async () => {
+    const tools = makeTools(makeHooks())
+
+    const outcome = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* tools.register(echo)
+          tools.retire('echo')
+          return {
+            offered: tools.schemas().map((schema) => schema.name),
+            answered: yield* tools.call(request(JSON.stringify({ text: 'still here' }))),
+          }
+        }),
+      ),
+    )
+
+    expect(outcome.offered).toEqual([])
+    expect(outcome.answered.isError).toBe(false)
+    expect(outcome.answered.value).toEqual({ text: 'still here' })
+  })
+
+  test('a scope that closes drops the tool it retired', async () => {
+    const tools = makeTools(makeHooks())
+    const scope = await Effect.runPromise(Scope.make())
+
+    await Effect.runPromise(Effect.provideService(tools.register(echo), Scope.Scope, scope))
+    tools.retire('echo')
+    await Effect.runPromise(Scope.close(scope, Exit.void))
+
+    const outcome = await Effect.runPromise(tools.call(request(JSON.stringify({ text: 'gone' }))))
+    expect(outcome.error).toEqual({ name: 'ToolError', code: 'unknown-tool' })
   })
 
   test('duplicate registration fails with duplicate-tool', async () => {

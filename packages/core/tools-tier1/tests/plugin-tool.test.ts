@@ -45,17 +45,17 @@ const fakeHost = (answer = 'approve', mounted: ReadonlyArray<string> = [], fail?
         if (change.kind === 'remove') {
           const index = settings.findIndex((row) => row.id === change.id)
           if (index >= 0) settings.splice(index, 1)
-          return { rows: [...settings], mounted: [] }
+          return { rows: [...settings], mounted: [], detached: true, unmounted: [] }
         }
         if (change.kind === 'add') {
           settings.push({ id: change.id, name: change.name, disabled: false })
-          return { rows: [...settings], mounted }
+          return { rows: [...settings], mounted, detached: false, unmounted: [] }
         }
         const index = settings.findIndex((each) => each.id === change.id)
         if (index >= 0) {
           settings[index] = { id: change.id, name: change.name, disabled: change.disabled }
         }
-        return { rows: [...settings], mounted: [] }
+        return { rows: [...settings], mounted: [], detached: false, unmounted: [] }
       }),
     ask: {
       ask: (request: AskRequested) => {
@@ -159,6 +159,18 @@ describe('the plugin tool', () => {
       { kind: 'set-disabled', id: 'mcp', name: '@jozo-harness/mcp', disabled: true },
       { kind: 'remove', id: 'mcp' },
     ])
+  })
+
+  test('remove needs an id that exists', async () => {
+    const { host, asked } = fakeHost()
+
+    const result = await Effect.runPromise(
+      call(makePluginTool(host), { action: 'remove', id: 'nowhere' }),
+    )
+
+    expect(result?.isError).toBe(true)
+    expect(textOf(result)).toContain('no row with that id: nowhere')
+    expect(asked).toEqual([])
   })
 
   test('set needs an id that exists', async () => {

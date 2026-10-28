@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Effect } from 'effect'
@@ -113,6 +113,103 @@ describe('the plugin host', () => {
     expect(host.rows()).toEqual([
       { id: 'tier1', name: '@jozo-harness/tools-tier1', disabled: false },
     ])
+  })
+
+  test('removing a row this run wired takes its tools back and drops it from the settings', async () => {
+    const settingsPath = tempSettings()
+    writeFileSync(settingsPath, "plugins:\n  - id: lsp\n    name: '@jozo-harness/lsp'\n")
+    const released: Array<string> = []
+    const host = makePluginHost({
+      rows: [{ id: 'lsp', name: '@jozo-harness/lsp' }],
+      plugins: bundledPlugins,
+      settingsPath,
+      ask: await Effect.runPromise(makeAsk()),
+      unmount: (id) =>
+        Effect.sync(() => {
+          released.push(id)
+          return { detached: true, tools: ['lsp_hover'] }
+        }),
+    })
+
+    const outcome = await Effect.runPromise(host.change({ kind: 'remove', id: 'lsp' }))
+
+    expect(released).toEqual(['lsp'])
+    expect(outcome.detached).toBe(true)
+    expect(outcome.unmounted).toEqual(['lsp_hover'])
+    expect(outcome.rows).toEqual([])
+    expect(host.rows()).toEqual([])
+    expect(readFileSync(settingsPath, 'utf8')).toBe('')
+  })
+
+  test('a refused unmount leaves the settings and the rows as they were', async () => {
+    const settingsPath = tempSettings()
+    const text = "plugins:\n  - id: lsp\n    name: '@jozo-harness/lsp'\n"
+    writeFileSync(settingsPath, text)
+    const host = makePluginHost({
+      rows: [{ id: 'lsp', name: '@jozo-harness/lsp' }],
+      plugins: bundledPlugins,
+      settingsPath,
+      ask: await Effect.runPromise(makeAsk()),
+      unmount: () =>
+        Effect.fail(
+          new ToolError({ code: 'invalid-arguments', message: 'the row lsp stays in this run' }),
+        ),
+    })
+
+    const failed = await Effect.runPromise(Effect.flip(host.change({ kind: 'remove', id: 'lsp' })))
+
+    expect(failed.message).toContain('the row lsp stays in this run')
+    expect(readFileSync(settingsPath, 'utf8')).toBe(text)
+    expect(host.rows()).toEqual([{ id: 'lsp', name: '@jozo-harness/lsp', disabled: false }])
+  })
+
+  test('removing a row that carries config is refused before anything changes', async () => {
+    const settingsPath = tempSettings()
+    const text =
+      "plugins:\n  - id: session-jsonl\n    name: '@jozo-harness/session-jsonl'\n    config:\n      root: /tmp/sessions\n"
+    writeFileSync(settingsPath, text)
+    const host = makePluginHost({
+      rows: [
+        {
+          id: 'session-jsonl',
+          name: '@jozo-harness/session-jsonl',
+          config: { root: '/tmp/sessions' },
+        },
+      ],
+      plugins: bundledPlugins,
+      settingsPath,
+      ask: await Effect.runPromise(makeAsk()),
+      unmount: () => Effect.sync(() => ({ detached: true, tools: [] })),
+    })
+
+    const failed = await Effect.runPromise(
+      Effect.flip(host.change({ kind: 'remove', id: 'session-jsonl' })),
+    )
+
+    expect(failed.code).toBe('invalid-arguments')
+    expect(failed.message).toContain('carries config')
+    expect(readFileSync(settingsPath, 'utf8')).toBe(text)
+    expect(host.rows()).toHaveLength(1)
+  })
+
+  test('removing a row this run did not wire only changes the settings', async () => {
+    const settingsPath = tempSettings()
+    writeFileSync(settingsPath, "plugins:\n  - id: tier1\n    name: '@jozo-harness/tools-tier1'\n")
+    const host = makePluginHost({
+      rows: [{ id: 'tier1', name: '@jozo-harness/tools-tier1' }],
+      plugins: bundledPlugins,
+      settingsPath,
+      ask: await Effect.runPromise(makeAsk()),
+      unmount: () => Effect.succeed({ detached: false, tools: [] }),
+    })
+
+    const outcome = await Effect.runPromise(host.change({ kind: 'remove', id: 'tier1' }))
+
+    expect(outcome.detached).toBe(false)
+    expect(outcome.rows).toEqual([])
+    // The run still holds the row, so list keeps naming it until the next start.
+    expect(host.rows()).toHaveLength(1)
+    expect(readFileSync(settingsPath, 'utf8')).toBe('')
   })
 
   test('a mount failure writes nothing and leaves the rows as they were', async () => {

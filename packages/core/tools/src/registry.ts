@@ -20,6 +20,12 @@ type AnyTool = ToolDefinition<any, any>
 export interface ToolRegistry {
   /** Registers a tool until the surrounding scope closes. */
   register<A, V>(tool: ToolDefinition<A, V>): Effect.Effect<void, ToolError, Scope.Scope>
+  /**
+   * Withdraws a tool from what the next request is offered. A call already chosen
+   * for the step that is running still runs, so taking a row away never cuts a
+   * step short; the scope that registered the tool releases whatever it built.
+   */
+  retire(name: string): void
   /** Registers a monotonic policy check until the surrounding scope closes. */
   guard(guard: ToolGuard): Effect.Effect<void, never, Scope.Scope>
   /** Registers a tool filter until the surrounding scope closes. */
@@ -45,8 +51,13 @@ export const toolDeclaration = (tool: AnyTool): ToolSchema => {
 /** Builds a tool registry over one hook registry. */
 export function makeTools(hooks: HookRegistry): ToolRegistry {
   const registered = new Map<string, AnyTool>()
+  // A retired tool is no longer offered, but the step that chose it may still call
+  // it; the entry stays until its scope closes or another row claims the name.
+  const retired = new Map<string, AnyTool>()
   const guards = new Set<ToolGuard>()
   const restrictions = new Set<ToolRestriction>()
+
+  const toolNamed = (name: string): AnyTool | undefined => registered.get(name) ?? retired.get(name)
 
   const allowed = (tool: string): boolean =>
     [...restrictions].every((restriction) => restriction.allows(tool))
@@ -63,12 +74,21 @@ export function makeTools(hooks: HookRegistry): ToolRegistry {
           )
         }
         registered.set(tool.name, tool)
+        retired.delete(tool.name)
         yield* Effect.addFinalizer(() =>
           Effect.sync(() => {
             if (registered.get(tool.name) === tool) registered.delete(tool.name)
+            if (retired.get(tool.name) === tool) retired.delete(tool.name)
           }),
         )
       }),
+
+    retire: (name) => {
+      const tool = registered.get(name)
+      if (tool === undefined) return
+      registered.delete(name)
+      retired.set(name, tool)
+    },
 
     guard: (guard) =>
       Effect.gen(function* () {
@@ -88,14 +108,14 @@ export function makeTools(hooks: HookRegistry): ToolRegistry {
         .map((tool) => toolDeclaration(tool)),
 
     isConcurrencySafe: (tool, argumentsJson) => {
-      const definition = registered.get(tool)
+      const definition = toolNamed(tool)
       if (definition?.isConcurrencySafe === undefined) return false
       const decoded = tryDecodeArguments(definition, argumentsJson)
       return Option.isSome(decoded) && definition.isConcurrencySafe(decoded.value)
     },
 
     call: (request) => {
-      const tool = registered.get(request.tool)
+      const tool = toolNamed(request.tool)
       if (tool === undefined) {
         return Effect.succeed(
           errorResult(`unknown tool: ${request.tool}`, toolErrorInfo('unknown-tool')),
@@ -110,7 +130,7 @@ export function makeTools(hooks: HookRegistry): ToolRegistry {
     },
 
     presentCall: (tool, argumentsJson) => {
-      const definition = registered.get(tool)
+      const definition = toolNamed(tool)
       const fallback = { summary: callSummary(tool, argumentsJson) }
       if (definition?.presentCall === undefined) return fallback
       const decoded = tryDecodeArguments(definition, argumentsJson)
@@ -118,7 +138,7 @@ export function makeTools(hooks: HookRegistry): ToolRegistry {
     },
 
     presentResult: (tool, argumentsJson, result) => {
-      const definition = registered.get(tool)
+      const definition = toolNamed(tool)
       if (definition?.presentResult === undefined) return result
       const decoded = tryDecodeArguments(definition, argumentsJson)
       return Option.isSome(decoded) ? definition.presentResult(decoded.value, result) : result
