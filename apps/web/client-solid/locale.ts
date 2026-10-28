@@ -62,7 +62,8 @@ const english = {
   'settings.panelHide': 'hide',
   'settings.panelShow': 'show',
   'settings.panelHidden': 'hidden',
-  'settings.panelHint': 'The order stays in this browser; the last visible tab cannot be put away.',
+  'settings.panelHint':
+    'The order stays in this browser. The last visible tab and the settings tab stay.',
   'settings.reading': 'reading the settings…',
   'settings.run': 'run',
   'settings.model': 'model',
@@ -372,7 +373,7 @@ const japanese: Partial<Record<MessageKey, string>> = {
   'settings.panelHide': '隠す',
   'settings.panelShow': '表示',
   'settings.panelHidden': '非表示',
-  'settings.panelHint': 'この並びはこのブラウザに残ります。最後の 1 枚は隠せません。',
+  'settings.panelHint': 'この並びはこのブラウザに残ります。最後の 1 枚と設定タブは隠せません。',
   'settings.reading': '設定を読んでいます…',
   'settings.run': '実行',
   'settings.model': 'モデル',

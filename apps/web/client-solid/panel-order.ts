@@ -81,7 +81,8 @@ export const canPanelMove = (panels: KeptPanels, tab: PanelTab, delta: number): 
 
 /**
  * Hides or restores one tab. The last visible tab cannot be put away, so the
- * strip never comes up empty; restoring puts the tab back at the end.
+ * strip never comes up empty, and the settings tab stays because it is where
+ * the others come back from. Restoring puts the tab back at the end.
  */
 export const withPanelHidden = (panels: KeptPanels, tab: PanelTab, hidden: boolean): KeptPanels => {
   if (!hidden) {
@@ -93,7 +94,7 @@ export const withPanelHidden = (panels: KeptPanels, tab: PanelTab, hidden: boole
   }
   if (panels.hidden.includes(tab)) return panels
   if (!panels.order.includes(tab)) return panels
-  if (panels.order.length <= 1) return panels
+  if (tab === 'settings' || panels.order.length <= 1) return panels
   return {
     order: panels.order.filter((one) => one !== tab),
     hidden: [...panels.hidden, tab],

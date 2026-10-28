@@ -1437,7 +1437,7 @@ const Settings = (props: {
                 class="panel-order-hide"
                 type="button"
                 data-panel-hide={kind}
-                disabled={props.panels.order.length <= 1}
+                disabled={kind === 'settings' || props.panels.order.length <= 1}
                 onClick={() => props.onPanels(withPanelHidden(props.panels, kind, true))}
               >
                 {t('settings.panelHide')}

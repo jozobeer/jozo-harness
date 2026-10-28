@@ -1598,6 +1598,14 @@ describe('the Solid page', () => {
   })
 
   test('the settings list refuses to put away the last visible tab', () => {
+    // Settings is where the others come back from, so its own hide stays off.
+    const fresh = makeStore({ pane: { kind: 'settings' } })
+    const shown = render(() => <ContextPane store={fresh.store} />)
+    expect(
+      (shown.container.querySelector('[data-panel-hide="settings"]') as HTMLButtonElement).disabled,
+    ).toBe(true)
+    shown.unmount()
+
     localStorage.clear()
     localStorage.setItem(
       PANEL_ORDER_KEY,

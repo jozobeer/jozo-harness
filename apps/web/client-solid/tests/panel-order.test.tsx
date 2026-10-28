@@ -67,9 +67,11 @@ describe('the right pane tab order', () => {
     expect(withPanelHidden(DEFAULT_PANELS, 'files', false)).toBe(DEFAULT_PANELS)
   })
 
-  test('the last visible tab cannot be put away, and a saved empty strip shows every tab', () => {
+  test('the last visible tab and the settings tab cannot be put away', () => {
     const one = { order: ['run'] as const, hidden: PANEL_KINDS.filter((tab) => tab !== 'run') }
     expect(withPanelHidden(one, 'run', true)).toBe(one)
+    // Settings holds the list that brings the others back, so it stays reachable.
+    expect(withPanelHidden(DEFAULT_PANELS, 'settings', true)).toBe(DEFAULT_PANELS)
     expect(panelsFrom(JSON.stringify({ order: [], hidden: [...PANEL_KINDS] }))).toEqual(
       DEFAULT_PANELS,
     )
