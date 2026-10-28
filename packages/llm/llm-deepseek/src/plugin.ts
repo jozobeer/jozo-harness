@@ -1,4 +1,4 @@
-import { Llm } from '@jozo-harness/llm'
+import { Llm, outboundFetch } from '@jozo-harness/llm'
 import type { Plugin } from '@jozo-harness/kernel'
 import { Layer, Schema } from 'effect'
 import { deepSeekMessagesAdapter } from './adapter.ts'
@@ -29,7 +29,7 @@ export const llmDeepSeekConfig = Schema.Struct({
  * never inferred from a URL, so switching the route is always explicit.
  */
 export const makeLlmDeepSeekPlugin = (
-  send: typeof fetch = fetch,
+  send: typeof fetch = outboundFetch,
 ): Plugin<typeof llmDeepSeekConfig.Type, Llm, never> => ({
   name: '@jozo-harness/llm-deepseek',
   config: llmDeepSeekConfig,
