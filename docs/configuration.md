@@ -133,7 +133,7 @@ route は `opencode/<model>`、wire に送る model は `<model>` そのもの�
 |---|---|---|
 | `model` | どの行でも | `provider/model`。`--model` と設定ファイルの `model` が無いときにルートになる |
 | `effort` | どの行でも | provider に渡す reasoning effort。`--effort` と設定ファイルの `effort` が無いときに効く |
-| `maxSpillTokens` | どの行でも | tool の出力がこのトークン数を超えたら、ファイルに退避して頭と尾だけをモデルに返す。推定は 4 バイト = 1 トークン。既定は 8000。退避先は jzh home の `spill/<sessionId>/`（0700、7日で掃除）、jzh home が無ければ一時ディレクトリ。`read` の結果は対象外で、`… middle omitted` の行にあるパスを `read` の offset/limit で読み直せる。画像は base64 を本文に残さず、`read_image` に渡せるパスの locator に置き換える |
+| `maxSpillTokens` | どの行でも | tool の出力がこのトークン数を超えたら、ファイルに退避して頭と尾だけをモデルに返す。推定は 4 バイト = 1 トークン。既定は 8000。退避先は jzh home の `spill/<sessionId>/`（0700、7日で掃除）、jzh home が無ければ一時ディレクトリ。`read` と `read_image` の結果は対象外で、`… middle omitted` の行にあるパスを `read` の offset/limit で読み直せる。画像は base64 を本文に残さず、`read_image` に渡せるパスの locator に置き換える |
 | `planMode` | `@jozo-harness/safety` の行 | `true` でワークスペースを変える tool を外す。モデルは `exit_plan_mode` で計画を出し、ユーザーが承認したときだけ解除される。解除は `plan/mode` としてログに残るので、`--resume` したセッションは解除済みで始まる |
 
 ## コマンドライン
