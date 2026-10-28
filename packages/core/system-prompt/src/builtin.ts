@@ -13,6 +13,11 @@ export const IDENTITY_ORDER = 0
 export const TOOL_GUIDANCE_ORDER = 100
 export const TOOL_SIGNATURE_ORDER = 110
 
+/** Deployment prose opens the prompt, before the harness identity. */
+export const PERSONA_BEFORE_ORDER = -10
+/** Deployment prose follows the identity and precedes the tool guidance. */
+export const PERSONA_AFTER_ORDER = 10
+
 /** The facts the harness owns itself, between the plugin ones. */
 export const CWD_CONTEXT_ORDER = 10
 export const TIME_CONTEXT_ORDER = 30
@@ -25,6 +30,8 @@ export const timeLine = (now: number): string =>
   'time: ' + new Date(Math.floor(now / TIME_BUCKET_MS) * TIME_BUCKET_MS).toISOString()
 
 export const IDENTITY_SECTION = 'jzh:identity'
+export const PERSONA_BEFORE_SECTION = 'jzh:persona-before'
+export const PERSONA_AFTER_SECTION = 'jzh:persona-after'
 export const TOOL_GUIDANCE_SECTION = 'jzh:tool-guidance'
 export const TOOL_SIGNATURE_SECTION = 'jzh:tool-signatures'
 
@@ -115,9 +122,17 @@ const TOOL_GUIDANCE: ReadonlyArray<readonly [name: string, line: string]> = [
   ],
 ]
 
+/** Deployment prose around the identity. Blank parts add no section. */
+export interface PersonaText {
+  readonly before?: string
+  readonly after?: string
+}
+
 export interface BuiltinOptions {
   /** Introduces the harness in the prompt. */
   readonly includeHarnessIdentity?: boolean
+  /** Prose a deployment puts before and after the identity, separate from it. */
+  readonly persona?: PersonaText
   /** Tool usage lines, shown only for tools this assembly can call. */
   readonly includeToolGuidance?: boolean
   /** The argument and result type of every tool this assembly can call. */
@@ -151,11 +166,29 @@ export function builtinContexts(options: BuiltinOptions = {}): ReadonlyArray<Run
   ]
 }
 
+/**
+ * Persona prose is deployment text, not a template: surrounding whitespace is not
+ * content, so a blank or whitespace-only value adds no section and leaves no gap.
+ */
+const personaText = (text: string | undefined): string | undefined => {
+  if (text === undefined) return undefined
+  const trimmed = text.trim()
+  return trimmed === '' ? undefined : trimmed
+}
+
 /** The sections every jozo-harness prompt starts from. */
 export function builtinSections(options: BuiltinOptions = {}): ReadonlyArray<PromptSection> {
   const sections: Array<PromptSection> = []
+  const before = personaText(options.persona?.before)
+  if (before !== undefined) {
+    sections.push({ name: PERSONA_BEFORE_SECTION, order: PERSONA_BEFORE_ORDER, text: before })
+  }
   if (options.includeHarnessIdentity ?? true) {
     sections.push({ name: IDENTITY_SECTION, order: IDENTITY_ORDER, text: IDENTITY_TEXT })
+  }
+  const after = personaText(options.persona?.after)
+  if (after !== undefined) {
+    sections.push({ name: PERSONA_AFTER_SECTION, order: PERSONA_AFTER_ORDER, text: after })
   }
   if (options.includeToolGuidance ?? true) {
     sections.push({ name: TOOL_GUIDANCE_SECTION, order: TOOL_GUIDANCE_ORDER, text: toolGuidance })
