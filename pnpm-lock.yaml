@@ -609,6 +609,9 @@ importers:
       '@jozo-harness/kernel':
         specifier: workspace:*
         version: link:../../kernel/kernel
+      '@jozo-harness/safety':
+        specifier: workspace:*
+        version: link:../../core/safety
       '@jozo-harness/session':
         specifier: workspace:*
         version: link:../../core/session

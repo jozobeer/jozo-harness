@@ -21,6 +21,42 @@ export interface AskQuestion {
   readonly multiSelect: boolean
 }
 
+/**
+ * Turns the one string a single-question UI returns into the batch answer shape.
+ * A label selects that option, several comma-separated labels select several,
+ * and anything else is free-form text.
+ */
+export const answerOf = (question: AskQuestion, answer: string): AskAnswer => {
+  const labels = question.options.map((option) => option.label)
+  const selected = question.multiSelect
+    ? answer
+        .split(',')
+        .map((part) => part.trim())
+        .filter((part) => part !== '')
+    : [answer]
+  if (selected.length > 0 && selected.every((label) => labels.includes(label))) {
+    return { id: question.id, selected }
+  }
+  return {
+    id: question.id,
+    selected: [],
+    ...(answer === '' ? {} : { custom: answer }),
+  }
+}
+
+/** The user message that carries a late answer back into the session. */
+export const lateAnswerMessage = (answered: AskBatchAnswered): string =>
+  'The user answered ask_user call ' +
+  answered.callId +
+  ':\n' +
+  answered.answers
+    .map((answer) => {
+      const parts = [...answer.selected]
+      if (answer.custom !== undefined && answer.custom !== '') parts.push(answer.custom)
+      return '- ' + answer.id + ': ' + (parts.length === 0 ? '(skipped)' : parts.join(', '))
+    })
+    .join('\n')
+
 /** A batch of questions one tool call asks at once. */
 export interface AskBatchRequested {
   /** The tool call that asked, so a late answer can name it. */
@@ -105,7 +141,8 @@ const AskBatchRequestedSchema = Schema.Struct({
   questions: Schema.Array(AskQuestionSchema),
 })
 
-const AskAnswerSchema = Schema.Struct({
+/** The answer shape a UI sends back for one question. */
+export const AskAnswerSchema = Schema.Struct({
   id: Schema.String,
   selected: Schema.Array(Schema.String),
   custom: Schema.optionalKey(Schema.String),

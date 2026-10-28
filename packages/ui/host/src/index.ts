@@ -9,6 +9,8 @@ import {
   type SessionEvent,
 } from '@jozo-harness/session'
 import { loadSkill, type LoadedSkill } from '@jozo-harness/tools-tier1'
+import type { AskAnswer, AskBatchRequested, AskQuestion } from '@jozo-harness/safety'
+import { answerOf } from '@jozo-harness/safety'
 import type { SubmitMode, UiEvent, UiHost } from '@jozo-harness/ui-protocol'
 import { Deferred, Effect, Queue, Stream, type Scope } from 'effect'
 
@@ -96,7 +98,7 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
         approvals.set(event.data.callId, Deferred.makeUnsafe<boolean>())
       }
       if (event.type === 'safety/approval/answered') approvals.delete(event.data.callId)
-      if (event.type === 'interaction/ask/requested') {
+      if (event.type === 'interaction/ask/requested' && !asks.has(event.data.id)) {
         asks.set(event.data.id, Deferred.makeUnsafe<string>())
       }
       if (event.type === 'interaction/ask/answered') asks.delete(event.data.id)
@@ -138,6 +140,34 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
         const pending = waiting.get(key)
         return pending === undefined ? missing : yield* Deferred.await(pending)
       })
+
+    /**
+     * Asks a batch one question at a time through the existing question card.
+     * The log keeps the batch call id and the questions, so a late answer still
+     * names the call it belongs to even though the card shows one question.
+     */
+    const serveQuestions = (request: AskBatchRequested): Effect.Effect<ReadonlyArray<AskAnswer>> =>
+      Effect.forEach(
+        request.questions,
+        (question: AskQuestion) =>
+          Effect.gen(function* () {
+            const id = request.callId + '/' + question.id
+            const pending = yield* Deferred.make<string>()
+            asks.set(id, pending)
+            yield* options.session.append('interaction/ask/requested', {
+              id,
+              question:
+                question.header === undefined
+                  ? question.question
+                  : question.header + '\n\n' + question.question,
+              options: question.options.map((option) => option.label),
+            })
+            const answer = yield* Deferred.await(pending)
+            yield* options.session.append('interaction/ask/answered', { id, answer })
+            return answerOf(question, answer)
+          }),
+        { concurrency: 1 },
+      ).pipe(Effect.orDie)
 
     /** Whether the registry answers this name; a command keeps a name a skill also has. */
     const commandAnswers = (name: string): boolean =>
@@ -273,5 +303,6 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
       // Without a request there is nothing to allow: deny rather than hang.
       answerApproval: (request) => waitFor(approvals, request.callId, false),
       answerAsk: (request) => waitFor(asks, request.id, ''),
+      serveQuestions,
     }
   })

@@ -35,7 +35,9 @@ const textTurn = (text: string): ReadonlyArray<StreamChunk> => [
   { type: 'finish', kind: 'stop' },
 ]
 
-const stubLlm: Plugin<{}, Llm, never> = {
+const stubLlmFor = (
+  scripts: ReadonlyArray<ReadonlyArray<StreamChunk>>,
+): Plugin<{}, Llm, never> => ({
   name: 'stub-llm',
   config: Schema.Struct({}),
   provides: [Llm],
@@ -51,14 +53,36 @@ const stubLlm: Plugin<{}, Llm, never> = {
         promptCacheControl: false,
       },
       stream: () => {
-        const scripts = [callAsk, textTurn('thanks')]
         const script = scripts[call] ?? []
         call += 1
         return Stream.fromIterable(script)
       },
     } satisfies LlmAdapter)
   },
-}
+})
+
+const stubLlm = stubLlmFor([callAsk, textTurn('thanks')])
+
+const callBatch: ReadonlyArray<StreamChunk> = [
+  {
+    type: 'block-end',
+    index: 0,
+    block: {
+      type: 'tool-call',
+      id: 'c1',
+      name: 'ask_user',
+      arguments: JSON.stringify({
+        questions: [
+          { id: 'colour', question: 'which colour?', options: ['blue', 'red'] },
+          { id: 'size', question: 'which size?', options: ['small', 'large'] },
+        ],
+      }),
+    },
+  },
+  { type: 'finish', kind: 'tool-calls' },
+]
+
+const stubBatchLlm = stubLlmFor([callBatch, textTurn('done')])
 
 const profile = (root: string): string =>
   [
@@ -139,6 +163,58 @@ describe('ask_user through the command', () => {
     )
     expect(types.indexOf('tool/result')).toBeGreaterThan(types.indexOf('interaction/ask/answered'))
     expect(JSON.stringify(result)).toContain('blue')
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('one call asks several questions and the log names the call with every answer', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-ask-batch-'))
+    const asked: Array<string> = []
+
+    const code = await Effect.runPromise(
+      runCommand({
+        profiles: [profile(root)],
+        plugins: [
+          kernelPlugin,
+          sessionJsonlPlugin,
+          sessionPlugin,
+          toolsPlugin,
+          systemPromptPlugin,
+          safetyPlugin,
+          askPlugin,
+          tier1Plugin,
+          stubBatchLlm,
+          agentPlugin,
+          agentLoopPlugin,
+        ] as ReadonlyArray<Plugin<any, any, any>>,
+        cwd: '/tmp',
+        route: 'stub/model',
+        task: 'ask me two things',
+        answer: (request) =>
+          Effect.sync(() => {
+            asked.push(request.question)
+            return request.question === 'which colour?' ? 'blue' : 'large'
+          }),
+        stdout: () => undefined,
+        stderr: () => undefined,
+      }),
+    )
+    expect(code).toBe(0)
+
+    const sessions = await Effect.runPromise(jsonlSessions({ root }).list())
+    const opened = await Effect.runPromise(jsonlSessions({ root }).open(sessions[0]?.id ?? ''))
+    const answers = opened.events.find((event) => event.type === 'interaction/ask/answers')
+    const result = opened.events.find((event) => event.type === 'tool/result')
+
+    expect(asked).toEqual(['which colour?', 'which size?'])
+    expect(answers?.data).toEqual({
+      callId: 'c1',
+      answers: [
+        { id: 'colour', selected: ['blue'] },
+        { id: 'size', selected: ['large'] },
+      ],
+    })
+    expect(JSON.stringify(result)).toContain('blue')
+    expect(JSON.stringify(result)).toContain('large')
     await rm(root, { recursive: true, force: true })
   })
 
