@@ -1,9 +1,11 @@
 import {
   QuoteSchema,
+  ReferenceSchema,
   USER_MESSAGE_SOURCES,
   registerLogOnlySessionEvents,
   registerSessionEventSchemas,
   type Quote,
+  type Reference,
   type SessionEventSchemaMap,
   type UserMessageSource,
 } from '@jozo-harness/session'
@@ -18,6 +20,8 @@ export interface UserMessage {
   readonly source: UserMessageSource
   /** Passages the human quoted; they travel with the message to the log. */
   readonly quotes?: ReadonlyArray<Quote>
+  /** Files and sessions the human attached with @; they travel with the message to the log. */
+  readonly references?: ReadonlyArray<Reference>
 }
 
 declare module '@jozo-harness/session/events' {
@@ -33,6 +37,7 @@ const UserMessageSchema = Schema.Struct({
   // One list of sources, so a new one cannot be accepted here but refused by the log.
   source: Schema.Literals(USER_MESSAGE_SOURCES),
   quotes: Schema.optionalKey(Schema.Array(QuoteSchema)),
+  references: Schema.optionalKey(Schema.Array(ReferenceSchema)),
 })
 
 const InboxEventDataSchema = Schema.Struct({

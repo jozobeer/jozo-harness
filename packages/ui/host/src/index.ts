@@ -3,10 +3,12 @@ import { repairInterruptedRun } from '@jozo-harness/agent-loop'
 import type { HookRegistry } from '@jozo-harness/kernel'
 import {
   clipQuotes,
+  clipReferences,
   parseCommand,
   rateFeedback,
   type CommandsShape,
   type Quote,
+  type Reference,
   type Session,
   type SessionError,
   type SessionEvent,
@@ -201,6 +203,7 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
         readonly text: string
         readonly source: 'user'
         readonly quotes?: ReadonlyArray<Quote>
+        readonly references?: ReadonlyArray<Reference>
       },
       mode: SubmitMode,
     ): Effect.Effect<void, SessionError> =>
@@ -246,15 +249,25 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
         if (loaded.input !== '') yield* deliver({ text: loaded.input, source: 'user' }, mode)
       })
 
-    /** The message the agent receives: the human's words, and the passages they quoted. */
+    /**
+     * The message the agent receives: the human's words, and the passages they
+     * quoted and the files and sessions they attached.
+     */
     const quotedMessage = (
       text: string,
       quotes: ReadonlyArray<Quote>,
+      references: ReadonlyArray<Reference>,
     ): {
       readonly text: string
       readonly source: 'user'
       readonly quotes?: ReadonlyArray<Quote>
-    } => (quotes.length === 0 ? { text, source: 'user' } : { text, source: 'user', quotes })
+      readonly references?: ReadonlyArray<Reference>
+    } => ({
+      text,
+      source: 'user',
+      ...(quotes.length === 0 ? {} : { quotes }),
+      ...(references.length === 0 ? {} : { references }),
+    })
 
     /**
      * A line from the page becomes a forced skill, a command, or the agent's
@@ -266,11 +279,14 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
       text: string,
       mode: SubmitMode,
       quotes?: ReadonlyArray<Quote>,
+      references?: ReadonlyArray<Reference>,
     ): Effect.Effect<void, SessionError> =>
       Effect.gen(function* () {
-        // Quotations travel with the body, and both empty is nothing to send.
+        // Quotations and attachments travel with the body, and all empty is nothing
+        // to send.
         const selected = clipQuotes(quotes ?? [])
-        if (text.trim() === '' && selected.length === 0) return
+        const attached = clipReferences(references ?? [])
+        if (text.trim() === '' && selected.length === 0 && attached.length === 0) return
         // A slash the registry does not answer may still name a skill; the loaded
         // skill becomes the turn's input, and its arguments become the message.
         const loaded = yield* forcedSkillOf(text)
@@ -288,7 +304,7 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
                 setEffort: (effort) => options.agent.setEffort(effort),
               })
         if (outcome !== undefined) return
-        yield* deliver(quotedMessage(text, selected), mode)
+        yield* deliver(quotedMessage(text, selected, attached), mode)
       })
 
     return {
@@ -312,7 +328,8 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
       ),
       // A command is answered without consuming a turn; its answer reaches the UI
       // through the session events, so a reconnecting client sees it too.
-      submit: (text, mode = 'queue', quotes) => submitLine(text, mode, quotes),
+      submit: (text, mode = 'queue', quotes, references) =>
+        submitLine(text, mode, quotes, references),
       approve: (callId, approved) => Effect.asVoid(settle(approvals, callId, approved)),
       /**
        * A question only lives in the run that asked it: a session reopened from
