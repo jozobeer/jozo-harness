@@ -1,5 +1,5 @@
 import { Data, Effect, Schema } from 'effect'
-import type { SessionSeq } from './events.ts'
+import type { SessionEvent, SessionSeq } from './events.ts'
 import type { SessionError } from './errors.ts'
 import type { Session } from './session.ts'
 import { registerLogOnlySessionEvents } from './projections.ts'
@@ -53,20 +53,11 @@ export class FeedbackError extends Data.TaggedError('FeedbackError')<{
 }> {}
 
 /** The newest assistant message that said something: the answer a bare rating names. */
-export const newestAnswerSeq = (
-  events: ReadonlyArray<{ readonly type: string; readonly seq: number; readonly data: unknown }>,
-): SessionSeq | undefined => {
+export const newestAnswerSeq = (events: ReadonlyArray<SessionEvent>): SessionSeq | undefined => {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
     if (event?.type !== 'assistant/message') continue
-    const content = (
-      event.data as {
-        readonly content?: ReadonlyArray<{ readonly type: string; readonly text?: string }>
-      }
-    ).content
-    if (
-      content?.some((block) => block.type === 'text' && (block.text ?? '').trim() !== '') === true
-    ) {
+    if (event.data.content.some((block) => block.type === 'text' && block.text.trim() !== '')) {
       return event.seq
     }
   }
@@ -75,13 +66,12 @@ export const newestAnswerSeq = (
 
 /** The latest rating of every target; a second rating of one answer replaces the first. */
 export const feedbackOf = (
-  events: ReadonlyArray<{ readonly type: string; readonly data: unknown }>,
+  events: ReadonlyArray<SessionEvent>,
 ): ReadonlyMap<SessionSeq, FeedbackRatedData> => {
   const byTarget = new Map<SessionSeq, FeedbackRatedData>()
   for (const event of events) {
     if (event.type !== 'feedback/rated') continue
-    const data = event.data as FeedbackRatedData
-    byTarget.set(data.target, data)
+    byTarget.set(event.data.target, event.data)
   }
   return byTarget
 }
