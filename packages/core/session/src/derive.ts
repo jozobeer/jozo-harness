@@ -26,7 +26,12 @@ const toMessage = (event: SessionEvent): ReadonlyArray<RequestMessage> => {
       return [
         {
           role: 'user',
-          content: [{ type: 'text', text: renderUserText(event.data.text, event.data.quotes) }],
+          content: [
+            {
+              type: 'text',
+              text: renderUserText(event.data.text, event.data.quotes, event.data.references),
+            },
+          ],
         },
       ]
     case 'assistant/message':
