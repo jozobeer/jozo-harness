@@ -1,4 +1,5 @@
 export * from './assembler.ts'
+export * from './proxy.ts'
 export * from './assistant-stream.ts'
 export * from './schemas.ts'
 export * from './service.ts'
