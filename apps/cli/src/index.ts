@@ -1779,9 +1779,15 @@ const runReadingOf = (
     )
     // What the provider takes for an effort is the adapter's to say; a page only offers it.
     const efforts = Context.get(context, Llm).capabilities.reasoningEffort ?? []
+    // A reader must not take the write lock: an @ reference or a fork may name the
+    // very session this server has open, and opening it again would claim its log.
+    const readSessionEvents = (id: string) =>
+      persistence.read === undefined
+        ? persistence.open(id).pipe(Effect.map((opened) => opened.events))
+        : persistence.read(id)
     return {
       listSessions: () => sessions.list(),
-      readSessionEvents: (id) => persistence.open(id).pipe(Effect.map((opened) => opened.events)),
+      readSessionEvents,
       searchSessions: (text) => (text.trim() === '' ? Effect.succeed([]) : query.search(text)),
       efforts,
     }
