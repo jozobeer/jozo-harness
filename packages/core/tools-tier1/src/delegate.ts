@@ -113,15 +113,8 @@ export const makeDelegateTool = (
           }),
         )
       }
-      const program = argv[0]
-      if (program === undefined) {
-        return yield* Effect.fail(
-          new ToolError({
-            code: 'invalid-arguments',
-            message: 'delegate refused: the config for ' + args.command + ' has an empty argv',
-          }),
-        )
-      }
+      // delegateArgv appends the task, so a configured name always yields a program.
+      const program = argv[0] ?? args.command
       if (!host.hasProgram(program)) {
         return yield* Effect.fail(
           new ToolError({

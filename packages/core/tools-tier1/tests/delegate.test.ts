@@ -139,4 +139,40 @@ describe('delegate tool', () => {
     expect(value?.text.length).toBe(MAX_DELEGATE_OUTPUT)
     expect(value?.truncated).toBe(true)
   })
+
+  test('fails the call when the agent exits non-zero, naming the code and what it said', async () => {
+    const host = hostOf(['codex'], async () => ({
+      exitCode: 2,
+      stdout: '',
+      stderr: 'boom\n',
+    }))
+
+    const { error } = await delegate({ command: 'codex', task: 't' }, host)
+
+    expect(error?.code).toBe('unavailable')
+    expect(error?.message).toContain('exit 2')
+    expect(error?.message).toContain('boom')
+  })
+
+  test('reports a host that cannot start the program, rather than failing the turn', async () => {
+    const host = hostOf(['codex'], async () => {
+      throw new Error('spawn EACCES')
+    })
+
+    const { error } = await delegate({ command: 'codex', task: 't' }, host)
+
+    expect(error?.code).toBe('unavailable')
+    expect(error?.message).toContain('spawn EACCES')
+  })
+
+  test('names the agent in the call and the result, and may run beside another call', () => {
+    const tool = makeDelegateTool(allowed, noneSandbox, hostOf(['codex']))
+    const args = { command: 'codex', task: 't' }
+
+    expect(tool.presentCall?.(args)).toMatchObject({ summary: 'delegate to codex' })
+    expect(tool.presentResult?.(args, { isError: false, summary: '' })).toMatchObject({
+      summary: 'delegated to codex',
+    })
+    expect(tool.isConcurrencySafe?.(args)).toBe(true)
+  })
 })
