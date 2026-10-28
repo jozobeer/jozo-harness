@@ -1,0 +1,13 @@
+{
+  "name": "@jozo-harness/hooks-json",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@jozo-harness/kernel": "workspace:*",
+    "@jozo-harness/process": "workspace:*",
+    "@jozo-harness/safety": "workspace:*",
+    "@jozo-harness/tools": "workspace:*",
+    "effect": "4.0.3"
+  }
+}

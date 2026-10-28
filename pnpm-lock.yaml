@@ -412,6 +412,24 @@ importers:
         specifier: 4.0.3
         version: 4.0.3
 
+  packages/core/hooks-json:
+    dependencies:
+      '@jozo-harness/kernel':
+        specifier: workspace:*
+        version: link:../../kernel/kernel
+      '@jozo-harness/process':
+        specifier: workspace:*
+        version: link:../../kernel/process
+      '@jozo-harness/safety':
+        specifier: workspace:*
+        version: link:../safety
+      '@jozo-harness/tools':
+        specifier: workspace:*
+        version: link:../tools
+      effect:
+        specifier: 4.0.3
+        version: 4.0.3
+
   packages/core/safety:
     dependencies:
       '@jozo-harness/kernel':
