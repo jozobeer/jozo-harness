@@ -76,8 +76,8 @@ describe('bundled profile assembly', () => {
       status: 'idle',
       sessions: true,
       tools: 0,
-      // The prompt layer opens with the built-in identity and tool guidance.
-      prompt: ['jzh:identity', 'jzh:tool-guidance'],
+      // The prompt layer opens with the identity, tool guidance, and the visible signatures.
+      prompt: ['jzh:identity', 'jzh:tool-guidance', 'jzh:tool-signatures'],
       llm: false,
       preset: 'workspace-write',
     })
