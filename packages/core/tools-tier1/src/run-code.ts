@@ -114,7 +114,7 @@ const Parameters = Schema.Struct({
   runtime: Schema.optionalKey(
     Schema.Literals(['node', 'python']).annotate({
       description:
-        'Which runtime runs the code. Defaults to node. python runs the body with python3 as a plain script: no tool calls, and what it prints is the output.',
+        'Which runtime runs the code. Defaults to node. python runs the body as a python3 script, where a tool call is tools.name(...) and print is the output.',
     }),
   ),
 })
@@ -198,17 +198,36 @@ createInterface({ input: process.stdin }).on('line', (line) => {
 /**
  * The program that runs in the child when the runtime is python. It speaks the
  * same one-line-of-JSON protocol as the node bootstrap so the parent reads both
- * the same way, but a python program cannot reach other tools yet: the body runs
- * as a plain script and only its printed output comes back.
+ * the same way. A tool call is synchronous: the body waits on stdin while the
+ * parent runs the tool, and the answer becomes the call's value or exception.
  */
 const PYTHON_BOOTSTRAP = String.raw`
 import json, sys, traceback
 RS = chr(30)
-config = json.loads(sys.stdin.readline())
+def read_message():
+    line = sys.stdin.readline()
+    if line == '':
+        raise RuntimeError('run_code ended before the tool call was answered')
+    return json.loads(line)
+config = read_message()
 class Tools:
+    def __init__(self, names):
+        self._names = set(names)
+        self._next_id = 1
     def __getattr__(self, name):
-        raise RuntimeError('tools are not available in the python runtime yet: ' + name)
-namespace = {'tools': Tools()}
+        if name not in self._names:
+            raise AttributeError(name)
+        def call(**args):
+            call_id = self._next_id
+            self._next_id += 1
+            sys.stdout.write(RS + json.dumps({'t': 'call', 'id': call_id, 'name': name, 'args': args}) + '\n')
+            sys.stdout.flush()
+            message = read_message()
+            if not message.get('ok'):
+                raise RuntimeError(message.get('error') or 'tool ' + name + ' failed')
+            return message.get('value')
+        return call
+namespace = {'tools': Tools(config.get('tools') or [])}
 try:
     exec(compile(config.get('code') or '', '<run_code>', 'exec'), namespace, namespace)
     message = {'t': 'final'}
@@ -396,7 +415,7 @@ export const makeRunCodeTool = (
 ): ToolDefinition<{ readonly code: string; readonly runtime?: RunCodeRuntime }, RunCodeValue> => ({
   name: 'run_code',
   description:
-    'Runs a program you write in a child process and returns its output. The code is the body of an async function: call another tool as `await tools.name(args)` and the call reaches the same policy and sandbox as a direct call. Return the value the next step should read; console.log lines are returned too. Output past the limit is cut with a marker, and a program still running at the timeout is ended.',
+    'Runs a program you write in a child process and returns its output. The code is the body of an async function: call another tool as `await tools.name(args)` and the call reaches the same policy and sandbox as a direct call. Return the value the next step should read; console.log lines are returned too. With runtime python the code is a script that calls tools.name(...) and prints its output. Output past the limit is cut with a marker, and a program still running at the timeout is ended.',
   parameters: Parameters,
   output: {
     schema: Output,
@@ -418,14 +437,10 @@ export const makeRunCodeTool = (
                     new ToolError({ code: 'execution', message: 'sandbox: ' + error.message }),
                 ),
               )
-      // A python program cannot reach other tools yet, so it is not offered any.
-      const names =
-        runtime === 'node'
-          ? host
-              .tools()
-              .map((declaration) => declaration.name)
-              .filter((name) => name !== 'run_code')
-          : []
+      const names = host
+        .tools()
+        .map((declaration) => declaration.name)
+        .filter((name) => name !== 'run_code')
       return yield* Effect.acquireUseRelease(
         Effect.try({
           try: () =>
