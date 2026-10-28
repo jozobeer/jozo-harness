@@ -1,7 +1,13 @@
-import { Context, Effect, Layer, Schema } from 'effect'
+import { Context, Effect, Layer, Schema, type Scope } from 'effect'
 import type { Plugin } from '@jozo-harness/kernel'
 import { noneSandbox, type SandboxShape } from '@jozo-harness/safety'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
+import {
+  browserPrograms,
+  browserSessionTools,
+  makeBrowserSession,
+  systemBrowserSessionHost,
+} from './browser-session.ts'
 import { messageOf, programExists, reasonOf, runProcess } from './program.ts'
 
 const Parameters = Schema.Struct({
@@ -44,20 +50,6 @@ export const systemBrowserHost: BrowserHost = {
   hasProgram: programExists,
   run: (command) => runProcess(command.argv, command.cwd),
 }
-
-/**
- * The chrome builds tried in order. macOS ships Chrome in an app bundle rather
- * than on PATH, so the bundle's executable is the last fallback there.
- */
-export const browserPrograms = (platform: NodeJS.Platform): ReadonlyArray<string> =>
-  platform === 'darwin'
-    ? [
-        'google-chrome',
-        'chromium',
-        'chrome',
-        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-      ]
-    : ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser', 'chrome']
 
 /**
  * The argv that dumps the page's DOM, before the sandbox wraps it. Only a
@@ -204,17 +196,27 @@ export const makeBrowserTool = (
     }),
 })
 
-/** The browser tool, ready for whoever registers tools into the registry; the run's sandbox wraps it. */
+/**
+ * The browser tools, ready for whoever registers tools into the registry; the
+ * run's sandbox wraps the one-shot read, while the session browser owns chrome.
+ */
 export class BrowserTools extends Context.Service<
   BrowserTools,
-  (sandbox: SandboxShape) => ReadonlyArray<ToolDefinition<any, any>>
+  (
+    sandbox: SandboxShape,
+  ) => Effect.Effect<ReadonlyArray<ToolDefinition<any, any>>, never, Scope.Scope>
 >()('jozo-harness/BrowserTools') {}
 
-/** Loader definition for the browser tool; the row opts a session into reading pages. */
+/** Loader definition for the browser tools; the row opts a session into owning a browser. */
 export const browserPlugin: Plugin<{}, BrowserTools, never> = {
   name: '@jozo-harness/browser',
   config: Schema.Struct({}),
   provides: [BrowserTools],
   requires: [],
-  layer: () => Layer.succeed(BrowserTools, (sandbox) => [makeBrowserTool(sandbox)]),
+  layer: () =>
+    Layer.succeed(BrowserTools, (sandbox) =>
+      makeBrowserSession(systemBrowserSessionHost).pipe(
+        Effect.map((session) => [makeBrowserTool(sandbox), ...browserSessionTools(session)]),
+      ),
+    ),
 }
