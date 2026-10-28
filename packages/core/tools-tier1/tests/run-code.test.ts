@@ -547,6 +547,17 @@ describe('run_code', () => {
     expect(textOf(outcomes[1]?.content ?? [])).toContain('return: "undefined"')
   })
 
+  test('a child that exited is replaced on the next call', async () => {
+    const outcomes = await runCalls(makeRunCodeTool(host(() => Effect.succeed(ok('unused', {})))), [
+      { args: { code: 'process.exit(3)' } },
+      { args: { code: 'return 7' } },
+    ])
+
+    expect(outcomes[0]?.isError).toBe(true)
+    expect(outcomes[1]?.isError).toBe(false)
+    expect(textOf(outcomes[1]?.content ?? [])).toContain('return: 7')
+  })
+
   test('runs TypeScript after removing its annotations, as, and satisfies', async () => {
     const tool = makeRunCodeTool(host(() => Effect.succeed(ok('unused', {}))))
 

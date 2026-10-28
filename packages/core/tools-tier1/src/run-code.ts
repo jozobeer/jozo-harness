@@ -334,6 +334,8 @@ export interface SessionWorker {
       readonly answer: (call: ProtocolCall) => Promise<ProtocolResult>
     },
   ) => Promise<ProtocolFinal | undefined>
+  /** Whether the child is still there to run another program. */
+  readonly alive: () => boolean
   /** Ends the child; no program runs in it afterwards. */
   readonly kill: () => void
   /** The child's exit code, once it stopped. */
@@ -384,6 +386,7 @@ const makeWorker = (child: Child): SessionWorker => {
   let current: WorkerRun | undefined
   let answers: Promise<void> = Promise.resolve()
   let nextRid = 1
+  let ended = false
 
   const settle = (final: ProtocolFinal | undefined): void => {
     const running = current
@@ -419,9 +422,13 @@ const makeWorker = (child: Child): SessionWorker => {
   })
   // A child that ends leaves the program it was running without an answer; the
   // caller reports the exit code instead of waiting on a record that cannot come.
-  lines.on('close', () => settle(undefined))
+  lines.on('close', () => {
+    ended = true
+    settle(undefined)
+  })
 
   return {
+    alive: () => !ended,
     run: (code, tools, handlers) =>
       new Promise((resolve) => {
         if (current !== undefined) {
@@ -434,6 +441,7 @@ const makeWorker = (child: Child): SessionWorker => {
         child.stdin.write(JSON.stringify({ t: 'run', rid, code, tools }) + '\n')
       }),
     kill: () => {
+      ended = true
       settle(undefined)
       child.kill()
     },
@@ -689,6 +697,11 @@ export const makeRunCodeTool = (host: RunCodeHost): RunCodeTool => {
                   message: 'run_code could not run its program: ' + String(error),
                 }),
         }).pipe(
+          // A child that died is no longer the session's memory; forgetting it here
+          // lets the next call start a fresh one instead of writing to a closed pipe.
+          Effect.tapError(() =>
+            Effect.suspend(() => (worker.alive() ? Effect.void : sessions.discard(key))),
+          ),
           // A call that timed out must not leave the stuck program behind, waiting
           // on the next call's line; the next call gets a child of its own.
           Effect.onInterrupt(() => sessions.discard(key)),
