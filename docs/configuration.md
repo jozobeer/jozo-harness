@@ -60,11 +60,12 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 
 ## plugin が受け取る config キー
 
-同梱の plugin のうち `config` にキーを持つのは11個で、残りはキーを持たない。
+同梱の plugin のうち `config` にキーを持つのは12個で、残りはキーを持たない。
 
 | plugin | キー |
 |---|---|
 | `@jozo-harness/session-jsonl` | `root`（必須）— セッションログのディレクトリ |
+| `@jozo-harness/session-telemetry-otlp` | `endpoint` — OTLP/HTTP の base。`POST <endpoint>/v1/logs` に JSON を送る。末尾が `/v1/logs` ならそのまま使う。空なら送らない、`scope` — `off` / `feedback` / `all`（**既定は `off`**）。`feedback` は `feedback/rated` だけ、`all` はすべてのセッションイベントを送る、`headers` — リクエストに足すヘッダ、`identityPath` — 匿名 id のファイル（既定 `~/.jzh/anonymous-user-id`） |
 | `@jozo-harness/system-prompt` | `includeHarnessIdentity` — 冒頭の harness の自己紹介（`jzh:identity`）を出すか（既定 `true`）、`includeToolGuidance` — 見える tool の使い方の行を出すか（既定 `true`）、`tmuxContext` — runtime context に `tmux: session <name>, window <index>, pane <index>` を足すか（既定 `false`）。tmux の中にいるときだけ出し、外・tmux が無い・答えないときは行を出さない。セッション名・window index・pane index が変わったときだけ新しい snapshot になる、`devContext` — `jzh web` のセッションで、サーバが配信している GUI の URL を runtime context に `gui: <url>` として足すか（既定 `true`）。`--public-url` があればその origin、無ければ listen した loopback の URL を使う。URL は起動時に決まるので、同じ run なら同じバイト列になる。system prompt と既存の user メッセージの本文には入れず、別の user 文脈として届ける。`false` で行を出さない、`persona` — 配備ごとの文章。`before` は `jzh:identity` の前、`after` はその直後（tool guidance より前）に、identity とは別の section として入る。空文字・空白だけ・未設定の側は section を作らず、前後の空白は落とす。同じ設定なら同じバイト列になる |
 | `@jozo-harness/safety` | `preset`（必須）— `read-only` / `workspace-write` / `full` / `auto`。新しいセッションが従う sandbox モードを決める（走っているセッションは `/permission` か Run ペインで切り替える）。`auto` は `workspace-write` と同じ sandbox で、副作用のある呼び出しだけを実行前にモデルへ審査させる、`sandbox` — `none` / `auto` / `seatbelt` / `bwrap`（**既定は `auto`**。macOS では `seatbelt`、Linux では `bwrap` を選ぶ）、`writableRoots` — sandbox が書き込めるディレクトリ（既定はコマンドの cwd と一時ディレクトリ。ここに足す） |
 | `@jozo-harness/llm-deepseek` | `baseUrl`（必須）— Messages API の root（末尾が `/v1` でなければ adapter が補う）、`apiKeyEnv`（必須）— キーを持つ環境変数の名前、`apiKeyRef` — 値の代わりに `credentials.json` の参照名を置く。`apiKeyEnv` の名前がシェル・近い `.env`・`secrets.env` のどれにも無いときだけ読む、`maxTokens` — 1 応答の上限（既定 8192。リクエストの `max_tokens` が優先する）、`extensions` — Messages の本文に足すトップレベルのフィールド。省略すると何も足さない、`headers` — 毎回のリクエストにそのまま付けるヘッダ（`x-api-key` と `anthropic-version` は adapter が決める）、`contextWindow` — ルートしたモデルの context window（トークン） |
@@ -75,6 +76,8 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 | `@jozo-harness/workspace-dependencies` | `dir`（必須）— この配布が同梱するランタイムの payload ディレクトリ（絶対パス、または `~` で始める）。`dir/runtime.json` が payload からの相対パスで `python`（必須）、`node`、`pnpm` を並べる |
 | `@jozo-harness/tools-tier0` | `env` — `JZH_` で始まる名前だけを持つ map。bash、背景ジョブ、run_code の子がこの値を環境に持ち、モデルが `env` 引数で同じ名前を渡してもこの値が勝つ。名前は `JZH_` のあとに大文字・数字・`_` だけを置け、`=` や空白を含む名前は起動時に拒否する。値は設定のリテラルだけで、`secrets.env` や `.env` は読まない。秘密は `jzh auth` の経路に置く |
 | `@jozo-harness/tools-tier1` | `timeLimitMs` — `ask_user` が複数の質問を待つ既定の時間（ミリ秒、1 以上）。省略すると回答があるまで待つ。呼び出しの `time_limit_ms` が優先する |
+
+`@jozo-harness/session-telemetry-otlp` は `base` profile に `scope: off` の行として入っている。何も設定しなければ外部へ送らない。`endpoint` と `scope` の両方を設定したときだけ、セッションイベントを 20 件ずつ OTLP/HTTP の JSON にまとめて送る。匿名 id は resource にだけ載り、ログ本文にも `--dump-config` にも出ない。送信は turn の外で走り、失敗したバッチは警告を 1 行残して捨てるので、collector が落ちていてもセッションは続く。
 
 `@jozo-harness/artifact` はキーを持たない。行を足すと、そのセッションのモデルに `artifact` tool が渡り、モデルは 1 枚の HTML ページを session root の隣の `artifacts/<sessionId>/<name>.html` に書ける。`deliverable: { path, title? }` を渡したときはページを書かず、cwd 内の既存ファイルを成果物として宣言して `deliverable: <path>` の 1 行を返す（cwd 外・不在・ディレクトリは `invalid-arguments`）。ページは `images` に渡した png / jpeg / webp / gif のパスを data URL に畳んだ 1 ファイルで（1 枚 2MB・合計 10MB まで）、`http://` / `https://` / `//` の外部サブリソースを参照する HTML は保存時に拒否する。preset が `read-only` の run では書かず、`denied` を返す。配信は jzh web の `/artifact/<sessionId>/<name>` が行う。同梱 profile に入れていないのは、ページを書かないセッションの tool 一覧を太らせないためである（既定では入らない）。
 

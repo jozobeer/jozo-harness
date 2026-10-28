@@ -681,6 +681,37 @@ jzh --patch sessions.yml "…"
 
 JSON として読めない、`version` が違う、`seq` がログに無い、ログがチェックポイントより小さい、投影の形が違う、のいずれかなら、そのチェックポイントは捨てて先頭から畳み直す。チェックポイントは表示を速くするためのキャッシュであり、消してもセッションは開く。
 
+## セッションログを OTLP で送る
+
+送信は既定で止まっている。設定の telemetry 行に `endpoint` と `scope` の両方を書いたときだけ送る。
+
+```yaml
+plugins:
+  - id: telemetry
+    name: '@jozo-harness/session-telemetry-otlp'
+    config:
+      endpoint: https://collector.example.com
+      scope: feedback        # off（既定）/ feedback / all
+      headers:
+        authorization: Bearer <collector の token>
+```
+
+送り先は `POST <endpoint>/v1/logs` で、本文は OTLP/HTTP の JSON である。`scope: feedback` は `feedback/rated` だけ、`scope: all` はすべてのセッションイベントを送る。バッチは 20 件ずつ、2 秒ごとに送る。待ちが 200 件を超えたら古いものから捨てる。
+
+送信は turn の外で走る。collector が落ちていても、失敗したバッチの警告を 1 行残して捨てるだけで、セッションと turn は続く。
+
+resource の `anonymous.user.id` は `~/.jzh/anonymous-user-id` に一度だけ作る。ログ本文にも `--dump-config` にも出さない。このファイルを消すと、次の送信で新しい id になる。
+
+止めるときは `scope: off` に戻すか、telemetry の行を消す。
+
+```yaml
+plugins:
+  - id: telemetry
+    name: '@jozo-harness/session-telemetry-otlp'
+    config:
+      scope: off
+```
+
 ## コマンドを sandbox の外で走らせる
 
 `@jozo-harness/safety` の `sandbox` は既定で `auto` である。macOS では `seatbelt`（`sandbox-exec`）、Linux では `bwrap`（bubblewrap）が走る。コマンドは自分が走るディレクトリと一時ディレクトリにだけ書ける。それ以外の場所に書こうとすると macOS では `Operation not permitted`、Linux では `Read-only file system` になる。読み取りは制限せず、`/dev/null` への書き込みは許可する。

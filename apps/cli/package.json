@@ -18,6 +18,7 @@
     "@jozo-harness/safety": "workspace:*",
     "@jozo-harness/session": "workspace:*",
     "@jozo-harness/session-jsonl": "workspace:*",
+    "@jozo-harness/session-telemetry-otlp": "workspace:*",
     "@jozo-harness/system-prompt": "workspace:*",
     "@jozo-harness/test-support-replay": "workspace:*",
     "@jozo-harness/tools": "workspace:*",
