@@ -838,9 +838,10 @@ schedule action=delete id=sched-1
 REPL・TUI・Web では、行頭が `/` の行はコマンドとしてその場で答える。モデルの turn は消費せず、`command/run` と `command/done` としてログに残る。
 
 ```
-/help     使えるコマンドを並べる
-/status   このセッションの居場所（モデル、cwd、turn 数、token 統計、goal、schedule）
-/feedback 回答に like / dislike と短いメモを付ける
+/help       使えるコマンドを並べる
+/status     このセッションの居場所（モデル、cwd、turn 数、token 統計、goal、schedule）
+/permission このセッションの sandbox の境界を切り替える
+/feedback   回答に like / dislike と短いメモを付ける
 ```
 
 `/status` の `stats` 行はセッションログから読める値だけを出す。tok/s は最後の turn の decode 区間、token は非キャッシュ入力・cache read / write・output・課金入力、cache は cache read ÷ 課金入力、context は runner が compaction に使うのと同じ budget に対する推定値の割合である。ログに無い値は `—` になり、0 と偽らない。
@@ -848,6 +849,22 @@ REPL・TUI・Web では、行頭が `/` の行はコマンドとしてその場�
 Web UI は同じ値を、Run ペインの Usage と composer の context の輪で見せる。Usage は context の棒（compaction の位置に印）、入力と出力、最後の turn の tok/s を 0〜500 の速度計で示す。500 を超えると輪は満ちきり、中央の数字がそのまま速さを示す。速度計の青い弧は、値が変わると 180ms で前の長さから次の長さへ伸び縮みする。compaction まで窓の 10% を切ると、棒と輪が金になる。輪を押すと Run ペインの Usage が開く。`prefers-reduced-motion: reduce` の環境では弧はその場で切り替わる。
 
 知らない名前は登録済みの一覧を返す。コマンドの答えは TUI と Web では会話の notice として出る。
+
+### セッションの境界を切り替える
+
+走っているセッションの sandbox は、次の 3 つの境界の間で切り替えられる。
+
+```
+/permission read-only
+/permission workspace-write
+/permission danger-full-access
+```
+
+- 引数なしは今の境界を返す。知らない語は usage を返し、何も変えない。
+- 次の tool 呼び出しから新しい境界になる。turn は起こさず、`permission/preset`（preset と時刻）としてログに残る。
+- `danger-full-access` は sandbox を外す。コマンドを打つか、Web の Run ペインで Confirm を押したときだけ切り替わる。
+- Web の Run ペインの Permission は同じコマンドを送る。`danger-full-access` は 1 回目のクリックでは確認を出すだけで、送らない。
+- `--resume` はログの最後の preset を設定より優先する。設定の `preset` は新しいセッションの既定のままで、切り替えでは変わらない。
 
 ### 回答を評価する
 

@@ -8,6 +8,7 @@ import {
   permissionPresetOf,
   permissionWordOf,
   policyOf,
+  resumedPermission,
   sandboxWithPermission,
   switchPermission,
   type PermissionLog,
@@ -55,9 +56,29 @@ describe('permission presets', () => {
     expect(currentPermission([...events])).toBe('full')
   })
 
-  test('a session that never switched keeps the configured preset', () => {
+  test('a new session starts from the configured preset while a resumed one follows its log', () => {
     expect(currentPermission([])).toBeUndefined()
+    expect(resumedPermission([], 'auto')).toBe('auto')
     expect(makePermission('auto').current()).toBe('auto')
+
+    const switchEvent = {
+      seq: 2,
+      time: 1,
+      type: 'permission/preset',
+      data: { preset: 'full', at: 't1' },
+    } as const
+    expect(resumedPermission([switchEvent], 'auto')).toBe('full')
+  })
+
+  test('a switch changes only the session that made it, not the configured default', async () => {
+    const first = makePermission('read-only')
+    const second = makePermission('read-only')
+    const { log } = logOf()
+
+    await Effect.runPromise(switchPermission(log, first, 'full', { confirmed: true }))
+
+    expect(first.current()).toBe('full')
+    expect(second.current()).toBe('read-only')
   })
 
   test('danger-full-access needs a human confirmation before the boundary moves', async () => {

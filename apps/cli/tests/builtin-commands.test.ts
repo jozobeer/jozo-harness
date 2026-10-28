@@ -112,6 +112,8 @@ describe('the built-in commands a session can switch with', () => {
     expect(recorded[0]?.type === 'permission/preset' ? recorded[0].data.preset : '').toBe('full')
     // A command is the human's line, not a request: no turn began here.
     expect(session.events().some((event) => event.type === 'turn/start')).toBe(false)
+    const status = await Effect.runPromise(commands.run('/status', session))
+    expect(status?.text).toContain('permission: danger-full-access')
   })
 
   test('/permission alone reads the boundary and an unknown word changes nothing', async () => {

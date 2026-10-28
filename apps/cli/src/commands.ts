@@ -79,7 +79,11 @@ const scheduleLines = (session: Session): ReadonlyArray<string> => {
  * Without the loop's budget the context stays unknown, and so does anything the
  * log never counted: a missing number reads as an em dash, not as zero.
  */
-export const statusText = (session: Session, budget?: TokenBudget): string => {
+export const statusText = (
+  session: Session,
+  budget?: TokenBudget,
+  permission?: PermissionShape,
+): string => {
   const events = session.events()
   const header: SessionHeader = session.header
   return [
@@ -90,6 +94,7 @@ export const statusText = (session: Session, budget?: TokenBudget): string => {
     'stats: ' + statsLineTextOf(statsViewOf(events, budget)),
     goalLine(session),
     ...scheduleLines(session),
+    ...(permission === undefined ? [] : ['permission: ' + permissionWordOf(permission.current())]),
   ].join('\n')
 }
 
@@ -215,7 +220,10 @@ export const installBuiltinCommands = (
       name: 'status',
       summary: 'where this session stands: model, cwd, turns, token stats, goal, schedules',
       run: (_input, context) =>
-        Effect.succeed({ ok: true, text: statusText(context.session, options.budget) }),
+        Effect.succeed({
+          ok: true,
+          text: statusText(context.session, options.budget, options.permission),
+        }),
     })
     yield* commands.register({
       name: 'model',

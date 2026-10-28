@@ -52,6 +52,15 @@ export const currentPermission = (
   return undefined
 }
 
+/**
+ * The preset a session continues under: the last choice in its own log, else the
+ * configured default. A new session has no such event, so the default decides it.
+ */
+export const resumedPermission = (
+  events: ReadonlyArray<SessionEvent>,
+  configured: PermissionPreset,
+): PermissionPreset => currentPermission(events) ?? configured
+
 /** The boundary words a running session may choose. */
 export const PERMISSION_WORDS = ['read-only', 'workspace-write', 'danger-full-access'] as const
 
