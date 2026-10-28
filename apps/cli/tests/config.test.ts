@@ -16,6 +16,7 @@ describe('configPaths', () => {
     expect(paths.directory).toBe('/tmp/xdg/jzh')
     expect(paths.config).toBe('/tmp/xdg/jzh/config.yaml')
     expect(paths.secrets).toBe('/tmp/xdg/jzh/secrets.env')
+    expect(paths.credentials).toBe('/tmp/xdg/jzh/credentials.json')
     expect(paths.schedules).toBe('/tmp/xdg/jzh/schedules.json')
   })
 

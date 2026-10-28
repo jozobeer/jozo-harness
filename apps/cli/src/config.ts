@@ -7,6 +7,8 @@ export interface ConfigPaths {
   readonly directory: string
   readonly config: string
   readonly secrets: string
+  /** Reference names and their secret values, kept apart from the settings. */
+  readonly credentials: string
   /** The host's schedules, which every session of every run shares. */
   readonly schedules: string
 }
@@ -25,6 +27,7 @@ export const configPaths = (
     directory,
     config: join(directory, 'config.yaml'),
     secrets: join(directory, 'secrets.env'),
+    credentials: join(directory, 'credentials.json'),
     schedules: join(directory, 'schedules.json'),
   }
 }

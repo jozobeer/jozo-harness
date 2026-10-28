@@ -67,8 +67,8 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 | `@jozo-harness/session-jsonl` | `root`（必須）— セッションログのディレクトリ |
 | `@jozo-harness/system-prompt` | `includeHarnessIdentity` — 冒頭の harness の自己紹介（`jzh:identity`）を出すか（既定 `true`）、`includeToolGuidance` — 見える tool の使い方の行を出すか（既定 `true`）、`tmuxContext` — runtime context に `tmux: session <name>, window <index>, pane <index>` を足すか（既定 `false`）。tmux の中にいるときだけ出し、外・tmux が無い・答えないときは行を出さない。セッション名・window index・pane index が変わったときだけ新しい snapshot になる、`devContext` — `jzh web` のセッションで、サーバが配信している GUI の URL を runtime context に `gui: <url>` として足すか（既定 `true`）。`--public-url` があればその origin、無ければ listen した loopback の URL を使う。URL は起動時に決まるので、同じ run なら同じバイト列になる。system prompt と既存の user メッセージの本文には入れず、別の user 文脈として届ける。`false` で行を出さない、`persona` — 配備ごとの文章。`before` は `jzh:identity` の前、`after` はその直後（tool guidance より前）に、identity とは別の section として入る。空文字・空白だけ・未設定の側は section を作らず、前後の空白は落とす。同じ設定なら同じバイト列になる |
 | `@jozo-harness/safety` | `preset`（必須）— `read-only` / `workspace-write` / `full` / `auto`。新しいセッションが従う sandbox モードを決める（走っているセッションは `/permission` か Run ペインで切り替える）。`auto` は `workspace-write` と同じ sandbox で、副作用のある呼び出しだけを実行前にモデルへ審査させる、`sandbox` — `none` / `auto` / `seatbelt` / `bwrap`（**既定は `auto`**。macOS では `seatbelt`、Linux では `bwrap` を選ぶ）、`writableRoots` — sandbox が書き込めるディレクトリ（既定はコマンドの cwd と一時ディレクトリ。ここに足す） |
-| `@jozo-harness/llm-deepseek` | `baseUrl`（必須）— Messages API の root（末尾が `/v1` でなければ adapter が補う）、`apiKeyEnv`（必須）— キーを持つ環境変数の名前、`maxTokens` — 1 応答の上限（既定 8192。リクエストの `max_tokens` が優先する）、`extensions` — Messages の本文に足すトップレベルのフィールド。省略すると何も足さない、`headers` — 毎回のリクエストにそのまま付けるヘッダ（`x-api-key` と `anthropic-version` は adapter が決める）、`contextWindow` — ルートしたモデルの context window（トークン） |
-| `@jozo-harness/llm-openai` | `baseUrl`（必須）、`apiKeyEnv`（必須）— キーを持つ環境変数の名前、`localBaseUrl` — リクエストを送る local daemon の OpenAI 互換 URL。指定すると常にそこへ送り、daemon が動いている前提になる。空文字にすると local を使わず `baseUrl` に送る。`baseUrl` は `jzh models` のモデル一覧を読む先でもある。local 経由では route のモデル名を Ollama の cloud 名（`<model>:cloud`、タグ付きなら `<model>:<tag>-cloud`）に直して送る、`streamIdleTimeoutMs` — チャンク間の無応答を許す上限（ミリ秒、既定 300000。チャンクが届くたびに測り直す）、`headers` — 毎回のリクエストにそのまま付けるヘッダ（endpoint が client の user agent や routing 用の id を求めるときに使う。`Authorization` と `Content-Type` は adapter が決める）、`reasoningEfforts` — この endpoint が受ける effort の語（UI が選択肢に並べる。既定は `low` / `medium` / `high` / `xhigh` / `max`、空配列なら選択肢を出さない） |
+| `@jozo-harness/llm-deepseek` | `baseUrl`（必須）— Messages API の root（末尾が `/v1` でなければ adapter が補う）、`apiKeyEnv`（必須）— キーを持つ環境変数の名前、`apiKeyRef` — 値の代わりに `credentials.json` の参照名を置く。`apiKeyEnv` の名前がシェル・近い `.env`・`secrets.env` のどれにも無いときだけ読む、`maxTokens` — 1 応答の上限（既定 8192。リクエストの `max_tokens` が優先する）、`extensions` — Messages の本文に足すトップレベルのフィールド。省略すると何も足さない、`headers` — 毎回のリクエストにそのまま付けるヘッダ（`x-api-key` と `anthropic-version` は adapter が決める）、`contextWindow` — ルートしたモデルの context window（トークン） |
+| `@jozo-harness/llm-openai` | `baseUrl`（必須）、`apiKeyEnv`（必須）— キーを持つ環境変数の名前、`apiKeyRef` — 値の代わりに `credentials.json` の参照名を置く。`apiKeyEnv` の名前がシェル・近い `.env`・`secrets.env` のどれにも無いときだけ読む、`localBaseUrl` — リクエストを送る local daemon の OpenAI 互換 URL。指定すると常にそこへ送り、daemon が動いている前提になる。空文字にすると local を使わず `baseUrl` に送る。`baseUrl` は `jzh models` のモデル一覧を読む先でもある。local 経由では route のモデル名を Ollama の cloud 名（`<model>:cloud`、タグ付きなら `<model>:<tag>-cloud`）に直して送る、`streamIdleTimeoutMs` — チャンク間の無応答を許す上限（ミリ秒、既定 300000。チャンクが届くたびに測り直す）、`headers` — 毎回のリクエストにそのまま付けるヘッダ（endpoint が client の user agent や routing 用の id を求めるときに使う。`Authorization` と `Content-Type` は adapter が決める）、`reasoningEfforts` — この endpoint が受ける effort の語（UI が選択肢に並べる。既定は `low` / `medium` / `high` / `xhigh` / `max`、空配列なら選択肢を出さない） |
 | `@jozo-harness/agent-loop` | `models` — ルートのモデル名（`provider/model` の model 部分）をキーに、`contextWindow`、`maxTokens`、`reasoningEfforts`、`defaultReasoningEffort` をモデルごとに持つ（同じ行の単一値より優先する）、`contextWindow` — ルートしたモデルの context window（トークン）。`models` のそのモデルの値、この値、adapter の値、128000 の順に使う、`thresholdRatio` — 推定が窓のこの割合に達したら compaction する（既定 0.8）、`headroomTokens` — 発火点と窓の間に必ず空けるトークン（既定 65536）、`maxTokens` — 1 リクエストが答えのために予約するトークン。`models` にそのモデルの値があればそちらを使う。provider へ `max_tokens` として送り、発火点から先に引く（既定は無し＝予約しない）、`models` の `reasoningEfforts` — そのモデルが受ける effort の語。llm 行の同名キーより優先し、空配列ならどの語も受けない、`models` の `defaultReasoningEffort` — セッションが effort を選んでいないときに送る語。省略か `null` なら `reasoning_effort` を送らない、`retainTokens` — 末尾で内容を置き換えない範囲を、推定トークンで表した目標（既定は窓の 16%。最新の 1 件は大きさによらず残る）、`maxBytes` — これを超える text block を、保持の外でスタブに置き換える（バイト、既定 32000）、`maxParallelToolCalls` — 並列に走らせる tool call の上限（既定 10。0 以下でも 1 件ずつ）、`title` — 最初の発話からセッション名をモデルに 1 回書かせる。キーを置くと有効で、無ければ最初の発話の切り詰めが名前になる。`enabled` — `false` で書かせない（既定は有効）、`model` — 名前を書く route（既定はセッションの route）、`maxChars` — 名前の長さ（既定 60）、`timeoutMs` — 応答を待つ上限（ミリ秒、既定 5000）。`models` の effort は送信前に照合し、そのモデルに無い語は受け付ける語の一覧を含む `INVALID_REQUEST` で拒否する |
 | `@jozo-harness/mcp` | `command`（必須）、`prefix` |
 | `@jozo-harness/delegate` | `tools`（必須）— 委譲してよい外部 CLI の配列。各要素は `name`（tool の `command` に渡す名前）と `argv`（起動する argv。タスクは最後の引数として足す） |
@@ -147,6 +147,26 @@ plugins:
 
 `baseUrl` は Messages API の root である。adapter は末尾に `/v1` が無ければ補い、`<baseUrl>/v1/messages` へ送り、`x-api-key` と `anthropic-version: 2023-06-01` を付ける。`extensions` は公式 adapter だけが読み、指定したキーを本文のトップレベルにそのまま置く。指定しなければ `thinking` などのフィールドは本文に現れない。この行は `jzh models` の一覧取得元ではない（一覧は `llm-openai` 行の `baseUrl` を読む）。
 
+### 秘密を参照で持つ
+
+設定ファイルに鍵の値を書かず、名前だけを置くことができる。llm 行の `apiKeyRef` が参照名で、値は `credentials.json` にだけ置く。
+
+```yaml
+plugins:
+  - id: llm
+    name: '@jozo-harness/llm-openai'
+    config:
+      baseUrl: https://openrouter.ai/api/v1
+      apiKeyEnv: OPENROUTER_API_KEY
+      apiKeyRef: openrouter
+```
+
+`jzh auth ref openrouter` は値を端末から読み、`~/.config/jzh/credentials.json` に `{"openrouter": "..."}` の形でモード 600 で書く。値は表示にもログにも出さない。参照名は設定の `apiKeyRef` と同じ綴りにする。
+
+解決の順はシェル環境、作業ディレクトリに近い `.env`、`secrets.env`、そして `apiKeyRef` の参照である。前の 3 つが `apiKeyEnv` の名前を埋めたら参照は読まない。参照が store に無いときは、どの参照がどのファイルに無いかを stderr に出して止まり、値は返さない。`jzh --dump-config` は参照が効いた場合に `credentials (the reference "openrouter" in <path>)` と出し、値は出さない。
+
+`credentials.json` は `XDG_CONFIG_HOME` に従う。既存の `OLLAMA_API_KEY` の経路はそのままで、`apiKeyRef` を書かなければ今までどおり動く。
+
 ## plugin の schema に無い行キー
 
 次の4つは plugin の schema ではなく CLI が行から直接読む。`model`、`effort`、`maxSpillTokens` は複数の行に書いた場合に最初の行が勝ち、`planMode` は1つの行でも `true` なら効く。
@@ -202,7 +222,7 @@ plugins:
 | `DEEPSEEK_API_KEY` | `search: deepseek` のとき `web_search` が DeepSeek Search API を呼ぶ。無い場合は tool error が `jzh auth add deepseek` を案内する |
 | `EXA_API_KEY` | `search: exa` のとき `web_search` が Exa の `/search` を呼ぶ。無い場合は tool error が `jzh auth set EXA_API_KEY` を案内する |
 | `PERPLEXITY_API_KEY` | `search: perplexity` のとき `web_search` が Perplexity の chat completions を呼ぶ。無い場合は tool error が `jzh auth set PERPLEXITY_API_KEY` を案内する |
-| `XDG_CONFIG_HOME` | `config.yaml` と `secrets.env` を置くディレクトリ |
+| `XDG_CONFIG_HOME` | `config.yaml`、`secrets.env`、`credentials.json` を置くディレクトリ |
 | `HTTP_PROXY` / `http_proxy` | http の外向き通信をこの forward proxy に送る |
 | `HTTPS_PROXY` / `https_proxy` | https の外向き通信（モデルへの接続を含む）をこの proxy に送る |
 | `NO_PROXY` / `no_proxy` | ここに挙げたホストは proxy を通らず直接つなぐ |
@@ -211,7 +231,7 @@ proxy の判断はモデルへの接続と `web_fetch` が共有する。同じ�
 
 http は proxy に絶対 URI 形式で送り、https は `CONNECT` でトンネルを開ける。proxy URL に `user:password@` を書くと `Proxy-Authorization` に載せる。値はリクエストのたびに読み直すので、起動後に export しても効く。proxy の値が URL でなければ、どの変数が悪いかを添えて失敗する。検索 provider と browser の通信はまだこの判断を通らず、直接 fetch する。
 
-優先順位はシェル環境、作業ディレクトリに近い `.env`、`secrets.env` の順である。先に値がある場所が勝ち、後ろは空いているキーだけを埋める。どのファイルがそのキーを埋めたかは `jzh --dump-config` の `in effect for a run from here:` に出る。
+優先順位はシェル環境、作業ディレクトリに近い `.env`、`secrets.env`、llm 行の `apiKeyRef` が指す `credentials.json` の参照の順である。先に値がある場所が勝ち、後ろは空いているキーだけを埋める。どのファイルがそのキーを埋めたかは `jzh --dump-config` の `in effect for a run from here:` に出る。参照が埋めた場合は store のパスも出る。
 
 設定値そのものの優先順位は、コマンドラインのフラグ、`config.yaml`、コマンドラインの既定（`--profile` 省略時の `headless` など）の順で、同じく `--dump-config` が値と出どころを並べる。解決は 1 か所（`apps/cli/src/settings.ts`）で行うので、走行時の値と表示が食い違わない。
 
@@ -221,6 +241,7 @@ http は proxy に絶対 URI 形式で送り、https は `CONNECT` でトンネ�
 |---|---|---|
 | 設定 | `~/.config/jzh/config.yaml` | `--config`、`XDG_CONFIG_HOME` |
 | 秘密 | `~/.config/jzh/secrets.env`（モード 600） | `jzh auth add` / `set` / `remove` / `list` |
+| 参照つきの秘密 | `~/.config/jzh/credentials.json`（モード 600） | `jzh auth ref NAME`。キーは llm 行の `apiKeyRef` |
 | セッションログ | `~/.jzh/sessions/<id>/session.v1.jsonl.zst`（既存は `session.v1.jsonl`） | `@jozo-harness/session-jsonl` 行の `root` |
 | 添付ファイル | session root の隣の `attachments/<sha256>`（既定は `~/.jzh/attachments/...`） | `@jozo-harness/session-jsonl` 行の `root` を変えると一緒に移る。内容のハッシュが名前なので、同じ内容は 1 ファイル |
 | 予定 | `~/.config/jzh/schedules.json` | `XDG_CONFIG_HOME`。キーは無い |

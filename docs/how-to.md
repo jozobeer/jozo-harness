@@ -433,6 +433,8 @@ jzh auth list         # 入っている名前を見る
 
 `.env` に書く場合は `OLLAMA_API_KEY=` を作業ディレクトリかその祖先に置く。どれが勝つかは [configuration.md](configuration.md) の環境変数の節にある。
 
+鍵の値を設定ファイルに書かず、名前だけを置きたいときは llm 行に `apiKeyRef` を書き、`jzh auth ref <name>` で値を保存する。値は `~/.config/jzh/credentials.json`（モード 600）にだけ入り、シェル・`.env`・`secrets.env` が空のときだけ読まれる。詳しくは [configuration.md](configuration.md) の「秘密を参照で持つ」を見る。
+
 ## web_search の provider を選ぶ
 
 ```yaml
