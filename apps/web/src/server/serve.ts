@@ -14,7 +14,7 @@ import {
 } from '@jozo-harness/tools-tier1'
 import { sendCommand, type SessionError, type SessionEvent } from '@jozo-harness/ui-protocol'
 import { attachmentRootOf, saveAttachment } from '@jozo-harness/session/attachment-store'
-import { UiRpcs, type CommandView } from '../shared/rpc.ts'
+import { UiRpcs, type CommandView, type SessionHit } from '../shared/rpc.ts'
 import {
   authCookie,
   COOKIE_NAME,
@@ -35,6 +35,7 @@ import { makeParticipantRegistry, type ParticipantRegistry } from './participant
 import { makeWebProtocol, type Connection } from './protocol.ts'
 import { answerShare } from './share.ts'
 import { applyMeta, markFork, readMeta, sessionActionOf, withMeta } from './session-meta.ts'
+import type { WebError } from './errors.ts'
 import {
   makeSessionRegistry,
   type InitialSession,
@@ -98,6 +99,11 @@ export interface ServeWebOptions {
   readonly readSessionEvents: (
     id: string,
   ) => Effect.Effect<ReadonlyArray<SessionEvent>, SessionError>
+  /**
+   * The store's full-text search, which reads the logs a page lists but does not
+   * open. Absent answers an empty list, so a test or an embedder keeps its store.
+   */
+  readonly searchSessions?: (text: string) => Effect.Effect<ReadonlyArray<SessionHit>, WebError>
   /** What the run can be told before any session exists: the blank page's own list. */
   readonly commands: () => ReadonlyArray<CommandView>
   /**
@@ -131,6 +137,7 @@ const handlersOf = (
   workspaces: WorkspacesPort,
   openInApp: OpenInAppPort,
   readSessionEvents: (id: string) => Effect.Effect<ReadonlyArray<SessionEvent>, SessionError>,
+  searchSessions: (text: string) => Effect.Effect<ReadonlyArray<SessionHit>, WebError>,
   commands: () => ReadonlyArray<CommandView>,
   store: StoreEvents,
   schedules: ScheduleStore,
@@ -189,6 +196,17 @@ const handlersOf = (
         // A rename, a pin, or a delete is another device's row as well.
         store.notify()
         return true
+      }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
+    searchSessions: ({ query }) =>
+      Effect.gen(function* () {
+        const text = query.trim()
+        if (text === '') return { items: [] }
+        // A hit is offered only for a session the rail already lists, so a log
+        // that another profile stores is never quoted through this page.
+        const listed = yield* registry.list()
+        const known = new Set(listed.map((summary) => summary.id))
+        const hits = yield* searchSessions(text)
+        return { items: hits.filter((hit) => known.has(hit.sessionId)) }
       }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
     forkSession: ({ sessionId }) =>
       Effect.gen(function* () {
@@ -883,6 +901,7 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
             options.workspaces,
             options.openInApp ?? noOpenInApp,
             options.readSessionEvents,
+            options.searchSessions ?? (() => Effect.succeed([])),
             options.commands,
             store,
             options.schedules,

@@ -34,7 +34,7 @@ import {
   type SessionSummary,
 } from '@jozo-harness/session'
 import { attachmentRootOf } from '@jozo-harness/session/attachment-store'
-import { expandHome, makeSessionQuery } from '@jozo-harness/session-jsonl'
+import { expandHome, makeSessionQuery, type SearchHit } from '@jozo-harness/session-jsonl'
 import {
   SystemPrompt,
   additionalInstructionsText,
@@ -1751,6 +1751,8 @@ interface RunReading {
   readonly readSessionEvents: (
     id: string,
   ) => Effect.Effect<ReadonlyArray<SessionEvent>, SessionError>
+  /** The store's full-text index, which the rail searches from its field. */
+  readonly searchSessions: (text: string) => Effect.Effect<ReadonlyArray<SearchHit>, SessionError>
   /** The effort words the provider takes, which the blank seat offers. */
   readonly efforts: ReadonlyArray<string>
 }
@@ -1761,6 +1763,7 @@ interface RunReading {
  */
 const runReadingOf = (
   layer: Layer.Layer<any, PluginError, never>,
+  sessionRoot: string,
 ): Effect.Effect<RunReading, PluginError, Scope.Scope> =>
   Effect.gen(function* () {
     const context = yield* Layer.build(layer)
@@ -1768,11 +1771,18 @@ const runReadingOf = (
     // A reference reads a log without opening a live session: the page may attach a
     // session nobody has open, and reading it must not start one.
     const persistence = Context.get(context, SessionPersistenceService)
+    // The rail searches the same index the search tool and --search read, so a hit
+    // names the line it matched instead of the page rescanning every log.
+    const query = yield* Effect.acquireRelease(
+      Effect.sync(() => makeSessionQuery({ root: sessionRoot, sessions: persistence })),
+      (held) => Effect.sync(() => held.close()),
+    )
     // What the provider takes for an effort is the adapter's to say; a page only offers it.
     const efforts = Context.get(context, Llm).capabilities.reasoningEffort ?? []
     return {
       listSessions: () => sessions.list(),
       readSessionEvents: (id) => persistence.open(id).pipe(Effect.map((opened) => opened.events)),
+      searchSessions: (text) => (text.trim() === '' ? Effect.succeed([]) : query.search(text)),
       efforts,
     }
   })
@@ -1916,7 +1926,7 @@ const serveWebUi = (
     // the server they serve.
     return yield* Effect.scoped(
       Effect.gen(function* () {
-        const reading = yield* runReadingOf(layer)
+        const reading = yield* runReadingOf(layer, sessionRootOf(rows))
         // The facts are mutable: a save rebuilds the rows and the layer for the next
         // session, and updates the values a running call reads.
         const live = liveSettingsOf(options, rows)
@@ -1939,6 +1949,10 @@ const serveWebUi = (
           workspaces: workspacesPortOf(options, reading.listSessions),
           openInApp: makeOpenInApp(),
           readSessionEvents: reading.readSessionEvents,
+          searchSessions: (text) =>
+            reading
+              .searchSessions(text)
+              .pipe(Effect.mapError((error) => new WebError({ message: messageOf(error) }))),
           ...(options.settings?.webhooks === undefined
             ? {}
             : { webhooks: options.settings.webhooks }),

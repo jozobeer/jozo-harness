@@ -561,6 +561,8 @@ const start = (
   webhooks: ReadonlyArray<WebhookRule> = [],
   /** What the page may open the workspace with; absent keeps the route's no-app answer. */
   openInApp?: OpenInAppPort,
+  /** The store's full-text search; absent answers no body hits. */
+  searchSessions?: ServeWebOptions['searchSessions'],
 ): Effect.Effect<Started, never, Scope.Scope> =>
   Effect.gen(function* () {
     const ready = yield* Deferred.make<ReadyUrls>()
@@ -579,6 +581,7 @@ const start = (
         ),
         workspaces: workspaces.port,
         ...(openInApp === undefined ? {} : { openInApp }),
+        ...(searchSessions === undefined ? {} : { searchSessions }),
         commands: web.initial.commands,
         plugins,
         ...(webhooks.length === 0 ? {} : { webhooks }),
@@ -2191,6 +2194,59 @@ describe('the web transport', () => {
     expect(observed.refused).toBe('the session is not open')
     await rm(root, { recursive: true, force: true })
     await rm(workspace, { recursive: true, force: true })
+  })
+
+  test('the rail search keeps body hits in listed sessions and refuses a blank query', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-search-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a', '/work', false)
+    const settings = makeSettings()
+    const searched: Array<string> = []
+    const searchSessions = (text: string) => {
+      searched.push(text)
+      return Effect.succeed([
+        { sessionId: 'a', seq: 3, type: 'user/message', text: 'the «ledger» is here' },
+        { sessionId: 'gone', seq: 1, type: 'user/message', text: 'a «ledger» nobody lists' },
+      ])
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(
+            root,
+            web,
+            settings,
+            makeWorkspaces(),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            searchSessions,
+          )
+          const wsUrl = started.wsUrl
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const found = yield* client.searchSessions({ query: 'ledger' })
+            const blank = yield* client.searchSessions({ query: '  ' })
+            return { found, blank }
+          }).pipe(clientLayers(wsUrl))
+          const result = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    expect(observed.found.items).toEqual([
+      { sessionId: 'a', seq: 3, type: 'user/message', text: 'the «ledger» is here' },
+    ])
+    expect(observed.blank.items).toEqual([])
+    // A blank query never wakes the index.
+    expect(searched).toEqual(['ledger'])
+    await rm(root, { recursive: true, force: true })
   })
 
   test('a fork copies the parent log into a new session and records where it began', async () => {

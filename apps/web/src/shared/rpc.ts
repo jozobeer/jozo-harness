@@ -170,6 +170,27 @@ export const ForkSessionRpc = Rpc.make('forkSession', {
   error: Schema.String,
 })
 
+/** One event of a session whose text holds the phrase searched for. */
+export const SessionHitSchema = Schema.Struct({
+  sessionId: Schema.String,
+  seq: Schema.Number,
+  type: Schema.String,
+  /** The matching text as the index marks it, with the match between «». */
+  text: Schema.String,
+})
+
+export type SessionHit = typeof SessionHitSchema.Type
+
+/**
+ * Searches the text of every stored session, not just the name the rail shows.
+ * The index is the one the store keeps, so a hit names the line it matched.
+ */
+export const SearchSessionsRpc = Rpc.make('searchSessions', {
+  payload: Schema.Struct({ query: Schema.String }),
+  success: Schema.Struct({ items: Schema.Array(SessionHitSchema) }),
+  error: Schema.String,
+})
+
 /** One UI command, addressed to one session. Returns false when the core could not take it. */
 export const UiCommandRpc = Rpc.make('command', {
   payload: Schema.Struct({ sessionId: Schema.String, command: UiCommandSchema }),
@@ -694,6 +715,7 @@ export const UiRpcs = RpcGroup.make(
   AddWorkspaceRpc,
   SessionActionRpc,
   ForkSessionRpc,
+  SearchSessionsRpc,
   UiCommandRpc,
   UiEventsRpc,
   StoreChangedRpc,
