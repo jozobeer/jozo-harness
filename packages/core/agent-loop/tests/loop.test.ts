@@ -196,6 +196,28 @@ describe('agent loop', () => {
     expect(assistant).toEqual([[{ type: 'text', text }]])
   })
 
+  test('records the files attached to a human message beside its text', async () => {
+    const attachment = {
+      hash: 'a'.repeat(64),
+      mediaType: 'text/plain',
+      name: 'note.txt',
+      bytes: 5,
+    }
+    const events = await scenario([chunks(textTurn('read'))], (ctx) =>
+      Effect.gen(function* () {
+        const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+        yield* agent.followup({ text: 'see this', source: 'user', attachments: [attachment] })
+        yield* agent.whenIdle
+        return agent
+      }),
+    )
+
+    const logged = events.session
+      .events()
+      .flatMap((event) => (event.type === 'user/message' ? [event.data] : []))
+    expect(logged[0]?.attachments).toEqual([attachment])
+  })
+
   test('adds a runtime snapshot only when the tmux location changes', async () => {
     let output = 'main:2.1'
     const reader = {

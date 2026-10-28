@@ -24,6 +24,7 @@ import {
   COMPACT_SUMMARY_INSTRUCTION,
   DEFAULT_COMPACT_MAX_BYTES,
   checkpointOf,
+  clipAttachments,
   clipQuotes,
   clipReferences,
   cwdOf,
@@ -481,11 +482,14 @@ export const agentLoopEffect = (
     const loggedMessage = (message: UserMessage): SessionEventMap['user/message'] => {
       const quotes = message.quotes === undefined ? [] : clipQuotes(message.quotes)
       const references = message.references === undefined ? [] : clipReferences(message.references)
+      const attachments =
+        message.attachments === undefined ? [] : clipAttachments(message.attachments)
       return {
         text: message.text,
         source: message.source,
         ...(quotes.length === 0 ? {} : { quotes }),
         ...(references.length === 0 ? {} : { references }),
+        ...(attachments.length === 0 ? {} : { attachments }),
       }
     }
 

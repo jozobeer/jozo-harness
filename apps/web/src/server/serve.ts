@@ -13,7 +13,7 @@ import {
   type ScheduleStore,
 } from '@jozo-harness/tools-tier1'
 import { sendCommand, type SessionError, type SessionEvent } from '@jozo-harness/ui-protocol'
-import { attachmentRootOf, saveAttachment } from '@jozo-harness/session'
+import { attachmentRootOf, saveAttachment } from '@jozo-harness/session/attachment-store'
 import { UiRpcs, type CommandView } from '../shared/rpc.ts'
 import {
   authCookie,

@@ -6,10 +6,10 @@ import { Effect } from 'effect'
 import {
   ATTACHMENT_LIMITS,
   deriveMessagesWithSeqs,
-  saveAttachment,
   type Attachment,
   type SessionEvent,
 } from '@jozo-harness/session'
+import { saveAttachment } from '@jozo-harness/session/attachment-store'
 import { hydrateAttachments } from '../src/attachments.ts'
 
 const roots: Array<string> = []

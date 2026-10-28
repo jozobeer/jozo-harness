@@ -2,14 +2,13 @@ import type { ContentBlock, RequestMessage } from '@jozo-harness/llm'
 import {
   ATTACHMENT_LIMITS,
   attachmentLabel,
-  attachmentPathOf,
   isImageAttachment,
-  readAttachment,
   renderUserText,
   type Attachment,
   type DerivedMessage,
   type SessionEvent,
 } from '@jozo-harness/session'
+import { attachmentPathOf, readAttachment } from '@jozo-harness/session/attachment-store'
 import { Effect } from 'effect'
 
 /** A reference fence longer than any run inside the body, so the body cannot close it. */

@@ -24,7 +24,6 @@ import {
 import {
   SessionPersistenceService,
   Sessions,
-  attachmentRootOf,
   cwdOf,
   rootOf,
   lastSkillCatalog,
@@ -34,6 +33,7 @@ import {
   type SessionId,
   type SessionSummary,
 } from '@jozo-harness/session'
+import { attachmentRootOf } from '@jozo-harness/session/attachment-store'
 import { expandHome, makeSessionQuery } from '@jozo-harness/session-jsonl'
 import {
   SystemPrompt,

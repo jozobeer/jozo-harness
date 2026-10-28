@@ -5,15 +5,17 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { Effect, Result } from 'effect'
 import {
   ATTACHMENT_LIMITS,
-  attachmentPathOf,
-  attachmentRootOf,
   clipAttachments,
   displayNameOf,
   mediaTypeOf,
-  readAttachment,
-  saveAttachment,
   type Attachment,
 } from '../src/index.ts'
+import {
+  attachmentPathOf,
+  attachmentRootOf,
+  readAttachment,
+  saveAttachment,
+} from '../src/attachment-store.ts'
 
 const roots: Array<string> = []
 
