@@ -115,6 +115,7 @@ import {
   ScreenCaptureTools,
   BrowserTools,
   DelegateTools,
+  WorkspaceDependenciesTools,
   teamIdentityLine,
   teamIdentityOf,
   makeScheduleTool,
@@ -1045,6 +1046,10 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
         return (source) =>
           Effect.succeed(Context.get(source, DelegateTools)(sandboxOf(wiring) ?? noneSandbox))
       }
+      if (name === '@jozo-harness/workspace-dependencies') {
+        // The payload is fixed by the row, so the tool only reads what that directory holds.
+        return (source) => Effect.succeed(Context.get(source, WorkspaceDependenciesTools))
+      }
       return undefined
     }
 
@@ -1211,6 +1216,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
     yield* installWiredRow('@jozo-harness/screen-capture')
     yield* installWiredRow('@jozo-harness/browser')
     yield* installWiredRow('@jozo-harness/delegate')
+    yield* installWiredRow('@jozo-harness/workspace-dependencies')
     // A failed provider attempt is retried for the codes the loop row lists; the
     // loop only decides what to do when a listener answers, so this is the wiring
     // that makes the retry path part of a run.
