@@ -7,6 +7,8 @@ import {
   initialState,
   withDeletedPage,
   withDraft,
+  withQuotes,
+  withSelection,
   withTheme,
   type Pane,
   type WebState,
@@ -50,6 +52,9 @@ afterEach(cleanup)
 /** One call a component made, in the order it made them. */
 type Call =
   | { readonly kind: 'submit'; readonly mode?: SubmitMode }
+  | { readonly kind: 'addQuote'; readonly text: string }
+  | { readonly kind: 'removeQuote'; readonly index: number }
+  | { readonly kind: 'selection'; readonly text: string }
   | { readonly kind: 'draft'; readonly text: string }
   | { readonly kind: 'moveTo'; readonly id: string | undefined; readonly cwd?: string | undefined }
   | { readonly kind: 'pane'; readonly pane: Pane | undefined }
@@ -98,6 +103,23 @@ const makeStore = (
     },
     submit: (mode) =>
       calls.push(mode === undefined ? { kind: 'submit' } : { kind: 'submit', mode }),
+    addQuote: (text) => {
+      calls.push({ kind: 'addQuote', text })
+      update((current) => withQuotes(withSelection(current, ''), [...current.quotes, { text }]))
+    },
+    removeQuote: (index) => {
+      calls.push({ kind: 'removeQuote', index })
+      update((current) =>
+        withQuotes(
+          current,
+          current.quotes.filter((_quote, at) => at !== index),
+        ),
+      )
+    },
+    setSelection: (text) => {
+      calls.push({ kind: 'selection', text })
+      update((current) => withSelection(current, text))
+    },
     send: (command) => calls.push({ kind: 'command', command }),
     moveTo: (id, cwd) => calls.push({ kind: 'moveTo', id, cwd }),
     chooseTheme: (theme) => update((current) => withTheme(current, theme)),
@@ -510,6 +532,63 @@ describe('the Solid page', () => {
 
     fireEvent.click(container.querySelector('button.change') as Element)
     expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'changes', path: 'a.ts' } })
+  })
+
+  test('a quoted passage reads as a blockquote above the human prompt', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const { store } = makeStore({
+      conversation: { ...emptyConversation, blocks: [{ kind: 'user', text: 'hello' }] },
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'agent/inbox/claimed', {
+          message: {
+            text: 'hello',
+            source: 'user',
+            quotes: [{ text: 'a claim from the answer' }],
+          },
+        }),
+      ]),
+    })
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    expect(container.querySelector('.turn-ask .quoted blockquote')?.textContent).toBe(
+      'a claim from the answer',
+    )
+    expect(container.querySelector('.turn-ask .body')?.textContent).toBe('hello')
+  })
+
+  test('selecting text in the conversation offers it to the next message as a quote', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const { store, calls } = makeStore({
+      conversation: { ...emptyConversation, blocks: [{ kind: 'user', text: 'hello' }] },
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'agent/inbox/claimed', { message: { text: 'hello', source: 'user' } }),
+      ]),
+    })
+    const { container } = render(() => (
+      <>
+        <Conversation store={store} />
+        <Composer store={store} />
+      </>
+    ))
+
+    const body = container.querySelector('.turn-ask .body') as Element
+    const range = document.createRange()
+    range.selectNodeContents(body)
+    const picked = window.getSelection()
+    picked?.removeAllRanges()
+    picked?.addRange(range)
+    document.dispatchEvent(new Event('selectionchange'))
+
+    expect(calls).toContainEqual({ kind: 'selection', text: 'hello' })
+    const quote = container.querySelector('#quote-selection') as Element
+    expect(quote).not.toBeNull()
+    fireEvent.click(quote)
+
+    expect(calls).toContainEqual({ kind: 'addQuote', text: 'hello' })
+    expect(container.querySelector('.quote-chip .quote-text')?.textContent).toBe('hello')
   })
 
   test('an answer takes a verdict and a note, and a reload draws the newest one', () => {

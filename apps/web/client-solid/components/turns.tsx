@@ -1,5 +1,6 @@
 import { For, Index, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import { plainText, summaryBodyOf } from '@jozo-harness/ui-view'
+import type { Quote } from '@jozo-harness/ui-protocol'
 import { renderMarkdown } from '../../src/ui/markdown.ts'
 import {
   toolsOf,
@@ -365,16 +366,32 @@ const Feedback = (props: { turn: TraceTurn; store: SessionStore }) => {
   )
 }
 
+/** The quoted passages as Markdown blockquotes, so a quote reads as a quote. */
+const quotedMarkdown = (quotes: ReadonlyArray<Quote>): string =>
+  quotes
+    .map((quote) =>
+      quote.text
+        .split('\n')
+        .map((line) => '> ' + line)
+        .join('\n'),
+    )
+    .join('\n\n')
+
 /** One turn: what was asked, the work folded, the answer, and what it changed. */
 const Turn = (props: { turn: TraceTurn; live: string; now: number; store: SessionStore }) => {
   const running = () => props.turn.endedAt === undefined
   return (
     <article class={'block turn' + (running() ? ' running' : '')}>
-      <Show when={props.turn.prompt !== ''}>
+      <Show when={props.turn.prompt !== '' || props.turn.quotes.length > 0}>
         <div class="block user turn-ask">
-          <div class="body">
-            <Linkify text={plainText(props.turn.prompt)} />
-          </div>
+          <Show when={props.turn.quotes.length > 0}>
+            <Markdown text={quotedMarkdown(props.turn.quotes)} class="quoted" />
+          </Show>
+          <Show when={props.turn.prompt !== ''}>
+            <div class="body">
+              <Linkify text={plainText(props.turn.prompt)} />
+            </div>
+          </Show>
         </div>
       </Show>
       <Show when={props.turn.steps.length > 0 || running()}>

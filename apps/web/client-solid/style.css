@@ -237,6 +237,20 @@
     white-space: pre-wrap;
   }
 
+  /* A passage quoted from an earlier turn reads as a quotation, above the ask. */
+  .turn-ask .quoted {
+    margin-bottom: var(--s2);
+  }
+
+  .turn-ask .quoted blockquote {
+    margin: 0 0 2px;
+    padding: 2px 10px;
+    border-left: 2px solid var(--line-strong);
+    color: var(--dim);
+    font-size: var(--text-sm);
+    white-space: pre-wrap;
+  }
+
   .process {
     margin: 0 0 var(--s3);
     border-left: 2px solid var(--line);
@@ -1834,6 +1848,58 @@
     align-self: center;
     width: 14px;
     height: 14px;
+  }
+
+  /* The passages waiting to travel with the next message, above the textarea. */
+  #quotes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+    padding: 0 0 6px;
+  }
+
+  .quote-chip {
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+    min-width: 0;
+    max-width: 100%;
+    padding: 2px 4px 2px 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--dim);
+    font-size: var(--text-sm);
+  }
+
+  .quote-chip .quote-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .quote-remove {
+    padding: 0 4px;
+    border: 0;
+    background: none;
+    color: inherit;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  #quote-selection {
+    padding: 2px 10px;
+    border: 1px dashed var(--line-strong);
+    border-radius: 999px;
+    background: none;
+    color: var(--dim);
+    font-size: var(--text-sm);
+    cursor: pointer;
+  }
+
+  .quote-remove:hover,
+  #quote-selection:hover {
+    color: var(--text);
   }
 
   /* With the seat folded behind +, send and stop still close the row. */

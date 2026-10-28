@@ -225,10 +225,17 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
           }),
         ),
       ),
-      submit: (text, mode) =>
+      submit: (text, mode, quotes) =>
         Effect.suspend(() => {
+          const message: UiCommand = { kind: 'submit', text }
           commands.push(
-            mode === undefined ? { kind: 'submit', text } : { kind: 'submit', text, mode },
+            quotes === undefined
+              ? mode === undefined
+                ? message
+                : { ...message, mode }
+              : mode === undefined
+                ? { ...message, quotes }
+                : { ...message, mode, quotes },
           )
           return host.accepting ? Effect.void : Effect.die(new Error('the core fell over'))
         }),
@@ -786,6 +793,48 @@ describe('the page store', () => {
             text: 'join the step',
             mode: 'steer',
           })
+        }),
+      ),
+    )
+  })
+
+  test('a quoted passage rides with the message, and a message of quotations alone still goes', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          store.addQuote('  the passage to quote  ')
+          expect(store.state().selection).toBe('')
+          store.setDraft('does this hold?')
+          store.submit()
+          yield* until(
+            () => host.commands.some((command) => command.kind === 'submit'),
+            'sent the message',
+          )
+          expect(host.commands).toContainEqual({
+            kind: 'submit',
+            text: 'does this hold?',
+            quotes: [{ text: 'the passage to quote' }],
+          })
+          expect(store.state().quotes).toEqual([])
+
+          // A message made only of quotations is still a message.
+          store.addQuote('only quoted')
+          store.submit()
+          yield* until(
+            () => host.commands.filter((command) => command.kind === 'submit').length >= 2,
+            'sent the quotation alone',
+          )
+          expect(host.commands).toContainEqual({
+            kind: 'submit',
+            text: '',
+            quotes: [{ text: 'only quoted' }],
+          })
+
+          // Neither words nor passages is nothing to send.
+          store.submit()
+          expect(host.commands.filter((command) => command.kind === 'submit')).toHaveLength(2)
         }),
       ),
     )

@@ -1,7 +1,13 @@
 import { Cause, Effect, Fiber, Queue, Stream } from 'effect'
 import { RpcClient, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
-import type { SubmitMode, UiCommand, UiEvent, UiSessionEvent } from '@jozo-harness/ui-protocol'
+import type {
+  Quote,
+  SubmitMode,
+  UiCommand,
+  UiEvent,
+  UiSessionEvent,
+} from '@jozo-harness/ui-protocol'
 import { batch, createSignal, type Accessor } from 'solid-js'
 import {
   UiRpcs,
@@ -25,8 +31,10 @@ import {
   withOpened,
   withPane,
   withProblem,
+  withQuotes,
   withRun,
   withRunSchedules,
+  withSelection,
   withSession,
   withSessions,
   withSettings,
@@ -270,6 +278,12 @@ export interface SessionStore {
    * plain submit the page has always sent, which the core queues.
    */
   readonly submit: (mode?: SubmitMode) => void
+  /** Queues one passage the reader selected for the next message, newest last. */
+  readonly addQuote: (text: string) => void
+  /** Drops one queued passage, by its place in the list. */
+  readonly removeQuote: (index: number) => void
+  /** Remembers the conversation text the reader holds selected. */
+  readonly setSelection: (text: string) => void
   readonly send: (command: UiCommand) => void
   /** Sends one command to a session that need not be the one on screen. */
   readonly sendTo: (sessionId: string, command: UiCommand) => void
@@ -450,7 +464,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
    * opened for it, and it is sent there; a session that cannot be opened gives
    * the line back to the composer rather than swallowing it.
    */
-  let owed: string | undefined
+  let owed: { readonly text: string; readonly quotes?: ReadonlyArray<Quote> } | undefined
   /** The folder the blank page will start its session in; the last one the reader picked. */
   let blankCwd: string | undefined
   const commands = Effect.runSync(
@@ -629,7 +643,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       if (first === undefined) return Effect.void
       owed = undefined
       return Effect.asVoid(
-        Queue.offer(commands, { sessionId, command: { kind: 'submit', text: first } }),
+        Queue.offer(commands, { sessionId, command: { kind: 'submit', ...first } }),
       )
     }
 
@@ -970,10 +984,10 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
               Effect.sync(() => {
                 // A line that never reached a session comes back to the reader.
                 if (owed !== undefined) {
-                  const text = owed
+                  const first = owed
                   owed = undefined
-                  rememberDraft(state().sessionId, text)
-                  update((now) => withDraft(now, text))
+                  rememberDraft(state().sessionId, first.text)
+                  update((now) => withQuotes(withDraft(now, first.text), first.quotes ?? []))
                 }
                 update((now) => withProblem(now, causeText(cause)))
               }),
@@ -1027,13 +1041,17 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     submit: (mode) => {
       const current = state()
       const value = current.draft.trim()
-      if (value === '') return
+      // A message may be a body, a set of quotations, or both; neither is nothing.
+      const quotes = current.quotes
+      if (value === '' && quotes.length === 0) return
+      const sent = quotes.length === 0 ? { text: value } : { text: value, quotes }
       if (current.sessionId === '') {
         // The session this line starts is already on its way; keep the line.
         if (owed !== undefined) return
-        owed = value
+        owed = sent
         Queue.offerUnsafe(moves, { kind: 'open', id: undefined, cwd: blankCwd })
         clearDraft(current.sessionId)
+        update((now) => withQuotes(now, []))
         return
       }
       const ask = current.conversation.ask
@@ -1041,12 +1059,27 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
         current.sessionId,
         ask === undefined
           ? mode === undefined
-            ? { kind: 'submit', text: value }
-            : { kind: 'submit', text: value, mode }
+            ? { kind: 'submit', ...sent }
+            : { kind: 'submit', ...sent, mode }
           : { kind: 'answer', id: ask.id, answer: value },
       )
       clearDraft(current.sessionId)
+      update((now) => withQuotes(now, []))
     },
+    addQuote: (text) => {
+      const quote = text.trim()
+      if (quote === '') return
+      update((now) => withQuotes(withSelection(now, ''), [...now.quotes, { text: quote }]))
+    },
+    removeQuote: (index) =>
+      update((now) =>
+        withQuotes(
+          now,
+          now.quotes.filter((_quote, at) => at !== index),
+        ),
+      ),
+    setSelection: (text) =>
+      update((now) => (now.selection === text ? now : withSelection(now, text))),
     send: (command) => sendTo(state().sessionId, command),
     sendTo,
     moveTo: (id, cwd) => {
