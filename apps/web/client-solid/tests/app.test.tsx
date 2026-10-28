@@ -51,6 +51,7 @@ import {
   railStateOf,
   railWidthFrom,
 } from '../rail.ts'
+import { PANEL_ORDER_KEY } from '../panel-order.ts'
 import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY } from '../recent.ts'
 import { LOCALE_KEY } from '../locale.ts'
 import { ToolDensityContext } from '../tool-density-choice.ts'
@@ -248,6 +249,10 @@ const labelOf = (root: ParentNode, selector: string): string | null | undefined 
 /** The text a selector picks, or nothing when it is absent. */
 const textOf = (root: ParentNode, selector: string): string | null | undefined =>
   root.querySelector(selector)?.textContent
+
+/** The tab strip's ids, in the order it draws them. */
+const tabIds = (container: HTMLElement): Array<string> =>
+  [...container.querySelectorAll('.tabs .tab')].map((tab) => tab.id).filter((id) => id !== '')
 
 /** The JSON a test fetch sent in its body; a non-string body is not one the route sends. */
 const bodyOf = (init: RequestInit | undefined): unknown =>
@@ -1519,6 +1524,129 @@ describe('the Solid page', () => {
       (step) => step.textContent,
     )
     expect(docked).toEqual(listed)
+  })
+
+  test('the right pane draws the tabs a reader who never reordered has always seen', () => {
+    localStorage.clear()
+    const { store } = makeStore()
+
+    const { container } = render(() => <ContextPane store={store} />)
+
+    expect(tabIds(container)).toEqual([
+      'changes',
+      'files',
+      'browser',
+      'run',
+      'settings',
+      'trajectory',
+    ])
+  })
+
+  test('the settings list moves a tab, and the strip keeps that order after a reload', () => {
+    localStorage.clear()
+    const { store } = makeStore({ pane: { kind: 'settings' } })
+
+    const first = render(() => <ContextPane store={store} />)
+    fireEvent.click(first.container.querySelector('[data-panel-down="changes"]') as Element)
+
+    expect(tabIds(first.container)).toEqual([
+      'files',
+      'changes',
+      'browser',
+      'run',
+      'settings',
+      'trajectory',
+    ])
+    const kept = JSON.parse(localStorage.getItem(PANEL_ORDER_KEY) ?? '{}') as {
+      order: Array<string>
+    }
+    expect(kept.order.slice(0, 2)).toEqual(['files', 'changes'])
+
+    // A reload mounts the pane against the order the last visit saved.
+    first.unmount()
+    const again = render(() => <ContextPane store={store} />)
+    expect(tabIds(again.container)).toEqual([
+      'files',
+      'changes',
+      'browser',
+      'run',
+      'settings',
+      'trajectory',
+    ])
+  })
+
+  test('a tab put away leaves the strip and comes back at the end from the settings list', () => {
+    localStorage.clear()
+    const { store } = makeStore({ pane: { kind: 'settings' } })
+
+    const { container } = render(() => <ContextPane store={store} />)
+    fireEvent.click(container.querySelector('[data-panel-hide="files"]') as Element)
+
+    expect(tabIds(container)).toEqual(['changes', 'browser', 'run', 'settings', 'trajectory'])
+    const show = container.querySelector('[data-panel-show="files"]')
+    expect(show?.textContent).toBe('show')
+
+    fireEvent.click(show as Element)
+    expect(tabIds(container)).toEqual([
+      'changes',
+      'browser',
+      'run',
+      'settings',
+      'trajectory',
+      'files',
+    ])
+  })
+
+  test('the settings list refuses to put away the last visible tab', () => {
+    localStorage.clear()
+    localStorage.setItem(
+      PANEL_ORDER_KEY,
+      JSON.stringify({
+        order: ['run'],
+        hidden: ['changes', 'files', 'browser', 'settings', 'trajectory'],
+      }),
+    )
+    const { store } = makeStore({ pane: { kind: 'settings' } })
+
+    const { container } = render(() => <ContextPane store={store} />)
+    expect(tabIds(container)).toEqual(['run'])
+    const hide = container.querySelector('[data-panel-hide="run"]') as HTMLButtonElement
+    expect(hide.disabled).toBe(true)
+
+    fireEvent.click(hide)
+    expect(tabIds(container)).toEqual(['run'])
+  })
+
+  test('Alt+ArrowDown moves the focused tab, and the order survives the reload', () => {
+    localStorage.clear()
+    const { store } = makeStore()
+
+    const { container, unmount } = render(() => <ContextPane store={store} />)
+    const changes = container.querySelector('#changes') as HTMLButtonElement
+    changes.focus()
+    fireEvent.keyDown(changes, { key: 'ArrowDown', altKey: true })
+
+    expect(tabIds(container)).toEqual([
+      'files',
+      'changes',
+      'browser',
+      'run',
+      'settings',
+      'trajectory',
+    ])
+    // The moved button keeps the focus, so a second press moves the same tab.
+    expect(document.activeElement?.id).toBe('changes')
+
+    unmount()
+    const again = render(() => <ContextPane store={store} />)
+    expect(tabIds(again.container)).toEqual([
+      'files',
+      'changes',
+      'browser',
+      'run',
+      'settings',
+      'trajectory',
+    ])
   })
 
   test('the todo dock takes no room when the session has no todo', () => {

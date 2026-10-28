@@ -19,6 +19,16 @@ import { createBrowser } from '../browser.ts'
 import { useLocaleChoice, useTranslate } from '../i18n.ts'
 import { basenameOf, childSessionsOf, elapsedOf, pagesOf } from '../lib.ts'
 import { LOCALES, type MessageKey } from '../locale.ts'
+import {
+  PANEL_ORDER_KEY,
+  canPanelMove,
+  keepPanels,
+  panelsFrom,
+  withPanelHidden,
+  withPanelMoved,
+  type KeptPanels,
+  type PanelTab,
+} from '../panel-order.ts'
 import type { ScheduleDraft, SessionStore } from '../store.ts'
 import { BrowserPane } from './browser-pane.tsx'
 import { FilePreview } from './file-preview.tsx'
@@ -28,7 +38,7 @@ import { PLAN_VERDICTS } from './plan-card.tsx'
 import { Review } from './review.tsx'
 import { Inspector } from './inspector.tsx'
 import { Button } from './ui/button.tsx'
-import { Icon } from './ui/icon.tsx'
+import { Icon, type IconName } from './ui/icon.tsx'
 import { GoalMark, roundsOf } from './ui/goal-mark.tsx'
 import { Mug } from './ui/mug.tsx'
 import { Usage } from './usage.tsx'
@@ -1339,7 +1349,12 @@ const familyLabel: Record<FontFamily, MessageKey> = {
   mono: 'settings.font.mono',
 }
 
-const Settings = (props: { store: SessionStore; settings: SettingsView | undefined }) => {
+const Settings = (props: {
+  store: SessionStore
+  settings: SettingsView | undefined
+  panels: KeptPanels
+  onPanels: (next: KeptPanels) => void
+}) => {
   const t = useTranslate()
   const choice = useLocaleChoice()
   return (
@@ -1392,6 +1407,62 @@ const Settings = (props: { store: SessionStore; settings: SettingsView | undefin
           )}
         </For>
       </div>
+      <span class="pane-label">{t('settings.panels')}</span>
+      <ul class="panel-order" aria-label={t('settings.panels')}>
+        <For each={props.panels.order}>
+          {(kind) => (
+            <li class="panel-order-row" data-panel={kind}>
+              <span class="panel-order-name">{t(PANES[kind].label)}</span>
+              <button
+                class="panel-order-move"
+                type="button"
+                data-panel-up={kind}
+                aria-label={t('settings.panelUp') + ' ' + t(PANES[kind].label)}
+                disabled={!canPanelMove(props.panels, kind, -1)}
+                onClick={() => props.onPanels(withPanelMoved(props.panels, kind, -1))}
+              >
+                ↑
+              </button>
+              <button
+                class="panel-order-move"
+                type="button"
+                data-panel-down={kind}
+                aria-label={t('settings.panelDown') + ' ' + t(PANES[kind].label)}
+                disabled={!canPanelMove(props.panels, kind, 1)}
+                onClick={() => props.onPanels(withPanelMoved(props.panels, kind, 1))}
+              >
+                ↓
+              </button>
+              <button
+                class="panel-order-hide"
+                type="button"
+                data-panel-hide={kind}
+                disabled={props.panels.order.length <= 1}
+                onClick={() => props.onPanels(withPanelHidden(props.panels, kind, true))}
+              >
+                {t('settings.panelHide')}
+              </button>
+            </li>
+          )}
+        </For>
+        <For each={props.panels.hidden}>
+          {(kind) => (
+            <li class="panel-order-row hidden" data-panel={kind}>
+              <span class="panel-order-name">{t(PANES[kind].label)}</span>
+              <span class="panel-order-state">{t('settings.panelHidden')}</span>
+              <button
+                class="panel-order-show"
+                type="button"
+                data-panel-show={kind}
+                onClick={() => props.onPanels(withPanelHidden(props.panels, kind, false))}
+              >
+                {t('settings.panelShow')}
+              </button>
+            </li>
+          )}
+        </For>
+      </ul>
+      <div class="card-hint">{t('settings.panelHint')}</div>
       <span class="pane-label">{t('settings.language')}</span>
       <div class="theme-choice" role="group" aria-label={t('settings.language')}>
         <For each={LOCALES}>
@@ -1558,16 +1629,17 @@ const PlanPane = (props: { store: SessionStore; callId: string }) => {
   )
 }
 
-const PANES = [
-  { kind: 'changes', label: 'pane.changes', icon: 'changes' },
-  { kind: 'files', label: 'pane.files', icon: 'folder' },
-  { kind: 'browser', label: 'pane.browser', icon: 'web' },
-  { kind: 'run', label: 'pane.run', icon: 'run' },
-  { kind: 'settings', label: 'pane.settings', icon: 'settings' },
-  { kind: 'trajectory', label: 'pane.turns', icon: 'turns' },
-] as const
+/** Every tab the strip can draw, by the name its order stores. */
+const PANES: Readonly<Record<PanelTab, { readonly label: MessageKey; readonly icon: IconName }>> = {
+  changes: { label: 'pane.changes', icon: 'changes' },
+  files: { label: 'pane.files', icon: 'folder' },
+  browser: { label: 'pane.browser', icon: 'web' },
+  run: { label: 'pane.run', icon: 'run' },
+  settings: { label: 'pane.settings', icon: 'settings' },
+  trajectory: { label: 'pane.turns', icon: 'turns' },
+}
 
-type Tab = (typeof PANES)[number]['kind']
+type Tab = PanelTab
 
 /** The pane when it is of one kind, narrowed to it; undefined otherwise. */
 const ofKind = <K extends Pane['kind']>(
@@ -1585,6 +1657,21 @@ export const ContextPane = (props: { store: SessionStore }) => {
   /** The reader's pages stay beside the pane, so a look at another tab keeps them. */
   const browser = createBrowser()
   const pane = () => props.store.state().pane
+  /** The order and put-away tabs this browser keeps; the strip draws from it. */
+  const [panels, setPanels] = createSignal<KeptPanels>(
+    panelsFrom(localStorage.getItem(PANEL_ORDER_KEY)),
+  )
+  const savePanels = (next: KeptPanels): void => {
+    setPanels(next)
+    keepPanels(next)
+  }
+  const move = (kind: Tab, delta: number): void => {
+    const next = withPanelMoved(panels(), kind, delta)
+    if (next === panels()) return
+    savePanels(next)
+    // A moved tab stays under the fingers, so the next arrow press moves the same one.
+    document.getElementById(kind)?.focus()
+  }
   let strip: HTMLElement | undefined
   /** What the body shows while the sheet slides out; undefined once it has. */
   const [kept, setKept] = createSignal<Pane | undefined>(undefined)
@@ -1628,16 +1715,26 @@ export const ContextPane = (props: { store: SessionStore }) => {
     <>
       <header class="context-head">
         <nav class="tabs" aria-label={t('pane.tabs')} ref={(element) => (strip = element)}>
-          <For each={PANES}>
-            {(entry) => (
+          <For each={panels().order}>
+            {(kind) => (
               <button
-                id={entry.kind}
-                class={'tab' + (active(entry.kind) ? ' active' : '')}
+                id={kind}
+                class={'tab' + (active(kind) ? ' active' : '')}
                 type="button"
-                onClick={() => toggle(entry.kind)}
+                aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+                onClick={() => toggle(kind)}
+                onKeyDown={(event) => {
+                  // Alt keeps the plain arrows free for moving between tabs later.
+                  if (!event.altKey) return
+                  const delta =
+                    event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : undefined
+                  if (delta === undefined) return
+                  event.preventDefault()
+                  move(kind, delta)
+                }}
               >
-                <Icon name={entry.icon} />
-                {t(entry.label)}
+                <Icon name={PANES[kind].icon} />
+                {t(PANES[kind].label)}
               </button>
             )}
           </For>
@@ -1700,7 +1797,12 @@ export const ContextPane = (props: { store: SessionStore }) => {
             <Run store={props.store} />
           </Match>
           <Match when={body()?.kind === 'settings'}>
-            <Settings store={props.store} settings={props.store.state().settings} />
+            <Settings
+              store={props.store}
+              settings={props.store.state().settings}
+              panels={panels()}
+              onPanels={savePanels}
+            />
           </Match>
           <Match when={body()?.kind === 'trajectory'}>
             <Trajectory turns={props.store.state().turns} />
