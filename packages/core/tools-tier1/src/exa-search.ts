@@ -83,9 +83,7 @@ export const exaSearch = (options: ExaSearchOptions): SearchHost => ({
       const body = yield* Schema.decodeUnknownEffect(ExaResponse)(json).pipe(
         Effect.mapError(() =>
           failure(
-            'exa search got an invalid response from ' +
-              endpoint +
-              '; expected results[].url',
+            'exa search got an invalid response from ' + endpoint + '; expected results[].url',
           ),
         ),
       )

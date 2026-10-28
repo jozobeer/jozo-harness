@@ -108,9 +108,9 @@ export const perplexitySearch = (options: PerplexitySearchOptions): SearchHost =
         return body.search_results.slice(0, Math.min(limit, 50)).map(hitOfSource)
       }
       if (body.citations !== undefined) {
-        return body.citations.slice(0, Math.min(limit, 50)).map(
-          (url): SearchHit => ({ title: '', url, snippet: '' }),
-        )
+        return body.citations
+          .slice(0, Math.min(limit, 50))
+          .map((url): SearchHit => ({ title: '', url, snippet: '' }))
       }
       return yield* Effect.fail(
         failure(

@@ -54,10 +54,7 @@ describe('searchFromEnv', () => {
   })
 
   test('the settings choose exa, and its missing key does not fall back to brave', async () => {
-    const host = searchFromEnv(
-      { [SEARCH_KEY_ENV]: 'brave-secret' },
-      { search: 'exa' },
-    )
+    const host = searchFromEnv({ [SEARCH_KEY_ENV]: 'brave-secret' }, { search: 'exa' })
     const message = await Effect.runPromise(
       Effect.match(host?.search('jozo', 1) ?? Effect.die('no provider'), {
         onFailure: (error) => error.message,
@@ -71,10 +68,7 @@ describe('searchFromEnv', () => {
   })
 
   test('the settings choose perplexity, and its missing key does not fall back to brave', async () => {
-    const host = searchFromEnv(
-      { [SEARCH_KEY_ENV]: 'brave-secret' },
-      { search: 'perplexity' },
-    )
+    const host = searchFromEnv({ [SEARCH_KEY_ENV]: 'brave-secret' }, { search: 'perplexity' })
     const message = await Effect.runPromise(
       Effect.match(host?.search('jozo', 1) ?? Effect.die('no provider'), {
         onFailure: (error) => error.message,

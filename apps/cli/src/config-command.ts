@@ -97,9 +97,7 @@ const modelProblem = (value: string): string | undefined => {
 const SEARCH_PROVIDERS: ReadonlyArray<string> = ['brave', 'deepseek', 'exa', 'perplexity']
 
 const searchProblem = (value: string): string | undefined =>
-  SEARCH_PROVIDERS.includes(value)
-    ? undefined
-    : 'search takes brave, deepseek, exa, or perplexity'
+  SEARCH_PROVIDERS.includes(value) ? undefined : 'search takes brave, deepseek, exa, or perplexity'
 
 const baseUrlProblem = (value: string): string | undefined =>
   /^https?:\/\//.test(value) ? undefined : 'deepseekToolsBaseUrl takes an http(s) URL'
