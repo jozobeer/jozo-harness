@@ -1,5 +1,6 @@
 import { readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Effect } from 'effect'
 import { readIfPresent } from './read-text.ts'
 
@@ -13,6 +14,10 @@ const FRONTMATTER_FIELD = /^([A-Za-z][A-Za-z0-9_-]*)\s*:\s*(.*)$/
 export interface SkillSummary {
   readonly name: string
   readonly description: string
+  /** Whether the model's catalog lists it; false keeps it to a human's slash. */
+  readonly modelInvocable: boolean
+  /** Whether a human's slash list offers it; false keeps it to the model's tool. */
+  readonly userInvocable: boolean
   /** Absolute path of the SKILL.md this summary came from. */
   readonly path: string
 }
@@ -21,8 +26,32 @@ export interface SkillSummary {
 export interface SkillDocument {
   readonly name: string
   readonly description: string
+  readonly modelInvocable: boolean
+  readonly userInvocable: boolean
   readonly body: string
 }
+
+/**
+ * The two frontmatter flags, as the one judgment every listing path reads. A flag
+ * is opt-out: absent means true, so adding it changes nothing for existing skills.
+ */
+export interface SkillInvocation {
+  readonly model: boolean
+  readonly user: boolean
+}
+
+/** Who may reach one skill. Both the catalog and the slash lists filter through this. */
+export const invocationOf = (
+  skill: Pick<SkillSummary, 'modelInvocable' | 'userInvocable'>,
+): SkillInvocation => ({ model: skill.modelInvocable, user: skill.userInvocable })
+
+/** The skills the model's catalog may list. */
+export const modelSkills = (skills: ReadonlyArray<SkillSummary>): ReadonlyArray<SkillSummary> =>
+  skills.filter((skill) => invocationOf(skill).model)
+
+/** The skills a human's slash list may offer. */
+export const userSkills = (skills: ReadonlyArray<SkillSummary>): ReadonlyArray<SkillSummary> =>
+  skills.filter((skill) => invocationOf(skill).user)
 
 const unquote = (value: string): string => {
   const trimmed = value.trim()
@@ -45,6 +74,14 @@ const frontmatterFields = (block: string): ReadonlyMap<string, string> => {
 }
 
 /**
+ * Reads one opt-out flag. Only the word `false` turns a listing off: an absent,
+ * misspelled, or non-boolean value falls back to true on purpose, because dropping
+ * the whole skill would hide a working file from both the model and the human,
+ * which is worse than a flag that keeps the behavior the file had before.
+ */
+const flagOf = (value: string | undefined): boolean => value?.trim().toLowerCase() !== 'false'
+
+/**
  * Parses one SKILL.md. A document is a skill only when its frontmatter names it
  * with a safe name and describes it; anything else is not a skill at all, so no
  * later stage has to re-check it.
@@ -61,6 +98,8 @@ export function parseSkillDocument(text: string): SkillDocument | undefined {
   return {
     name,
     description,
+    modelInvocable: flagOf(fields.get('modelInvocable')),
+    userInvocable: flagOf(fields.get('userInvocable')),
     body: lines
       .slice(closing + 1)
       .join('\n')
@@ -128,6 +167,8 @@ export function discoverSkills(
         found.push({
           name: entry.document.name,
           description: entry.document.description,
+          modelInvocable: entry.document.modelInvocable,
+          userInvocable: entry.document.userInvocable,
           path: entry.path,
         })
       }
@@ -168,16 +209,18 @@ export const catalogDescription = (description: string): string =>
 
 /**
  * The durable catalog the model reads, or '' when no skill is available: an empty
- * catalog is not worth a message, and the model then has nothing to call.
+ * catalog is not worth a message, and the model then has nothing to call. Skills
+ * marked user-only stay out here, but the skill tool still reads them by name.
  */
 export function renderSkillCatalog(skills: ReadonlyArray<SkillSummary>): string {
-  if (skills.length === 0) return ''
+  const listed = modelSkills(skills)
+  if (listed.length === 0) return ''
   return [
     '<system-reminder>',
     'A skill is a reusable set of task-specific instructions. The following skills are available in this session:',
     '',
     '<available_skills>',
-    ...skills.map((skill) => '- ' + skill.name + ': ' + catalogDescription(skill.description)),
+    ...listed.map((skill) => '- ' + skill.name + ': ' + catalogDescription(skill.description)),
     '</available_skills>',
     '',
     "If the user names a skill, or the task clearly matches a skill's description, call the `skill` tool with the exact skill name before taking task actions. Load all applicable skills, then follow their full instructions. This catalog contains summaries only; do not infer or follow a skill's instructions until it has been loaded.",
@@ -193,13 +236,24 @@ export interface SkillRootsInput {
   readonly custom?: ReadonlyArray<string>
 }
 
-/** The skill roots of this run, project first. A repeated root appears once. */
+/**
+ * The skills jzh ships. The path is resolved from this module at run time, not
+ * from the workspace, so the Office instructions are readable in any cwd and
+ * need no install step.
+ */
+export const bundledSkillsRoot = fileURLToPath(new URL('../skills', import.meta.url))
+
+/**
+ * The skill roots of this run, project first and the bundled skills last. A
+ * repeated root appears once, and a user's own `docx` wins over ours.
+ */
 export function skillRoots(input: SkillRootsInput): ReadonlyArray<string> {
   return [
     ...new Set([
       join(input.cwd, '.jzh', 'skills'),
       ...(input.custom ?? []),
       ...(input.home === undefined ? [] : [join(input.home, 'skills')]),
+      bundledSkillsRoot,
     ]),
   ]
 }

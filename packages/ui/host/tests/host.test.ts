@@ -234,6 +234,32 @@ describe('ui host', () => {
     }
   })
 
+  test('a slash reads a skill the model catalog hides', async () => {
+    const input = makeInput()
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-host-skill-'))
+    try {
+      await mkdir(join(root, 'by-hand'), { recursive: true })
+      await writeFile(
+        join(root, 'by-hand', 'SKILL.md'),
+        '---\nname: by-hand\ndescription: Only a human runs this\nmodelInvocable: false\n---\n\nrun it by hand\n',
+      )
+
+      await withSkills(input, [root], (host) =>
+        Effect.gen(function* () {
+          yield* host.submit('/by-hand')
+
+          const result = input.session.events().find((event) => event.type === 'tool/result')
+          expect(result?.type === 'tool/result' ? result.data.isError : true).toBe(false)
+          expect(
+            JSON.stringify(result?.type === 'tool/result' ? result.data.content : ''),
+          ).toContain('run it by hand')
+        }),
+      )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('a registered command wins the name a skill also holds', async () => {
     const input = makeInput()
     const root = await skillRoot('echo', 'skill body that must not load')

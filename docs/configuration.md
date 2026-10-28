@@ -37,8 +37,11 @@ plugin ごとの config キー、フラグ、環境変数の一覧は `jzh --dum
 | 1 | `<workspace>/.jzh/skills` |
 | 2 | `skills` に書いた順 |
 | 3 | `<jzh home>/skills`（既定 `~/.jzh/skills`） |
+| 4 | jzh に同梱した skills（`docx` / `pptx` / `xlsx`） |
 
 `SKILL.md` は YAML frontmatter に `name` と `description` を必ず持つ。欠けたファイルは一覧にも読込にも現れない。セッションの開始時に、見つかった skill の一覧がモデルへ届く。
+
+`modelInvocable` と `userInvocable` は既定 `true` で、`false` と書くとモデルのカタログと `/` の候補のそれぞれから外れる。`true` / `false` として読めない値は無視して `true` に倒す。同梱 skills は探索の最後に置くので、同じ名前の自作 skill が勝つ。
 
 探索先の直下にある symlink は、リンク先がディレクトリなら 1 段だけ辿る。壊れたリンクとファイルへのリンクは、`SKILL.md` を持たないディレクトリと同じく無視する。リンク先の中のディレクトリやリンクは辿らない。
 
