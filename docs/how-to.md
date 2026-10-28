@@ -38,6 +38,26 @@ plugins:
 
 優先順は `--effort` > 設定ファイルの `effort` > 行の `effort` で、どれも無ければ provider の既定になる。値は `reasoning_effort` としてそのまま provider に渡るので、受け付ける語は provider が決める（`jzh --dump-config` が「effort in effect:」で実効値を出す）。
 
+## tmux のペイン位置を文脈に入れる
+
+tmux の中で jzh を走らせ、そのペインをモデルに意識させたいときは、system-prompt の行で `tmuxContext` を有効にする。既定は無効で、同梱 profile には入っていない。
+
+```yaml
+plugins:
+  - id: system-prompt
+    name: '@jozo-harness/system-prompt'
+    config:
+      tmuxContext: true
+```
+
+有効にすると、runtime context に次の行が足される。
+
+```
+- tmux: session main, window 2, pane 1
+```
+
+行は tmux の中にいるときだけ出る。外にいるとき、tmux が無いとき、`tmux display-message` が答えないときは、行を出さずに step を続ける。位置はセッション名・window index・pane index で比べ、そのどれかが変わったときだけ新しい snapshot をログに足す。window の名前を変えただけでは足さない。
+
 ## ブラウザ UI でセッションを始める
 
 `jzh web` が出す起動 URL は、その run だけの短命 code（60 秒・1 回限り）を `?code=` に載せる。ブラウザが開くとサーバが code を `HttpOnly; SameSite=Strict; Path=/` の cookie と交換し、303 で `/` に戻すので、アドレス欄・履歴・転送されたメッセージに残るのは交換前の code だけになる。cookie はその run の間だけ有効な session cookie で、https で配信されている場合（`x-forwarded-proto: https`）だけ `Secure` を足す。交換済み・期限切れの code は 401 になる。WebSocket はこの cookie で認証し、Origin の検査はそのまま残る。テストやスクリプトが使う `ws://.../ui?token=...` の直接指定も引き続き受け付ける。
