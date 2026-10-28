@@ -11,7 +11,9 @@ import {
   makeAsk,
   type AskAnswer,
   type AskBatchAnswered,
+  type AskQuestion,
 } from '../src/index.ts'
+import { answerOf, lateAnswerMessage } from '../src/ask.ts'
 
 const request = (callId = 'c1') => ({
   callId,
@@ -233,3 +235,37 @@ describe('installAsk', () => {
 
 const eventsById = (events: ReadonlyArray<SessionEvent>, type: string): unknown =>
   events.find((event) => event.type === type)?.data
+
+describe('a human answer arrives as text', () => {
+  const multi: AskQuestion = {
+    id: 'colour',
+    question: 'Which colours?',
+    options: [{ label: 'red' }, { label: 'green' }, { label: 'blue' }],
+    multiSelect: true,
+  }
+
+  test('splits a multi-select answer on commas and drops the empty parts', () => {
+    expect(answerOf(multi, 'red, blue')).toEqual({ id: 'colour', selected: ['red', 'blue'] })
+    expect(answerOf(multi, 'red,,blue')).toEqual({ id: 'colour', selected: ['red', 'blue'] })
+  })
+
+  test('keeps text that names no label as the free-form answer', () => {
+    expect(answerOf({ ...multi, multiSelect: false }, 'teal')).toEqual({
+      id: 'colour',
+      selected: [],
+      custom: 'teal',
+    })
+  })
+
+  test('a late answer names its call and marks a skipped question', () => {
+    expect(
+      lateAnswerMessage({
+        callId: 'call-9',
+        answers: [
+          { id: 'a', selected: [] },
+          { id: 'b', selected: ['red'], custom: 'also teal' },
+        ],
+      }),
+    ).toBe('The user answered ask_user call call-9:\n- a: (skipped)\n- b: red, also teal')
+  })
+})
