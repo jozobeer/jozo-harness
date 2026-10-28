@@ -7,6 +7,7 @@ import {
   type TraceTool,
   type TraceTurn,
 } from '../../src/ui/trace.ts'
+import { maskSecrets } from '../../src/ui/secret.ts'
 import { useTranslate, type Translate } from '../i18n.ts'
 import type { SessionStore } from '../store.ts'
 import { Icon, toolIconOf } from './ui/icon.tsx'
@@ -131,7 +132,7 @@ const TurnLane = (props: { turn: TraceTurn; now: number; filter: Filter; store: 
     <section class={'wf-turn' + (props.turn.endedAt === undefined ? ' running' : '')}>
       <header class="wf-head">
         <span class="wf-turn-number">{t('wf.turn') + String(props.turn.turn)}</span>
-        <span class="wf-turn-prompt">{props.turn.prompt}</span>
+        <span class="wf-turn-prompt">{maskSecrets(props.turn.prompt)}</span>
         <span class="wf-turn-facts">
           {spanOf(liveEnd() - props.turn.startedAt) +
             ' · ' +

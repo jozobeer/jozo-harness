@@ -605,6 +605,31 @@ describe('the Solid page', () => {
     expect(container.querySelector('.turn-ask .body')?.textContent).toBe('hello')
   })
 
+  test('a key pasted into the prompt reads masked in the turn and in the waterfall', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const key = 'sk-proj-AbCdEfGhIjKlMnOpQrStUvWx0123'
+    const prompt = 'use ' + key
+    const { store } = makeStore({
+      conversation: { ...emptyConversation, blocks: [{ kind: 'user', text: prompt }] },
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'agent/inbox/claimed', { message: { text: prompt, source: 'user' } }),
+      ]),
+    })
+
+    const { container } = render(() => (
+      <>
+        <Conversation store={store} />
+        <Waterfall store={store} />
+      </>
+    ))
+
+    const body = container.querySelector('.turn-ask .body') as Element
+    expect(body.textContent).toBe('use sk-…0123')
+    expect(container.textContent).not.toContain(key)
+    expect(container.querySelector('.wf-turn-prompt')?.textContent).toBe('use sk-…0123')
+  })
+
   test('an attached file keeps a card above the prompt and a chip in the composer', () => {
     const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
     const attachment = {
