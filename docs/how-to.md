@@ -640,3 +640,246 @@ jzh --patch sessions.yml "…"
 読取専用の経路（一覧・検索・`jzh web` の表示）は lock を取らない。書き手が居てもログは読めるが、書き込み途中の切れた末尾は読み飛ばす。pid の生死は同じマシンの中でしか正しく分からないので、ネットワークファイルシステムを複数のマシンで共有する置き場では、この lock を排他の根拠にしない。
 
 長いセッションを開き直すために、投影（モデル履歴）をログの隣の `projection.v1.json` に残す。中身は畳み終えた最後の `seq`、その時点のメッセージ、版（`version: 1`）、書き込み時点のログの `mtimeMs` と `size` である。開くときにこのファイルがあり、版と `seq` がログに合い、ログが書き込み時より小さくなっていなければ、`seq` より後ろのイベントだけを畳んで履歴を戻す。
+
+チェックポイントは 200 イベントを畳むごとか、前回の書き込みから 5 秒経ったとき、および `flush`（プロセス終了時）に書く。書き込みは同じディレクトリの一時ファイルに書いてから rename するので、途中で落ちても読めるのは古いチェックポイントか新しいチェックポイントのどちらかである。
+
+JSON として読めない、`version` が違う、`seq` がログに無い、ログがチェックポイントより小さい、投影の形が違う、のいずれかなら、そのチェックポイントは捨てて先頭から畳み直す。チェックポイントは表示を速くするためのキャッシュであり、消してもセッションは開く。
+
+## コマンドを sandbox の外で走らせる
+
+`@jozo-harness/safety` の `sandbox` は既定で `auto` である。macOS では `seatbelt`（`sandbox-exec`）、Linux では `bwrap`（bubblewrap）が走る。コマンドは自分が走るディレクトリと一時ディレクトリにだけ書ける。それ以外の場所に書こうとすると macOS では `Operation not permitted`、Linux では `Read-only file system` になる。読み取りは制限せず、`/dev/null` への書き込みは許可する。
+
+```yaml
+  - id: safety
+    name: '@jozo-harness/safety'
+    config:
+      preset: workspace-write
+      sandbox: none          # 明示的に外すときだけ
+      writableRoots:         # 足したいディレクトリ（既定は cwd と一時ディレクトリ）
+        - ~/work/shared
+```
+
+`auto` で sandbox が使えないとき、または明示した backend がその platform で動かないときは、無制限に切り替えず起動が失敗する。Linux では `bwrap` の probe が通らない（未導入、user namespace を作れない）場合も起動が失敗する。
+
+Ubuntu 23.10 以降は AppArmor が非特権の user namespace を拒むので、bubblewrap を入れただけでは probe が通らない。bwrap に user namespace を許す profile を置く（CI も同じ手順を踏む）。
+
+```sh
+sudo apt-get install -y bubblewrap
+printf '%s\n' 'abi <abi/4.0>,' 'include <tunables/global>' \
+  'profile bwrap /usr/bin/bwrap flags=(unconfined) {' '  userns,' '}' \
+  | sudo tee /etc/apparmor.d/bwrap
+sudo apparmor_parser -r /etc/apparmor.d/bwrap
+bwrap --ro-bind / / --dev /dev --proc /proc --unshare-pid true && echo ok
+```
+
+## PowerShell でコマンドを走らせる
+
+`bash` tool は `shell` 引数で PowerShell を選べる。既定は `bash` で、`shell: powershell` を渡すと `pwsh -NoProfile -Command <script>` として走る。sandbox は bash と同じで、`sandbox-exec` / `bwrap` の内側で `pwsh` が起動する。
+
+`pwsh` が PATH に無い環境では、その呼び出しは理由を添えた `execution` の tool 失敗になる。turn は落ちないので、モデルは `shell: bash` でやり直せる。
+
+## チームで分担させる
+
+`ralph` は `--subagents` を要さず、tier1 行がある run で既定でモデルに渡る。objective と前 round の handoff だけを受け取る fresh な子を round ごとに起こすので、親の会話を長期記憶にしない反復に向く。通常の長い仕事は同じ session を続ける `goal` を使う。
+
+`--subagents` を付けると、`subagent` / `workflow` / 子を操る 4 つ（`list_agents` / `send_message` / `interrupt_agent` / `wait_agent`）と `team` がモデルに渡る。モデルは `team` ツールで名前つきの子（teammate）と共有の板（board）を持てる。teammate は `subagent` と同じ子 agent で、仕事を渡すのは既存の `send_message`、待つのは `wait_agent` である。
+
+```
+team spawn name=builder role="writes the guide"
+team create title="write the guide" owner=builder
+send_message id=<roster に出た session id> message="write the guide"
+team update id=task-1 state=done revision=1
+```
+
+`team list` が roster（子の状態つき）と板を出す。板の revision は更新のたびに増え、古い revision での update は拒否される。
+
+teammate 同士は Lead を介さずに `team send` で話せる。宛先は roster の name だけで、名簿に無い相手・自分自身・もう動いていない相手は拒否される。メッセージは宛先の session ログに入り、次にその子が動くときの system prompt と `team inbox` の両方から読める。idle の子はその場で起こされる。
+
+```
+team send to=writer text="review the draft"
+team inbox
+```
+
+task は `blockedBy` で他の task を待てる。依存が未完了のまま `state=done` にすると、残っている task id と状態を添えて拒否される。存在しない id と、自分自身や既存の依存をたどって戻ってくる循環は、作成または変更の時点で拒否される。
+
+```
+team create title="publish" blockedBy='["task-1"]'
+team update id=task-2 state=done revision=1   # task-1 が未完了なら拒否
+```
+
+権限は roster の内側だけで分かれる。spawn・create・owner の割当・blockedBy の変更は Lead だけが呼べる。teammate は自分の task を進めて完了でき、peer に send し、inbox と板を読める。Lead 専用の操作を teammate が呼ぶと、何を代わりにすればよいかを添えた `denied` で拒否される。
+
+子を 1 つだけ使うときは `subagent` で足りる。`model` で別の route（`provider/model`）を走らせられるが、その run が設定に置いている route に限る。候補はその run の既定 route と、`agent-loop` 行の `models` が値を持つモデル名（既定 route が provider を持つなら `<provider>/<model>` の形も）である。一覧に無い route は子を起こす前に `invalid-arguments` で拒否する。`context=fresh` で親の履歴を渡さず、`task` を省くと起こしたまま idle で残せる（あとから `send_message` で仕事を渡す）。
+
+## スクリプトで子エージェントを編成する（workflow の script）
+
+`workflow` は `tasks` の配列を渡す扇状実行のほかに、`script` を渡して子を順に起こせる。`script` は async 関数の本体で、引数の `workflow` から `spawn` を呼ぶ。`spawn` は子を 1 体起こし、その最終テキストと使った tool の要約を返すので、次の子の task をその場で決められる。
+
+```js
+const draft = await workflow.spawn('最初の案を書く', { label: 'draft' })
+const review = await workflow.spawn('この案をレビューする:\n' + draft.text, { label: 'review' })
+if (review.text.includes('NG')) {
+  return await workflow.spawn('指摘を直す:\n' + review.text)
+}
+return review.text
+```
+
+- `tasks` と `script` はどちらか一方だけ。両方渡すと `invalid-arguments` になる。
+- `spawn(task, { label, cwd })` は `{ sessionId, text, tools }` を返す。`tools` は子が使った tool の名前と結果の 1 行要約である。
+- 子は `subagent` と同じ経路で起こす。同じ route と同じ sandbox・承認を通る。
+- スクリプト自身は `run_code` と同じ sandbox の子プロセスで走る。fs や process には直接触れない。
+- 失敗は tool の失敗ではなく結果になる。例外は `stage: script`、子が起動できない・メッセージを取らない・turn が error で終わる場合は `stage: spawn N`、deadline は `stage: timeout`、起動数が `maxChildren` を超えた場合は `stage: spawn N` として、`ok: false` と `reason` が返る。
+- `maxChildren` の既定は 12。deadline は 10 分（`WORKFLOW_SCRIPT_TIMEOUT_MS`）。出力は 16,000 文字で切る。
+- 単純な同時実行は `tasks` のほうが短い。
+
+## モデルにまとめて質問させる（ask_user）
+
+`ask_user` は 1 回の呼び出しで複数の質問を出せる。`questions` に `id`（呼び出し内で一意）、`question`、任意の `header` / `options` / `multi_select` を並べる。同じ id が 2 つある呼び出しは、誰かに聞く前に `invalid-arguments` で拒否される。答えは質問ごとに `{ id, selected, custom? }` で返り、`multi_select` が true なら `selected` に複数が入る。選択肢に無い答えは `custom` に入る。
+
+`time_limit_ms` を渡すと、その時間で待つのをやめ、未回答の質問 id を `pending: true` と `unanswered` に残して呼び出しを終える。モデルはそのまま別の作業を続けられる。待っていた答えは捨てず、人間が答えた時点で `ask_user call <call id>` と質問 id を含む user メッセージとしてセッションに届く。ログには `interaction/ask/questions` / `interaction/ask/answers` / `interaction/ask/pending` が残るので、どの呼び出しへの答えかはそこから辿れる。
+
+`- id: tier1` の `timeLimitMs` を設定すると、`time_limit_ms` を省いた呼び出しもその時間で保留になる。既定は無効で、回答があるまで待つ。単一の質問だけを聞く従来の `question` / `options` の形も受け付け、その結果は `{ id, question, answer }` のままである。この形は制限時間を使わないので、保留にしたいときは `questions` を使う。
+
+## ツールの引数と戻り値の型を system prompt で見せる
+
+system prompt には、その step で見える tool の署名が 1 行ずつ出る。引数は必須と任意（`?`）を区別し、戻り値は tool の `output` schema から描く。plan mode や子 agent の制限で見えない tool は出ない。schema を型として読めない部分は `unknown` になる。
+
+## 配備ごとの persona を identity の前後に置く
+
+system prompt の `jzh:identity` は harness 自身の自己紹介である。配備ごとの口調や前提はここへ混ぜず、`system-prompt` 行の `persona` に分けて置く。`before` は identity の前、`after` は identity の直後に、それぞれ別の section として入る。
+
+```yaml
+plugins:
+  - id: system-prompt
+    name: '@jozo-harness/system-prompt'
+    config:
+      persona:
+        before: |
+          この配備では、利用者が日本語で話すときは日本語で答える。
+        after: |
+          変更を終えたら、確認したコマンドと結果を最後に並べる。
+```
+
+空文字・空白だけ・未設定の側は section を作らないので、空の見出しや空行は残らない。前後の空白は落とす。設定が同じなら、同じセッションのその部分は同じバイト列になる（時刻や環境の値は混ぜない）。同梱の `base` profile には入れていない。配備ごとに足す。
+
+## モデルにプログラムを書かせて tool を束ねる（run_code）
+
+tier1 行がある run では、モデルに `run_code` が渡る。モデルは既定で async 関数の本体を書き、`await tools.name(args)` で可視の tool を呼べる。`runtime: 'python'` を渡すと python3 のスクリプトとして走り、同じ tool を `tools.name(...)` で呼べる。大量の read / grep を 1 step に畳むときに使う。
+
+実行はセッションごとの子プロセスで、bash と同じ sandbox の下で走る。中の tool 呼び出しも、直接呼んだときと同じ policy と承認を通る。auto の審査だけは外側の `run_code` 呼び出しで 1 回行い、中の呼び出しでは繰り返さない。戻るのは node なら `return` と `console.log`、python なら `print` だけで、途中の tool の結果は会話に入らない。python の呼び出しは同期で、1 本ずつ順に走る。
+
+- 記憶: node の子はセッションが閉じるまで残る。プログラムが `globalThis` に置いた値は、同じセッションの次の `run_code` から読める。python も同じ子の中で名前空間を保つので、前のプログラムの変数が残る。別のセッションや子 agent は別の子を持つ。セッションが閉じると子は終了し、値は消える。
+- 打ち切り: 30 秒（`RUN_CODE_TIMEOUT_MS`）と 16,000 文字（`RUN_CODE_OUTPUT_LIMIT`）。切ったときは結果に印が付く。時間切れになった子は捨てるので、次の呼び出しは新しい子で始まり、固まったプログラムの `globalThis` は残らない。
+- 型: コードは TypeScript として渡せる。型注釈・`as`・`satisfies`・`interface` は実行前に `node:module` の `stripTypeScriptTypes` で外す。外せない構文（`enum`・`namespace` など）は、壊れた JavaScript として走らせず、`invalid-arguments` として理由を返す。
+- python は run に python3 があるときだけ使える。無ければ `unavailable` になる。
+- `run_code` 自身はプログラムからは呼べない（入れ子の再帰を防ぐ）。
+
+## モデルにプラグイン行を直させる
+
+モデルは `plugin` ツールで settings の `plugins` 行を list / add / remove / disable できる。1 回ごとに承認を求められ、足せるのは同梱のパッケージ名だけ。
+
+add した行の plugin をこの run の service の上に組めるなら、その tool は**次の step から**見える。設定ファイルには同時に書くので、次の起動でも同じ行が効く。組めるのは config が空の opt-in 行（`@jozo-harness/lsp`・`@jozo-harness/artifact`・`@jozo-harness/session-search`・`@jozo-harness/screen-capture`）である。
+
+remove はその逆で、この run が組んだ行なら settings から消すのと同じ呼び出しで、次の step から tool 一覧から外す。走っている step と tool 呼び出しはそのまま終わる。外した行は同じ id で add し直せる。config を持つ行（`mcp` など）を実行中の run から外す経路はまだ無いので、remove は拒否する。config が要る行の add も、次の起動で読めない行になるため拒否する。disable は次の起動から効く。
+
+```
+plugin list                     この run が組まれた行
+plugin add id=lsp name=@jozo-harness/lsp
+plugin remove id=lsp                         # この run からも外れる
+plugin add id=mcp name=@jozo-harness/mcp     # config が要るので拒否される
+plugin set id=mcp disabled=true              # 次の起動から効く
+```
+
+add や remove が失敗したとき（config が不正、tool 名が既に登録済み、id が無い、config を持つ行、など）は、settings も走っている tool 一覧も変わらない。失敗は tool の結果としてモデルに返り、run はそのまま続く。
+
+行が増えて tool が増えても、そのセッションはそのまま続けられる（新しい構成が記録される）。tool が減る変更や profile を変えるときだけ `--allow-preset-change` が要る（[構成を変えてセッションを再開する](#構成を変えてセッションを再開する)）。
+
+## 画面からプラグイン行を変える
+
+`jzh web` の Run ペインには Plugins の一覧がある。行ごとに on / off を切り替えられ、起動時に行の tool を組めなかったときは理由と Retry が出る。下の optional bundles にはこの build が持つ任意バンドルが並び、Install を押して確認でもう一度押すと settings に row を書く。画面のクリックが承認である。
+
+- on / off と Install は settings に書くだけで、走っている run の Layer は組み替えない。効くのは次の起動から。
+- 失敗の Retry だけは走っている run に効く。同じ row の wiring をその場でやり直し、成功すると失敗の表示が消える。
+- 一覧に無い名前は POST でも拒否する。画面に出るのは build の catalog にある名前だけで、catalog は同梱名の検査を緩めない。
+- `mcp`・`delegate`・`workspace-dependencies` は config が要るので画面からは足せない。`jzh config add plugins ...` で設定ファイルに書く（[MCP サーバを繋ぐ](#mcp-サーバを繋ぐ)）。
+
+## 構成を変えてセッションを再開する
+
+セッションは、始めたときの profile 名と tool の一覧を覚えている。
+
+- tool が増えただけなら、そのまま続く。増えた分は新しい構成として記録される。
+- tool が減ったとき、profile が変わったときは、turn を始める前に拒否され、違う点が stderr に出る。
+
+```sh
+jzh --resume <sessionId> "続き"                          # 同じ構成なら続く
+jzh --resume <sessionId> --allow-preset-change "続き"     # 減った tool や profile の変更を受け入れる（新しい構成を記録する）
+```
+
+## 予定を残す（schedule）
+
+モデルには `schedule` ツールを渡してある。時刻が来たら元のセッションに指示を届ける予定を、モデルが作り・一覧し・止め・消す。
+
+```
+schedule action=create prompt="pnpm run check を回して失敗を報告する" daily="08:30" timeZone="Asia/Tokyo"
+schedule action=create prompt="ビルドを確認する" after=600
+schedule action=create prompt="リリースを切る" at="2026-10-30T09:00:00+09:00"
+schedule action=list
+schedule action=pause id=sched-1
+schedule action=delete id=sched-1
+```
+
+- 規則は `every`（秒）、`daily` / `weekly` / `cron`（IANA の `timeZone` つき、省略時はこのホストの帯）、`at`（オフセット付きの絶対時刻）、`after`（今から N 秒）のどれか 1 つ。daily などの壁時計はその帯で読み、夏時間の切り替えを跨いでも同じ時刻に来る。無い帯、過去の `at`、2 月 30 日のような来ない cron は作成時に拒否する。
+- 予定はセッションログではなくホストの `schedules.json` に置き、元のセッション id を持つ。`jzh web` を開いている間は Web サーバが時計を持ち、別のセッションを見ていても元のセッションに届く。届け先のセッションが閉じていれば、その予定は期限のまま残り、次に開いたときに届く。
+- 古いセッションログに `schedule/created` として残っている予定は、そのセッションを開いたとき、またはツールが一覧したときにホストの保存域へ引き継ぐ。ログはそのまま読める記録として残る。
+- Web の Run ペインの Schedules からも同じ保存域に作れる。New で規則を選び、Stop / Resume で止め、Delete で消す。モデルのツールと同じ検査を通るので、片方で作った予定がもう片方の一覧に出る。
+
+## セッションに話しかけずに尋ねる（コマンド）
+
+REPL・TUI・Web では、行頭が `/` の行はコマンドとしてその場で答える。モデルの turn は消費せず、`command/run` と `command/done` としてログに残る。
+
+```
+/help     使えるコマンドを並べる
+/status   このセッションの居場所（モデル、cwd、turn 数、token 統計、goal、schedule）
+/feedback 回答に like / dislike と短いメモを付ける
+```
+
+`/status` の `stats` 行はセッションログから読める値だけを出す。tok/s は最後の turn の decode 区間、token は非キャッシュ入力・cache read / write・output・課金入力、cache は cache read ÷ 課金入力、context は runner が compaction に使うのと同じ budget に対する推定値の割合である。ログに無い値は `—` になり、0 と偽らない。
+
+Web UI は同じ値を、Run ペインの Usage と composer の context の輪で見せる。Usage は context の棒（compaction の位置に印）、入力と出力、最後の turn の tok/s を 0〜500 の速度計で示す。500 を超えると輪は満ちきり、中央の数字がそのまま速さを示す。速度計の青い弧は、値が変わると 180ms で前の長さから次の長さへ伸び縮みする。compaction まで窓の 10% を切ると、棒と輪が金になる。輪を押すと Run ペインの Usage が開く。`prefers-reduced-motion: reduce` の環境では弧はその場で切り替わる。
+
+知らない名前は登録済みの一覧を返す。コマンドの答えは TUI と Web では会話の notice として出る。
+
+### 回答を評価する
+
+Web では、終わった回答の下に Good と Bad が出る。押すとその場で評価がログに残り、Add a note から 500 文字までのメモを付けて Save できる。再読込してもログの `feedback/rated` から評価とメモを復元する。
+
+コマンドでも同じ評価を付けられる。
+
+```
+/feedback like                 # 最新の回答を like
+/feedback dislike #42 説明不足   # seq 42 の回答を dislike、メモ付き
+/feedback like #42             # メモなし
+```
+
+- 1 語目は `like` か `dislike`。そのあとの `#<seq>` は assistant メッセージの seq で、省略するとその時点で最新の回答を選ぶ。
+- `#<seq>` の後ろはメモ。500 文字を超えるメモは拒否し、ログには書かない。
+- 同じ回答に付け直すと、画面は最新の評価とメモを出す。ログには付けた回のすべてが残る。
+- 評価は log-only のイベントで、モデルの次のリクエストの履歴には入らない。`/feedback` は turn を起こさず、`command/run` と `command/done` だけを残す。
+
+## 過去のセッションを探して読む
+
+```sh
+jzh sessions              # 新しい順に、id・開始時刻・作業ディレクトリ
+jzh sessions <sessionId>  # そのセッションの会話を読む
+```
+
+続きから走らせるには `jzh --resume <sessionId>` を使う。一覧はセッションログの置き場（既定は `~/.jzh/sessions`）を見るので、置き場を変えているときは `--config` で同じ設定を指す。プロセスが止まる前に積まれ、まだ turn が取り込んでいなかった queued と steering は、開き直したセッションがそのまま走らせる。
+
+## 設定が効かないときに見る
+
+```sh
+jzh config          # 設定ファイルのパス、4キーの今の値、リストの中身
+jzh --dump-config   # 行、plugin ごとのキー、フラグ、環境変数
+```
+
+`jzh config` に値が出なければ、そのキーは読まれていない。綴りは [configuration.md](configuration.md) の表と突き合わせる。`profile:` が指せるのは同梱の `base` / `headless` / `repl` だけである。
