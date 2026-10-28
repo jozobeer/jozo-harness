@@ -154,6 +154,7 @@ export const makeDelegateTool = (
         type: 'text',
         text:
           value.text +
+          (value.truncated ? '\n\n[stdout truncated]' : '') +
           (value.stderr === ''
             ? ''
             : '\n\n[stderr]\n' +

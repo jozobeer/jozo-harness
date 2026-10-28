@@ -322,6 +322,29 @@ describe('delegate tool', () => {
     ).toEqual([{ type: 'text', text: 'hi' }])
   })
 
+  test('marks a cut stdout and a cut stderr in the rendered result', () => {
+    const tool = makeDelegateTool(allowed, noneSandbox, hostOf(['codex']))
+
+    expect(
+      tool.output.render(
+        { command: 'codex', task: 't' },
+        {
+          command: 'codex',
+          text: 'hi',
+          stderr: 'warn',
+          exitCode: 0,
+          truncated: true,
+          stderrTruncated: true,
+        },
+      ),
+    ).toEqual([
+      {
+        type: 'text',
+        text: 'hi\n\n[stdout truncated]\n\n[stderr]\nwarn\n[stderr truncated]',
+      },
+    ])
+  })
+
   test('renders a clean exit with stderr beside the answer', () => {
     const tool = makeDelegateTool(allowed, noneSandbox, hostOf(['codex']))
 
