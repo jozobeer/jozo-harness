@@ -22,19 +22,17 @@ const textTurn = (text: string): ReadonlyArray<StreamChunk> => [
   { type: 'finish', kind: 'stop' },
 ]
 
-const searchTurn = (query: string): ReadonlyArray<StreamChunk> => [
+const callTurn = (name: string, args: unknown, id: string): ReadonlyArray<StreamChunk> => [
   {
     type: 'block-end',
     index: 0,
-    block: {
-      type: 'tool-call',
-      id: 'c1',
-      name: 'session_search',
-      arguments: JSON.stringify({ query }),
-    },
+    block: { type: 'tool-call', id, name, arguments: JSON.stringify(args) },
   },
   { type: 'finish', kind: 'tool-calls' },
 ]
+
+const searchTurn = (query: string): ReadonlyArray<StreamChunk> =>
+  callTurn('session_search', { query }, 'c1')
 
 const stubLlm = (scripts: ReadonlyArray<ReadonlyArray<StreamChunk>>): Plugin<{}, Llm, never> => {
   let call = 0
@@ -183,24 +181,29 @@ const toolResultsOf = async (root: string): Promise<ReadonlyArray<string>> => {
 }
 
 describe('the session-search row', () => {
-  test('adds session_search to the tools only when the row is enabled', async () => {
+  test('adds the session tools to the tools only when the row is enabled', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-session-search-'))
     try {
       const code = await run(root, root, 'enabled', [textTurn('ok')])
       expect(code).toBe(0)
-      expect(await toolsOfFirstSession(root)).toContain('session_search')
+      expect(await toolsOfFirstSession(root)).toEqual(
+        expect.arrayContaining(['session_search', 'session_trace', 'session_event_read']),
+      )
     } finally {
       await rm(root, { recursive: true, force: true })
     }
   })
 
-  test('keeps session_search out when the row is disabled or absent', async () => {
+  test('keeps the session tools out when the row is disabled or absent', async () => {
     for (const row of ['disabled', 'absent'] as const) {
       const root = await mkdtemp(join(tmpdir(), 'jozo-harness-session-search-off-'))
       try {
         const code = await run(root, root, row, [textTurn('ok')])
         expect(code).toBe(0)
-        expect(await toolsOfFirstSession(root)).not.toContain('session_search')
+        const names = await toolsOfFirstSession(root)
+        expect(names).not.toContain('session_search')
+        expect(names).not.toContain('session_trace')
+        expect(names).not.toContain('session_event_read')
       } finally {
         await rm(root, { recursive: true, force: true })
       }
@@ -228,6 +231,32 @@ describe('the session-search row', () => {
       await rm(root, { recursive: true, force: true })
       await rm(workspace, { recursive: true, force: true })
       await rm(elsewhere, { recursive: true, force: true })
+    }
+  })
+
+  test('traces and reads a session that ran in this workspace', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-session-trace-'))
+    const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-session-trace-here-'))
+    try {
+      const here = await seedSession(root, workspace, 'the needle is in this workspace')
+
+      const code = await run(root, workspace, 'enabled', [
+        callTurn('session_trace', { sessionId: here }, 'c1'),
+        callTurn('session_event_read', { sessionId: here, seq: 2 }, 'c2'),
+        textTurn('done'),
+      ])
+      expect(code).toBe(0)
+
+      const results = await toolResultsOf(root)
+      expect(results).toHaveLength(2)
+      // The trace names the event and shows its first line; the read opens the
+      // same event in full, marked as the target of the window.
+      expect(results[0]).toContain('seq 2 user/message: the needle is in this workspace')
+      expect(results[1]).toContain('> seq 2 user/message')
+      expect(results[1]).toContain('the needle is in this workspace')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+      await rm(workspace, { recursive: true, force: true })
     }
   })
 })

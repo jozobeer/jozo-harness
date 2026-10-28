@@ -959,6 +959,14 @@ const installSessionSearch = (
       cwd: wiring.options.cwd,
       cwdOf: (sessionId) => cwdById.get(sessionId),
       search: (text, limit) => query.search(text, limit),
+      // The cut is leased to this read only, so it is given back before the next
+      // call can reuse it; a session read never becomes a cache entry of its own.
+      eventsOf: (sessionId) =>
+        Effect.acquireUseRelease(
+          query.observe(sessionId),
+          (observed) => Effect.succeed(observed.events),
+          (observed) => Effect.sync(() => observed.dispose()),
+        ),
     }
     for (const tool of Context.get(wiring.context, SessionSearchTools)(host)) {
       yield* tools.register(tool)
