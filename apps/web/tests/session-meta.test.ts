@@ -88,6 +88,29 @@ describe('the session metadata beside the logs', () => {
     expect(withMeta(summaryOf('parent', 'trunk'), meta.parent).forkOf).toBeUndefined()
   })
 
+  test('a fork is refused when the child log is not on disk', async () => {
+    const root = await rootOf()
+    await mkdir(join(root, 'parent'), { recursive: true })
+
+    // Recording a parent for a log that is not there would make the rail link nowhere.
+    await expect(Effect.runPromise(markFork(root, 'child', 'parent'))).rejects.toThrow(
+      /no such session: child/,
+    )
+    expect(await Effect.runPromise(readMeta(root))).toEqual({})
+  })
+
+  test('a fork whose metadata cannot be read names the file it could not read', async () => {
+    const root = await rootOf()
+    await mkdir(join(root, 'child'), { recursive: true })
+    await mkdir(join(root, 'parent'), { recursive: true })
+    // A directory where the metadata file belongs is unreadable, not missing.
+    await mkdir(metaPathOf(root))
+
+    await expect(Effect.runPromise(markFork(root, 'child', 'parent'))).rejects.toThrow(
+      /cannot read .*.web-meta.json/,
+    )
+  })
+
   test('a name that would leave the session root is refused', async () => {
     const root = await rootOf()
     await expect(

@@ -2249,6 +2249,69 @@ describe('the web transport', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('a page whose store has no index finds no body hits', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-search-none-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a', '/work', false)
+
+    const found = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, makeSettings())
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            return yield* client.searchSessions({ query: 'ledger' })
+          }).pipe(clientLayers(started.wsUrl))
+          const answered = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return answered
+        }),
+      ),
+    )
+
+    // Without an index, the rail still narrows by title; there is no body hit to add.
+    expect(found.items).toEqual([])
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('the rail search says why the index could not answer', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-search-gone-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a', '/work', false)
+    const searchSessions = () => Effect.fail(new WebError({ message: 'the index is gone' }))
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(
+            root,
+            web,
+            makeSettings(),
+            makeWorkspaces(),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            searchSessions,
+          )
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const refused = yield* client.searchSessions({ query: 'ledger' }).pipe(Effect.flip)
+            return String(refused)
+          }).pipe(clientLayers(started.wsUrl))
+          const answered = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return answered
+        }),
+      ),
+    )
+
+    expect(observed).toContain('the index is gone')
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('a fork copies the parent log into a new session and records where it began', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-fork-'))
     await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
@@ -2295,6 +2358,34 @@ describe('the web transport', () => {
     expect(observed.listed.opened).toContain('new-2')
     await rm(root, { recursive: true, force: true })
     await rm(home, { recursive: true, force: true })
+  })
+
+  test('a fork of a session the store does not hold says so and copies nothing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-fork-gone-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a', '/work', false)
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, makeSettings())
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const refused = yield* client.forkSession({ sessionId: 'gone' }).pipe(Effect.flip)
+            return { refused: String(refused), seeds: web.seeds.length, opened: web.hosts.size }
+          }).pipe(clientLayers(started.wsUrl))
+          const answered = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return answered
+        }),
+      ),
+    )
+
+    expect(observed.refused).toBe('no such session: gone')
+    // A refused fork neither reads the log nor starts a child.
+    expect(observed.seeds).toBe(0)
+    expect(observed.opened).toBe(1)
+    await rm(root, { recursive: true, force: true })
   })
 
   test('the row menu deletes an open session, and its pages with it', async () => {
