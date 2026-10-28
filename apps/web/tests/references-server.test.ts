@@ -141,6 +141,31 @@ describe('reading an @session', () => {
     }
   })
 
+  test('keeps only the seq range the word names', async () => {
+    const root = await workspace()
+    try {
+      const source = sourceOf([summaryOf('other', root)], {
+        other: [
+          userMessage(1, 'before the range'),
+          userMessage(2, 'inside the range'),
+          assistantMessage(3, 'the answer inside'),
+          userMessage(4, 'after the range'),
+        ],
+      })
+
+      const [reference] = await Effect.runPromise(
+        resolveReferences(root, 'see @session:other#2-3', source),
+      )
+
+      expect(reference?.text).toContain('inside the range')
+      expect(reference?.text).toContain('the answer inside')
+      expect(reference?.text).not.toContain('before the range')
+      expect(reference?.text).not.toContain('after the range')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('keeps a session from another workspace out of the candidates and the body', async () => {
     const root = await workspace()
     const other = await mkdtemp(join(tmpdir(), 'jzh-other-tree-'))

@@ -556,7 +556,7 @@ const Completion = (props: {
   )
 }
 
-/** The files one @word names, above the input. */
+/** The files and sessions one @word names, above the input. */
 const Reference = (props: {
   paths: ReadonlyArray<string>
   answered: boolean
@@ -568,10 +568,13 @@ const Reference = (props: {
     id="reference-list"
     class="command-list"
     role="listbox"
-    aria-label="the files this word names"
+    aria-label="the files and sessions this word names"
   >
     <Show when={props.answered} fallback={<div class="card-hint">reading the files…</div>}>
-      <Show when={props.paths.length > 0} fallback={<div class="card-hint">no file matches</div>}>
+      <Show
+        when={props.paths.length > 0}
+        fallback={<div class="card-hint">no file or session matches</div>}
+      >
         <For each={props.paths}>
           {(path, index) => (
             <button
