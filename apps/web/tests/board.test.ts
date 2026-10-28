@@ -8,6 +8,8 @@ import {
   emptyWatched,
   entryOf,
   keysOf,
+  matchesTitle,
+  matchingSessions,
   recentGroupsOf,
   visibleSessions,
   watchedAfter,
@@ -175,6 +177,34 @@ describe('the board', () => {
         '/work/b',
       ),
     ).toBe(groups[1])
+  })
+
+  test('a body hit keeps a session whose title does not match and carries the line it matched', () => {
+    const sessions = [summary('alpha'), summary('beta')]
+    const bodies = new Map([['beta', { text: 'the «ledger» is here' }]])
+
+    expect(matchingSessions(sessions, 'ledger', bodies).map((session) => session.id)).toEqual([
+      'beta',
+    ])
+    // A title match has no body hit, so the row shows no excerpt.
+    expect(matchesTitle(sessions[0] as never, 'alpha')).toBe(true)
+    expect(bodies.has('alpha')).toBe(false)
+    expect(matchingSessions(sessions, '  ', bodies)).toEqual(sessions)
+  })
+
+  test('a folder the reader ordered keeps that order, and a folder nobody ordered keeps recency', () => {
+    const one = entryOf({ ...summary('one', 1, 10), cwd: '/work/a' }, undefined)
+    const two = entryOf({ ...summary('two', 1, 20), cwd: '/work/a' }, undefined)
+    const older = entryOf({ ...summary('older', 1, 30), cwd: '/work/b' }, undefined)
+    const newer = entryOf({ ...summary('newer', 1, 40), cwd: '/work/b' }, undefined)
+    const groups = recentGroupsOf([one, two, older, newer], { '/work/a': ['two', 'one'] })
+
+    expect(
+      groups.find((group) => group.cwd === '/work/a')?.entries.map((e) => e.summary.id),
+    ).toEqual(['two', 'one'])
+    expect(
+      groups.find((group) => group.cwd === '/work/b')?.entries.map((e) => e.summary.id),
+    ).toEqual(['newer', 'older'])
   })
 
   test('a finished session keeps the first line of its answer, and a replayed event counts once', () => {

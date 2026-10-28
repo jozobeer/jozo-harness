@@ -19,6 +19,7 @@ import {
   type RunSettingsInput,
   type RunStateView,
   type SessionAction,
+  type SessionHit,
   type WorkspacePreview,
 } from '../src/shared/rpc.ts'
 import {
@@ -263,6 +264,7 @@ type PanelAsk =
     }
   | { readonly kind: 'scheduleDelete'; readonly sessionId: string; readonly id: string }
   | { readonly kind: 'sessionAction'; readonly sessionId: string; readonly action: SessionAction }
+  | { readonly kind: 'fork'; readonly sessionId: string }
   | {
       readonly kind: 'attach'
       readonly name: string
@@ -440,6 +442,10 @@ export interface SessionStore {
   readonly saveRunSettings: (input: RunSettingsInput) => void
   /** Renames, pins, archives, or deletes one session through its row menu. */
   readonly act: (sessionId: string, action: SessionAction) => void
+  /** Copies one session's log into a new one, and opens it. */
+  readonly fork: (sessionId: string) => void
+  /** Asks the store's index which sessions say what was typed; the answer may be stale. */
+  readonly searchSessions: (query: string, reply: (hits: ReadonlyArray<SessionHit>) => void) => void
   /** Drops a page the server no longer holds, so the run pane stops listing it. */
   readonly pageDeleted: (page: string) => void
 }
@@ -593,6 +599,13 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
   )
   const treeAsks = Effect.runSync(Queue.unbounded<TreeAsk>())
   const previewAsks = Effect.runSync(Queue.unbounded<PreviewAsk>())
+  /** The rail's searches: the store's index answers, and an answer may outlive the ask. */
+  const searchAsks = Effect.runSync(
+    Queue.unbounded<{
+      readonly query: string
+      readonly reply: (hits: ReadonlyArray<SessionHit>) => void
+    }>(),
+  )
   let following: Fiber.Fiber<void, unknown> | undefined
   const bridge = makeBridge((message) => update((current) => withProblem(current, message)))
 
@@ -910,6 +923,14 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
         }
       })
 
+    /** Copies one session's log and stands on the copy, so the reader continues there. */
+    const forkSession = (sessionId: string) =>
+      Effect.gen(function* () {
+        const forked = yield* client.forkSession({ sessionId })
+        yield* relist()
+        yield* Queue.offer(moves, { kind: 'open', id: forked.id })
+      })
+
     /** Reads the run's choices back, so the seat and the sheet say what a session opened now starts from. */
     const readRunChoice = () =>
       Effect.gen(function* () {
@@ -1072,6 +1093,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       if (asked.kind === 'attach') return answerAttach(asked)
       if (isSettingsAsk(asked)) return answerSettingsAsk(asked)
       if (asked.kind === 'sessionAction') return applySessionAction(asked)
+      if (asked.kind === 'fork') return forkSession(asked.sessionId)
       if (isRunAsk(asked)) return answerRunAsk(asked)
       return answerScheduleAsk(asked)
     }
@@ -1186,6 +1208,23 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       )
 
     yield* Effect.forkScoped(Stream.runForEach(Stream.fromQueue(previewAsks), readPreview))
+
+    /**
+     * One rail search. A refusal reads as no body hits rather than an error in
+     * the strip: the title matches the page already holds still narrow the list.
+     */
+    const answerSearch = (asked: {
+      readonly query: string
+      readonly reply: (hits: ReadonlyArray<SessionHit>) => void
+    }) =>
+      client.searchSessions({ query: asked.query }).pipe(
+        Effect.map((answer) => answer.items),
+        Effect.catchCause(() => Effect.succeed<ReadonlyArray<SessionHit>>([])),
+        Effect.tap((items) => Effect.sync(() => asked.reply(items))),
+        Effect.asVoid,
+      )
+
+    yield* Effect.forkScoped(Stream.runForEach(Stream.fromQueue(searchAsks), answerSearch))
 
     const settings = yield* client.settings()
     yield* Effect.sync(() => update((now) => withSettings(now, settings)))
@@ -1459,6 +1498,8 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       Queue.offerUnsafe(panelAsks, { kind: 'saveRunSettings', input }),
     act: (sessionId, action) =>
       Queue.offerUnsafe(panelAsks, { kind: 'sessionAction', sessionId, action }),
+    fork: (sessionId) => Queue.offerUnsafe(panelAsks, { kind: 'fork', sessionId }),
+    searchSessions: (query, reply) => Queue.offerUnsafe(searchAsks, { query, reply }),
     pageDeleted: (page) => update((now) => withDeletedPage(now, page)),
   }
 }

@@ -711,6 +711,12 @@ const refuseUpgrade = (socket: Duplex, status: number, message: string): void =>
   )
 }
 
+/** The search the rail uses: the caller's port, or one that answers no body hit. */
+const searchPortOf = (
+  options: ServeWebOptions,
+): ((text: string) => Effect.Effect<ReadonlyArray<SessionHit>, WebError>) =>
+  options.searchSessions ?? (() => Effect.succeed([]))
+
 /**
  * Serves the sessions of one profile: the browser app and the RPC socket.
  * Binds to loopback, and to this machine's detected tailnet address when there
@@ -901,7 +907,7 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
             options.workspaces,
             options.openInApp ?? noOpenInApp,
             options.readSessionEvents,
-            options.searchSessions ?? (() => Effect.succeed([])),
+            searchPortOf(options),
             options.commands,
             store,
             options.schedules,

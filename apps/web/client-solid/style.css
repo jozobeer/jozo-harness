@@ -1252,6 +1252,28 @@
     grid-column: 1;
   }
 
+  /* A body hit shows the line it matched under the row, leaving the menu on the first. */
+  .session-row > .session-excerpt {
+    grid-column: 1 / -1;
+    margin: 0;
+    padding: 0 8px 6px 26px;
+    overflow: hidden;
+    color: var(--dim);
+    font-size: var(--text-xs);
+    line-height: 1.5;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .session-match {
+    margin-right: 6px;
+    padding: 0 4px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-hover);
+    color: var(--text);
+    font-size: var(--text-xs);
+  }
+
   .session-menu {
     grid-column: 2;
     display: flex;
