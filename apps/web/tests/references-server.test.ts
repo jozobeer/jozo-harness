@@ -88,6 +88,18 @@ describe('reading an @file', () => {
     }
   })
 
+  test('notes a file inside the workspace that is missing', async () => {
+    const root = await workspace()
+    try {
+      const reference = await Effect.runPromise(readFileReference(root, 'src/gone.md'))
+
+      expect(reference?.kind).toBe('file')
+      expect(reference?.text).toContain('could not be read')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('refuses a path that leaves the workspace by .. or by its name', async () => {
     const root = await workspace()
     const outside = await mkdtemp(join(tmpdir(), 'jzh-outside-'))
@@ -161,6 +173,61 @@ describe('reading an @session', () => {
       expect(reference?.text).toContain('the answer inside')
       expect(reference?.text).not.toContain('before the range')
       expect(reference?.text).not.toContain('after the range')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('offers the readable sessions newest first when several match', async () => {
+    const root = await workspace()
+    try {
+      const source: SessionDigestSource = {
+        list: () =>
+          Effect.succeed([
+            { ...summaryOf('older', root, 'work one'), updatedAt: 1 },
+            { ...summaryOf('newer', root, 'work two'), updatedAt: 2 },
+          ]),
+        events: () => Effect.succeed([]),
+      }
+
+      const candidates = await Effect.runPromise(sessionCandidateTargets(root, 'work', source))
+
+      expect(candidates).toEqual(['session:newer', 'session:older'])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('offers no candidate when the store cannot be read', async () => {
+    const root = await workspace()
+    try {
+      const source: SessionDigestSource = {
+        list: () => Effect.fail(new Error('the store is gone')),
+        events: () => Effect.succeed([]),
+      }
+
+      const candidates = await Effect.runPromise(sessionCandidateTargets(root, 'work', source))
+
+      expect(candidates).toEqual([])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('attaches the named session with no messages when its log cannot be read', async () => {
+    const root = await workspace()
+    try {
+      const source: SessionDigestSource = {
+        list: () => Effect.succeed([summaryOf('other', root, 'the other work')]),
+        events: () => Effect.fail(new Error('the log is gone')),
+      }
+
+      const [reference] = await Effect.runPromise(
+        resolveReferences(root, 'see @session:other', source),
+      )
+
+      expect(reference?.kind).toBe('session')
+      expect(reference?.text).toContain('the other work')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
