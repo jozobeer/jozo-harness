@@ -27,6 +27,9 @@ const textTurn = (text: string): ReadonlyArray<StreamChunk> => [
 /** Every request the stub was sent, by the route it named. */
 const calls: Array<{ readonly provider: string; readonly model: string }> = []
 
+/** The text each request carried, so a test can read what the provider was told. */
+const seen: Array<string> = []
+
 const stubLlm: Plugin<{}, Llm, never> = {
   name: 'stub-llm',
   config: Schema.Struct({}),
@@ -43,6 +46,13 @@ const stubLlm: Plugin<{}, Llm, never> = {
       },
       stream: (request) => {
         calls.push({ provider: request.provider, model: request.model })
+        seen.push(
+          request.messages
+            .flatMap((message) =>
+              message.content.flatMap((block) => (block.type === 'text' ? [block.text] : [])),
+            )
+            .join('\n'),
+        )
         return Stream.fromIterable(textTurn('hello from jozo-harness'))
       },
     } satisfies LlmAdapter),
@@ -222,7 +232,9 @@ describe('the browser UI through the command', () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-gui-'))
     const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-web-gui-ws-'))
 
+    const before = seen.length
     const turn = await turnThroughPage(profile(root), workspace)
+    const request = seen.slice(before)
     const session = await Effect.runPromise(jsonlSessions({ root }).open(turn.id))
     const snapshots = session.events.flatMap((event) =>
       event.type === 'user/message' && event.data.source === 'runtime-context'
@@ -236,6 +248,9 @@ describe('the browser UI through the command', () => {
     // The page the human opened is named in the snapshot the model reads...
     expect(snapshots).toHaveLength(1)
     expect(snapshots[0]).toContain('- gui: ' + turn.origin)
+    // ...and in the request the provider answers.
+    expect(request).toHaveLength(1)
+    expect(request[0]).toContain('- gui: ' + turn.origin)
     // ...and the prompt the provider caches carries no address at all.
     expect(system).toHaveLength(1)
     expect(system[0]).not.toContain(turn.origin)
@@ -248,7 +263,9 @@ describe('the browser UI through the command', () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-nogui-'))
     const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-web-nogui-ws-'))
 
+    const before = seen.length
     const turn = await turnThroughPage(profile(root, ['config:', '  devContext: false']), workspace)
+    const request = seen.slice(before)
     const session = await Effect.runPromise(jsonlSessions({ root }).open(turn.id))
     const snapshots = session.events.flatMap((event) =>
       event.type === 'user/message' && event.data.source === 'runtime-context'
@@ -262,6 +279,9 @@ describe('the browser UI through the command', () => {
     // The workspace and the clock still arrive; the address the setting turned off does not.
     expect(snapshots).toHaveLength(1)
     expect(snapshots[0]).toContain('- cwd: ' + workspace)
+    expect(request).toHaveLength(1)
+    expect(request[0]).toContain('- cwd: ' + workspace)
+    expect(request[0]).not.toContain('gui:')
     expect(everything.join('\n')).not.toContain('gui:')
     expect(everything.join('\n')).not.toContain(turn.origin)
 
