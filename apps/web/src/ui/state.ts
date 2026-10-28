@@ -10,6 +10,7 @@ import type {
   SettingsView,
   WorkspaceView,
 } from '../shared/rpc.ts'
+import { DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, type FontFamily, type FontSize } from './font.ts'
 import { DEFAULT_THEME, type Theme } from './theme.ts'
 import { traceAfter, type TraceTurn } from './trace.ts'
 import { turnsAfter, type TurnView } from './trajectory.ts'
@@ -56,6 +57,10 @@ export interface WebState {
   readonly problem: string
   /** Which of the ways a page may be lit the reader chose. */
   readonly theme: Theme
+  /** The face the reader set the page in, which the conversation and composer keep. */
+  readonly fontFamily: FontFamily
+  /** The base size the reader set, which the whole type scale follows. */
+  readonly fontSize: FontSize
   /** What the server says about this run; undefined until the page has read it. */
   readonly settings: SettingsView | undefined
   /** The values the settings pane may edit; undefined until the pane asked. */
@@ -108,6 +113,8 @@ export const initialState: WebState = {
   opened: [],
   problem: '',
   theme: DEFAULT_THEME,
+  fontFamily: DEFAULT_FONT_FAMILY,
+  fontSize: DEFAULT_FONT_SIZE,
   settings: undefined,
   editable: undefined,
   settingsProblem: '',
@@ -167,6 +174,17 @@ export const withDeletedPage = (state: WebState, page: string): WebState =>
     : { ...state, deletedPages: [...state.deletedPages, page] }
 
 export const withTheme = (state: WebState, theme: Theme): WebState => ({ ...state, theme })
+
+/** The face and size stay on the page, as the theme does, rather than in the run's settings. */
+export const withFontFamily = (state: WebState, fontFamily: FontFamily): WebState => ({
+  ...state,
+  fontFamily,
+})
+
+export const withFontSize = (state: WebState, fontSize: FontSize): WebState => ({
+  ...state,
+  fontSize,
+})
 
 export const withSettings = (state: WebState, settings: SettingsView): WebState => ({
   ...state,

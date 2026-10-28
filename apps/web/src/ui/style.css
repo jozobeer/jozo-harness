@@ -54,12 +54,13 @@
   --s4: 16px;
   --s5: 24px;
   --s6: 32px;
-  /* One type scale around the 14px body, stepping by about a fifth. */
-  --text-xs: 11.5px;
-  --text-sm: 12.5px;
-  --text-base: 14px;
-  --text-md: 16px;
-  --text-lg: 19px;
+  /* One type scale around the 14px body, stepping by about a fifth. The whole
+     scale follows the reader's size choice, so no step is left behind. */
+  --text-xs: calc(11.5px * var(--font-scale));
+  --text-sm: calc(12.5px * var(--font-scale));
+  --text-base: calc(14px * var(--font-scale));
+  --text-md: calc(16px * var(--font-scale));
+  --text-lg: calc(19px * var(--font-scale));
   --radius: 10px;
   --radius-sm: 6px;
   /* The three columns, and the width prose is allowed to reach (about 75 characters). */
@@ -72,6 +73,10 @@
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   --sans:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+  --serif: 'Iowan Old Style', 'Hiragino Mincho ProN', 'Noto Serif JP', Georgia, serif;
+  /* The face and size the reader chose; these are the sheet's own until they do. */
+  --font-family: var(--sans);
+  --font-scale: 1;
 }
 
 /* The system's preference, for a page nobody has told otherwise. */
@@ -148,7 +153,7 @@ body {
   flex-direction: column;
   background: var(--bg);
   color: var(--text);
-  font: var(--text-base) / 1.6 var(--sans);
+  font: var(--text-base) / 1.6 var(--font-family);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -1757,7 +1762,7 @@ summary.tool-head:hover .tool-summary {
 .tool-state {
   flex: none;
   color: var(--dim);
-  font-family: var(--sans);
+  font-family: var(--font-family);
   font-size: var(--text-xs);
 }
 

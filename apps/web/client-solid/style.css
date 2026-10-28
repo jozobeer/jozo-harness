@@ -1496,7 +1496,7 @@
     align-items: baseline;
     padding: 8px var(--s3) 6px;
     background: var(--bg-sunken);
-    font-family: var(--sans);
+    font-family: var(--font-family);
   }
 
   .wf-turn-number {
@@ -1623,7 +1623,7 @@
 
   .inspect-status {
     color: var(--dim);
-    font-family: var(--sans);
+    font-family: var(--font-family);
     font-size: var(--text-xs);
     font-weight: 400;
   }
@@ -2155,7 +2155,7 @@
 
   .dial-value {
     fill: var(--text);
-    font: 700 30px var(--sans);
+    font: 700 30px var(--font-family);
     font-variant-numeric: tabular-nums;
   }
 
@@ -2170,7 +2170,7 @@
 
   .dial-unit {
     fill: var(--dim);
-    font: 7.5px var(--sans);
+    font: 7.5px var(--font-family);
     letter-spacing: 0.04em;
   }
 

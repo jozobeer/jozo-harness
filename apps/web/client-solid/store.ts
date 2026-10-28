@@ -32,6 +32,8 @@ import {
   withDraft,
   withEditable,
   withFiles,
+  withFontFamily,
+  withFontSize,
   withModels,
   withOpened,
   withPane,
@@ -49,16 +51,23 @@ import {
   type Pane,
   type WebState,
 } from '../src/ui/state.ts'
+import type { FontFamily, FontSize } from '../src/ui/font.ts'
 import type { Theme } from '../src/ui/theme.ts'
 import { draftOnMove, drafted } from '../src/ui/draft.ts'
 import { readDraft, writeDraft } from './drafts.ts'
 import {
   addressSession,
+  keptFontFamily,
+  keptFontSize,
   keptTheme,
+  keepFontFamily,
+  keepFontSize,
   keepTheme,
   onNextFrame,
   pageSearch,
   pageSocket,
+  showFontFamily,
+  showFontSize,
   showTheme,
 } from './dom.ts'
 import { emptyWatched, watchedAfter, type Watched } from '../src/ui/board.ts'
@@ -339,6 +348,10 @@ export interface SessionStore {
    */
   readonly moveTo: (id: string | undefined, cwd?: string) => void
   readonly chooseTheme: (theme: Theme) => void
+  /** Picks the face the conversation and the composer are set in. */
+  readonly chooseFontFamily: (family: FontFamily) => void
+  /** Picks the base size the whole type scale follows. */
+  readonly chooseFontSize: (size: FontSize) => void
   readonly showPane: (pane: Pane | undefined) => void
   readonly openJob: (id: string) => void
   readonly stopJob: (id: string) => void
@@ -1120,6 +1133,12 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     const theme = keptTheme()
     update((now) => withTheme(now, theme))
     showTheme(theme)
+    const family = keptFontFamily()
+    update((now) => withFontFamily(now, family))
+    showFontFamily(family)
+    const size = keptFontSize()
+    update((now) => withFontSize(now, size))
+    showFontSize(size)
     bridge.start(runnable)
   }
 
@@ -1246,6 +1265,16 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       update((now) => withTheme(now, theme))
       showTheme(theme)
       keepTheme(theme)
+    },
+    chooseFontFamily: (family) => {
+      update((now) => withFontFamily(now, family))
+      showFontFamily(family)
+      keepFontFamily(family)
+    },
+    chooseFontSize: (size) => {
+      update((now) => withFontSize(now, size))
+      showFontSize(size)
+      keepFontSize(size)
     },
     showPane: (pane) => update((current) => withPane(current, pane)),
     openJob: (id) => {

@@ -8,6 +8,8 @@ import {
   withConnection,
   withDraft,
   withFiles,
+  withFontFamily,
+  withFontSize,
   withModels,
   withPane,
   withProblem,
@@ -113,6 +115,15 @@ describe('the browser state', () => {
   test('the theme a reader picks is what the page keeps', () => {
     expect(initialState.theme).toBe('system')
     expect(withTheme(initialState, 'dark').theme).toBe('dark')
+  })
+
+  test('the face and size a reader picks stay on the page without touching the run', () => {
+    expect(initialState.fontFamily).toBe('sans')
+    expect(initialState.fontSize).toBe(14)
+    const larger = withFontSize(withFontFamily(initialState, 'serif'), 18)
+    expect(larger.fontFamily).toBe('serif')
+    expect(larger.fontSize).toBe(18)
+    expect(larger.settings).toBe(initialState.settings)
   })
 
   test('the header keeps the branch its workspace stands on beside the path', () => {

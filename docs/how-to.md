@@ -74,6 +74,12 @@ plugins:
 
 モデルに送るプロンプトの言語はこの設定では変わらない。prompt はホストが組み立て、ブラウザは選んだ言語で自分の文言を描くだけである。
 
+### フォントと文字の大きさを変える
+
+設定シートの `font` で `sans` / `serif` / `mono` を、`text size` で 12〜18px を選ぶ。会話と composer を含むページ全体がその face と大きさになり、`localStorage` の `jzh.font.family` と `jzh.font.size` に残るので再読込しても同じ見た目で開く。まだ選んでいなければサンセリフの 14px で開き、これは変える前の見た目と同じである。
+
+大きさは `apps/web/src/ui/style.css` の型スケール（`--text-*`）がまとめて `--font-scale` で伸び縮みする。コードとツールの出力は、選んだ face にかかわらず等幅のままである。
+
 ### GUI の URL をモデルに渡す
 
 `jzh web` のセッションには、その run が配信している GUI の URL が runtime context の 1 行として届く。既定で有効で、同梱 profile のままでも出る。

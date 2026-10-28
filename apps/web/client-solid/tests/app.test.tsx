@@ -7,6 +7,8 @@ import {
   initialState,
   withDeletedPage,
   withDraft,
+  withFontFamily,
+  withFontSize,
   withQuotes,
   withSelection,
   withTheme,
@@ -78,6 +80,8 @@ type Call =
   | { readonly kind: 'model'; readonly model: string }
   | { readonly kind: 'chooseModel'; readonly model: string }
   | { readonly kind: 'chooseEffort'; readonly effort: string }
+  | { readonly kind: 'fontFamily'; readonly family: string }
+  | { readonly kind: 'fontSize'; readonly size: number }
   | { readonly kind: 'askModels' }
   | { readonly kind: 'askCommands' }
   | { readonly kind: 'askRunSettings' }
@@ -142,6 +146,14 @@ const makeStore = (
     send: (command) => calls.push({ kind: 'command', command }),
     moveTo: (id, cwd) => calls.push({ kind: 'moveTo', id, cwd }),
     chooseTheme: (theme) => update((current) => withTheme(current, theme)),
+    chooseFontFamily: (family) => {
+      calls.push({ kind: 'fontFamily', family })
+      update((current) => withFontFamily(current, family))
+    },
+    chooseFontSize: (size) => {
+      calls.push({ kind: 'fontSize', size })
+      update((current) => withFontSize(current, size))
+    },
     showPane: (pane) => calls.push({ kind: 'pane', pane }),
     openJob: (id) => calls.push({ kind: 'openJob', id }),
     stopJob: (id) => calls.push({ kind: 'stopJob', id }),
@@ -2013,6 +2025,53 @@ describe('the Solid page', () => {
     fireEvent.click(container.querySelector('#use-model') as Element)
 
     expect(calls).toContainEqual({ kind: 'model', model: 'stub/other' })
+  })
+
+  test('the settings pane offers the faces and sizes, marks the one in use, and hands the pick on', () => {
+    const { store, calls } = makeStore({
+      pane: { kind: 'settings' },
+      fontFamily: 'serif',
+      fontSize: 16,
+    })
+
+    const { container } = render(() => <ContextPane store={store} />)
+
+    const faces = Array.from(container.querySelectorAll('[data-font]'))
+    expect(faces.map((button) => button.getAttribute('data-font'))).toEqual([
+      'sans',
+      'serif',
+      'mono',
+    ])
+    expect(faces.map((button) => button.getAttribute('aria-pressed'))).toEqual([
+      'false',
+      'true',
+      'false',
+    ])
+    const sizes = Array.from(container.querySelectorAll('[data-font-size]'))
+    expect(sizes.map((button) => button.getAttribute('data-font-size'))).toEqual([
+      '12',
+      '13',
+      '14',
+      '15',
+      '16',
+      '18',
+    ])
+    expect(sizes.map((button) => button.getAttribute('aria-pressed'))).toEqual([
+      'false',
+      'false',
+      'false',
+      'false',
+      'true',
+      'false',
+    ])
+
+    fireEvent.click(container.querySelector('[data-font="mono"]') as Element)
+    fireEvent.click(container.querySelector('[data-font-size="18"]') as Element)
+
+    expect(calls).toContainEqual({ kind: 'fontFamily', family: 'mono' })
+    expect(calls).toContainEqual({ kind: 'fontSize', size: 18 })
+    expect(store.state().fontFamily).toBe('mono')
+    expect(store.state().fontSize).toBe(18)
   })
 
   test('the settings pane fills its fields from the values the server resolved', () => {
