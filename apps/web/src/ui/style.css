@@ -949,6 +949,36 @@ body {
   font-size: var(--text-xs);
 }
 
+/* The export row sits beside its heading: downloading and copying share one line. */
+.run-exports {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  flex-wrap: wrap;
+}
+
+.run-export {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.run-export:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.run-export-notice {
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
 /* Live work heads its rows with a count; what settled folds behind its own count. */
 .run-work-counts {
   color: var(--dim);

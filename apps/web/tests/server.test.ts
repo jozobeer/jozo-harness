@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { request } from 'node:http'
 import { makeArtifactTool, makeScheduleStore } from '@jozo-harness/tools-tier1'
-import type { UiCommand, UiEvent, UiHost } from '@jozo-harness/ui-protocol'
+import type { SessionEvent, UiCommand, UiEvent, UiHost } from '@jozo-harness/ui-protocol'
 import { WebSocket } from 'ws'
 import { Deferred, Effect, Exit, Fiber, Option, Queue, Stream, type Scope } from 'effect'
 import { RpcClient, RpcSerialization } from 'effect/rpc'
@@ -20,6 +20,7 @@ import {
   type PluginsView,
   type PublicOrigin,
   type ReadyUrls,
+  type ServeWebOptions,
   type SessionFactory,
   type SettingsPort,
   type SettingsView,
@@ -429,6 +430,8 @@ const start = (
     known: () => [],
     change: async () => ({ ok: true }),
   },
+  /** The log read the session export route folds; tests that never export leave it empty. */
+  readSessionEvents: ServeWebOptions['readSessionEvents'] = () => Effect.succeed([]),
 ): Effect.Effect<Started, never, Scope.Scope> =>
   Effect.gen(function* () {
     const ready = yield* Deferred.make<ReadyUrls>()
@@ -438,7 +441,7 @@ const start = (
         initial: { session: web.initial, close: web.initialClose },
         factory: web.factory,
         settings: settings.port,
-        readSessionEvents: () => Effect.succeed([]),
+        readSessionEvents,
         schedules: makeScheduleStore(
           join(
             tmpdir(),
@@ -725,6 +728,111 @@ describe('the web transport', () => {
     expect(observed.foreignHost).toBe(403)
     await rm(root, { recursive: true, force: true })
     await rm(home, { recursive: true, force: true })
+  })
+
+  test('a page exports a session log and transcript without starting a turn', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-export-'))
+    const sessionRoot = join(root, 'sessions')
+    const id = 'exported'
+    const events: ReadonlyArray<SessionEvent> = [
+      {
+        seq: 1,
+        time: 1,
+        type: 'session/header',
+        data: { formatVersion: 1, createdAt: 0, cwd: '/work' },
+      },
+      { seq: 2, time: 2, type: 'user/message', data: { text: 'count the files', source: 'user' } },
+      {
+        seq: 3,
+        time: 3,
+        type: 'assistant/message',
+        data: {
+          provider: 'stub',
+          model: 'stub/model',
+          stream: [],
+          content: [{ type: 'text', text: 'twelve files' }],
+        },
+      },
+      {
+        seq: 4,
+        time: 4,
+        type: 'tool/result',
+        data: { callId: 'c1', isError: false, content: [{ type: 'text', text: 'a.txt' }] },
+      },
+    ]
+    await writeFileDeep(
+      join(sessionRoot, id, 'session.v1.jsonl'),
+      events.map((event) => JSON.stringify(event)).join('\n') + '\n',
+    )
+    const web = makeWeb('a')
+    const base = makeSettings()
+    const settings = {
+      ...base,
+      port: {
+        ...base.port,
+        read: () => Effect.succeed({ ...settingsView, sessionRoot }),
+      } satisfies SettingsPort,
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(
+            root,
+            web,
+            settings,
+            makeWorkspaces(),
+            undefined,
+            undefined,
+            undefined,
+            (named) => Effect.succeed(named === id ? events : []),
+          )
+          const cookie = { headers: { cookie: started.cookie } }
+          const zip = yield* Effect.promise(() =>
+            fetch(started.origin + '/session/' + id + '/log.zip', cookie),
+          )
+          const zipBytes = yield* Effect.promise(() => zip.arrayBuffer())
+          const transcript = yield* Effect.promise(() =>
+            fetch(started.origin + '/session/' + id + '/transcript.md', cookie),
+          )
+          const markdown = yield* Effect.promise(() => transcript.text())
+          const anonymous = yield* Effect.promise(() =>
+            fetch(started.origin + '/session/' + id + '/transcript.md'),
+          )
+          yield* Deferred.succeed(started.stop, undefined)
+          return {
+            zipStatus: zip.status,
+            zipType: zip.headers.get('content-type'),
+            zipName: zip.headers.get('content-disposition'),
+            zipSignature: Buffer.from(zipBytes).subarray(0, 2).toString('utf8'),
+            transcriptStatus: transcript.status,
+            transcriptType: transcript.headers.get('content-type'),
+            markdown,
+            anonymous: anonymous.status,
+            opened: web.hosts.size,
+            exportOpened: web.hosts.has(id),
+            commands: web.hosts.get('a')?.commands ?? [],
+          }
+        }),
+      ),
+    )
+
+    expect(observed.zipStatus).toBe(200)
+    expect(observed.zipType).toBe('application/zip')
+    expect(observed.zipName).toBe('attachment; filename="' + id + '.zip"')
+    expect(observed.zipSignature).toBe('PK')
+    expect(observed.transcriptStatus).toBe(200)
+    expect(observed.transcriptType).toBe('text/markdown; charset=utf-8')
+    expect(observed.markdown).toContain('## User\n\ncount the files')
+    expect(observed.markdown).toContain('## Assistant\n\ntwelve files')
+    expect(observed.markdown).toContain('## Tool result')
+    expect(observed.markdown).toContain('a.txt')
+    expect(observed.anonymous).toBe(401)
+    // Exporting reads the log; it neither opens a core nor sends it a command.
+    expect(observed.opened).toBe(1)
+    expect(observed.exportOpened).toBe(false)
+    expect(observed.commands).toEqual([])
+    await rm(root, { recursive: true, force: true })
   })
 
   test('a page the tool wrote under a changed session root is served on the route', async () => {

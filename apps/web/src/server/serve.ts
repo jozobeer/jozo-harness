@@ -37,6 +37,7 @@ import {
   type SessionRegistry,
 } from './sessions.ts'
 import { answerArtifact } from './artifacts.ts'
+import { answerSessionExport } from './session-export.ts'
 import { answerPlugins, type PluginsPort } from './plugins.ts'
 import { searchWorkspaceFiles } from './files.ts'
 import {
@@ -465,12 +466,14 @@ const respondTo = async (
   response: ServerResponse,
   staticRoot: string,
   artifactRoot: string | undefined,
+  sessionRoot: string | undefined,
   port: number,
   publicOrigin: PublicOrigin | undefined,
   tailnet: TailnetAddresses | undefined,
   token: string,
   codes: CodeExchange,
   plugins: PluginsPort,
+  readSessionEvents: (id: string) => Effect.Effect<ReadonlyArray<SessionEvent>, SessionError>,
 ): Promise<void> => {
   // A page served under another name could read this one through a rebinding
   // proxy; the name the request asked for must be one this server answers to.
@@ -483,6 +486,18 @@ const respondTo = async (
   if (
     await answerArtifact(request, response, path, {
       root: artifactRoot,
+      port,
+      publicOrigin,
+      tailnet,
+      token,
+      codes,
+    })
+  )
+    return
+  if (
+    await answerSessionExport(request, response, path, {
+      root: sessionRoot,
+      events: readSessionEvents,
       port,
       publicOrigin,
       tailnet,
@@ -570,10 +585,11 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
       // The sessions root names the jzh home the artifacts sit beside; settings
       // that cannot be read leave the route answering as if the file were gone.
       const view = yield* options.settings.read().pipe(Effect.option)
-      const artifactRoot = Option.match(view, {
+      const sessionRoot = Option.match(view, {
         onNone: () => undefined,
-        onSome: (read) => artifactRootOf(read.sessionRoot),
+        onSome: (read) => read.sessionRoot,
       })
+      const artifactRoot = sessionRoot === undefined ? undefined : artifactRootOf(sessionRoot)
       // The chosen port is known only once the listeners are up; requests arrive after.
       let boundPort = options.port
       // A detected address joins the gate only once a listener waits there; a
@@ -585,12 +601,14 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
           response,
           options.staticRoot,
           artifactRoot,
+          sessionRoot,
           boundPort,
           publicOrigin,
           tailnet,
           token,
           codes,
           options.plugins,
+          options.readSessionEvents,
         ).catch(() => {
           response.destroy()
         })
