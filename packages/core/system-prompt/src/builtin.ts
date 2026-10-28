@@ -176,20 +176,32 @@ const personaText = (text: string | undefined): string | undefined => {
   return trimmed === '' ? undefined : trimmed
 }
 
+/** One persona section, or none when its text carries no content. */
+const personaSection = (
+  name: string,
+  order: number,
+  text: string | undefined,
+): ReadonlyArray<PromptSection> => (text === undefined ? [] : [{ name, order, text }])
+
 /** The sections every jozo-harness prompt starts from. */
 export function builtinSections(options: BuiltinOptions = {}): ReadonlyArray<PromptSection> {
-  const sections: Array<PromptSection> = []
-  const before = personaText(options.persona?.before)
-  if (before !== undefined) {
-    sections.push({ name: PERSONA_BEFORE_SECTION, order: PERSONA_BEFORE_ORDER, text: before })
-  }
+  const sections: Array<PromptSection> = [
+    ...personaSection(
+      PERSONA_BEFORE_SECTION,
+      PERSONA_BEFORE_ORDER,
+      personaText(options.persona?.before),
+    ),
+  ]
   if (options.includeHarnessIdentity ?? true) {
     sections.push({ name: IDENTITY_SECTION, order: IDENTITY_ORDER, text: IDENTITY_TEXT })
   }
-  const after = personaText(options.persona?.after)
-  if (after !== undefined) {
-    sections.push({ name: PERSONA_AFTER_SECTION, order: PERSONA_AFTER_ORDER, text: after })
-  }
+  sections.push(
+    ...personaSection(
+      PERSONA_AFTER_SECTION,
+      PERSONA_AFTER_ORDER,
+      personaText(options.persona?.after),
+    ),
+  )
   if (options.includeToolGuidance ?? true) {
     sections.push({ name: TOOL_GUIDANCE_SECTION, order: TOOL_GUIDANCE_ORDER, text: toolGuidance })
   }
