@@ -17,8 +17,6 @@ const english = {
   'app.name': 'jozo-harness',
   'rail.hide': 'Hide sessions',
   'rail.show': 'Show sessions',
-  'rail.hideHint': 'Hide sessions (Mod+B)',
-  'rail.showHint': 'Show sessions (Mod+B)',
   'rail.resize': 'Resize sessions',
   'drawer.sessions': 'sessions',
   'context.title': 'Context',
@@ -264,8 +262,6 @@ export type MessageKey = keyof typeof english
 const japanese: Partial<Record<MessageKey, string>> = {
   'rail.hide': 'セッションを隠す',
   'rail.show': 'セッションを表示',
-  'rail.hideHint': 'セッションを隠す (Mod+B)',
-  'rail.showHint': 'セッションを表示 (Mod+B)',
   'rail.resize': 'セッションの幅を変える',
   'drawer.sessions': 'セッション',
   'context.title': 'コンテキスト',
