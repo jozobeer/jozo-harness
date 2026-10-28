@@ -1502,12 +1502,12 @@ const settingsPortOf = (
     }),
 })
 
-/** Opens one more session for a UI that outlives its first: the same wiring, a new scope. */
 /** The address this run serves. The port is known only once the listeners are up. */
 interface GuiEndpoint {
   url: string | undefined
 }
 
+/** Opens one more session for a UI that outlives its first: the same wiring, a new scope. */
 const sessionFactoryOf = (
   options: CommandOptions,
   rows: ReadonlyArray<PluginRow>,
