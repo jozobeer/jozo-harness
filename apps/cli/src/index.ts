@@ -116,6 +116,7 @@ import {
   ArtifactTools,
   LspTools,
   ScreenCaptureTools,
+  ComputerUseTools,
   BrowserTools,
   DelegateTools,
   WorkspaceDependenciesTools,
@@ -1032,20 +1033,21 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
       source: Context.Context<any>,
     ) => Effect.Effect<ReadonlyArray<ToolDefinition<any, any>>, ToolError, Scope.Scope>
 
-    const mounterOf = (name: string): RowMounter | undefined => {
-      if (name === '@jozo-harness/lsp') {
-        return (source) => Effect.succeed(Context.get(source, LspTools))
-      }
-      if (name === '@jozo-harness/artifact') {
-        return (source) => Effect.succeed(artifactToolsOf(source, wiring))
-      }
-      if (name === '@jozo-harness/session-search') {
-        return (source) => sessionSearchToolsOf(source, wiring)
-      }
+    const sandboxedMounterOf = (name: string): RowMounter | undefined => {
       if (name === '@jozo-harness/screen-capture') {
         // The capture runs through the run's sandbox, so an unconfined run wraps nothing.
         return (source) =>
           Effect.succeed(Context.get(source, ScreenCaptureTools)(sandboxOf(wiring) ?? noneSandbox))
+      }
+      if (name === '@jozo-harness/computer-use') {
+        // Approvals go through the same log-wrapped ask as every other Tier 1 tool.
+        return (source) =>
+          Effect.succeed(
+            Context.get(source, ComputerUseTools)(
+              sandboxOf(wiring) ?? noneSandbox,
+              installAsk(Context.get(wiring.context, Ask), wiring.agent.session),
+            ),
+          )
       }
       if (name === '@jozo-harness/browser') {
         // The browser runs through the run's sandbox, so an unconfined run wraps nothing.
@@ -1056,6 +1058,21 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
         // A delegated CLI runs through the run's sandbox too; the row fixes what it may start.
         return (source) =>
           Effect.succeed(Context.get(source, DelegateTools)(sandboxOf(wiring) ?? noneSandbox))
+      }
+      return undefined
+    }
+
+    const mounterOf = (name: string): RowMounter | undefined => {
+      const sandboxed = sandboxedMounterOf(name)
+      if (sandboxed !== undefined) return sandboxed
+      if (name === '@jozo-harness/lsp') {
+        return (source) => Effect.succeed(Context.get(source, LspTools))
+      }
+      if (name === '@jozo-harness/artifact') {
+        return (source) => Effect.succeed(artifactToolsOf(source, wiring))
+      }
+      if (name === '@jozo-harness/session-search') {
+        return (source) => sessionSearchToolsOf(source, wiring)
       }
       if (name === '@jozo-harness/workspace-dependencies') {
         // The payload is fixed by the row, so the tool only reads what that directory holds.
@@ -1242,6 +1259,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
     yield* installWiredRow('@jozo-harness/artifact')
     yield* installWiredRow('@jozo-harness/session-search')
     yield* installWiredRow('@jozo-harness/screen-capture')
+    yield* installWiredRow('@jozo-harness/computer-use')
     yield* installWiredRow('@jozo-harness/browser')
     yield* installWiredRow('@jozo-harness/delegate')
     yield* installWiredRow('@jozo-harness/workspace-dependencies')

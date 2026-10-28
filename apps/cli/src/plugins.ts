@@ -11,6 +11,7 @@ import { tier0Plugin } from '@jozo-harness/tools-tier0'
 import {
   artifactPlugin,
   browserPlugin,
+  computerUsePlugin,
   delegatePlugin,
   lspPlugin,
   mcpPlugin,
@@ -54,6 +55,12 @@ export const optionalBundles: ReadonlyArray<OptionalBundle> = [
     id: 'screen-capture',
     name: '@jozo-harness/screen-capture',
     summary: 'capture the screen as an image through the run sandbox',
+    needsConfig: false,
+  },
+  {
+    id: 'computer-use',
+    name: '@jozo-harness/computer-use',
+    summary: 'click, type, and press keys on screen after the human approves',
     needsConfig: false,
   },
   {
@@ -115,6 +122,7 @@ export const bundledPlugins: ReadonlyArray<Plugin<any, any, any>> = [
   tier1Plugin,
   artifactPlugin,
   screenCapturePlugin,
+  computerUsePlugin,
   browserPlugin,
   delegatePlugin,
   mcpPlugin,
