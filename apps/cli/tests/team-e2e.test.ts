@@ -201,4 +201,149 @@ describe('a team through the command', () => {
 
     await rm(root, { recursive: true, force: true })
   })
+
+  test('teammates talk to each other and a task waits for its dependency', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-team-peers-'))
+    const requests: Array<LlmRequest> = []
+    const errs: Array<string> = []
+    const builderTurn = (request: LlmRequest): ReadonlyArray<StreamChunk> =>
+      textOf(request).includes('sent to writer: review the draft')
+        ? textTurn('the draft is done')
+        : toolTurn('team', { action: 'send', to: 'writer', text: 'review the draft' })
+    const writerTurn = (): ReadonlyArray<StreamChunk> => textTurn('looks good')
+    const isBuilder = (request: LlmRequest): boolean => textOf(request).includes('write the guide')
+    const isWriter = (request: LlmRequest): boolean =>
+      request.messages.some(
+        (message) =>
+          message.role === 'user' &&
+          message.content.some(
+            (block) =>
+              block.type === 'text' && block.text === 'peer message from builder: review the draft',
+          ),
+      )
+    const leadScript: ReadonlyArray<(request: LlmRequest) => ReadonlyArray<StreamChunk>> = [
+      () => toolTurn('team', { action: 'spawn', name: 'builder' }),
+      () => toolTurn('team', { action: 'spawn', name: 'writer' }),
+      () => toolTurn('team', { action: 'create', title: 'draft the guide' }),
+      () =>
+        toolTurn('team', {
+          action: 'create',
+          title: 'publish the guide',
+          blockedBy: ['task-1'],
+        }),
+      (request) => toolTurn('send_message', { id: childIdIn(request), message: 'write the guide' }),
+      (request) => toolTurn('wait_agent', { id: childIdIn(request) }),
+      // This completion must be refused while task-1 is still open.
+      () => toolTurn('team', { action: 'update', id: 'task-2', state: 'done', revision: 1 }),
+      () => toolTurn('team', { action: 'update', id: 'task-1', state: 'done', revision: 1 }),
+      () => toolTurn('team', { action: 'update', id: 'task-2', state: 'done', revision: 1 }),
+    ]
+    const leadTurn = (step: number, request: LlmRequest): ReadonlyArray<StreamChunk> =>
+      leadScript[step - 1]?.(request) ?? textTurn('the guide is published')
+    let leadStep = 1
+    const peersLlm: Plugin<{}, Llm, never> = {
+      name: 'stub-llm',
+      config: Schema.Struct({}),
+      provides: [Llm],
+      requires: [],
+      layer: () =>
+        Layer.succeed(Llm, {
+          name: 'stub',
+          capabilities: {
+            toolChoice: false,
+            reasoningEffort: null,
+            images: 'none',
+            promptCacheControl: false,
+          },
+          stream: (request) => {
+            requests.push(request)
+            if (isWriter(request)) return Stream.fromIterable(writerTurn())
+            if (isBuilder(request)) return Stream.fromIterable(builderTurn(request))
+            const script = leadTurn(leadStep, request)
+            leadStep += 1
+            return Stream.fromIterable(script)
+          },
+        } satisfies LlmAdapter),
+    }
+    const code = await Effect.runPromise(
+      runCommand({
+        profiles: [profile(root)],
+        plugins: [
+          kernelPlugin,
+          sessionJsonlPlugin,
+          sessionPlugin,
+          toolsPlugin,
+          systemPromptPlugin,
+          safetyPlugin,
+          askPlugin,
+          tier0Plugin,
+          tier1Plugin,
+          peersLlm,
+          agentPlugin,
+          agentLoopPlugin,
+        ] as ReadonlyArray<Plugin<any, any, any>>,
+        cwd: '/tmp',
+        route: 'stub/model',
+        task: 'get the guide published',
+        subagents: true,
+        stdout: () => undefined,
+        stderr: (text) => {
+          errs.push(text)
+        },
+      }),
+    )
+
+    const sessions = await Effect.runPromise(jsonlSessions({ root }).list())
+    expect(errs.join('')).toBe('')
+    expect(code).toBe(0)
+    expect(sessions).toHaveLength(3)
+    const logs = await Promise.all(
+      sessions.map((session) =>
+        Effect.runPromise(jsonlSessions({ root }).open(session.id)).then((opened) => opened.events),
+      ),
+    )
+    const lead = logs.find((events) => events.some((event) => event.type === 'team/spawned'))
+    const builder = logs.find((events) =>
+      events.some(
+        (event) => event.type === 'user/message' && event.data.text === 'write the guide',
+      ),
+    )
+    const writer = logs.find((events) => events !== lead && events !== builder)
+
+    expect(
+      lead?.flatMap((event) => (event.type === 'team/spawned' ? [event.data] : [])),
+    ).toHaveLength(2)
+    if (lead === undefined || writer === undefined) throw new Error('the run left no team logs')
+    // The peer message is in the writer's own log, sent by the builder, not relayed by the lead.
+    expect(writer.flatMap((event) => (event.type === 'team/message' ? [event.data] : []))).toEqual([
+      expect.objectContaining({
+        from: 'builder',
+        to: 'writer',
+        text: 'review the draft',
+        fromSession: expect.any(String),
+        at: expect.any(String),
+      }),
+    ])
+    expect(lead.flatMap((event) => (event.type === 'team/message' ? [event.data] : []))).toEqual([])
+    // The writer's next turn reads the message from its runtime context.
+    expect(requests.filter(isWriter).map(textOf).join('\n')).toContain(
+      'team inbox: builder: review the draft',
+    )
+    // Completing the dependent task before its dependency is refused, and the
+    // refusal names the open task on the next request.
+    expect(requests.map(textOf).join('\n')).toContain(
+      'cannot complete task-2: waiting on task-1 (pending)',
+    )
+    // The board still reaches done once the dependency lands.
+    expect(
+      lead
+        .flatMap((event) => (event.type === 'team/task/updated' ? [event.data.task] : []))
+        .map((task) => [task.id, task.state]),
+    ).toEqual([
+      ['task-1', 'done'],
+      ['task-2', 'done'],
+    ])
+
+    await rm(root, { recursive: true, force: true })
+  })
 })

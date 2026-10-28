@@ -518,6 +518,22 @@ team update id=task-1 state=done revision=1
 
 `team list` が roster（子の状態つき）と板を出す。板の revision は更新のたびに増え、古い revision での update は拒否される。
 
+teammate 同士は Lead を介さずに `team send` で話せる。宛先は roster の name だけで、名簿に無い相手・自分自身・もう動いていない相手は拒否される。メッセージは宛先の session ログに入り、次にその子が動くときの system prompt と `team inbox` の両方から読める。idle の子はその場で起こされる。
+
+```
+team send to=writer text="review the draft"
+team inbox
+```
+
+task は `blockedBy` で他の task を待てる。依存が未完了のまま `state=done` にすると、残っている task id と状態を添えて拒否される。存在しない id と、自分自身や既存の依存をたどって戻ってくる循環は、作成または変更の時点で拒否される。
+
+```
+team create title="publish" blockedBy='["task-1"]'
+team update id=task-2 state=done revision=1   # task-1 が未完了なら拒否
+```
+
+権限は roster の内側だけで分かれる。spawn・create・owner の割当・blockedBy の変更は Lead だけが呼べる。teammate は自分の task を進めて完了でき、peer に send し、inbox と板を読める。Lead 専用の操作を teammate が呼ぶと、何を代わりにすればよいかを添えた `denied` で拒否される。
+
 子を 1 つだけ使うときは `subagent` で足りる。`model` で別の route（`provider/model`）を走らせられるが、その run が設定に置いている route に限る。候補はその run の既定 route と、`agent-loop` 行の `models` が値を持つモデル名（既定 route が provider を持つなら `<provider>/<model>` の形も）である。一覧に無い route は子を起こす前に `invalid-arguments` で拒否する。`context=fresh` で親の履歴を渡さず、`task` を省くと起こしたまま idle で残せる（あとから `send_message` で仕事を渡す）。
 
 ## スクリプトで子エージェントを編成する（workflow の script）

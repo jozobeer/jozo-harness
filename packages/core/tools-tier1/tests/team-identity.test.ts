@@ -1,7 +1,7 @@
 import type { Agent, AgentsShape } from '@jozo-harness/agent'
 import type { SessionEvent } from '@jozo-harness/session'
 import { describe, expect, test } from 'vitest'
-import { teamIdentityLine, teamIdentityOf } from '../src/index.ts'
+import { teamIdentityLine, teamIdentityOf, teamInboxLine } from '../src/index.ts'
 
 const event = (seq: number, type: string, data: unknown): SessionEvent =>
   ({ seq, time: seq, type, data }) as unknown as SessionEvent
@@ -62,6 +62,28 @@ describe('teamIdentityLine', () => {
     expect(teamIdentityLine({ name: 'builder', role: '', lead: 'lead-1' })).toBe(
       'team: you are teammate "builder"; your Team Lead is session lead-1. ' +
         'Act as that teammate, not as the lead.',
+    )
+  })
+})
+
+describe('teamInboxLine', () => {
+  test('says nothing when there is no unread message', () => {
+    expect(teamInboxLine([])).toBeUndefined()
+  })
+
+  test('names each sender and asks for an inbox call', () => {
+    expect(
+      teamInboxLine([
+        {
+          from: 'builder',
+          fromSession: 'child-1',
+          to: 'writer',
+          text: 'review the draft',
+          at: '2026-10-28T00:00:00.000Z',
+        },
+      ]),
+    ).toBe(
+      'team inbox: builder: review the draft. Reply with team send, or run team inbox to mark these read.',
     )
   })
 })
