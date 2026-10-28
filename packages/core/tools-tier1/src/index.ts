@@ -17,10 +17,12 @@ export const tier1Tools = (
   ask: AskShape,
   skillRoots: ReadonlyArray<string> = [],
   runCode?: RunCodeHost,
+  /** Default wait for a batch of questions; absent waits until answered. */
+  timeLimitMs?: number,
 ): ReadonlyArray<ToolDefinition<any, any>> => [
   todoWriteTool,
 
-  askUserToolFor(ask),
+  askUserToolFor(ask, timeLimitMs),
   webFetchTool,
   readImageTool,
   ...(skillRoots.length === 0 ? [] : [makeSkillTool(skillRoots)]),

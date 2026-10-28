@@ -10,15 +10,20 @@ export class Tier1Tools extends Context.Service<
   ReadonlyArray<ToolDefinition<any, any>>
 >()('jozo-harness/Tier1Tools') {}
 
+/** The ask tool's default wait for a batch; absent leaves the tool waiting until answered. */
+const tier1ConfigSchema = Schema.Struct({
+  timeLimitMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
+})
+
 /** Loader definition for the Tier 1 tools; the ask tool uses the ask holder. */
-export const tier1Plugin: Plugin<{}, Tier1Tools, Ask> = {
+export const tier1Plugin: Plugin<Schema.Schema.Type<typeof tier1ConfigSchema>, Tier1Tools, Ask> = {
   name: '@jozo-harness/tools-tier1',
-  config: Schema.Struct({}),
+  config: tier1ConfigSchema,
   provides: [Tier1Tools],
   requires: [Ask],
-  layer: () =>
+  layer: (config) =>
     Layer.effect(
       Tier1Tools,
-      Effect.map(Ask, (ask) => tier1Tools(ask)),
+      Effect.map(Ask, (ask) => tier1Tools(ask, [], undefined, config.timeLimitMs)),
     ),
 }
