@@ -10,6 +10,7 @@ import {
 import {
   Hooks,
   isRowEnabled,
+  loadPluginRow,
   loadProfile,
   mergeRows,
   parseProfile,
@@ -41,7 +42,7 @@ import {
   type AgentsMdOptions,
   type RuntimeContextSubject,
 } from '@jozo-harness/system-prompt'
-import { ToolError, type ToolExecution } from '@jozo-harness/tools'
+import { ToolError, type ToolDefinition, type ToolExecution } from '@jozo-harness/tools'
 import { Tools, type ToolRegistry } from '@jozo-harness/tools'
 import {
   currentPreset,
@@ -87,7 +88,6 @@ import { stopSubagentOf, subagentsOf } from './subagents.ts'
 import { sessionRootOf } from './session-list.ts'
 import { credentialSource, type SettingsSurface } from './settings.ts'
 import { configPaths } from './config.ts'
-import { bundledPlugins } from './plugins.ts'
 import { makePluginHost } from './plugin-host.ts'
 import {
   agentTools,
@@ -434,6 +434,8 @@ const installTier1 = (
   jobs: JobsShape,
   /** The boundary the run's commands are confined to; run_code's child uses it too. */
   sandbox: SandboxShape | undefined,
+  /** Builds an added row over this run's services and reports the tools it wired. */
+  mount: (row: PluginRow) => Effect.Effect<ReadonlyArray<string>, ToolError>,
 ) =>
   Effect.gen(function* () {
     // A run with nobody to answer leaves the seam unserved, so a question fails
@@ -442,9 +444,10 @@ const installTier1 = (
     if (answer !== undefined) yield* holder.serve((request) => answer(request))
     const pluginHost = makePluginHost({
       rows,
-      known: bundledPlugins.map((plugin) => plugin.name),
+      plugins: options.plugins,
       settingsPath: options.settingsPath ?? configPaths().config,
       ask,
+      mount,
     })
     for (const tool of tier1ToolList(
       ask,
@@ -913,19 +916,26 @@ const installLsp = (tools: ToolRegistry, wiring: ProfileWiring) =>
     for (const tool of Context.get(wiring.context, LspTools)) yield* tools.register(tool)
   })
 
+/**
+ * The tools one context's artifact service hands the run. The page is written by
+ * a tool, not a command, so the sandbox never wraps it; the preset has to reach
+ * the tool here to keep read-only runs from publishing. Without a safety row
+ * there is no preset to obey.
+ */
+const artifactToolsOf = (
+  source: Context.Context<any>,
+  wiring: ProfileWiring,
+): ReadonlyArray<ToolDefinition<any, any>> => {
+  const sandbox = hasEnabledRow(wiring.rows, '@jozo-harness/safety')
+    ? Context.get(wiring.context, Sandbox)
+    : noneSandbox
+  return Context.get(source, ArtifactTools)(sessionRootOf(wiring.rows), sandbox)
+}
+
 const installArtifact = (tools: ToolRegistry, wiring: ProfileWiring) =>
   Effect.gen(function* () {
     if (!hasEnabledRow(wiring.rows, '@jozo-harness/artifact')) return
-    const sessionRoot = sessionRootOf(wiring.rows)
-    // The page is written by a tool, not a command, so the sandbox never wraps
-    // it and the preset has to reach the tool here to keep read-only runs from
-    // publishing. Without a safety row there is no preset to obey.
-    const sandbox = hasEnabledRow(wiring.rows, '@jozo-harness/safety')
-      ? Context.get(wiring.context, Sandbox)
-      : noneSandbox
-    for (const tool of Context.get(wiring.context, ArtifactTools)(sessionRoot, sandbox)) {
-      yield* tools.register(tool)
-    }
+    for (const tool of artifactToolsOf(wiring.context, wiring)) yield* tools.register(tool)
   })
 
 /**
@@ -933,12 +943,11 @@ const installArtifact = (tools: ToolRegistry, wiring: ProfileWiring) =>
  * useful only where its session ran, so the header's cwd decides what counts as
  * this workspace; the run's own cwd is what the model is searching from.
  */
-const installSessionSearch = (
-  tools: ToolRegistry,
+const sessionSearchToolsOf = (
+  source: Context.Context<any>,
   wiring: ProfileWiring,
-): Effect.Effect<void, ToolError, Scope.Scope> =>
+): Effect.Effect<ReadonlyArray<ToolDefinition<any, any>>, ToolError, Scope.Scope> =>
   Effect.gen(function* () {
-    if (!hasEnabledRow(wiring.rows, '@jozo-harness/session-search')) return
     const sessions = Context.get(wiring.context, SessionPersistenceService)
     const summaries = yield* sessions
       .list()
@@ -968,7 +977,16 @@ const installSessionSearch = (
           (observed) => Effect.sync(() => observed.dispose()),
         ),
     }
-    for (const tool of Context.get(wiring.context, SessionSearchTools)(host)) {
+    return Context.get(source, SessionSearchTools)(host)
+  })
+
+const installSessionSearch = (
+  tools: ToolRegistry,
+  wiring: ProfileWiring,
+): Effect.Effect<void, ToolError, Scope.Scope> =>
+  Effect.gen(function* () {
+    if (!hasEnabledRow(wiring.rows, '@jozo-harness/session-search')) return
+    for (const tool of yield* sessionSearchToolsOf(wiring.context, wiring)) {
       yield* tools.register(tool)
     }
   })
@@ -983,6 +1001,76 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
   Effect.gen(function* () {
     const tools = Context.get(wiring.context, Tools)
     const planMode = planModeFromProfile(wiring.rows, wiring.agent.session)
+    // A row added while the session runs is built into this scope, so its tools
+    // leave with the session that mounted them.
+    const scope = yield* Scope.Scope
+
+    /** One opt-in row's tools, built from the services that row provides. */
+    type RowMounter = (
+      source: Context.Context<any>,
+    ) => Effect.Effect<ReadonlyArray<ToolDefinition<any, any>>, ToolError, Scope.Scope>
+
+    const mounterOf = (name: string): RowMounter | undefined => {
+      if (name === '@jozo-harness/lsp') {
+        return (source) => Effect.succeed(Context.get(source, LspTools))
+      }
+      if (name === '@jozo-harness/artifact') {
+        return (source) => Effect.succeed(artifactToolsOf(source, wiring))
+      }
+      if (name === '@jozo-harness/session-search') {
+        return (source) => sessionSearchToolsOf(source, wiring)
+      }
+      return undefined
+    }
+
+    /**
+     * Builds one added row over the running services and registers what it adds.
+     * A row no mounter knows is left to the next start. A tool that is already
+     * registered is refused before the settings change, because another row of
+     * the same plugin would not load on the next start either.
+     */
+    const mountRow = (row: PluginRow) =>
+      Effect.gen(function* () {
+        const mounter = mounterOf(row.name)
+        if (mounter === undefined) return []
+        const source = yield* loadPluginRow({
+          plugins: wiring.options.plugins,
+          row,
+          context: wiring.context,
+        }).pipe(
+          Effect.mapError(
+            (error) =>
+              new ToolError({
+                code: 'invalid-arguments',
+                message:
+                  'the row ' +
+                  row.id +
+                  ' (' +
+                  row.name +
+                  ') would not load in this run: ' +
+                  error.message,
+              }),
+          ),
+        )
+        const list = yield* mounter(source)
+        const known = new Set(tools.schemas().map((schema) => schema.name))
+        const clash = list.find((tool) => known.has(tool.name))
+        if (clash !== undefined) {
+          return yield* Effect.fail(
+            new ToolError({
+              code: 'duplicate-tool',
+              message:
+                'tool ' +
+                clash.name +
+                ' is already registered; another row of ' +
+                row.name +
+                ' would not load on the next start either',
+            }),
+          )
+        }
+        for (const tool of list) yield* tools.register(tool)
+        return list.map((tool) => tool.name)
+      }).pipe(Effect.provideService(Scope.Scope, scope))
     if (hasEnabledRow(wiring.rows, '@jozo-harness/tools-tier0')) {
       const sessions = Context.get(wiring.context, Agents)
       // A worktree call is shared with every child, so it moves the log of the
@@ -1029,6 +1117,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
         wiring.rows,
         wiring.jobs,
         sandboxOf(wiring),
+        mountRow,
       )
       // An agent at the delegation limit reads it in the next runtime snapshot;
       // the tool stays visible and refuses the call, as dsh does.

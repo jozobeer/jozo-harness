@@ -71,7 +71,7 @@ describe('tier 1 tool schemas', () => {
       makePluginTool({
         rows: () => [],
         known: () => [],
-        change: () => Effect.succeed([]),
+        change: () => Effect.succeed({ rows: [], mounted: [] }),
         ask,
       }),
       makeExitPlanModeTool(makePlanMode(), ask),

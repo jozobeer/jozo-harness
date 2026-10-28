@@ -21,17 +21,23 @@ export type PluginChange =
       readonly disabled: boolean
     }
 
+/** What one change left behind: the rows the settings hold, and what was wired now. */
+export interface PluginChangeOutcome {
+  readonly rows: ReadonlyArray<PluginRowSummary>
+  /** Tools this change added to the running registry; empty when it waits for the next start. */
+  readonly mounted: ReadonlyArray<string>
+}
+
 /**
  * The composition as the session knows it: the rows it was built from, the plugin
  * names this build has, and the one place a change can be written (the settings),
- * which is what the next start reads.
+ * which is what the next start reads. A host that can build a row over the
+ * running services wires its tools here instead of waiting for the next start.
  */
 export interface PluginHost {
   readonly rows: () => ReadonlyArray<PluginRowSummary>
   readonly known: () => ReadonlyArray<string>
-  readonly change: (
-    change: PluginChange,
-  ) => Effect.Effect<ReadonlyArray<PluginRowSummary>, ToolError>
+  readonly change: (change: PluginChange) => Effect.Effect<PluginChangeOutcome, ToolError>
   readonly ask: AskShape
 }
 
@@ -40,7 +46,7 @@ const ACTIONS = ['list', 'add', 'remove', 'set'] as const
 const Parameters = Schema.Struct({
   action: Schema.Literals(ACTIONS).annotate({
     description:
-      'list shows the rows this run was built from; add, remove, and set change the settings for the next start.',
+      'list shows the rows this run was built from; add, remove, and set change the settings for the next start. An added row for an opt-in plugin may also be wired into this run.',
   }),
   id: Schema.optionalKey(
     Schema.String.annotate({
@@ -111,14 +117,11 @@ const changeFor = (args: PluginArgs, host: PluginHost): PluginChange | ToolError
 
 const questionFor = (change: PluginChange): string => {
   if (change.kind === 'add') {
-    return 'Add the plugin row ' + change.id + ' (' + change.name + ') for the next start?'
+    return 'Add the plugin row ' + change.id + ' (' + change.name + ') to the settings?'
   }
-  if (change.kind === 'remove') return 'Remove the plugin row ' + change.id + ' for the next start?'
+  if (change.kind === 'remove') return 'Remove the plugin row ' + change.id + ' from the settings?'
   return (
-    'Switch the plugin row ' +
-    change.id +
-    (change.disabled ? ' off' : ' on') +
-    ' for the next start?'
+    'Switch the plugin row ' + change.id + (change.disabled ? ' off' : ' on') + ' in the settings?'
   )
 }
 
@@ -126,7 +129,7 @@ const listed = (host: PluginHost): PluginValue => ({
   action: 'list',
   changed: false,
   rows: host.rows(),
-  note: '(these are the rows this run was built from; a change lands on the next start)',
+  note: '(these are the rows this run was built from; a change lands on the next start unless it is wired now)',
 })
 
 const kept = (action: string, host: PluginHost): PluginValue => ({
@@ -136,24 +139,29 @@ const kept = (action: string, host: PluginHost): PluginValue => ({
   note: '(the user kept the plugin rows as they are)',
 })
 
-const changed = (action: string, rows: ReadonlyArray<PluginRowSummary>): PluginValue => ({
+const changed = (action: string, outcome: PluginChangeOutcome): PluginValue => ({
   action,
   changed: true,
-  rows,
+  rows: outcome.rows,
   note:
-    '(the settings changed; every row is wired when jozo-harness starts again, and a session that ' +
-    'then loses a tool needs --allow-preset-change to resume)',
+    outcome.mounted.length === 0
+      ? '(the settings changed; every row is wired when jozo-harness starts again, and a session that ' +
+        'then loses a tool needs --allow-preset-change to resume)'
+      : '(the settings changed; ' +
+        outcome.mounted.join(', ') +
+        ' is wired into this run now, and every row is wired when jozo-harness starts again)',
 })
 
 /**
- * Lists the composition and changes the settings the next start reads. Nothing a
- * running process holds changes: a row added here is wired when jozo-harness starts again,
- * and every change is one the human approved.
+ * Lists the composition and changes the settings the next start reads. A host
+ * that can build a row now also wires its tools, so a row added while the run
+ * continues is not always a next-start change; every change is one the human
+ * approved.
  */
 export const makePluginTool = (host: PluginHost): ToolDefinition<PluginArgs, PluginValue> => ({
   name: 'plugin',
   description:
-    'Lists the plugin rows this session runs with and changes them in the settings the next start reads: add a row for a plugin this build has, remove one, or switch one off. Every change is put to the user first, and it takes effect when jozo-harness starts again, not in this session.',
+    'Lists the plugin rows this session runs with and changes them in the settings the next start reads: add a row for a plugin this build has, remove one, or switch one off. Every change is put to the user first. Adding a row for an opt-in plugin this build carries also wires its tools into this run when it can; the other changes take effect when jozo-harness starts again.',
   parameters: Parameters,
   output: {
     schema: Schema.Struct({

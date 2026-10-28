@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 import { Context, Effect, Layer, Schema } from 'effect'
 import {
   PluginError,
+  loadPluginRow,
   loadProfile,
   mergeRows,
   parseProfile,
@@ -311,5 +312,75 @@ describe('loader composition with two dependencies', () => {
     )
 
     expect(built).toEqual({ value: 'also-nested' })
+  })
+})
+
+describe('loadPluginRow', () => {
+  test('builds one row over the services this run already holds', async () => {
+    const label = crypto.randomUUID()
+    const built = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const context = yield* loadPluginRow({
+            plugins: [alphaPlugin],
+            row: row('alpha', 'alpha', { label }),
+            context: Context.empty(),
+          })
+          return Context.get(context, Alpha)
+        }),
+      ),
+    )
+
+    expect(built).toEqual({ id: label })
+  })
+
+  test('refuses a row whose service this run already has', async () => {
+    const error = await Effect.runPromise(
+      Effect.scoped(
+        Effect.flip(
+          loadPluginRow({
+            plugins: [alphaPlugin],
+            row: row('alpha', 'alpha', { label: 'again' }),
+            context: Context.make(Alpha, { id: 'running' }),
+          }),
+        ),
+      ),
+    )
+
+    expect(error.code).toBe('duplicate-provider')
+    expect(error.service).toBe('test/Alpha')
+  })
+
+  test('refuses a row whose dependency this run does not hold', async () => {
+    const error = await Effect.runPromise(
+      Effect.scoped(
+        Effect.flip(
+          loadPluginRow({
+            plugins: [betaPlugin],
+            row: row('beta', 'beta'),
+            context: Context.empty(),
+          }),
+        ),
+      ),
+    )
+
+    expect(error.code).toBe('missing-provider')
+    expect(error.service).toBe('test/Alpha')
+  })
+
+  test('refuses a row whose config its schema rejects', async () => {
+    const error = await Effect.runPromise(
+      Effect.scoped(
+        Effect.flip(
+          loadPluginRow({
+            plugins: [alphaPlugin],
+            row: row('alpha', 'alpha', { label: 42 }),
+            context: Context.empty(),
+          }),
+        ),
+      ),
+    )
+
+    expect(error.code).toBe('config')
   })
 })
