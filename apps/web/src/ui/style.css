@@ -1152,6 +1152,57 @@ body {
   font-size: var(--text-sm);
 }
 
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-field > span:first-child {
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.settings-field input,
+.settings-field select,
+.settings-field textarea {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.settings-field textarea {
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+
+.settings-source {
+  color: var(--dim);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.settings-problem {
+  padding: 8px 12px;
+  color: var(--danger, #c0392b);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
 .panel .card-hint {
   padding: 0 12px 10px;
 }

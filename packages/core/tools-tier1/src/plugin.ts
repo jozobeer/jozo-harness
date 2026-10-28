@@ -13,6 +13,10 @@ export class Tier1Tools extends Context.Service<
 /** The ask tool's default wait for a batch; absent leaves the tool waiting until answered. */
 const tier1ConfigSchema = Schema.Struct({
   timeLimitMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
+  /** How many levels of children a session may start. The CLI reads it for the subagent tool. */
+  subagentMaxDepth: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 8 })),
+  ),
 })
 
 /** Loader definition for the Tier 1 tools; the ask tool uses the ask holder. */

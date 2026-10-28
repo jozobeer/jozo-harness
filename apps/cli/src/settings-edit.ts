@@ -21,6 +21,8 @@ export type SettingsEdit =
       readonly value: string
     }
   | { readonly kind: 'remove-row'; readonly id: string }
+  | { readonly kind: 'remove-scalar'; readonly key: string }
+  | { readonly kind: 'remove-row-key'; readonly id: string; readonly key: string }
 
 export type EditErrorCode = 'inline-value' | 'no-such-item' | 'no-such-row' | 'duplicate-row'
 
@@ -289,6 +291,29 @@ const removeRow = (
   return Effect.succeed(dropEmptyBlock(next, 'plugins', (rest) => rowsIn(next, rest).length > 0))
 }
 
+/** Drops a top-level key, so a value the file set returns to the layer beneath it. */
+const removeScalar = (
+  lines: ReadonlyArray<string>,
+  key: string,
+): Effect.Effect<Array<string>, EditError> => {
+  const block = blockOf(lines, key)
+  return Effect.succeed(block === undefined ? [...lines] : without(lines, block.keyAt))
+}
+
+/** Drops one key under a row's config, so a later layer's value takes over again. */
+const removeRowKey = (
+  lines: ReadonlyArray<string>,
+  id: string,
+  key: string,
+): Effect.Effect<Array<string>, EditError> => {
+  const block = blockOf(lines, 'plugins')
+  const row = block === undefined ? undefined : rowOf(lines, block, id)
+  if (row === undefined) return refuse('no-such-row', id)
+  const configAt = childKeyAt(lines, row, 'config')
+  const at = configAt === -1 ? -1 : configKeyAt(lines, row, configAt, key)
+  return Effect.succeed(at === -1 ? [...lines] : without(lines, at))
+}
+
 const apply = (
   lines: ReadonlyArray<string>,
   edit: SettingsEdit,
@@ -309,6 +334,10 @@ const apply = (
       return setRow(lines, edit)
     case 'remove-row':
       return removeRow(lines, edit.id)
+    case 'remove-scalar':
+      return removeScalar(lines, edit.key)
+    case 'remove-row-key':
+      return removeRowKey(lines, edit.id, edit.key)
   }
 }
 

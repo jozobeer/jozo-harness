@@ -1,7 +1,12 @@
 import { forkSeed } from '@jozo-harness/session'
 import { childAnswerOf } from './child-answer.ts'
 import type { StructuredOutputs } from './structured-output.ts'
-import { delegationRefusal, eventsOfAgent } from './delegation.ts'
+import {
+  DELEGATION_MAX_DEPTH,
+  delegationRefusal,
+  eventsOfAgent,
+  type DepthLimit,
+} from './delegation.ts'
 import { Schema, Effect } from 'effect'
 import type { Agent, AgentsShape } from '@jozo-harness/agent'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
@@ -121,6 +126,11 @@ export interface SubagentHost {
    * and the answer the parent reads. A host without it refuses outputSchema.
    */
   readonly outputs?: StructuredOutputs
+  /**
+   * How deep delegation may go. A function reads the run's current setting, so the
+   * call after a change sees it; absent keeps the default.
+   */
+  readonly maxDepth?: DepthLimit
 }
 
 /** The preset a child runs under: the allowed one it was given, or the host's default. */
@@ -263,7 +273,11 @@ export const makeSubagentTool = (
     },
     execute: (args, context) =>
       Effect.gen(function* () {
-        const refused = delegationRefusal(agents, context.sessionId)
+        const refused = delegationRefusal(
+          agents,
+          context.sessionId,
+          host.maxDepth ?? DELEGATION_MAX_DEPTH,
+        )
         if (refused !== undefined) return yield* Effect.fail(refused)
         const route = routeFor(args.model, host.route, host.routes)
         if (route instanceof ToolError) return yield* Effect.fail(route)

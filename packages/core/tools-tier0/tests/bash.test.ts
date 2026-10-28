@@ -132,6 +132,23 @@ describe('bash tool', () => {
     expect(elapsed).toBeLessThan(10_000)
   })
 
+  test('the run default decides the wait when the call names none', async () => {
+    let wait = 300
+
+    const result = await Effect.runPromise(
+      call(
+        makeBashTool(undefined, undefined, undefined, undefined, undefined, undefined, () => wait),
+        { command: 'sleep 30' },
+        '/tmp',
+      ),
+    )
+    // The next call reads the run's current choice, not the one it started with.
+    wait = 400
+
+    expect(result?.isError).toBe(false)
+    expect(textOf(result)).toContain('[timed out after 300ms]')
+  })
+
   test('a timed-out command is handed to the job registry instead of killed', async () => {
     const promoted: Array<{ command: string; child: Child }> = []
     const jobs = {

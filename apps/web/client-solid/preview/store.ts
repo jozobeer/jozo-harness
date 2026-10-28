@@ -34,6 +34,25 @@ const SETTINGS: SettingsView = {
   sessionRoot: '/Users/dev/.jzh/sessions',
 }
 
+/** The preview's editable values, with the same sources the real sheet shows. */
+const EDITABLE = {
+  search: {
+    provider: 'brave' as const,
+    keyName: 'BRAVE_API_KEY',
+    keyPresent: true,
+    source: '/Users/dev/.config/jzh/config.yaml',
+  },
+  apiKeyRef: {
+    ref: 'ollama-cloud',
+    present: true,
+    source: 'the @jozo-harness/llm-openai row',
+  },
+  bashTimeoutMs: { value: 120_000, source: 'the default' },
+  maxParallelToolCalls: { value: 10, source: 'the default' },
+  subagentDepth: { value: 1, source: 'the default' },
+  delegateTools: [{ name: 'codex', argv: ['codex', 'exec'] }],
+}
+
 /** The models the preview's seat offers, as a provider's list would. */
 const MODELS: ReadonlyArray<string> = [
   'ollama-cloud/qwen3-coder:480b',
@@ -149,6 +168,7 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
         ...initialState,
         connected: true,
         settings,
+        editable: EDITABLE,
         models: MODELS,
         workspaces: {
           cwd: SETTINGS.cwd,
@@ -250,6 +270,35 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
       setState((now) => withSettings(now, settings))
     },
     setModel: () => undefined,
+    askRunSettings: () => undefined,
+    saveRunSettings: (input) =>
+      setState((now) => ({
+        ...now,
+        editable: {
+          ...EDITABLE,
+          apiKeyRef: { ...EDITABLE.apiKeyRef, ref: input.apiKeyRef },
+          search: {
+            ...EDITABLE.search,
+            ...(input.search === ''
+              ? {}
+              : { provider: input.search as (typeof EDITABLE.search)['provider'] }),
+          },
+          bashTimeoutMs: {
+            value: input.bashTimeoutMs,
+            source: now.editable?.bashTimeoutMs.source ?? 'the default',
+          },
+          maxParallelToolCalls: {
+            value: input.maxParallelToolCalls,
+            source: now.editable?.maxParallelToolCalls.source ?? 'the default',
+          },
+          subagentDepth: {
+            value: input.subagentDepth,
+            source: now.editable?.subagentDepth.source ?? 'the default',
+          },
+          delegateTools: input.delegateTools,
+        },
+        settingsProblem: '',
+      })),
     pageDeleted: (page) => setState((now) => withDeletedPage(now, page)),
     // The made-up rail keeps its own rows, so the menu is alive without a server.
     act: (id, action) => {

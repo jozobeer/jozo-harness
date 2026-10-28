@@ -22,6 +22,18 @@ describe('the delegation depth', () => {
     expect(refusal?.message).toContain('delegation depth')
   })
 
+  test('the limit is read when the call is made, so a change reaches the next one', () => {
+    let limit = 0
+    const read = () => limit
+
+    expect(delegationRefusal(fakeAgents(0), 's1', read)?.message).toContain('(0)')
+    limit = 2
+    expect(delegationRefusal(fakeAgents(0), 's1', read)).toBeUndefined()
+    expect(delegationLine(1, read)).toBeUndefined()
+    limit = 1
+    expect(delegationLine(1, read)).toContain('maximum 1')
+  })
+
   test('the runtime line speaks only at the limit', () => {
     expect(delegationLine(0)).toBeUndefined()
     expect(delegationLine(DELEGATION_MAX_DEPTH)).toBe(

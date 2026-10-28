@@ -43,13 +43,23 @@ export const tier0Tools = (
   sessions?: ShellSessions,
   /** The harness-owned variables every command inherits. */
   managed?: ManagedEnv,
+  /** The wait a bash call gets when it names none, read per call so a run can change it. */
+  defaultTimeoutMs?: () => number | undefined,
 ): ReadonlyArray<ToolDefinition<any, any>> => [
   makeReadTool(observed),
   makeWriteTool(observed, sandbox, approval),
   makeEditTool(observed, sandbox, approval),
   globTool,
   grepTool,
-  makeBashTool(sandbox, approval, jobs, undefined, sessions, managed),
+  makeBashTool(
+    sandbox,
+    approval,
+    jobs,
+    undefined,
+    sessions,
+    managed,
+    defaultTimeoutMs ?? (() => undefined),
+  ),
   ...(worktree === undefined ? [] : [makeWorktreeTool(sandbox, approval, worktree)]),
 ]
 export * from './plugin.ts'
