@@ -26,7 +26,7 @@ import { Conversation } from '../components/conversation.tsx'
 import { Board } from '../components/board.tsx'
 import { Status } from '../components/status.tsx'
 import { emptyWatched, watchedAfter, type Watched } from '../../src/ui/board.ts'
-import { Markdown } from '../components/turns.tsx'
+import { Markdown } from '../components/markdown.tsx'
 import { Review } from '../components/review.tsx'
 import { Waterfall } from '../components/waterfall.tsx'
 import { LensSwitch } from '../components/lens-switch.tsx'
@@ -4881,6 +4881,149 @@ describe('the workspace file preview', () => {
     const { container } = render(() => <ContextPane store={refused.store} />)
     expect(container.querySelector('.preview-problem')?.textContent).toBe(
       'the file is outside the workspace',
+    )
+  })
+})
+
+describe('the plan a model proposed', () => {
+  const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+  const plan = (text: string) => JSON.stringify({ plan: text })
+  const options = ['approve', 'keep planning']
+
+  const withPlan = (
+    text: string,
+    extra: ReadonlyArray<ReturnType<typeof at>> = [],
+  ): ReturnType<typeof makeStore> =>
+    makeStore({
+      conversation: {
+        ...emptyConversation,
+        blocks: [{ kind: 'user', text: 'draft a plan' }],
+      },
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'agent/inbox/claimed', { message: { text: 'draft a plan', source: 'user' } }),
+        at(3, 'step/start', { step: 1 }),
+        at(4, 'tool/call', {
+          callId: 'call-1',
+          name: 'exit_plan_mode',
+          arguments: plan(text),
+          summary: 'exit_plan_mode',
+        }),
+        ...extra,
+      ]),
+    })
+
+  test('a plan proposed to the human stays in the conversation as a card', () => {
+    const { store } = withPlan('# Plan', [
+      at(5, 'interaction/ask/requested', { id: 'call-1', question: 'Leave plan mode?', options }),
+    ])
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    expect(container.querySelector('.plan-card .plan-title')?.textContent).toBe('Plan')
+    expect(container.querySelector('.plan-card .plan-verdict')?.textContent).toBe(
+      'waiting for your answer',
+    )
+    expect(container.querySelector('.plan-card .markdown h1')?.textContent).toBe('Plan')
+    expect(container.querySelector('.tool-card')).toBeNull()
+    // The plan is the turn's answer, not part of the work: folding the steps does not hide it.
+    expect(container.querySelector('.process .plan-card')).toBeNull()
+  })
+
+  test('the card answers the question over the same ask path as the composer', () => {
+    const { store, calls } = withPlan('# Plan', [
+      at(5, 'interaction/ask/requested', { id: 'call-1', question: 'Leave plan mode?', options }),
+    ])
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    fireEvent.click(container.querySelector('[data-plan-answer="keep planning"]') as Element)
+    expect(calls).toContainEqual({
+      kind: 'command',
+      command: { kind: 'answer', id: 'call-1', answer: 'keep planning' },
+    })
+  })
+
+  test('a plan the human approved reads approved after a reload', () => {
+    const { store } = withPlan('# Plan', [
+      at(5, 'interaction/ask/requested', { id: 'call-1', question: 'Leave plan mode?', options }),
+      at(6, 'interaction/ask/answered', { id: 'call-1', answer: 'approve' }),
+    ])
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    expect(container.querySelector('.plan-card .plan-verdict')?.textContent).toBe('approved')
+    expect(container.querySelector('[data-plan-answer]')).toBeNull()
+  })
+
+  test('a plan kept for a reason shows the human reason on the card', () => {
+    const { store } = withPlan('# Plan', [
+      at(5, 'interaction/ask/requested', { id: 'call-1', question: 'Leave plan mode?', options }),
+      at(6, 'interaction/ask/answered', {
+        id: 'call-1',
+        answer: 'split the migration out first',
+      }),
+    ])
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    expect(container.querySelector('.plan-card .plan-verdict')?.textContent).toBe('kept planning')
+    expect(container.querySelector('.plan-card .plan-reason')?.textContent).toContain(
+      'split the migration out first',
+    )
+  })
+
+  test('a long plan starts folded, and a short one is open', () => {
+    const long = Array.from({ length: 30 }, (_line, index) => 'step ' + String(index)).join('\n')
+    const folded = render(() => <Conversation store={withPlan(long).store} />)
+    expect(folded.container.querySelector('.plan-body')?.hasAttribute('open')).toBe(false)
+    cleanup()
+
+    const open = render(() => <Conversation store={withPlan('- read the log').store} />)
+    expect(open.container.querySelector('.plan-body')?.hasAttribute('open')).toBe(true)
+  })
+
+  test('the card opens the plan in the pane', () => {
+    const { store, calls } = withPlan('# Plan')
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    fireEvent.click(container.querySelector('.plan-open') as Element)
+    expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'plan', callId: 'call-1' } })
+  })
+
+  test('the pane reads the plan in full as Markdown, with its verdict', () => {
+    const { store } = makeStore({
+      pane: { kind: 'plan', callId: 'call-1' },
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'step/start', { step: 1 }),
+        at(3, 'tool/call', {
+          callId: 'call-1',
+          name: 'exit_plan_mode',
+          arguments: plan('## Steps\n\n1. read'),
+          summary: 'exit_plan_mode',
+        }),
+        at(4, 'interaction/ask/requested', { id: 'call-1', question: 'Leave?', options }),
+      ]),
+    })
+
+    const { container } = render(() => <ContextPane store={store} />)
+
+    expect(container.querySelector('.plan-pane .plan-verdict')?.textContent).toBe(
+      'waiting for your answer',
+    )
+    expect(container.querySelector('.plan-pane .markdown h2')?.textContent).toBe('Steps')
+    expect(container.querySelector('.plan-pane .markdown li')?.textContent).toBe('read')
+  })
+
+  test('a pane opened on a plan the log no longer holds says so', () => {
+    const { store } = makeStore({ pane: { kind: 'plan', callId: 'call-9' } })
+
+    const { container } = render(() => <ContextPane store={store} />)
+
+    expect(container.querySelector('.plan-pane .preview-hint')?.textContent).toBe(
+      'this plan is no longer in the session log',
     )
   })
 })

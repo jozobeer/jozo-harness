@@ -1,7 +1,7 @@
-import { For, Index, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
+import { For, Index, Show, createMemo, createSignal, onCleanup } from 'solid-js'
 import { plainText, summaryBodyOf } from '@jozo-harness/ui-view'
 import type { Attachment, Quote } from '@jozo-harness/ui-protocol'
-import { renderMarkdown } from '../../src/ui/markdown.ts'
+import { PLAN_TOOL, planOf } from '../../src/ui/plan.ts'
 import {
   toolsOf,
   type TraceImage,
@@ -10,6 +10,8 @@ import {
   type TraceTurn,
 } from '../../src/ui/trace.ts'
 import { Linkify } from './linkify.tsx'
+import { Markdown } from './markdown.tsx'
+import { PlanCard } from './plan-card.tsx'
 import { EndMark } from './ui/end-mark.tsx'
 import { Icon, toolIconOf } from './ui/icon.tsx'
 import { Mug } from './ui/mug.tsx'
@@ -17,30 +19,6 @@ import { useTranslate } from '../i18n.ts'
 import { pagesIn, spanOf } from '../lib.ts'
 import { useSeen } from '../seen.ts'
 import type { SessionStore } from '../store.ts'
-
-/**
- * The answer as HTML. A text that renders where it did leaves the nodes it
- * already wrote alone, so only a change to the answer rebuilds its body.
- */
-export const Markdown = (props: { text: string; class?: string }) => {
-  let node: HTMLDivElement | undefined
-  let written = ''
-  const html = createMemo(() => renderMarkdown(plainText(props.text)))
-  createEffect(() => {
-    const next = html()
-    if (node === undefined || next === written) return
-    written = next
-    node.innerHTML = next
-  })
-  return (
-    <div
-      class={'markdown ' + (props.class ?? '')}
-      ref={(element) => {
-        node = element
-      }}
-    />
-  )
-}
 
 /** The clock a running turn reads its elapsed time from; one tick a second. */
 const createNow = () => {
@@ -196,21 +174,36 @@ const Skill = (props: { tool: TraceTool }) => {
   )
 }
 
+/** One call as the conversation draws it: a skill gets its own card, the rest a line each. */
+const Call = (props: { tool: TraceTool; store: SessionStore }) => (
+  <Show when={props.tool.name === 'skill'} fallback={<Tool tool={props.tool} />}>
+    <Skill tool={props.tool} />
+  </Show>
+)
+
+/**
+ * The plans a turn proposed. They stay outside the folded process: a plan is
+ * the turn's answer, and a reader should not have to open the work to see it.
+ */
+const Plans = (props: { turn: TraceTurn; store: SessionStore }) => (
+  <Index
+    each={toolsOf(props.turn).filter(
+      (tool) => tool.name === PLAN_TOOL && planOf(tool) !== undefined,
+    )}
+  >
+    {(tool) => <PlanCard tool={tool()} store={props.store} />}
+  </Index>
+)
+
 /** A call the log wrote outside any turn: its card stands alone because no turn holds it. */
-const Load = (props: { turn: TraceTurn }) => (
+const Load = (props: { turn: TraceTurn; store: SessionStore }) => (
   <article class="block load">
-    <Index each={toolsOf(props.turn)}>
-      {(tool) => (
-        <Show when={tool().name === 'skill'} fallback={<Tool tool={tool()} />}>
-          <Skill tool={tool()} />
-        </Show>
-      )}
-    </Index>
+    <Index each={toolsOf(props.turn)}>{(tool) => <Call tool={tool()} store={props.store} />}</Index>
   </article>
 )
 
 /** One step of the process: a line of what the model thought, what it said, and its calls. */
-const Step = (props: { step: TraceStep; last: boolean }) => (
+const Step = (props: { step: TraceStep; last: boolean; store: SessionStore }) => (
   <li class="step">
     <Show when={props.step.reasoning !== ''}>
       <p class="step-thought">
@@ -222,8 +215,8 @@ const Step = (props: { step: TraceStep; last: boolean }) => (
     </Show>
     <Index each={props.step.tools}>
       {(tool) => (
-        <Show when={tool().name === 'skill'} fallback={<Tool tool={tool()} />}>
-          <Skill tool={tool()} />
+        <Show when={tool().name !== PLAN_TOOL}>
+          <Call tool={tool()} store={props.store} />
         </Show>
       )}
     </Index>
@@ -461,6 +454,7 @@ const Turn = (props: { turn: TraceTurn; live: string; now: number; store: Sessio
   return (
     <article class={'block turn' + (running() ? ' running' : '')}>
       <Ask turn={props.turn} />
+      <Plans turn={props.turn} store={props.store} />
       <Show when={props.turn.steps.length > 0 || running()}>
         <details class="process">
           <ProcessLine
@@ -471,7 +465,11 @@ const Turn = (props: { turn: TraceTurn; live: string; now: number; store: Sessio
           <ol class="steps">
             <Index each={props.turn.steps}>
               {(step, index) => (
-                <Step step={step()} last={index === props.turn.steps.length - 1 && !running()} />
+                <Step
+                  step={step()}
+                  last={index === props.turn.steps.length - 1 && !running()}
+                  store={props.store}
+                />
               )}
             </Index>
           </ol>
@@ -516,7 +514,7 @@ export const Turns = (props: { store: SessionStore }) => {
             />
           }
         >
-          <Load turn={turn()} />
+          <Load turn={turn()} store={props.store} />
         </Show>
       )}
     </Index>
