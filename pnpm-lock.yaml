@@ -473,6 +473,18 @@ importers:
         specifier: 4.0.3
         version: 4.0.3
 
+  packages/core/session-telemetry-otlp:
+    dependencies:
+      '@jozo-harness/kernel':
+        specifier: workspace:*
+        version: link:../../kernel/kernel
+      '@jozo-harness/session':
+        specifier: workspace:*
+        version: link:../session
+      effect:
+        specifier: 4.0.3
+        version: 4.0.3
+
   packages/core/system-prompt:
     dependencies:
       '@jozo-harness/kernel':

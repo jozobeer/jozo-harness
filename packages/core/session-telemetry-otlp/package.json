@@ -1,0 +1,11 @@
+{
+  "name": "@jozo-harness/session-telemetry-otlp",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@jozo-harness/kernel": "workspace:*",
+    "@jozo-harness/session": "workspace:*",
+    "effect": "4.0.3"
+  }
+}
