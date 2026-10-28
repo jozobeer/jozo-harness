@@ -1,6 +1,7 @@
 export * from './codec.ts'
 export * from './derive.ts'
 export * from './projections.ts'
+export * from './projection-checkpoint.ts'
 export * from './errors.ts'
 export * from './events.ts'
 export * from './json.ts'

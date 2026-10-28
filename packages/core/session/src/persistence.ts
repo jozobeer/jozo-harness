@@ -1,11 +1,23 @@
 import type { Effect } from 'effect'
+import type { DerivedMessage } from './derive.ts'
 import type { SessionError } from './errors.ts'
-import type { SessionEvent, SessionHeader, SessionId } from './events.ts'
+import type { SessionEvent, SessionHeader, SessionId, SessionSeq } from './events.ts'
+import type { ProjectionCheckpoint } from './projection-checkpoint.ts'
 
 /** Where one live session writes. The provider owns durability and flush timing. */
 export interface SessionSink {
   readonly append: (event: SessionEvent) => Effect.Effect<void, SessionError>
   readonly flush: () => Effect.Effect<void, SessionError>
+  /**
+   * The projection saved with the log, so a reopened session folds only what came
+   * after it. A provider that cannot keep one omits both hooks and every open
+   * folds the whole log.
+   */
+  readonly loadProjection?: () => Effect.Effect<ProjectionCheckpoint | undefined, SessionError>
+  readonly saveProjection?: (
+    seq: SessionSeq,
+    derived: ReadonlyArray<DerivedMessage>,
+  ) => Effect.Effect<void, SessionError>
 }
 
 /** A session restored by a persistence provider, ready to append. */
