@@ -8,7 +8,7 @@ import { WebSocket } from 'ws'
 import { Deferred, Effect, Exit, Fiber, Option, Queue, Stream, type Scope } from 'effect'
 import { RpcClient, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { networkInterfaces, tmpdir } from 'node:os'
 import {
@@ -721,8 +721,15 @@ describe('the web transport', () => {
             const refused = yield* client
               .scheduleCreate({ sessionId: 'a', prompt: 'never', cron: '0 0 30 2 *' })
               .pipe(Effect.flip)
+            // A page may name an id another tab just removed; the route says why.
+            const missingPause = yield* client
+              .schedulePause({ sessionId: 'a', id: 'gone', paused: true })
+              .pipe(Effect.flip)
+            const missingDelete = yield* client
+              .scheduleDelete({ sessionId: 'a', id: 'gone' })
+              .pipe(Effect.flip)
             const deleted = yield* client.scheduleDelete({ sessionId: 'a', id })
-            return { created, paused, refused, deleted }
+            return { created, paused, refused, missingPause, missingDelete, deleted }
           }).pipe(clientLayers(started.wsUrl))
           const answer = yield* withoutServices(useClient)
           yield* Deferred.succeed(started.stop, undefined)
@@ -734,7 +741,75 @@ describe('the web transport', () => {
     expect(observed.created).toMatchObject([{ when: 'in 60s', title: 'build', paused: false }])
     expect(observed.paused).toMatchObject([{ paused: true }])
     expect(observed.refused).toContain('never comes around')
+    expect(observed.missingPause).toContain('no schedule with that id in this session')
+    expect(observed.missingDelete).toContain('no schedule with that id in this session')
     expect(observed.deleted).toEqual([])
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('the session list reports why it cannot be read when the settings are gone', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-settings-gone-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const base = makeSettings()
+    const settings = {
+      ...base,
+      port: {
+        ...base.port,
+        read: () => Effect.fail(new WebError({ message: 'cannot read the settings file' })),
+      } satisfies SettingsPort,
+    }
+
+    const failure = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const refused = yield* client.sessions().pipe(Effect.flip)
+            return String(refused)
+          }).pipe(clientLayers(started.wsUrl))
+          const answered = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return answered
+        }),
+      ),
+    )
+
+    expect(failure).toContain('cannot read the settings file')
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('the workspace list reports why it cannot be read', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-workspaces-gone-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const base = makeWorkspaces()
+    const workspaces = {
+      ...base,
+      port: {
+        ...base.port,
+        list: () => Effect.fail(new WebError({ message: 'the workspace list is gone' })),
+      } satisfies WorkspacesPort,
+    }
+
+    const failure = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, makeSettings(), workspaces)
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const refused = yield* client.workspaces().pipe(Effect.flip)
+            return String(refused)
+          }).pipe(clientLayers(started.wsUrl))
+          const answered = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return answered
+        }),
+      ),
+    )
+
+    expect(failure).toContain('the workspace list is gone')
     await rm(root, { recursive: true, force: true })
   })
 
@@ -974,6 +1049,10 @@ describe('the web transport', () => {
     await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
     await writeFileDeep(join(artifacts, 'beta.html'), '<h1>beta</h1>')
     await writeFileDeep(join(artifacts, 'alpha.html'), '<h1>alpha</h1>')
+    // A directory that ends in .html is not a page, and a link to a page that
+    // is gone cannot be listed either.
+    await mkdir(join(artifacts, 'gamma.html'))
+    await symlink(join(artifacts, 'missing.html'), join(artifacts, 'broken.html'))
     const web = makeWeb('a')
     const base = makeSettings()
     const settings = {
@@ -1024,6 +1103,51 @@ describe('the web transport', () => {
     }
     expect(observed.empty).toEqual([])
     expect(observed.anonymous).toBe(401)
+    await rm(root, { recursive: true, force: true })
+    await rm(home, { recursive: true, force: true })
+  })
+
+  test('a page attaches bytes under the session root and is told when the name is empty', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-attach-'))
+    const home = await mkdtemp(join(tmpdir(), 'jozo-harness-web-attach-home-'))
+    const sessionRoot = join(home, 'sessions')
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const base = makeSettings()
+    const settings = {
+      ...base,
+      port: {
+        ...base.port,
+        read: () => Effect.succeed({ ...settingsView, sessionRoot }),
+      } satisfies SettingsPort,
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const kept = yield* client.attach({
+              name: 'notes.txt',
+              mediaType: 'text/plain',
+              data: Buffer.from('the notes').toString('base64'),
+            })
+            const refused = yield* client
+              .attach({ name: '', mediaType: 'text/plain', data: '' })
+              .pipe(Effect.flip)
+            return { kept, refused: String(refused) }
+          }).pipe(clientLayers(started.wsUrl))
+          const answered = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return answered
+        }),
+      ),
+    )
+
+    expect(observed.kept.name).toBe('notes.txt')
+    expect(observed.kept.bytes).toBe('the notes'.length)
+    expect(observed.refused).toContain('the attachment has no file name')
     await rm(root, { recursive: true, force: true })
     await rm(home, { recursive: true, force: true })
   })
@@ -2925,6 +3049,10 @@ describe('sharing a run with another browser', () => {
           const created = yield* Effect.promise(() =>
             httpCall(started.origin + '/share?label=Bob', 'POST', started.cookie),
           )
+          // The list names the live invitation and the link the owner hands over.
+          const liveList = yield* Effect.promise(() =>
+            httpCall(started.origin + '/share', 'GET', started.cookie),
+          )
           const shared = sharedInvitation(created.body)
           const join = new URL(shared.url).searchParams.get('join')
           if (join === null) throw new Error('the share link carries no invitation')
@@ -2961,6 +3089,7 @@ describe('sharing a run with another browser', () => {
             closeCode,
             retry: retry.status,
             stale: stale.status,
+            liveList: liveList.body,
             listed: listed.body,
           }
         }),
@@ -2973,8 +3102,10 @@ describe('sharing a run with another browser', () => {
       closeCode: 4001,
       retry: 401,
       stale: 401,
+      liveList: expect.stringContaining('"label":"Bob"'),
       listed: '{"items":[]}',
     })
+    expect(observed.liveList).toContain('/?join=')
     await rm(root, { recursive: true, force: true })
   })
 })

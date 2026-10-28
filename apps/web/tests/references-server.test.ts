@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'vitest'
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Effect } from 'effect'
 import { REFERENCE_LIMITS, type SessionEvent, type SessionSummary } from '@jozo-harness/ui-protocol'
 import {
   readFileReference,
+  readSessionReference,
   resolveReferences,
   sessionCandidateTargets,
   type SessionDigestSource,
@@ -96,6 +97,23 @@ describe('reading an @file', () => {
       expect(reference?.kind).toBe('file')
       expect(reference?.text).toContain('could not be read')
     } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('notes a file it may not read instead of attaching its body', async () => {
+    const root = await workspace()
+    const locked = join(root, 'locked.md')
+    await writeFile(locked, 'not yours')
+    try {
+      await chmod(locked, 0o000)
+
+      const reference = await Effect.runPromise(readFileReference(root, 'locked.md'))
+
+      expect(reference?.kind).toBe('file')
+      expect(reference?.text).toBe('the file could not be read')
+    } finally {
+      await chmod(locked, 0o600).catch(() => undefined)
       await rm(root, { recursive: true, force: true })
     }
   })
@@ -228,6 +246,22 @@ describe('reading an @session', () => {
 
       expect(reference?.kind).toBe('session')
       expect(reference?.text).toContain('the other work')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('attaches nothing when the session store cannot be read at all', async () => {
+    const root = await workspace()
+    try {
+      const source: SessionDigestSource = {
+        list: () => Effect.fail(new Error('the store is gone')),
+        events: () => Effect.succeed([]),
+      }
+
+      const reference = await Effect.runPromise(readSessionReference(root, { id: 'other' }, source))
+
+      expect(reference).toBeUndefined()
     } finally {
       await rm(root, { recursive: true, force: true })
     }

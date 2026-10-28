@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { listDirectories } from '../src/server/index.ts'
@@ -49,6 +49,19 @@ describe('the workspace browser', () => {
         'no such directory',
       )
     } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('refuses a folder it may not read', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-browse-unreadable-'))
+    const locked = join(root, 'locked')
+    await mkdir(locked)
+    try {
+      await chmod(locked, 0o000)
+      await expect(listDirectories(locked, root)).rejects.toThrow('cannot read this directory')
+    } finally {
+      await chmod(locked, 0o700).catch(() => undefined)
       await rm(root, { recursive: true, force: true })
     }
   })
