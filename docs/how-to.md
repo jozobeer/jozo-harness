@@ -503,6 +503,27 @@ team update id=task-1 state=done revision=1
 
 子を 1 つだけ使うときは `subagent` で足りる。`model` で別の route（`provider/model`）を走らせられるが、その run が設定に置いている route に限る。候補はその run の既定 route と、`agent-loop` 行の `models` が値を持つモデル名（既定 route が provider を持つなら `<provider>/<model>` の形も）である。一覧に無い route は子を起こす前に `invalid-arguments` で拒否する。`context=fresh` で親の履歴を渡さず、`task` を省くと起こしたまま idle で残せる（あとから `send_message` で仕事を渡す）。
 
+## スクリプトで子エージェントを編成する（workflow の script）
+
+`workflow` は `tasks` の配列を渡す扇状実行のほかに、`script` を渡して子を順に起こせる。`script` は async 関数の本体で、引数の `workflow` から `spawn` を呼ぶ。`spawn` は子を 1 体起こし、その最終テキストと使った tool の要約を返すので、次の子の task をその場で決められる。
+
+```js
+const draft = await workflow.spawn('最初の案を書く', { label: 'draft' })
+const review = await workflow.spawn('この案をレビューする:\n' + draft.text, { label: 'review' })
+if (review.text.includes('NG')) {
+  return await workflow.spawn('指摘を直す:\n' + review.text)
+}
+return review.text
+```
+
+- `tasks` と `script` はどちらか一方だけ。両方渡すと `invalid-arguments` になる。
+- `spawn(task, { label, cwd })` は `{ sessionId, text, tools }` を返す。`tools` は子が使った tool の名前と結果の 1 行要約である。
+- 子は `subagent` と同じ経路で起こす。同じ route と同じ sandbox・承認を通る。
+- スクリプト自身は `run_code` と同じ sandbox の子プロセスで走る。fs や process には直接触れない。
+- 失敗は tool の失敗ではなく結果になる。例外は `stage: script`、子が起動できない・メッセージを取らない・turn が error で終わる場合は `stage: spawn N`、deadline は `stage: timeout`、起動数が `maxChildren` を超えた場合は `stage: spawn N` として、`ok: false` と `reason` が返る。
+- `maxChildren` の既定は 12。deadline は 10 分（`WORKFLOW_SCRIPT_TIMEOUT_MS`）。出力は 16,000 文字で切る。
+- 単純な同時実行は `tasks` のほうが短い。
+
 ## モデルにプログラムを書かせて tool を束ねる（run_code）
 
 tier1 行がある run では、モデルに `run_code` が渡る。モデルは既定で async 関数の本体を書き、`await tools.name(args)` で可視の tool を呼べる。`runtime: 'python'` を渡すと python3 のスクリプトとして走り、同じ tool を `tools.name(...)` で呼べる。大量の read / grep を 1 step に畳むときに使う。

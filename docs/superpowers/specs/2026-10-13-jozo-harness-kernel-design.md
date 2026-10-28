@@ -66,7 +66,7 @@ UI と核の間は、プロセス境界を越えられる形に保つ。核の�
 | `exit_plan_mode` | 採用。S5 の plan-mode。制限を解く出口をモデルに与える |
 | `present` | 除外。カードを描く client を持たない v1 では、成果物はファイルのパスで示す。UI への提示は S7 / S8 と `presentCall` / `presentResult` の領分である。**2026-10-14 追記**: `presentCall` / `presentResult` は pipeline に実配線し、要約をログに記録するようにした（S1 の追記を参照）。`present` tool そのもの（client へカードを渡す経路）は持たないままである |
 | `lsp` | 除外。言語サーバの管理はどの S の範囲にも無い |
-| `workflow` | 採用（2026-10-14 改訂）。S6 の決定 4 を改訂し、データで書く扇状実行のツールとして持つ。dsh のスクリプト engine は持たない（[S6 の決定 4](2026-10-13-jozo-harness-tier3-design.md)） |
+| `workflow` | 採用（2026-10-28 改訂）。S6 の決定 4 を改訂し、データで書く扇状実行のツールとして持つ。加えて、モデルの書いた JavaScript が `workflow.spawn` で子を起こす口を持つ。段・依存を持つ engine は持たない（[S6 の決定 4](2026-10-13-jozo-harness-tier3-design.md)） |
 | MCP resources | 除外。S5 の MCP は「ツール一覧の取り込みと実行だけ」と決めている |
 | session query 5 種 | 採用済み（2026-10-14）。`jzh sessions` の一覧・閲覧と `--search` が担い、索引は JSONL の隣に置く（D4） |
 | schedule 4 種 | 採用済み。`schedule` ツール 1 つが create / list / update / delete を担う（C2） |
@@ -83,6 +83,8 @@ UI と核の間は、プロセス境界を越えられる形に保つ。核の�
 **2026-10-18 追記（Issue #157）**: `create_worktree` の除外を反転する。partial clone の repo で作成時の lazy fetch を止めるため、`git worktree add` には `GIT_NO_LAZY_FETCH=1` を渡す。作成はワークスペースの外へ書くので、`workspace-write` では既存の escalation（`sandbox_permissions` + `justification` と承認）を通す。移動は `session/cwd/changed` に `root` を足して表し、`working_directory` と以降の bash / write / edit は新しい根に従う。
 
 **2026-10-18 追記（Issue #143）**: `ralph` の除外を反転する。tier1 行がある run の既定ツールとして登録し、round worker は `subagent` の fresh 起動経路（`seed: []`）を使う。worker が受け取るのは immutable な objective と前 round の構造化 handoff だけで、完了・blocker は worker の自己報告として返す。通常の長い仕事を同じ session で続ける `goal` の役割は変えない。
+
+**2026-10-28 追記（Issue #345）**: `workflow` に `script` を足したが、「エンジンを持たない」決定は変えない。jzh が持たないのは、段・依存・再試行・状態を持つワークフロー engine であり、どの子をいつ起こすか（分岐・繰り返し・次の task）はモデルの書いた JavaScript 側にある。jzh が足したのは、sandbox された子プロセスでそのスクリプトを走らせ、`workflow.spawn` を既存の subagent 起動経路へ渡し、起動数と deadline の上限で止める口だけである。したがって dsh の workflow-ptc のような run の再開・段の検証・失敗項目の正規化は持たず、失敗は 1 つの結果として返す。
 
 ## S1 の設計
 

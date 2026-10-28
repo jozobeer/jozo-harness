@@ -490,10 +490,15 @@ const installTier1 = (
         append: (type, data) => agent.session.append(type, data),
         ...(sandbox === undefined ? {} : { sandbox }),
       },
+      sandbox,
     )) {
       yield* tools.register(tool)
     }
   })
+
+/** The workflow tool over the run's sandbox, keeping the optional key absent when unconfined. */
+const workflowToolFor = (agents: AgentsShape, route: string, sandbox: SandboxShape | undefined) =>
+  makeWorkflowTool({ agents, route, ...(sandbox === undefined ? {} : { sandbox }) })
 
 const tier1ToolList = (
   ask: AskShape,
@@ -508,6 +513,8 @@ const tier1ToolList = (
   planMode: PlanModeShape | undefined,
   pluginHost: PluginHost,
   runCode: RunCodeHost,
+  /** The boundary the run's commands are confined to; a workflow script's child uses it too. */
+  sandbox: SandboxShape | undefined,
 ) => {
   const list = [...tier1Tools(ask, skills, runCode)]
   list.push(makePluginTool(pluginHost))
@@ -576,7 +583,7 @@ const tier1ToolList = (
       makeSubagentTool({ agents, route, outputs, ...(routes === undefined ? {} : { routes }) }),
       makeStructuredOutputTool(outputs),
       ...agentTools(agents),
-      makeWorkflowTool({ agents, route }),
+      workflowToolFor(agents, route, sandbox),
       makeTeamTool({
         agents,
         route,
