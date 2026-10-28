@@ -10,6 +10,19 @@ export const ACP_METHODS = [
 
 export type AcpMethod = (typeof ACP_METHODS)[number]
 
+/** The methods the server sends to the editor: one notification and one request. */
+export const ACP_CLIENT_METHODS = ['session/update', 'session/request_permission'] as const
+
+export type AcpClientMethod = (typeof ACP_CLIENT_METHODS)[number]
+
+/** The one protocol version this server speaks. */
+export const ACP_PROTOCOL_VERSION = 1
+
+export interface AgentCapabilities {
+  /** Whether a prompt may carry an image; this server sends text only. */
+  readonly promptCapabilities: { readonly image: false; readonly audio: false }
+}
+
 export interface InitializeParams {
   readonly protocolVersion: number
 }
@@ -17,6 +30,8 @@ export interface InitializeParams {
 export interface InitializeResult {
   readonly protocolVersion: number
   readonly agentName: string
+  /** What this agent can take in a prompt; absent on an older server. */
+  readonly agentCapabilities?: AgentCapabilities
 }
 
 export interface SessionNewParams {
@@ -32,8 +47,11 @@ export interface SessionPromptParams {
   readonly prompt: readonly string[]
 }
 
+/** The stop reasons the SDK client decodes; an editor compares them by name. */
+export type StopReason = 'end-turn' | 'cancelled' | 'refused'
+
 export interface SessionPromptResult {
-  readonly stopReason: 'end-turn' | 'cancelled' | 'refused'
+  readonly stopReason: StopReason
 }
 
 export interface SessionCancelParams {
@@ -42,6 +60,41 @@ export interface SessionCancelParams {
 
 export interface SessionCancelResult {
   readonly cancelled: boolean
+}
+
+/** One permission choice the editor offers for a call that needs an answer. */
+export interface PermissionOption {
+  readonly optionId: string
+  readonly name: string
+  readonly kind: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always'
+}
+
+/** What the server asks the editor: may this one call run? */
+export interface RequestPermissionParams {
+  readonly sessionId: string
+  readonly toolCall: {
+    readonly toolCallId: string
+    /** The one line an editor shows on the card. */
+    readonly title: string
+    readonly kind: string
+  }
+  readonly options: ReadonlyArray<PermissionOption>
+}
+
+/** The editor's answer; a cancelled request means nobody decided. */
+export type RequestPermissionResult =
+  | { readonly outcome: { readonly outcome: 'selected'; readonly optionId: string } }
+  | { readonly outcome: { readonly outcome: 'cancelled' } }
+
+/** One text fragment of the assistant message for this turn. */
+export interface AgentMessageChunk {
+  readonly sessionUpdate: 'agent_message_chunk'
+  readonly content: { readonly type: 'text'; readonly text: string }
+}
+
+export interface SessionUpdateParams {
+  readonly sessionId: string
+  readonly update: AgentMessageChunk
 }
 
 /** What each method takes and returns; the dispatcher itself only sees unknown values. */
@@ -55,7 +108,8 @@ export interface AcpMethodTypes {
 export interface AcpHandlerRegistration {
   /** Decoded before the handler runs, so a bad argument answers -32602 rather than reaching it. */
   readonly params?: Schema.ConstraintDecoder<unknown>
-  readonly handle: (params: unknown) => unknown
+  /** A handler may wait: a turn answers when the loop is done with it. */
+  readonly handle: (params: unknown) => unknown | Promise<unknown>
 }
 
 /**

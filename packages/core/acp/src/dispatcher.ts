@@ -1,6 +1,7 @@
 import { Schema } from 'effect'
 import {
   JSON_RPC_ERROR,
+  JsonRpcFault,
   JsonRpcNotificationSchema,
   JsonRpcRequestSchema,
   type JsonRpcId,
@@ -19,6 +20,7 @@ type Outcome =
   | { readonly kind: 'method-not-found' }
   | { readonly kind: 'invalid-params' }
   | { readonly kind: 'internal' }
+  | { readonly kind: 'fault'; readonly fault: JsonRpcFault }
 
 const respond = (id: JsonRpcId, result: unknown): string =>
   JSON.stringify({ jsonrpc: '2.0', id, result })
@@ -41,24 +43,34 @@ const decodeParams = (
   }
 }
 
-const run = (registry: AcpHandlerRegistry, method: string, params: unknown): Outcome => {
+/**
+ * Runs one registered handler. A handler may take a turn's worth of time, so the
+ * answer is awaited; a fault it throws is the answer it chose.
+ */
+const run = async (
+  registry: AcpHandlerRegistry,
+  method: string,
+  params: unknown,
+): Promise<Outcome> => {
   const registration = registry.get(method)
   if (registration === undefined) return { kind: 'method-not-found' }
   const decoded = decodeParams(registration, params)
   if (!decoded.ok) return { kind: 'invalid-params' }
   try {
-    return { kind: 'result', result: registration.handle(decoded.value) }
-  } catch {
-    return { kind: 'internal' }
+    return { kind: 'result', result: await registration.handle(decoded.value) }
+  } catch (cause) {
+    return cause instanceof JsonRpcFault ? { kind: 'fault', fault: cause } : { kind: 'internal' }
   }
 }
 
 /**
- * Routes a JSON-RPC line to an injected handler. It is a pure function: no
- * sessions, no I/O — the transport that reads the line and writes the answer
- * is the caller's.
+ * Routes a JSON-RPC line to an injected handler. It owns no transport and no
+ * sessions: the caller reads the line and writes the answer.
  */
-export const dispatchJsonRpc = (registry: AcpHandlerRegistry, line: string): DispatchResult => {
+export const dispatchJsonRpc = async (
+  registry: AcpHandlerRegistry,
+  line: string,
+): Promise<DispatchResult> => {
   let parsed: unknown
   try {
     parsed = JSON.parse(line)
@@ -69,7 +81,7 @@ export const dispatchJsonRpc = (registry: AcpHandlerRegistry, line: string): Dis
   if (!hasId(parsed)) {
     // A notification has no reply channel, so its outcome is dropped.
     if (Schema.is(JsonRpcNotificationSchema)(parsed)) {
-      void run(registry, parsed.method, parsed.params)
+      await run(registry, parsed.method, parsed.params)
     }
     return null
   }
@@ -78,7 +90,7 @@ export const dispatchJsonRpc = (registry: AcpHandlerRegistry, line: string): Dis
     return fail(null, JSON_RPC_ERROR.invalidRequest, 'Invalid request')
   }
 
-  const outcome = run(registry, parsed.method, parsed.params)
+  const outcome = await run(registry, parsed.method, parsed.params)
   switch (outcome.kind) {
     case 'result':
       return respond(parsed.id, outcome.result)
@@ -86,6 +98,8 @@ export const dispatchJsonRpc = (registry: AcpHandlerRegistry, line: string): Dis
       return fail(parsed.id, JSON_RPC_ERROR.methodNotFound, 'Method not found')
     case 'invalid-params':
       return fail(parsed.id, JSON_RPC_ERROR.invalidParams, 'Invalid params')
+    case 'fault':
+      return fail(parsed.id, outcome.fault.code, outcome.fault.message)
     case 'internal':
       return fail(parsed.id, JSON_RPC_ERROR.internal, 'Internal error')
   }
