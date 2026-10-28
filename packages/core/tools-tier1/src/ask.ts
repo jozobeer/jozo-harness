@@ -50,10 +50,10 @@ const Parameters = Schema.Struct({
     }),
   ),
   time_limit_ms: Schema.optionalKey(
-    Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).annotate({
+    Schema.Int.annotate({
       description:
         'How long to wait for the whole batch. After it, unanswered questions return pending and can still be answered later.',
-    }),
+    }).check(Schema.isGreaterThanOrEqualTo(1)),
   ),
 })
 
@@ -200,7 +200,7 @@ export const askUserToolFor = (
 ): ToolDefinition<AskArgs, AskValue> => ({
   name: 'ask_user',
   description:
-    'Asks the human one or more questions and waits for the answers. Use questions to ask several at once, each with a distinct id. With time_limit_ms, unanswered questions come back pending and any later answer arrives as a user message.',
+    'Asks the human one or more questions and waits for the answers. Use questions to ask several at once, each with a distinct id. With questions and time_limit_ms, unanswered questions come back pending and any later answer arrives as a user message.',
   parameters: Parameters,
   output: {
     schema: Schema.Union([LegacyValue, AnsweredValue, PendingValue]),
