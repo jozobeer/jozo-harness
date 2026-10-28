@@ -8,6 +8,10 @@ import {
   encodeZstdFrame,
   jsonlSessions,
   makeSessionQuery,
+  readFirstLine,
+  readTitle,
+  readZstdFirstLine,
+  readZstdTitle,
   SESSION_FILE_NAME,
   SESSION_ZSTD_FILE_NAME,
   splitZstdLog,
@@ -190,6 +194,24 @@ describe('a zstd log a crash cut short', () => {
 
     expect(failed._tag).toBe('Failure')
     expect(failed._tag === 'Failure' && failed.failure.message).toContain('cannot read')
+  })
+})
+
+describe('reading the head of a log that is gone', () => {
+  test('reports the missing file instead of an empty name or header', async () => {
+    const path = join(tempRoot, 'missing', SESSION_ZSTD_FILE_NAME)
+
+    const failures = await Promise.all([
+      Effect.runPromise(Effect.flip(readFirstLine(path))),
+      Effect.runPromise(Effect.flip(readZstdFirstLine(path))),
+      Effect.runPromise(Effect.flip(readTitle(path))),
+      Effect.runPromise(Effect.flip(readZstdTitle(path))),
+    ])
+
+    for (const failure of failures) {
+      expect(failure.code).toBe('persistence')
+      expect(failure.message).toContain('cannot')
+    }
   })
 })
 
