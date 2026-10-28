@@ -3,7 +3,7 @@ import { FLAG_NAMES } from './args.ts'
 import { CONFIG_HOME_ENV, configPaths } from './config.ts'
 import type { JozoHarnessConfig } from './config-file.ts'
 import type { CredentialSource, Resolved, SettingsSurface } from './settings.ts'
-import { DEEPSEEK_KEY_ENV, SEARCH_KEY_ENV } from './search-env.ts'
+import { DEEPSEEK_KEY_ENV, EXA_KEY_ENV, PERPLEXITY_KEY_ENV, SEARCH_KEY_ENV } from './search-env.ts'
 
 /** Row keys the command reads from a row's config itself; no plugin declares them. */
 export const MODEL_KEY = 'model'
@@ -108,7 +108,8 @@ export const SETTINGS_KEYS: ReadonlyArray<SettingsNote> = [
   },
   {
     name: 'search',
-    summary: 'the web_search provider: brave (default when BRAVE_API_KEY is set) or deepseek',
+    summary:
+      'the web_search provider: brave (default when BRAVE_API_KEY is set), deepseek, exa, or perplexity',
     value: (settings) => settings?.search ?? 'not set, so brave when BRAVE_API_KEY is set',
     example: ['search: deepseek'],
   },
@@ -182,6 +183,8 @@ const renderEnvironment = (): string =>
     '  - ' + CONFIG_HOME_ENV + ': moves the directory that holds config.yaml and secrets.env',
     '  - ' + SEARCH_KEY_ENV + ': with it the default web_search provider is registered',
     '  - ' + DEEPSEEK_KEY_ENV + ': the key search: deepseek sends to the Search API',
+    '  - ' + EXA_KEY_ENV + ': the key search: exa sends to api.exa.ai/search',
+    '  - ' + PERPLEXITY_KEY_ENV + ': the key search: perplexity sends to api.perplexity.ai',
   ].join('\n') + '\n'
 
 const describeValue = (value: unknown): string =>

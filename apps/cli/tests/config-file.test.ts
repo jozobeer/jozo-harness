@@ -49,6 +49,13 @@ describe('parseConfigText', () => {
     expect(config.plugins?.[0]?.id).toBe('safety')
   })
 
+  test('accepts exa and perplexity as the search provider', async () => {
+    for (const search of ['exa', 'perplexity'] as const) {
+      const config = await Effect.runPromise(parseConfigText('search: ' + search))
+      expect(config.search).toBe(search)
+    }
+  })
+
   test('refuses a port outside 0..65535 or not a whole number', async () => {
     const messageOf = async (text: string): Promise<string> =>
       await Effect.runPromise(

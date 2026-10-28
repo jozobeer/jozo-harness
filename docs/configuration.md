@@ -23,7 +23,7 @@ plugin ごとの config キー、フラグ、環境変数の一覧は `jzh --dum
 | `effort` | provider が読む語 | 推論の強さ。`--effort` > この値 > 行の `config.effort`。未設定なら provider の既定。ブラウザ UI の席は、セッションを開く前ならこの run で次に開くセッションの出発点を選び、開いた後ならそのセッションだけを切り替える（どちらも設定ファイルには書かない） |
 | `profile` | profile 名 | 層2で重ねる profile。既定は `headless`。`--profile` > この値 |
 | `port` | 0〜65535 の整数 | `jzh web` が listen するポート。`--port` > この値 > 0（空きポート）。`jzh web` 以外では使わない |
-| `search` | `brave` / `deepseek` | `web_search` の provider。未設定は `BRAVE_API_KEY` があるときだけ brave。`deepseek` は `DEEPSEEK_API_KEY` を DeepSeek Search API に送る |
+| `search` | `brave` / `deepseek` / `exa` / `perplexity` | `web_search` の provider。未設定は `BRAVE_API_KEY` があるときだけ brave。`deepseek` は `DEEPSEEK_API_KEY` を DeepSeek Search API に、`exa` は `EXA_API_KEY` を `https://api.exa.ai/search` に、`perplexity` は `PERPLEXITY_API_KEY` を chat completions に送る。選んだ provider のキーが無いときは、最初の呼び出しが欠けている変数名を返し、他の provider へ落ちない |
 | `deepseekToolsBaseUrl` | URL | DeepSeek Search / Fetch API の base。既定は `https://api.deepseek.com/v1/tools`。provider は `/search` を足す |
 | `skills` | 文字列の配列 | `<name>/SKILL.md` を持つディレクトリを追加する。```/x``` は展開する |
 | `plugins` | 行の配列 | 層3として重なる |
@@ -179,6 +179,8 @@ route は `opencode/<model>`、wire に送る model は `<model>` そのもの�
 | `OPENCODE_API_KEY` | OpenCode Console のキー。`apiKeyEnv` にこの名前を置く |
 | `BRAVE_API_KEY` | あると既定の `web_search` provider が付く |
 | `DEEPSEEK_API_KEY` | `search: deepseek` のとき `web_search` が DeepSeek Search API を呼ぶ。無い場合は tool error が `jzh auth add deepseek` を案内する |
+| `EXA_API_KEY` | `search: exa` のとき `web_search` が Exa の `/search` を呼ぶ。無い場合は tool error が `jzh auth set EXA_API_KEY` を案内する |
+| `PERPLEXITY_API_KEY` | `search: perplexity` のとき `web_search` が Perplexity の chat completions を呼ぶ。無い場合は tool error が `jzh auth set PERPLEXITY_API_KEY` を案内する |
 | `XDG_CONFIG_HOME` | `config.yaml` と `secrets.env` を置くディレクトリ |
 
 優先順位はシェル環境、作業ディレクトリに近い `.env`、`secrets.env` の順である。先に値がある場所が勝ち、後ろは空いているキーだけを埋める。どのファイルがそのキーを埋めたかは `jzh --dump-config` の `in effect for a run from here:` に出る。

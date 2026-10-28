@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import { describe, expect, test } from 'vitest'
 import { startStubServer } from '@jozo-harness/test-support-stub'
-import { SEARCH_KEY_ENV, searchFromEnv } from '../src/index.ts'
+import { EXA_KEY_ENV, PERPLEXITY_KEY_ENV, SEARCH_KEY_ENV, searchFromEnv } from '../src/index.ts'
 
 describe('searchFromEnv', () => {
   test('no key means no provider', () => {
@@ -51,5 +51,58 @@ describe('searchFromEnv', () => {
 
   test('a deepseek key alone does not change the default provider', () => {
     expect(searchFromEnv({ DEEPSEEK_API_KEY: 'secret' })).toBeUndefined()
+  })
+
+  test('an explicit brave selection without a key says which variable is missing', async () => {
+    const host = searchFromEnv({}, { search: 'brave' })
+    const message = await Effect.runPromise(
+      Effect.match(host?.search('jozo', 1) ?? Effect.die('no provider'), {
+        onFailure: (error) => error.message,
+        onSuccess: () => 'ok',
+      }),
+    )
+
+    expect(message).toContain('BRAVE_API_KEY')
+    expect(message).toContain('jzh auth set BRAVE_API_KEY')
+  })
+
+  test('the settings choose exa, and its missing key does not fall back to brave', async () => {
+    const host = searchFromEnv({ [SEARCH_KEY_ENV]: 'brave-secret' }, { search: 'exa' })
+    const message = await Effect.runPromise(
+      Effect.match(host?.search('jozo', 1) ?? Effect.die('no provider'), {
+        onFailure: (error) => error.message,
+        onSuccess: () => 'ok',
+      }),
+    )
+
+    expect(message).toContain('EXA_API_KEY')
+    expect(message).toContain('jzh auth set EXA_API_KEY')
+    expect(message).not.toContain('brave')
+  })
+
+  test('the settings choose perplexity, and its missing key does not fall back to brave', async () => {
+    const host = searchFromEnv({ [SEARCH_KEY_ENV]: 'brave-secret' }, { search: 'perplexity' })
+    const message = await Effect.runPromise(
+      Effect.match(host?.search('jozo', 1) ?? Effect.die('no provider'), {
+        onFailure: (error) => error.message,
+        onSuccess: () => 'ok',
+      }),
+    )
+
+    expect(message).toContain('PERPLEXITY_API_KEY')
+    expect(message).toContain('jzh auth set PERPLEXITY_API_KEY')
+    expect(message).not.toContain('brave')
+  })
+
+  test('an exa key with the provider selected gives a host', () => {
+    const host = searchFromEnv({ [EXA_KEY_ENV]: 'secret' }, { search: 'exa' })
+
+    expect(typeof host?.search).toBe('function')
+  })
+
+  test('a perplexity key with the provider selected gives a host', () => {
+    const host = searchFromEnv({ [PERPLEXITY_KEY_ENV]: 'secret' }, { search: 'perplexity' })
+
+    expect(typeof host?.search).toBe('function')
   })
 })

@@ -94,8 +94,10 @@ const modelProblem = (value: string): string | undefined => {
   return shaped ? undefined : 'model takes provider/model (jzh models lists them)'
 }
 
+const SEARCH_PROVIDERS: ReadonlyArray<string> = ['brave', 'deepseek', 'exa', 'perplexity']
+
 const searchProblem = (value: string): string | undefined =>
-  value === 'brave' || value === 'deepseek' ? undefined : 'search takes brave or deepseek'
+  SEARCH_PROVIDERS.includes(value) ? undefined : 'search takes brave, deepseek, exa, or perplexity'
 
 const baseUrlProblem = (value: string): string | undefined =>
   /^https?:\/\//.test(value) ? undefined : 'deepseekToolsBaseUrl takes an http(s) URL'
