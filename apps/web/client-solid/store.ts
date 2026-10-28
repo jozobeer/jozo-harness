@@ -14,7 +14,9 @@ import {
   UiRpcs,
   withoutServices,
   type DirectoryView,
+  type EditableSettingsView,
   type JobDetailView,
+  type RunSettingsInput,
   type RunStateView,
   type SessionAction,
 } from '../src/shared/rpc.ts'
@@ -28,6 +30,7 @@ import {
   withConnection,
   withDeletedPage,
   withDraft,
+  withEditable,
   withFiles,
   withModels,
   withOpened,
@@ -40,6 +43,7 @@ import {
   withSession,
   withSessions,
   withSettings,
+  withSettingsProblem,
   withTheme,
   withWorkspaces,
   type Pane,
@@ -221,6 +225,8 @@ type PanelAsk =
   | { readonly kind: 'files'; readonly sessionId: string; readonly query: string }
   | { readonly kind: 'chooseModel'; readonly model: string }
   | { readonly kind: 'setModel'; readonly model: string }
+  | { readonly kind: 'runSettings' }
+  | { readonly kind: 'saveRunSettings'; readonly input: RunSettingsInput }
   | { readonly kind: 'job'; readonly id: string }
   | { readonly kind: 'stopJob'; readonly id: string }
   | { readonly kind: 'stopSubagent'; readonly id: string }
@@ -248,7 +254,16 @@ type PanelAsk =
 /** The panel asks that read or write what the page may offer to the next turn. */
 type SettingsAsk = Extract<
   PanelAsk,
-  { kind: 'models' | 'commands' | 'files' | 'chooseModel' | 'setModel' }
+  {
+    kind:
+      | 'models'
+      | 'commands'
+      | 'files'
+      | 'chooseModel'
+      | 'setModel'
+      | 'runSettings'
+      | 'saveRunSettings'
+  }
 >
 
 /** What the server said about one upload: a stored reference, or why it refused. */
@@ -270,7 +285,9 @@ const isSettingsAsk = (asked: PanelAsk): asked is SettingsAsk =>
   asked.kind === 'commands' ||
   asked.kind === 'files' ||
   asked.kind === 'chooseModel' ||
-  asked.kind === 'setModel'
+  asked.kind === 'setModel' ||
+  asked.kind === 'runSettings' ||
+  asked.kind === 'saveRunSettings'
 
 const isRunAsk = (asked: PanelAsk): asked is RunAsk =>
   asked.kind === 'job' || asked.kind === 'stopJob' || asked.kind === 'stopSubagent'
@@ -361,6 +378,10 @@ export interface SessionStore {
   readonly chooseEffort: (effort: string) => void
   /** Picks the route the settings file keeps for the runs after this one. */
   readonly setModel: (model: string) => void
+  /** Reads the values the settings pane may edit, with where each came from. */
+  readonly askRunSettings: () => void
+  /** Validates and writes every editable value in one save. */
+  readonly saveRunSettings: (input: RunSettingsInput) => void
   /** Renames, pins, archives, or deletes one session through its row menu. */
   readonly act: (sessionId: string, action: SessionAction) => void
   /** Drops a page the server no longer holds, so the run pane stops listing it. */
@@ -904,10 +925,37 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       })
 
     /** The settings asks, including the pick the sheet keeps across runs. */
+    /**
+     * Applies one settings answer: the values it carried, and the end of any
+     * refusal. A read and a save answer in the same shape, so both go through here.
+     */
+    const applyEditable = <E, R>(answer: Effect.Effect<EditableSettingsView, E, R>) =>
+      answer.pipe(
+        Effect.tap((editable: EditableSettingsView) =>
+          Effect.sync(() =>
+            batch(() => {
+              update((now) => withEditable(now, editable))
+              update((now) => withSettingsProblem(now, ''))
+            }),
+          ),
+        ),
+        Effect.catchCause((cause) =>
+          Effect.sync(() => update((now) => withSettingsProblem(now, causeText(cause)))),
+        ),
+      )
+
+    /** Reads the editable values, and says why when the server refused. */
+    const readEditable = () => applyEditable(client.runSettings())
+
+    /** Writes every editable value in one save; a refusal names the field and keeps the form. */
+    const saveEditable = (input: RunSettingsInput) => applyEditable(client.saveRunSettings(input))
+
     const answerSettingsAsk = (asked: SettingsAsk) => {
       if (asked.kind === 'models') return answerModels()
       if (asked.kind === 'commands') return answerCommands(asked)
       if (asked.kind === 'files') return answerFiles(asked)
+      if (asked.kind === 'runSettings') return readEditable()
+      if (asked.kind === 'saveRunSettings') return saveEditable(asked.input)
       return Effect.gen(function* () {
         // Only the sheet asks for the settings file to keep the pick; the seat's
         // pick is the choice of this run alone.
@@ -1010,6 +1058,8 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
 
     const settings = yield* client.settings()
     yield* Effect.sync(() => update((now) => withSettings(now, settings)))
+    const editable = yield* client.runSettings()
+    yield* Effect.sync(() => update((now) => withEditable(now, editable)))
 
     const listed = yield* client.sessions()
     yield* Effect.sync(() => update((now) => withSessions(now, listed.items)))
@@ -1240,6 +1290,9 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       else Queue.offerUnsafe(effortAsks, effort)
     },
     setModel: (model) => Queue.offerUnsafe(panelAsks, { kind: 'setModel', model }),
+    askRunSettings: () => Queue.offerUnsafe(panelAsks, { kind: 'runSettings' }),
+    saveRunSettings: (input: RunSettingsInput) =>
+      Queue.offerUnsafe(panelAsks, { kind: 'saveRunSettings', input }),
     act: (sessionId, action) =>
       Queue.offerUnsafe(panelAsks, { kind: 'sessionAction', sessionId, action }),
     pageDeleted: (page) => update((now) => withDeletedPage(now, page)),

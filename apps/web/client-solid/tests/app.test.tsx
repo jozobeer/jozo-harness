@@ -30,7 +30,12 @@ import { lensFrom, type Lens } from '../lens.ts'
 import { pourFrom } from '../pour.ts'
 import { SEEN_KEY, SeenContext, createSeen, looksFrom } from '../seen.ts'
 import type { SessionStore } from '../store.ts'
-import type { DirectoryView, SessionAction } from '../../src/shared/rpc.ts'
+import type {
+  DirectoryView,
+  EditableSettingsView,
+  RunSettingsInput,
+  SessionAction,
+} from '../../src/shared/rpc.ts'
 import { traceOf } from '../../src/ui/trace.ts'
 import {
   RAIL_COLLAPSED_KEY,
@@ -75,6 +80,8 @@ type Call =
   | { readonly kind: 'chooseEffort'; readonly effort: string }
   | { readonly kind: 'askModels' }
   | { readonly kind: 'askCommands' }
+  | { readonly kind: 'askRunSettings' }
+  | { readonly kind: 'saveRunSettings'; readonly input: RunSettingsInput }
   | { readonly kind: 'askFiles'; readonly query: string }
   | { readonly kind: 'act'; readonly sessionId: string; readonly action: SessionAction }
   | { readonly kind: 'askWorkspaces' }
@@ -144,6 +151,8 @@ const makeStore = (
     deleteSchedule: () => undefined,
     askModels: () => calls.push({ kind: 'askModels' }),
     askCommands: () => calls.push({ kind: 'askCommands' }),
+    askRunSettings: () => calls.push({ kind: 'askRunSettings' }),
+    saveRunSettings: (input) => calls.push({ kind: 'saveRunSettings', input }),
     askFiles: (query) => calls.push({ kind: 'askFiles', query }),
     setModel: (model) => calls.push({ kind: 'model', model }),
     chooseModel: (model) => calls.push({ kind: 'chooseModel', model }),
@@ -2004,6 +2013,171 @@ describe('the Solid page', () => {
     fireEvent.click(container.querySelector('#use-model') as Element)
 
     expect(calls).toContainEqual({ kind: 'model', model: 'stub/other' })
+  })
+
+  test('the settings pane fills its fields from the values the server resolved', () => {
+    const editable: EditableSettingsView = {
+      search: {
+        provider: 'deepseek',
+        keyName: 'DEEPSEEK_API_KEY',
+        keyPresent: true,
+        source: '/work/settings.yml',
+      },
+      apiKeyRef: { ref: 'openrouter', present: true, source: '/work/settings.yml' },
+      bashTimeoutMs: { value: 45_000, source: '/work/settings.yml' },
+      maxParallelToolCalls: { value: 4, source: 'the default' },
+      subagentDepth: { value: 2, source: '/work/settings.yml' },
+      delegateTools: [{ name: 'codex', argv: ['codex', 'exec'] }],
+    }
+    const { store, calls } = makeStore({
+      pane: { kind: 'settings' },
+      settings: {
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+        settingsPath: '/work/settings.yml',
+        cwd: '/work',
+        sessionRoot: '/work/sessions',
+      },
+      editable,
+    })
+
+    const { container } = render(() => <ContextPane store={store} />)
+
+    // The page already read the values, so the form does not ask a second time.
+    expect(calls).not.toContainEqual({ kind: 'askRunSettings' })
+    expect((container.querySelector('#search-provider') as HTMLSelectElement).value).toBe(
+      'deepseek',
+    )
+    expect((container.querySelector('#api-key-ref') as HTMLInputElement).value).toBe('openrouter')
+    expect((container.querySelector('#bash-timeout') as HTMLInputElement).value).toBe('45000')
+    expect((container.querySelector('#max-parallel') as HTMLInputElement).value).toBe('4')
+    expect((container.querySelector('#subagent-depth') as HTMLInputElement).value).toBe('2')
+    expect((container.querySelector('#delegate-tools') as HTMLTextAreaElement).value).toBe(
+      'codex codex exec',
+    )
+    expect(container.querySelector('.settings-source')?.textContent).toContain('DEEPSEEK_API_KEY')
+  })
+
+  test('saving the settings form sends every edited value in one ask', () => {
+    const { store, calls } = makeStore({
+      pane: { kind: 'settings' },
+      settings: {
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+        settingsPath: '/work/settings.yml',
+        cwd: '/work',
+        sessionRoot: '/work/sessions',
+      },
+      editable: {
+        search: { keyName: 'BRAVE_API_KEY', keyPresent: false, source: 'no provider is named' },
+        apiKeyRef: { ref: '', present: false, source: 'no reference is named' },
+        bashTimeoutMs: { value: 120_000, source: 'the default' },
+        maxParallelToolCalls: { value: 10, source: 'the default' },
+        subagentDepth: { value: 1, source: 'the default' },
+        delegateTools: [],
+      },
+    })
+    const { container } = render(() => <ContextPane store={store} />)
+
+    fireEvent.change(container.querySelector('#search-provider') as Element, {
+      target: { value: 'exa' },
+    })
+    fireEvent.input(container.querySelector('#api-key-ref') as Element, {
+      target: { value: 'openrouter' },
+    })
+    fireEvent.input(container.querySelector('#bash-timeout') as Element, {
+      target: { value: '45000' },
+    })
+    fireEvent.input(container.querySelector('#max-parallel') as Element, {
+      target: { value: '4' },
+    })
+    fireEvent.input(container.querySelector('#subagent-depth') as Element, {
+      target: { value: '2' },
+    })
+    fireEvent.input(container.querySelector('#delegate-tools') as Element, {
+      target: { value: 'codex codex exec' },
+    })
+    fireEvent.click(container.querySelector('#save-settings') as Element)
+
+    expect(calls).toContainEqual({
+      kind: 'saveRunSettings',
+      input: {
+        search: 'exa',
+        apiKeyRef: 'openrouter',
+        bashTimeoutMs: 45_000,
+        maxParallelToolCalls: 4,
+        subagentDepth: 2,
+        delegateTools: [{ name: 'codex', argv: ['codex', 'exec'] }],
+      },
+    })
+  })
+
+  test('a delegated tool line without argv is refused before the server is asked', () => {
+    const { store, calls } = makeStore({
+      pane: { kind: 'settings' },
+      settings: {
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+        settingsPath: '/work/settings.yml',
+        cwd: '/work',
+        sessionRoot: '/work/sessions',
+      },
+      editable: {
+        search: { keyName: 'BRAVE_API_KEY', keyPresent: false, source: 'no provider is named' },
+        apiKeyRef: { ref: '', present: false, source: 'no reference is named' },
+        bashTimeoutMs: { value: 120_000, source: 'the default' },
+        maxParallelToolCalls: { value: 10, source: 'the default' },
+        subagentDepth: { value: 1, source: 'the default' },
+        delegateTools: [],
+      },
+    })
+    const { container } = render(() => <ContextPane store={store} />)
+
+    fireEvent.input(container.querySelector('#delegate-tools') as Element, {
+      target: { value: 'codex' },
+    })
+    fireEvent.click(container.querySelector('#save-settings') as Element)
+
+    expect(calls).not.toContainEqual(expect.objectContaining({ kind: 'saveRunSettings' }))
+    expect(container.querySelector('.settings-problem')?.textContent).toContain('argv')
+  })
+
+  test('a refused save names the field under the form', () => {
+    const { store } = makeStore({
+      pane: { kind: 'settings' },
+      settings: {
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+        settingsPath: '/work/settings.yml',
+        cwd: '/work',
+        sessionRoot: '/work/sessions',
+      },
+      editable: {
+        search: { keyName: 'BRAVE_API_KEY', keyPresent: false, source: 'no provider is named' },
+        apiKeyRef: { ref: '', present: false, source: 'no reference is named' },
+        bashTimeoutMs: { value: 120_000, source: 'the default' },
+        maxParallelToolCalls: { value: 10, source: 'the default' },
+        subagentDepth: { value: 1, source: 'the default' },
+        delegateTools: [],
+      },
+      settingsProblem: 'bashTimeoutMs: takes a whole number between 1 and 600000',
+    })
+
+    const { container } = render(() => <ContextPane store={store} />)
+
+    expect(container.querySelector('.settings-problem')?.textContent).toContain('bashTimeoutMs')
+  })
+
+  test('the settings pane asks for the editable values when it opens without them', () => {
+    const { store, calls } = makeStore({ pane: { kind: 'settings' } })
+
+    render(() => <ContextPane store={store} />)
+
+    expect(calls).toContainEqual({ kind: 'askRunSettings' })
   })
 
   test('the pane reads the run state and hands a tab click to the store', () => {

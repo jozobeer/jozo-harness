@@ -2,6 +2,7 @@ import type { Attachment, Quote, UiEvent, UiSessionEvent } from '@jozo-harness/u
 import { applyEvent, emptyConversation, type Conversation } from '@jozo-harness/ui-view'
 import type {
   CommandView,
+  EditableSettingsView,
   JobDetailView,
   RunStateView,
   ScheduleView,
@@ -57,6 +58,10 @@ export interface WebState {
   readonly theme: Theme
   /** What the server says about this run; undefined until the page has read it. */
   readonly settings: SettingsView | undefined
+  /** The values the settings pane may edit; undefined until the pane asked. */
+  readonly editable: EditableSettingsView | undefined
+  /** Why the last settings read or save failed; '' when nothing did. */
+  readonly settingsProblem: string
   /** The provider's models, once the reader asked for them; undefined while nobody has. */
   readonly models: ReadonlyArray<string> | undefined
   /** What this session can be told, once the composer asked; undefined while nobody has. */
@@ -104,6 +109,8 @@ export const initialState: WebState = {
   problem: '',
   theme: DEFAULT_THEME,
   settings: undefined,
+  editable: undefined,
+  settingsProblem: '',
   models: undefined,
   commands: undefined,
   files: undefined,
@@ -164,6 +171,17 @@ export const withTheme = (state: WebState, theme: Theme): WebState => ({ ...stat
 export const withSettings = (state: WebState, settings: SettingsView): WebState => ({
   ...state,
   settings,
+})
+
+/** The settings the page may edit, as the server last resolved them. */
+export const withEditable = (state: WebState, editable: EditableSettingsView): WebState => ({
+  ...state,
+  editable,
+})
+
+export const withSettingsProblem = (state: WebState, problem: string): WebState => ({
+  ...state,
+  settingsProblem: problem,
 })
 
 export const withModels = (state: WebState, models: ReadonlyArray<string>): WebState => ({

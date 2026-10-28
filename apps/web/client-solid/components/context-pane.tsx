@@ -1,6 +1,8 @@
 import { For, Match, Show, Switch, createEffect, createSignal, onCleanup, onMount } from 'solid-js'
 import type { ConversationBlock } from '@jozo-harness/ui-view'
 import type {
+  DelegateToolView,
+  EditableSettingsView,
   PluginCatalogView,
   PluginChangeRequest,
   PluginRowView,
@@ -1079,6 +1081,206 @@ const Share = () => {
   )
 }
 
+/** A delegated tool as one line of the form: the name, then the argv it starts. */
+const delegateTextOf = (tools: ReadonlyArray<DelegateToolView>): string =>
+  tools.map((tool) => [tool.name, ...tool.argv].join(' ')).join('\n')
+
+type ParsedTools =
+  | { readonly ok: true; readonly tools: ReadonlyArray<DelegateToolView> }
+  | { readonly ok: false; readonly line: number }
+
+/** One tool per line; a line without a name or without an argv word is refused. */
+const toolsFromText = (text: string): ParsedTools => {
+  const tools: Array<DelegateToolView> = []
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+  for (const [index, line] of lines.entries()) {
+    const [name, ...argv] = line.split(/\s+/)
+    if (name === undefined || name === '' || argv.length === 0) {
+      return { ok: false, line: index + 1 }
+    }
+    tools.push({ name, argv })
+  }
+  return { ok: true, tools }
+}
+
+/** The values the settings pane may edit, with the sources the server resolved. */
+const EditableSettings = (props: { store: SessionStore }) => {
+  const t = useTranslate()
+  const [search, setSearch] = createSignal('')
+  const [apiKeyRef, setApiKeyRef] = createSignal('')
+  const [bashTimeout, setBashTimeout] = createSignal('')
+  const [parallel, setParallel] = createSignal('')
+  const [depth, setDepth] = createSignal('')
+  const [delegateText, setDelegateText] = createSignal('')
+  const [formProblem, setFormProblem] = createSignal('')
+  let loaded: EditableSettingsView | undefined
+
+  // The pane asks once; a server that answers later fills the form, and a save
+  // replaces it, but typing in between is not overwritten by an unrelated update.
+  onMount(() => {
+    if (props.store.state().editable === undefined) props.store.askRunSettings()
+  })
+  createEffect(() => {
+    const view = props.store.state().editable
+    if (view === undefined || view === loaded) return
+    loaded = view
+    setSearch(view.search.provider ?? '')
+    setApiKeyRef(view.apiKeyRef.ref)
+    setBashTimeout(String(view.bashTimeoutMs.value))
+    setParallel(String(view.maxParallelToolCalls.value))
+    setDepth(String(view.subagentDepth.value))
+    setDelegateText(delegateTextOf(view.delegateTools))
+  })
+
+  const save = () => {
+    const parsed = toolsFromText(delegateText())
+    if (!parsed.ok) {
+      setFormProblem(t('settings.invalidDelegate') + ' ' + String(parsed.line))
+      return
+    }
+    const numbers = {
+      bashTimeoutMs: Number(bashTimeout()),
+      maxParallelToolCalls: Number(parallel()),
+      subagentDepth: Number(depth()),
+    }
+    const field = Object.entries(numbers).find(([, value]) => !Number.isInteger(value))
+    if (field !== undefined) {
+      setFormProblem(t('settings.invalidNumber') + ' ' + field[0])
+      return
+    }
+    setFormProblem('')
+    props.store.saveRunSettings({
+      search: search(),
+      apiKeyRef: apiKeyRef(),
+      ...numbers,
+      delegateTools: parsed.tools,
+    })
+  }
+
+  return (
+    <Show
+      when={props.store.state().editable}
+      fallback={<div class="card-hint">{t('settings.reading')}</div>}
+    >
+      {(view) => (
+        <>
+          <span class="pane-label">{t('settings.edit')}</span>
+          <div class="settings-form">
+            <label class="settings-field">
+              <span>{t('settings.searchProvider')}</span>
+              <select
+                id="search-provider"
+                value={search()}
+                onChange={(event) => setSearch(event.currentTarget.value)}
+              >
+                <option value="">{t('settings.searchOff')}</option>
+                <For each={['brave', 'deepseek', 'exa', 'perplexity']}>
+                  {(provider) => <option value={provider}>{provider}</option>}
+                </For>
+              </select>
+              <span class="settings-source">
+                {view().search.keyName === ''
+                  ? t('settings.source') + ': ' + view().search.source
+                  : view().search.keyName +
+                    ': ' +
+                    t(view().search.keyPresent ? 'settings.keyPresent' : 'settings.keyMissing') +
+                    ' · ' +
+                    t('settings.source') +
+                    ': ' +
+                    view().search.source}
+              </span>
+            </label>
+            <label class="settings-field">
+              <span>{t('settings.apiKeyRef')}</span>
+              <input
+                id="api-key-ref"
+                type="text"
+                value={apiKeyRef()}
+                onInput={(event) => setApiKeyRef(event.currentTarget.value)}
+                placeholder={t('settings.apiKeyRefHint')}
+              />
+              <span class="settings-source">
+                {view().apiKeyRef.ref === ''
+                  ? t('settings.none')
+                  : t(view().apiKeyRef.present ? 'settings.keyPresent' : 'settings.keyMissing') +
+                    ' · ' +
+                    t('settings.source') +
+                    ': ' +
+                    view().apiKeyRef.source}
+              </span>
+            </label>
+            <label class="settings-field">
+              <span>{t('settings.bashTimeout')}</span>
+              <input
+                id="bash-timeout"
+                type="number"
+                min="1"
+                max="600000"
+                value={bashTimeout()}
+                onInput={(event) => setBashTimeout(event.currentTarget.value)}
+              />
+              <span class="settings-source">
+                {t('settings.source') + ': ' + view().bashTimeoutMs.source}
+              </span>
+            </label>
+            <label class="settings-field">
+              <span>{t('settings.maxParallel')}</span>
+              <input
+                id="max-parallel"
+                type="number"
+                min="1"
+                max="64"
+                value={parallel()}
+                onInput={(event) => setParallel(event.currentTarget.value)}
+              />
+              <span class="settings-source">
+                {t('settings.source') + ': ' + view().maxParallelToolCalls.source}
+              </span>
+            </label>
+            <label class="settings-field">
+              <span>{t('settings.subagentDepth')}</span>
+              <input
+                id="subagent-depth"
+                type="number"
+                min="0"
+                max="8"
+                value={depth()}
+                onInput={(event) => setDepth(event.currentTarget.value)}
+              />
+              <span class="settings-source">
+                {t('settings.source') + ': ' + view().subagentDepth.source}
+              </span>
+            </label>
+            <label class="settings-field">
+              <span>{t('settings.delegateTools')}</span>
+              <textarea
+                id="delegate-tools"
+                rows="3"
+                value={delegateText()}
+                onInput={(event) => setDelegateText(event.currentTarget.value)}
+                placeholder={t('settings.delegateHint')}
+              />
+              <span class="settings-source">{t('settings.delegateHint')}</span>
+            </label>
+          </div>
+          <Show when={formProblem() !== '' ? formProblem() : props.store.state().settingsProblem}>
+            {(problem) => <div class="settings-problem">{problem()}</div>}
+          </Show>
+          <div class="panel-actions">
+            <Button id="save-settings" variant="primary" type="button" onClick={save}>
+              {t('settings.save')}
+            </Button>
+          </div>
+          <div class="card-hint">{t('settings.saveHint')}</div>
+        </>
+      )}
+    </Show>
+  )
+}
+
 const Settings = (props: { store: SessionStore; settings: SettingsView | undefined }) => {
   const t = useTranslate()
   const choice = useLocaleChoice()
@@ -1171,6 +1373,7 @@ const Settings = (props: { store: SessionStore; settings: SettingsView | undefin
           </>
         )}
       </Show>
+      <EditableSettings store={props.store} />
       <Share />
     </>
   )

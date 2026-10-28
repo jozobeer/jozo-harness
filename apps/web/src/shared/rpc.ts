@@ -406,6 +406,8 @@ export const DelegateToolViewSchema = Schema.Struct({
   argv: Schema.Array(Schema.String),
 })
 
+export type DelegateToolView = typeof DelegateToolViewSchema.Type
+
 /** The run's editable settings, resolved the way a run resolves them. */
 export const EditableSettingsViewSchema = Schema.Struct({
   search: EditableSearchSchema,

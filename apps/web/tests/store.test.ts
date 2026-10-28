@@ -13,7 +13,13 @@ import {
   type SettingsPort,
   type WorkspacesPort,
 } from '../src/server/index.ts'
-import type { JobDetailView, RunStateView, SessionSummary } from '../src/shared/rpc.ts'
+import type {
+  EditableSettingsView,
+  JobDetailView,
+  RunSettingsInput,
+  RunStateView,
+  SessionSummary,
+} from '../src/shared/rpc.ts'
 import { createSessionStore, type BrowseAnswer, type SessionStore } from '../client-solid/store.ts'
 import { draftKey } from '../src/ui/draft.ts'
 import { THEME_KEY } from '../src/ui/theme.ts'
@@ -295,17 +301,29 @@ interface FakeSettings {
   readonly chosen: Array<{ readonly model: string; readonly remember: boolean }>
   /** Every effort a page chose for the run. */
   readonly chosenEffort: Array<string>
+  /** Every editable settings save the page asked for. */
+  readonly saved: Array<RunSettingsInput>
   readonly port: SettingsPort
 }
 
 const makeSettings = (): FakeSettings => {
   const chosen: Array<{ readonly model: string; readonly remember: boolean }> = []
   const chosenEffort: Array<string> = []
+  const saved: Array<RunSettingsInput> = []
   let route = 'stub/model'
   let effort = ''
+  const editable = (bashTimeoutMs = 120_000): EditableSettingsView => ({
+    search: { keyName: 'BRAVE_API_KEY', keyPresent: false, source: 'no provider is named' },
+    apiKeyRef: { ref: '', present: false, source: 'no reference is named' },
+    bashTimeoutMs: { value: bashTimeoutMs, source: 'the default' },
+    maxParallelToolCalls: { value: 10, source: 'the default' },
+    subagentDepth: { value: 1, source: 'the default' },
+    delegateTools: [],
+  })
   return {
     chosen,
     chosenEffort,
+    saved,
     port: {
       read: () =>
         Effect.succeed({
@@ -327,24 +345,13 @@ const makeSettings = (): FakeSettings => {
           chosenEffort.push(next)
           effort = next
         }),
-      editable: () =>
-        Effect.succeed({
-          search: { keyName: 'BRAVE_API_KEY', keyPresent: false, source: 'no provider is named' },
-          apiKeyRef: { ref: '', present: false, source: 'no reference is named' },
-          bashTimeoutMs: { value: 120_000, source: 'the default' },
-          maxParallelToolCalls: { value: 10, source: 'the default' },
-          subagentDepth: { value: 1, source: 'the default' },
-          delegateTools: [],
-        }),
-      saveEditable: () =>
-        Effect.succeed({
-          search: { keyName: 'BRAVE_API_KEY', keyPresent: false, source: 'no provider is named' },
-          apiKeyRef: { ref: '', present: false, source: 'no reference is named' },
-          bashTimeoutMs: { value: 120_000, source: 'the default' },
-          maxParallelToolCalls: { value: 10, source: 'the default' },
-          subagentDepth: { value: 1, source: 'the default' },
-          delegateTools: [],
-        }),
+      editable: () => Effect.succeed(editable()),
+      saveEditable: (input) =>
+        input.bashTimeoutMs === 0
+          ? Effect.fail(new WebError({ message: 'bashTimeoutMs: a whole number is required' }))
+          : Effect.sync(() => {
+              saved.push(input)
+            }).pipe(Effect.as(editable(input.bashTimeoutMs))),
     },
   }
 }
@@ -469,6 +476,83 @@ const withStore = (
   )
 
 describe('the page store', () => {
+  test('the page reads the editable settings when it starts', async () => {
+    stubTheBrowser()
+    await Effect.runPromise(
+      withStore(makeHost('a'), (store) =>
+        Effect.gen(function* () {
+          yield* until(() => store.state().editable !== undefined, 'read the editable settings')
+
+          expect(store.state().editable?.bashTimeoutMs.value).toBe(120_000)
+          expect(store.state().editable?.apiKeyRef.ref).toBe('')
+        }),
+      ),
+    )
+  })
+
+  test('a settings save asks once and shows the values the server answered', async () => {
+    stubTheBrowser()
+    const settings = makeSettings()
+
+    await Effect.runPromise(
+      withStore(
+        makeHost('a'),
+        (store) =>
+          Effect.gen(function* () {
+            yield* until(() => store.state().editable !== undefined, 'read the editable settings')
+            store.saveRunSettings({
+              search: 'exa',
+              apiKeyRef: 'openrouter',
+              bashTimeoutMs: 45_000,
+              maxParallelToolCalls: 4,
+              subagentDepth: 2,
+              delegateTools: [{ name: 'codex', argv: ['codex', 'exec'] }],
+            })
+            yield* until(() => settings.saved.length === 1, 'saved the editable settings')
+            yield* until(
+              () => store.state().editable?.bashTimeoutMs.value === 45_000,
+              'showed the saved value',
+            )
+
+            expect(settings.saved[0]?.search).toBe('exa')
+            expect(store.state().settingsProblem).toBe('')
+          }),
+        { settings },
+      ),
+    )
+  })
+
+  test('a refused settings save names the field and keeps the values it had', async () => {
+    stubTheBrowser()
+    const settings = makeSettings()
+
+    await Effect.runPromise(
+      withStore(
+        makeHost('a'),
+        (store) =>
+          Effect.gen(function* () {
+            yield* until(() => store.state().editable !== undefined, 'read the editable settings')
+            store.saveRunSettings({
+              search: '',
+              apiKeyRef: '',
+              bashTimeoutMs: 0,
+              maxParallelToolCalls: 10,
+              subagentDepth: 1,
+              delegateTools: [],
+            })
+            yield* until(
+              () => store.state().settingsProblem !== '',
+              'said why the settings were refused',
+            )
+
+            expect(store.state().settingsProblem).toContain('bashTimeoutMs')
+            expect(store.state().editable?.bashTimeoutMs.value).toBe(120_000)
+          }),
+        { settings },
+      ),
+    )
+  })
+
   test('a long log keeps unfolding while the page reads the store again', async () => {
     stubTheBrowser()
     const host = makeHost('a')

@@ -23,6 +23,8 @@ import {
   type ReadyUrls,
   type ServeWebOptions,
   type SessionFactory,
+  type EditableSettingsView,
+  type RunSettingsInput,
   type SettingsPort,
   type SettingsView,
   type TailnetAddresses,
@@ -2038,6 +2040,76 @@ describe('the web transport', () => {
     expect(web.closed).toEqual([])
     await rm(root, { recursive: true, force: true })
     await rm(sessionRoot, { recursive: true, force: true })
+  })
+
+  test('the page reads and saves the editable settings through the run port', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-run-settings-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const base = makeSettings()
+    const saved: Array<RunSettingsInput> = []
+    const editable: EditableSettingsView = {
+      search: {
+        provider: 'deepseek',
+        keyName: 'DEEPSEEK_API_KEY',
+        keyPresent: true,
+        source: '/work/settings.yml',
+      },
+      apiKeyRef: { ref: 'openrouter', present: true, source: '/work/settings.yml' },
+      bashTimeoutMs: { value: 45_000, source: '/work/settings.yml' },
+      maxParallelToolCalls: { value: 4, source: 'the default' },
+      subagentDepth: { value: 2, source: '/work/settings.yml' },
+      delegateTools: [{ name: 'codex', argv: ['codex', 'exec'] }],
+    }
+    const settings = {
+      ...base,
+      port: {
+        ...base.port,
+        editable: () => Effect.succeed(editable),
+        saveEditable: (input: RunSettingsInput) =>
+          input.bashTimeoutMs === 0
+            ? Effect.fail(new WebError({ message: 'bashTimeoutMs: a whole number is required' }))
+            : Effect.sync(() => {
+                saved.push(input)
+              }).pipe(Effect.as(editable)),
+      } satisfies SettingsPort,
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const read = yield* client.runSettings()
+            const input: RunSettingsInput = {
+              search: 'exa',
+              apiKeyRef: 'openrouter',
+              bashTimeoutMs: 45_000,
+              maxParallelToolCalls: 4,
+              subagentDepth: 2,
+              delegateTools: [{ name: 'codex', argv: ['codex', 'exec'] }],
+            }
+            const written = yield* client.saveRunSettings(input)
+            const refused = yield* client
+              .saveRunSettings({ ...input, bashTimeoutMs: 0 })
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
+            return { read, written, refused }
+          }).pipe(clientLayers(started.wsUrl))
+          const result = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    expect(observed.read).toEqual(editable)
+    expect(observed.written).toEqual(editable)
+    // The field the writer refused comes back as the server named it.
+    expect(observed.refused).toBe('bashTimeoutMs: a whole number is required')
+    expect(saved).toHaveLength(1)
+    expect(saved[0]?.search).toBe('exa')
+    await rm(root, { recursive: true, force: true })
   })
 
   test('the page asks a session what it is working toward', async () => {
