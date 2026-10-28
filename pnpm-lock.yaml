@@ -205,6 +205,9 @@ importers:
       '@jozo-harness/llm':
         specifier: workspace:*
         version: link:../../packages/llm/llm
+      '@jozo-harness/llm-deepseek':
+        specifier: workspace:*
+        version: link:../../packages/llm/llm-deepseek
       '@jozo-harness/llm-openai':
         specifier: workspace:*
         version: link:../../packages/llm/llm-openai

@@ -60,13 +60,14 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 
 ## plugin が受け取る config キー
 
-同梱の plugin のうち `config` にキーを持つのは10個で、残りはキーを持たない。
+同梱の plugin のうち `config` にキーを持つのは11個で、残りはキーを持たない。
 
 | plugin | キー |
 |---|---|
 | `@jozo-harness/session-jsonl` | `root`（必須）— セッションログのディレクトリ |
 | `@jozo-harness/system-prompt` | `includeHarnessIdentity` — 冒頭の harness の自己紹介（`jzh:identity`）を出すか（既定 `true`）、`includeToolGuidance` — 見える tool の使い方の行を出すか（既定 `true`）、`tmuxContext` — runtime context に `tmux: session <name>, window <index>, pane <index>` を足すか（既定 `false`）。tmux の中にいるときだけ出し、外・tmux が無い・答えないときは行を出さない。セッション名・window index・pane index が変わったときだけ新しい snapshot になる、`devContext` — `jzh web` のセッションで、サーバが配信している GUI の URL を runtime context に `gui: <url>` として足すか（既定 `true`）。`--public-url` があればその origin、無ければ listen した loopback の URL を使う。URL は起動時に決まるので、同じ run なら同じバイト列になる。system prompt と既存の user メッセージの本文には入れず、別の user 文脈として届ける。`false` で行を出さない、`persona` — 配備ごとの文章。`before` は `jzh:identity` の前、`after` はその直後（tool guidance より前）に、identity とは別の section として入る。空文字・空白だけ・未設定の側は section を作らず、前後の空白は落とす。同じ設定なら同じバイト列になる |
 | `@jozo-harness/safety` | `preset`（必須）— `read-only` / `workspace-write` / `full` / `auto`。新しいセッションが従う sandbox モードを決める（走っているセッションは `/permission` か Run ペインで切り替える）。`auto` は `workspace-write` と同じ sandbox で、副作用のある呼び出しだけを実行前にモデルへ審査させる、`sandbox` — `none` / `auto` / `seatbelt` / `bwrap`（**既定は `auto`**。macOS では `seatbelt`、Linux では `bwrap` を選ぶ）、`writableRoots` — sandbox が書き込めるディレクトリ（既定はコマンドの cwd と一時ディレクトリ。ここに足す） |
+| `@jozo-harness/llm-deepseek` | `baseUrl`（必須）— Messages API の version まで含む URL、`apiKeyEnv`（必須）— キーを持つ環境変数の名前、`maxTokens` — 1 応答の上限（既定 8192。リクエストの `max_tokens` が優先する）、`extensions` — Messages の本文に足すトップレベルのフィールド。省略すると何も足さない、`headers` — 毎回のリクエストにそのまま付けるヘッダ（`x-api-key` と `anthropic-version` は adapter が決める）、`contextWindow` — ルートしたモデルの context window（トークン） |
 | `@jozo-harness/llm-openai` | `baseUrl`（必須）、`apiKeyEnv`（必須）— キーを持つ環境変数の名前、`localBaseUrl` — リクエストを送る local daemon の OpenAI 互換 URL。指定すると常にそこへ送り、daemon が動いている前提になる。空文字にすると local を使わず `baseUrl` に送る。`baseUrl` は `jzh models` のモデル一覧を読む先でもある。local 経由では route のモデル名を Ollama の cloud 名（`<model>:cloud`、タグ付きなら `<model>:<tag>-cloud`）に直して送る、`streamIdleTimeoutMs` — チャンク間の無応答を許す上限（ミリ秒、既定 300000。チャンクが届くたびに測り直す）、`headers` — 毎回のリクエストにそのまま付けるヘッダ（endpoint が client の user agent や routing 用の id を求めるときに使う。`Authorization` と `Content-Type` は adapter が決める）、`reasoningEfforts` — この endpoint が受ける effort の語（UI が選択肢に並べる。既定は `low` / `medium` / `high` / `xhigh` / `max`、空配列なら選択肢を出さない） |
 | `@jozo-harness/agent-loop` | `models` — ルートのモデル名（`provider/model` の model 部分）をキーに、`contextWindow` と `maxTokens` をモデルごとに持つ（同じ行の単一値より優先する）、`contextWindow` — ルートしたモデルの context window（トークン）。`models` のそのモデルの値、この値、adapter の値、128000 の順に使う、`thresholdRatio` — 推定が窓のこの割合に達したら compaction する（既定 0.8）、`headroomTokens` — 発火点と窓の間に必ず空けるトークン（既定 65536）、`maxTokens` — 1 リクエストが答えのために予約するトークン。`models` にそのモデルの値があればそちらを使う。provider へ `max_tokens` として送り、発火点から先に引く（既定は無し＝予約しない）、`retainTokens` — 末尾で内容を置き換えない範囲を、推定トークンで表した目標（既定は窓の 16%。最新の 1 件は大きさによらず残る）、`maxBytes` — これを超える text block を、保持の外でスタブに置き換える（バイト、既定 32000）、`maxParallelToolCalls` — 並列に走らせる tool call の上限（既定 10。0 以下でも 1 件ずつ）、`title` — 最初の発話からセッション名をモデルに 1 回書かせる。キーを置くと有効で、無ければ最初の発話の切り詰めが名前になる。`enabled` — `false` で書かせない（既定は有効）、`model` — 名前を書く route（既定はセッションの route）、`maxChars` — 名前の長さ（既定 60）、`timeoutMs` — 応答を待つ上限（ミリ秒、既定 5000） |
 | `@jozo-harness/mcp` | `command`（必須）、`prefix` |
@@ -125,6 +126,26 @@ route は `opencode/<model>`、wire に送る model は `<model>` そのもの�
 `jzh models` は `baseUrl + /models` を読む。Console ではこれが 404 になり、一覧は `https://opencode.ai/inference/v1/models` にある。今は一覧を取れないので、モデル名は手で指定する。
 
 無料 tier のモデルを OpenCode 本体以外から呼ぶと 403 の `FreeTierError` になる。adapter はこれを `AUTH` として扱い、provider の本文をメッセージに残す。OpenCode Go は client の user agent と会話ごとに安定した `x-opencode-session` を求める。`headers` で user agent は送れる。
+
+### DeepSeek 公式の Messages API に向ける
+
+公式 endpoint は OpenAI 互換ではなく Messages API を話す。`llm` 行の `name` を `@jozo-harness/llm-deepseek` に変えると、その route だけが `messages` の本文と SSE を使う。URL から公式かどうかを推測することはなく、行の plugin 名が唯一の選択である。OpenAI 互換の adapter はこの行を読まないので、互換 route の本文は変わらない。
+
+```yaml
+plugins:
+  - id: llm
+    name: '@jozo-harness/llm-deepseek'
+    config:
+      baseUrl: https://api.deepseek.com/anthropic/v1
+      apiKeyEnv: DEEPSEEK_API_KEY
+      maxTokens: 8192
+      # 公式だけが受けるトップレベルのフィールド。省略すると本文に足さない。
+      extensions:
+        thinking:
+          type: enabled
+```
+
+`baseUrl` は Messages API の version まで含める。adapter は `<baseUrl>/messages` へ送り、`x-api-key` と `anthropic-version: 2023-06-01` を付ける。`extensions` は公式 adapter だけが読み、指定したキーを本文のトップレベルにそのまま置く。指定しなければ `thinking` などのフィールドは本文に現れない。この行は `jzh models` の一覧取得元ではない（一覧は `llm-openai` 行の `baseUrl` を読む）。
 
 ## plugin の schema に無い行キー
 

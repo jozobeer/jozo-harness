@@ -13,6 +13,7 @@
     "@jozo-harness/bundle-base": "workspace:*",
     "@jozo-harness/kernel": "workspace:*",
     "@jozo-harness/llm": "workspace:*",
+    "@jozo-harness/llm-deepseek": "workspace:*",
     "@jozo-harness/llm-openai": "workspace:*",
     "@jozo-harness/safety": "workspace:*",
     "@jozo-harness/session": "workspace:*",

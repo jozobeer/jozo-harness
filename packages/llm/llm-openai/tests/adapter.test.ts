@@ -93,6 +93,55 @@ describe('openAiAdapter', () => {
     expect([...chunks].some((chunk) => chunk.type === 'usage')).toBe(true)
   })
 
+  test('the compatible route keeps its chat-completions body shape', async () => {
+    const bodies: Array<string> = []
+    const streaming = openAiAdapter({
+      baseUrl: 'https://example.test/v1',
+      apiKey: () => 'key',
+      capabilities: {
+        toolChoice: false,
+        reasoningEffort: null,
+        images: 'none',
+        promptCacheControl: false,
+      },
+      fetch: ((_url: string, init: RequestInit) => {
+        bodies.push(bodyOf(init))
+        return Promise.resolve(new Response('data: [DONE]\n\n', { status: 200 }))
+      }) as unknown as typeof fetch,
+    })
+
+    await Effect.runPromise(Stream.runCollect(streaming.stream(request)))
+    const sent = JSON.parse(bodies[0] ?? '{}') as Record<string, unknown>
+
+    // The official Messages route lives in its own adapter; this body is the
+    // shape every OpenAI-compatible endpoint already receives.
+    expect(Object.keys(sent).sort()).toEqual([
+      'messages',
+      'model',
+      'stream',
+      'stream_options',
+      'tools',
+    ])
+    expect(sent.messages).toEqual([
+      { role: 'system', content: 'be brief' },
+      { role: 'user', content: 'hi' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { id: 'c1', type: 'function', function: { name: 'echo', arguments: '{"text":"a"}' } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'c1', content: 'ping' },
+    ])
+    expect(sent.tools).toEqual([
+      {
+        type: 'function',
+        function: { name: 'echo', description: 'Echo', parameters: { type: 'object' } },
+      },
+    ])
+  })
+
   test('the params a request carries reach the body as written', async () => {
     const bodies: Array<string> = []
     const fixture = await readFile(

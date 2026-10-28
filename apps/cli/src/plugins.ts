@@ -1,6 +1,7 @@
 import { agentPlugin } from '@jozo-harness/agent'
 import { agentLoopPlugin } from '@jozo-harness/agent-loop'
 import { kernelPlugin, type Plugin } from '@jozo-harness/kernel'
+import { llmDeepSeekPlugin } from '@jozo-harness/llm-deepseek'
 import { llmOpenAiPlugin } from '@jozo-harness/llm-openai'
 import { sessionPlugin } from '@jozo-harness/session'
 import { sessionJsonlPlugin } from '@jozo-harness/session-jsonl'
@@ -114,6 +115,7 @@ export const bundledPlugins: ReadonlyArray<Plugin<any, any, any>> = [
   toolsPlugin,
   systemPromptPlugin,
   llmOpenAiPlugin,
+  llmDeepSeekPlugin,
   agentPlugin,
   agentLoopPlugin,
   safetyPlugin,
