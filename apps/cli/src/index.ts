@@ -37,6 +37,7 @@ import { expandHome, makeSessionQuery } from '@jozo-harness/session-jsonl'
 import {
   SystemPrompt,
   additionalInstructionsText,
+  guiContextEntry,
   loadedAgentsOf,
   nestedAgentsFiles,
   registerAgentsMd,
@@ -1502,6 +1503,11 @@ const settingsPortOf = (
 })
 
 /** Opens one more session for a UI that outlives its first: the same wiring, a new scope. */
+/** The address this run serves. The port is known only once the listeners are up. */
+interface GuiEndpoint {
+  url: string | undefined
+}
+
 const sessionFactoryOf = (
   options: CommandOptions,
   rows: ReadonlyArray<PluginRow>,
@@ -1510,6 +1516,7 @@ const sessionFactoryOf = (
   layer: Layer.Layer<any, PluginError, never>,
   listSessions: SessionRuntime['listSessions'],
   plugins: PluginWiringState,
+  gui: GuiEndpoint,
 ): SessionFactory => ({
   list: () =>
     listSessions().pipe(Effect.mapError((error) => new WebError({ message: messageOf(error) }))),
@@ -1530,6 +1537,7 @@ const sessionFactoryOf = (
         cwd ?? options.cwd,
         false,
         plugins,
+        gui,
       )
       if (built.kind === 'refused') {
         return yield* Effect.fail(new WebError({ message: built.message }))
@@ -1711,6 +1719,8 @@ const serveWebUi = (
   initial: InitialSession | undefined,
   /** The rows this run could not wire, and the retries the page may ask for. */
   wiring: PluginWiringState,
+  /** Filled by onReady; every session this run opens reads it when it renders. */
+  gui: GuiEndpoint,
 ): Effect.Effect<number, PluginError> =>
   Effect.gen(function* () {
     const staticRoot = work.staticRoot ?? defaultStaticRoot
@@ -1754,6 +1764,7 @@ const serveWebUi = (
             layer,
             reading.listSessions,
             wiring,
+            gui,
           ),
           settings: settingsPortOf(options, { rows, efforts: reading.efforts }, choice),
           schedules: scheduleStoreOf(options),
@@ -1766,6 +1777,9 @@ const serveWebUi = (
           ...(work.publicUrl === undefined ? {} : { publicUrl: work.publicUrl }),
           ...(tailnet.ip === undefined ? {} : { tailnet }),
           onReady: (urls) => {
+            // The public origin wins when a proxy publishes the page; the loopback
+            // URL is what the server itself bound otherwise.
+            gui.url = urls.public ?? urls.local
             // One unlabeled line while the page is loopback-only; one labeled
             // line per address when a tailnet or a proxy also reaches it.
             if (urls.tailnet.length === 0 && urls.public === undefined) {
@@ -2100,6 +2114,8 @@ const buildSession = (
   hostClock: boolean,
   /** The run's failed wirings, when a page can report and retry them. */
   plugins?: PluginWiringState,
+  /** The page this session serves, when a browser UI opened it. */
+  gui?: GuiEndpoint,
 ) =>
   Effect.gen(function* () {
     const context = yield* Layer.build(Layer.mergeAll(layer, approvalServiceLayer, askServiceLayer))
@@ -2117,11 +2133,17 @@ const buildSession = (
     const sessionOptions: CommandOptions = { ...options, cwd: agent.session.header.cwd }
 
     // Workspace instructions join the prompt before the first turn.
+    const prompt = Context.get(context, SystemPrompt)
     const instructions = yield* registerAgentsMd(
-      Context.get(context, SystemPrompt),
+      prompt,
       sessionOptions.cwd,
       agentsOptionsOf(options),
     )
+    // The page's URL is a user context, so the system prompt keeps the same bytes
+    // whatever address the server bound. A session without a page adds nothing.
+    if (gui !== undefined && prompt.devContext) {
+      yield* prompt.context(guiContextEntry(() => gui.url))
+    }
     // What the provider takes for an effort is the adapter's to say; a page only offers it.
     const efforts = Context.get(context, Llm).capabilities.reasoningEffort ?? []
     // The loop measured the request against this budget; reading the same values
@@ -2260,6 +2282,7 @@ const serveWebWork = (
     // The page reports a row that failed to wire and asks for the same wiring
     // again; every session this run opens records into this one list.
     const wiring = makePluginWiringState()
+    const gui: GuiEndpoint = { url: undefined }
     const resumed =
       options.resume === undefined
         ? undefined
@@ -2279,6 +2302,7 @@ const serveWebWork = (
               options.cwd,
               false,
               wiring,
+              gui,
             ).pipe(
               Effect.provideService(Scope.Scope, scope),
               // A build that fails or is interrupted must not leave its scope open.
@@ -2301,7 +2325,18 @@ const serveWebWork = (
         initial = { session, close: () => Scope.close(scope, Exit.void) }
       }
     }
-    return yield* serveWebUi(options, rows, route, effort, spillBytes, layer, work, initial, wiring)
+    return yield* serveWebUi(
+      options,
+      rows,
+      route,
+      effort,
+      spillBytes,
+      layer,
+      work,
+      initial,
+      wiring,
+      gui,
+    )
   })
 
 /**
