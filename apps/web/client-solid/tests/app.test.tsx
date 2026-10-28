@@ -52,6 +52,8 @@ import {
 } from '../rail.ts'
 import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY } from '../recent.ts'
 import { LOCALE_KEY } from '../locale.ts'
+import { ToolDensityContext } from '../tool-density-choice.ts'
+import { TOOL_DENSITY_KEY, type ToolDensity } from '../tool-density.ts'
 import { SHORTCUTS, SHORTCUTS_KEY } from '../shortcuts.ts'
 import { BUSY_ENTER_KEY } from '../submission.ts'
 import {
@@ -5328,5 +5330,142 @@ describe('the workflow a call ran', () => {
     expect(card?.querySelector('.workflow-state')?.textContent).toBe('running')
     expect(card?.querySelector('.workflow-took')?.textContent).toBe('…')
     expect(container.querySelectorAll('.workflow-child')).toHaveLength(0)
+  })
+})
+
+describe('the density of tool lines', () => {
+  beforeEach(() => localStorage.clear())
+
+  const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+
+  /** A conversation after one edit call: its arguments, its summary, and its output. */
+  const withEdit = () =>
+    makeStore({
+      conversation: {
+        ...emptyConversation,
+        blocks: [{ kind: 'user', text: 'change it' }],
+      },
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'step/start', { step: 1 }),
+        at(3, 'tool/call', {
+          callId: 'c1',
+          name: 'edit',
+          arguments: '{"path":"a.ts"}',
+          summary: 'edit a.ts',
+        }),
+        at(4, 'tool/result', {
+          callId: 'c1',
+          isError: false,
+          summary: 'lines: 1 → 2',
+          content: [{ type: 'text', text: 'the file said so\nand more' }],
+        }),
+        at(5, 'step/end', { step: 1 }),
+        at(6, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      ]),
+    })
+
+  /** The conversation drawn with one density, as the page's provider hands it down. */
+  const drawAt = (store: SessionStore, density: ToolDensity) =>
+    render(() => (
+      <ToolDensityContext.Provider value={{ density: () => density, choose: () => undefined }}>
+        <Conversation store={store} />
+      </ToolDensityContext.Provider>
+    ))
+
+  test('the standard card keeps the name, summary, and result the conversation has always shown', () => {
+    const { store } = withEdit()
+    const { container } = drawAt(store, 'standard')
+    const card = container.querySelector('.tool-card') as HTMLDetailsElement
+
+    expect(card.getAttribute('data-density')).toBe('standard')
+    expect(card.querySelector('.tool-name')?.textContent).toBe('edit')
+    expect(card.querySelector('.tool-summary')?.textContent).toBe('a.ts')
+    expect(card.querySelector('.tool-result')?.textContent).toBe('lines: 1 → 2')
+    expect(card.open).toBe(false)
+  })
+
+  test('every density keeps the tool name and its result one fold away', () => {
+    const densities: ReadonlyArray<ToolDensity> = ['compact', 'standard', 'detailed', 'verbose']
+    for (const density of densities) {
+      cleanup()
+      const { store } = withEdit()
+      const { container } = drawAt(store, density)
+      const card = container.querySelector('.tool-card') as HTMLDetailsElement
+
+      expect(card.querySelector('.tool-name')?.textContent).toBe('edit')
+      expect(card.querySelector('.tool-output')?.textContent).toBe('the file said so\nand more')
+    }
+  })
+
+  test('the compact line keeps the name and the time, with the result one fold away', () => {
+    const { store } = withEdit()
+    const { container } = drawAt(store, 'compact')
+    const card = container.querySelector('.tool-card') as HTMLDetailsElement
+
+    expect(card.querySelector('.tool-summary')).toBeNull()
+    expect(card.querySelector('.tool-result')).toBeNull()
+    expect(card.querySelector('.tool-result-body')?.textContent).toBe('lines: 1 → 2')
+    expect(card.querySelector('.tool-took')?.textContent).not.toBe('…')
+    expect(card.open).toBe(false)
+  })
+
+  test('the detailed line shows the arguments and where the output begins, still folded', () => {
+    const { store } = withEdit()
+    const { container } = drawAt(store, 'detailed')
+    const card = container.querySelector('.tool-card') as HTMLDetailsElement
+
+    expect(card.querySelector('.tool-args')?.textContent).toBe('path a.ts')
+    expect(card.querySelector('.tool-peek')?.textContent).toBe('the file said so')
+    expect(card.open).toBe(false)
+  })
+
+  test('the verbose card starts open with the whole arguments and output', () => {
+    const { store } = withEdit()
+    const { container } = drawAt(store, 'verbose')
+    const card = container.querySelector('.tool-card') as HTMLDetailsElement
+
+    expect(card.open).toBe(true)
+    expect(card.querySelector('.tool-args-full')?.textContent).toBe('{"path":"a.ts"}')
+    expect(card.querySelector('.tool-output')?.textContent).toBe('the file said so\nand more')
+  })
+
+  test('the switch offers the four densities and draws the one the page opens at', () => {
+    const { store } = withEdit()
+    const { container } = render(() => <App store={store} />)
+    const select = container.querySelector('.density-select') as HTMLSelectElement
+
+    expect([...select.options].map((option) => option.value)).toEqual([
+      'compact',
+      'standard',
+      'detailed',
+      'verbose',
+    ])
+    expect(select.value).toBe('standard')
+    expect(container.querySelector('.tool-card')?.getAttribute('data-density')).toBe('standard')
+  })
+
+  test('a chosen density survives a reload and redraws the tool line', () => {
+    const { store, calls } = withEdit()
+    const first = render(() => <App store={store} />)
+
+    fireEvent.change(first.container.querySelector('.density-select') as Element, {
+      target: { value: 'verbose' },
+    })
+
+    expect(localStorage.getItem(TOOL_DENSITY_KEY)).toBe('verbose')
+    expect(first.container.querySelector('.tool-card')?.getAttribute('data-density')).toBe(
+      'verbose',
+    )
+    expect((first.container.querySelector('.tool-card') as HTMLDetailsElement).open).toBe(true)
+
+    cleanup()
+    const next = render(() => <App store={store} />)
+    expect((next.container.querySelector('.density-select') as HTMLSelectElement).value).toBe(
+      'verbose',
+    )
+    expect(next.container.querySelector('.tool-card')?.getAttribute('data-density')).toBe('verbose')
+    // The density is a way of drawing the log, so choosing it sends nothing.
+    expect(calls.filter((call) => call.kind === 'command' || call.kind === 'submit')).toEqual([])
   })
 })
