@@ -249,10 +249,10 @@ describe('skills through the command', () => {
     const code = await Effect.runPromise(
       runCommand({
         profiles: [profile(root)],
-        plugins: plugins(stubLlm([textTurn('done')], seen)),
+        plugins: plugins(stubLlm([callSkill('docx'), textTurn('done')], seen)),
         cwd: workspace,
         route: 'stub/model',
-        task: 'say done',
+        task: 'use the docx skill',
         jzhHome: home,
         stdout: () => undefined,
         stderr: () => undefined,
@@ -278,6 +278,12 @@ describe('skills through the command', () => {
           event.data.text.includes('- docx:'),
       ),
     ).toBe(true)
+
+    // The skill tool reads the bundled instructions from a workspace that holds none.
+    const result = opened.events.find((event) => event.type === 'tool/result')
+    const body = result?.type === 'tool/result' ? JSON.stringify(result.data.content) : ''
+    expect(body).toContain('soffice')
+    expect(body).toContain('cannot produce report.pdf')
 
     await rm(root, { recursive: true, force: true })
     await rm(workspace, { recursive: true, force: true })
