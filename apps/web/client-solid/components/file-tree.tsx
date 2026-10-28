@@ -51,7 +51,7 @@ export const FileTree = (props: { store: SessionStore }) => {
           title={t('tree.refresh')}
           onClick={() => props.store.refreshTree()}
         >
-          <Icon name="changes" />
+          <Icon name="refresh" />
         </Button>
       </div>
       <ul class="tree-rows" role="tree" aria-label={t('tree.workspace')}>

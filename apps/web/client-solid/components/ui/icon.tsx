@@ -51,6 +51,8 @@ const SHAPES = {
     ),
   timeline: () => line('M2.5 4h6M5 8h8.5M3.5 12h5'),
   changes: () => line('M8 2.5v5M5.5 5h5M5.5 11.5h5M3 14h10'),
+  // A circular arrow: what the pane read is read again, not added to.
+  refresh: () => [line('M13 8a5 5 0 1 1-1.6-3.7'), line('M13 2.4V5h-2.6')],
   run: () => line('M2 8.5h2.8l1.7-4.5 3 9 1.7-4.5H14'),
   settings: () => [
     line('M2.5 4.5h1.8M7.7 4.5h5.8M2.5 11.5h6.3M12.2 11.5h1.3'),
