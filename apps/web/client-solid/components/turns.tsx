@@ -9,6 +9,7 @@ import {
   type TraceTool,
   type TraceTurn,
 } from '../../src/ui/trace.ts'
+import { maskSecrets } from '../../src/ui/secret.ts'
 import { WORKFLOW_TOOL } from '../../src/ui/workflow.ts'
 import { Linkify } from './linkify.tsx'
 import { Markdown } from './markdown.tsx'
@@ -401,7 +402,7 @@ const Feedback = (props: { turn: TraceTurn; store: SessionStore }) => {
 const quotedMarkdown = (quotes: ReadonlyArray<Quote>): string =>
   quotes
     .map((quote) =>
-      quote.text
+      maskSecrets(quote.text)
         .split('\n')
         .map((line) => '> ' + line)
         .join('\n'),
@@ -452,7 +453,7 @@ const Ask = (props: { turn: TraceTurn }) => (
       </Show>
       <Show when={props.turn.prompt !== ''}>
         <div class="body">
-          <Linkify text={plainText(props.turn.prompt)} />
+          <Linkify text={plainText(maskSecrets(props.turn.prompt))} />
         </div>
       </Show>
     </div>
