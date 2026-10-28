@@ -97,7 +97,7 @@ import { writeFileAtomic } from './atomic-write.ts'
 import { editRunSettings, readEditableSettings, type EditableInputs } from './run-settings.ts'
 import { runContextOf } from './run-state.ts'
 import { jobDetailOf, jobRecorderOf, jobsOf, stopJobOf } from './jobs.ts'
-import { stopSubagentOf, subagentsOf } from './subagents.ts'
+import { messageSubagentOf, stopSubagentOf, subagentsOf } from './subagents.ts'
 import { sessionRootOf } from './session-list.ts'
 import { credentialSource, type SettingsSurface } from './settings.ts'
 import { configPaths } from './config.ts'
@@ -1702,7 +1702,11 @@ const sessionFactoryOf = (
             agent,
             built.runtime.jobs,
             built.runtime.efforts,
-            built.runtime.agents.childrenOf(agent.id),
+            subagentsOf(
+              built.runtime.agents,
+              built.runtime.agents.childrenOf(agent.id),
+              built.runtime.subagentDepth(),
+            ),
             built.runtime.budget,
             scheduleStoreOf(options),
             built.runtime.permission,
@@ -1710,6 +1714,8 @@ const sessionFactoryOf = (
         jobOutput: (jobId: string) => jobDetailOf(built.runtime.jobs, jobId),
         stopJob: (jobId: string) => stopJobOf(built.runtime.jobs, jobId),
         stopSubagent: (childId: string) => stopSubagentOf(built.runtime.agents, agent.id, childId),
+        messageSubagent: (childId: string, message: string) =>
+          messageSubagentOf(built.runtime.agents, agent.id, childId, message),
         busy: () => busyOf(agent, built.runtime.jobs, built.runtime.agents.childrenOf(agent.id)),
         deliver: (schedule: Schedule) =>
           fireSchedule(agent, schedule, () => scheduleStoreOf(options).now()).pipe(Effect.as(true)),
@@ -1960,10 +1966,20 @@ const openSessionOf = (
     host: ui,
     commands: () => commandViewsOf(runtime.commands, runtime.skillCatalog()),
     runState: () =>
-      runStateOf(agent, jobs, efforts, agents.childrenOf(agent.id), budget, schedules, permission),
+      runStateOf(
+        agent,
+        jobs,
+        efforts,
+        subagentsOf(agents, agents.childrenOf(agent.id), runtime.subagentDepth()),
+        budget,
+        schedules,
+        permission,
+      ),
     jobOutput: (jobId: string) => jobDetailOf(jobs, jobId),
     stopJob: (jobId: string) => stopJobOf(jobs, jobId),
     stopSubagent: (childId: string) => stopSubagentOf(agents, agent.id, childId),
+    messageSubagent: (childId: string, message: string) =>
+      messageSubagentOf(agents, agent.id, childId, message),
     busy: () => busyOf(agent, jobs, agents.childrenOf(agent.id)),
     deliver: (schedule) =>
       fireSchedule(agent, schedule, () => schedules.now()).pipe(Effect.as(true)),
@@ -2029,6 +2045,8 @@ interface SessionRuntime {
   readonly jobs: JobsShape
   /** The agent registry this session was built in; its children run here too. */
   readonly agents: AgentsShape
+  /** The deepest delegation level the run allows now; a setting change reaches the next read. */
+  readonly subagentDepth: () => number
   readonly rows: ReadonlyArray<PluginRow>
   readonly route: string
   readonly effort: string
@@ -2089,8 +2107,8 @@ const runStateOf = (
   jobs: JobsShape,
   /** The effort words the provider takes, which a page offers as the choices. */
   efforts: ReadonlyArray<string>,
-  /** The child agents this session started, as the registry holds them now. */
-  children: ReadonlyArray<Agent>,
+  /** The children this session started, with where each sits in the delegation tree. */
+  subagents: RunStateView['subagents'],
   /** The line the loop compacts on; the page reports the same estimate. */
   budget: TokenBudget,
   /** The host's schedules, which outlive this session's process. */
@@ -2120,7 +2138,7 @@ const runStateOf = (
       .nextStep.filter((message) => message.source === 'user')
       .map((message) => message.text),
     jobs: jobsOf(jobs),
-    subagents: subagentsOf(children),
+    subagents,
     goal:
       goal === undefined
         ? null
@@ -2451,6 +2469,7 @@ const buildSession = (
         listSessions: () => Context.get(context, Sessions).list(),
         jobs,
         agents,
+        subagentDepth: () => liveSettings.subagentDepth,
         rows,
         route,
         effort,

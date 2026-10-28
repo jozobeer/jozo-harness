@@ -372,6 +372,12 @@ const handlersOf = (
             Effect.mapError((error) => error.message),
           )
     },
+    messageSubagent: ({ sessionId, id, message }) => {
+      const session = registry.sessionOf(sessionId)
+      return session === undefined
+        ? Effect.fail('the session is not open')
+        : session.messageSubagent(id, message).pipe(Effect.mapError((error) => error.message))
+    },
     workspaces: () => workspaces.list().pipe(Effect.mapError((error) => error.message)),
     browseDirectories: ({ path }) =>
       workspaces.browse(path).pipe(Effect.mapError((error) => error.message)),

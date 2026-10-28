@@ -1,7 +1,13 @@
 import type { UiHost } from '@jozo-harness/ui-protocol'
 import type { Schedule } from '@jozo-harness/tools-tier1'
 import { Deferred, Effect, Exit, Scope } from 'effect'
-import type { CommandView, JobDetailView, RunStateView, SessionSummary } from '../shared/rpc.ts'
+import type {
+  CommandView,
+  JobDetailView,
+  RunStateView,
+  SessionSummary,
+  SubagentMessageView,
+} from '../shared/rpc.ts'
 import type { WebError } from './errors.ts'
 
 /** One session the server can serve: the summary a page lists, and the UI face of its core. */
@@ -18,6 +24,11 @@ export interface OpenSession {
   readonly stopJob: (id: string) => Effect.Effect<void, WebError>
   /** Stops one child agent this session started. */
   readonly stopSubagent: (id: string) => Effect.Effect<void, WebError>
+  /** Sends one child agent this session started a follow-up message. */
+  readonly messageSubagent: (
+    id: string,
+    message: string,
+  ) => Effect.Effect<SubagentMessageView, WebError>
   /** Whether the session still owns running work: a turn, a job, or a child agent. */
   readonly busy: () => boolean
   /** Hands one due schedule to the session it belongs to; false when it could not. */

@@ -26,6 +26,7 @@ import {
   type EditableSettingsView,
   type RunSettingsInput,
   type SettingsPort,
+  type SubagentMessageView,
   type SettingsView,
   type TailnetAddresses,
   type WebhookRule,
@@ -83,8 +84,14 @@ interface FakeHost {
   readonly jobOutput: (id: string) => Effect.Effect<JobDetailView, WebError>
   readonly stopJob: (id: string) => Effect.Effect<void, WebError>
   readonly stopSubagent: (id: string) => Effect.Effect<void, WebError>
+  readonly messageSubagent: (
+    id: string,
+    message: string,
+  ) => Effect.Effect<SubagentMessageView, WebError>
   /** The children a page stopped, in the order it asked. */
   readonly stopped: Array<string>
+  /** The follow-ups a page sent, in the order it asked. */
+  readonly messaged: Array<{ readonly id: string; readonly message: string }>
   readonly commands: Array<UiCommand>
   /** Broadcasts one event to every tab, like the real host does. */
   readonly publish: (event: UiEvent) => void
@@ -94,6 +101,7 @@ interface FakeHost {
 const makeHost = (id: string, cwd = '/work', working = true): FakeHost => {
   const commands: Array<UiCommand> = []
   const stopped: Array<string> = []
+  const messaged: Array<{ readonly id: string; readonly message: string }> = []
   const subscribers = new Set<Queue.Queue<UiEvent>>()
   const publish = (event: UiEvent): void => {
     for (const queue of subscribers.values().toArray()) Queue.offerUnsafe(queue, event)
@@ -177,7 +185,15 @@ const makeHost = (id: string, cwd = '/work', working = true): FakeHost => {
           ]
         : [],
       subagents: working
-        ? [{ id: 'child-1', status: 'running', startedAt: 1_700_000_000_000 }]
+        ? [
+            {
+              id: 'child-1',
+              status: 'running',
+              startedAt: 1_700_000_000_000,
+              depth: 1,
+              maxDepth: 2,
+            },
+          ]
         : [],
       todos: [],
       todoCounts: { pending: 0, inProgress: 0, completed: 0 },
@@ -201,7 +217,15 @@ const makeHost = (id: string, cwd = '/work', working = true): FakeHost => {
             stopped.push(childId)
           })
         : Effect.fail(new WebError({ message: 'the subagent is not running' })),
+    messageSubagent: (childId, message) =>
+      childId === 'child-1'
+        ? Effect.sync(() => {
+            messaged.push({ id: childId, message })
+            return { id: childId, queued: false }
+          })
+        : Effect.fail(new WebError({ message: 'the subagent is not running' })),
     stopped,
+    messaged,
     commands,
     publish,
     host: {
@@ -252,6 +276,7 @@ const makeWeb = (initialId: string, cwd = '/work', working = true): FakeWeb => {
       jobOutput: first.jobOutput,
       stopJob: first.stopJob,
       stopSubagent: first.stopSubagent,
+      messageSubagent: first.messageSubagent,
       busy: () => working,
     },
     initialClose: () =>
@@ -273,6 +298,7 @@ const makeWeb = (initialId: string, cwd = '/work', working = true): FakeWeb => {
               jobOutput: known.jobOutput,
               stopJob: known.stopJob,
               stopSubagent: known.stopSubagent,
+              messageSubagent: known.messageSubagent,
               busy: () => working,
             }
           }
@@ -286,6 +312,7 @@ const makeWeb = (initialId: string, cwd = '/work', working = true): FakeWeb => {
             jobOutput: fresh.jobOutput,
             stopJob: fresh.stopJob,
             stopSubagent: fresh.stopSubagent,
+            messageSubagent: fresh.messageSubagent,
             busy: () => working,
           }
         }),
@@ -2390,13 +2417,31 @@ describe('the web transport', () => {
             const detail = yield* client.jobDetail({ sessionId: 'a', id: 'j-1' })
             const stopped = yield* client.stopJob({ sessionId: 'a', id: 'j-1' })
             const childStopped = yield* client.stopSubagent({ sessionId: 'a', id: 'child-1' })
+            const sent = yield* client.messageSubagent({
+              sessionId: 'a',
+              id: 'child-1',
+              message: 'try the second test',
+            })
             const unknownChild = yield* client
               .stopSubagent({ sessionId: 'a', id: 'child-9' })
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
+            const unknownFollowUp = yield* client
+              .messageSubagent({ sessionId: 'a', id: 'child-9', message: 'hello' })
               .pipe(Effect.catch((message) => Effect.succeed(message)))
             const unknownJob = yield* client
               .jobDetail({ sessionId: 'a', id: 'j-9' })
               .pipe(Effect.catch((message) => Effect.succeed(message)))
-            return { running, refused, detail, stopped, childStopped, unknownChild, unknownJob }
+            return {
+              running,
+              refused,
+              detail,
+              stopped,
+              childStopped,
+              sent,
+              unknownChild,
+              unknownFollowUp,
+              unknownJob,
+            }
           }).pipe(clientLayers(wsUrl))
           const result = yield* withoutServices(useClient)
           yield* Deferred.succeed(started.stop, undefined)
@@ -2418,7 +2463,13 @@ describe('the web transport', () => {
       },
     ])
     expect(observed.running.subagents).toEqual([
-      { id: 'child-1', status: 'running', startedAt: 1_700_000_000_000 },
+      {
+        id: 'child-1',
+        status: 'running',
+        startedAt: 1_700_000_000_000,
+        depth: 1,
+        maxDepth: 2,
+      },
     ])
     expect(observed.running.queued).toEqual(['one more thing'])
     expect(observed.detail).toEqual({
@@ -2429,7 +2480,9 @@ describe('the web transport', () => {
     })
     expect(observed.stopped).toBe(true)
     expect(observed.childStopped).toBe(true)
+    expect(observed.sent).toEqual({ id: 'child-1', queued: false })
     expect(observed.unknownChild).toBe('the subagent is not running')
+    expect(observed.unknownFollowUp).toBe('the subagent is not running')
     expect(observed.unknownJob).toBe('no such job')
     expect(observed.refused).toBe('the session is not open')
     await rm(root, { recursive: true, force: true })

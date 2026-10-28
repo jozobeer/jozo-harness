@@ -19,6 +19,7 @@ import type {
   RunSettingsInput,
   RunStateView,
   SessionSummary,
+  SubagentMessageView,
 } from '../src/shared/rpc.ts'
 import { createSessionStore, type BrowseAnswer, type SessionStore } from '../client-solid/store.ts'
 import { draftKey } from '../src/ui/draft.ts'
@@ -112,6 +113,10 @@ interface FakeHost {
   readonly jobOutput: (id: string) => Effect.Effect<JobDetailView, WebError>
   readonly stopJob: (id: string) => Effect.Effect<void, WebError>
   readonly stopSubagent: (id: string) => Effect.Effect<void, WebError>
+  readonly messageSubagent: (
+    id: string,
+    message: string,
+  ) => Effect.Effect<SubagentMessageView, WebError>
   /** The children the run state reports now, as a turn that started one would. */
   readonly setSubagents: (subagents: RunStateView['subagents']) => void
   /** The jobs the run state reports now, as a running command would. */
@@ -124,6 +129,8 @@ interface FakeHost {
   readonly jobReads: () => number
   /** The children a page stopped, in the order it asked. */
   readonly stopped: Array<string>
+  /** The follow-ups a page sent, in the order it asked. */
+  readonly messaged: Array<{ readonly id: string; readonly message: string }>
   /** The jobs a page stopped, in the order it asked. */
   readonly stoppedJobs: Array<string>
   readonly commands: ReadonlyArray<UiCommand>
@@ -155,6 +162,7 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
   const commands: Array<UiCommand> = []
   const stopped: Array<string> = []
   const stoppedJobs: Array<string> = []
+  const messaged: Array<{ readonly id: string; readonly message: string }> = []
   let follows = 0
   let states = 0
   let effort = ''
@@ -198,6 +206,11 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
       Effect.sync(() => {
         stopped.push(childId)
       }),
+    messageSubagent: (childId, message) =>
+      Effect.sync(() => {
+        messaged.push({ id: childId, message })
+        return { id: childId, queued: false }
+      }),
     setSubagents: (next) => {
       subagents = next
     },
@@ -213,6 +226,7 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
     jobReads: () => jobReads,
     stopped,
     stoppedJobs,
+    messaged,
     commands,
     accepting: true,
     refusing: false,
@@ -302,6 +316,7 @@ const openOf = (host: FakeHost): OpenSession => ({
   jobOutput: host.jobOutput,
   stopJob: host.stopJob,
   stopSubagent: host.stopSubagent,
+  messageSubagent: host.messageSubagent,
   // These tests never delete a session; the state still says what runs.
   busy: () => {
     const state = host.runState()
@@ -776,7 +791,13 @@ describe('the page store', () => {
           host.said(event(1, 'turn/start', { turn: 1 }))
           yield* until(() => store.state().conversation.running, 'saw the turn start')
           const before = host.states()
-          const child = { id: 'child-1', status: 'running', startedAt: Date.now() }
+          const child = {
+            id: 'child-1',
+            status: 'running',
+            startedAt: Date.now(),
+            depth: 1,
+            maxDepth: 2,
+          }
           host.setSubagents([child])
 
           yield* until(() => host.states() > before, 'read the run state during the turn')
@@ -801,6 +822,28 @@ describe('the page store', () => {
 
           yield* until(() => host.stopped.includes('child-1'), 'asked to stop the subagent')
           yield* until(() => host.states() > before, 'read the run state after the stop')
+        }),
+      ),
+    )
+  }, 15_000)
+
+  test('sending a follow-up to a subagent asks the server and reads the run state again', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          const before = host.states()
+          store.messageSubagent('child-1', 'try the second test')
+
+          yield* until(
+            () =>
+              host.messaged.some(
+                (sent) => sent.id === 'child-1' && sent.message === 'try the second test',
+              ),
+            'sent the follow-up to the subagent',
+          )
+          yield* until(() => host.states() > before, 'read the run state after the follow-up')
         }),
       ),
     )
