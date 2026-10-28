@@ -32,6 +32,7 @@ import {
 import { watchWidth } from '../rail.ts'
 import type { SessionStore } from '../store.ts'
 import { acceleratedSend, oppositeMode, submitModeFor } from '../submission.ts'
+import { browserVoice, listen, voiceSupport, type Listening, type VoiceScope } from '../voice.ts'
 import { Button } from './ui/button.tsx'
 import { Fizz } from './ui/fizz.tsx'
 import { GoalMark, roundsOf } from './ui/goal-mark.tsx'
@@ -659,6 +660,8 @@ export const Composer = (props: {
   busyEnter?: SubmitMode
   /** Records the reader's busy-Enter choice where the page keeps it. */
   onBusyEnter?: (mode: SubmitMode) => void
+  /** The browser facts speech is read from; absent reads this page. */
+  voice?: VoiceScope
 }) => {
   let textarea: HTMLTextAreaElement | undefined
   let row: HTMLDivElement | undefined
@@ -726,6 +729,8 @@ export const Composer = (props: {
 
   /** Sends the draft; an accelerated gesture asks for the other of the two modes. */
   const send = (accelerated = false): void => {
+    // A sent line is the end of a dictation: its last guess must not come back after the turn starts.
+    if (listening()) dropVoice()
     props.store.submit(submitModeFor(preferred(), running(), accelerated))
     if (textarea !== undefined) grow(textarea)
   }
@@ -901,6 +906,63 @@ export const Composer = (props: {
   let picker: HTMLInputElement | undefined
   const attachments = () => props.store.state().attachments
 
+  const [listening, setListening] = createSignal(false)
+  const [voiceReason, setVoiceReason] = createSignal<string | undefined>()
+  /** The microphone this page has open, if any; the button stops it, unmounting abandons it. */
+  let voice: Listening | undefined
+  onCleanup(() => {
+    voice?.abort()
+    voice = undefined
+  })
+
+  /** Writes the draft into the line the reader sees, wherever the words came from. */
+  const showDraft = (text: string): void => {
+    props.store.setDraft(text)
+    const node = textarea
+    if (node === undefined) return
+    node.value = text
+    grow(node)
+  }
+
+  /** Closes the microphone without putting its last guess into the draft. */
+  const dropVoice = (): void => {
+    const open = voice
+    voice = undefined
+    if (open !== undefined) open.abort()
+  }
+
+  const stopVoice = (): void => {
+    const open = voice
+    voice = undefined
+    if (open !== undefined) open.stop()
+  }
+
+  /**
+   * Starts a dictation from the draft as it stands. A browser that cannot listen
+   * says why, and the composer stays a keyboard.
+   */
+  const startVoice = (): void => {
+    const found = voiceSupport(props.voice ?? browserVoice())
+    if (found.kind === 'missing') {
+      setVoiceReason(found.reason)
+      return
+    }
+    setVoiceReason(undefined)
+    voice = listen(found.open, props.store.state().draft, {
+      onDraft: showDraft,
+      onFailure: (reason) => {
+        voice = undefined
+        setVoiceReason(reason)
+      },
+      onListening: setListening,
+    })
+  }
+
+  const toggleVoice = (): void => {
+    if (listening()) stopVoice()
+    else startVoice()
+  }
+
   return (
     <footer data-takeover={takeover() ? 'true' : 'false'}>
       <GoalBar store={props.store} onEdit={editGoal} />
@@ -1002,6 +1064,18 @@ export const Composer = (props: {
             />
           )}
         </Show>
+        <Show when={listening()}>
+          <p id="voice-listening" role="status">
+            Listening… the words go into the draft. Stop when you are done.
+          </p>
+        </Show>
+        <Show when={voiceReason()}>
+          {(reason) => (
+            <p id="voice-reason" role="status">
+              {reason()}
+            </p>
+          )}
+        </Show>
         <textarea
           id="input"
           rows="1"
@@ -1065,6 +1139,21 @@ export const Composer = (props: {
             onClick={() => picker?.click()}
           >
             <Icon name="paperclip" />
+          </Button>
+          <Button
+            id="voice"
+            size="icon"
+            type="button"
+            aria-label={listening() ? 'Stop dictation' : 'Start dictation'}
+            aria-pressed={listening() ? 'true' : 'false'}
+            title={
+              listening()
+                ? 'Stop dictation and keep the words in the draft'
+                : 'Turn speech into text in this draft'
+            }
+            onClick={toggleVoice}
+          >
+            <Icon name="mic" />
           </Button>
           <Show when={!compact()}>{seat()}</Show>
           <ContextRing store={props.store} />

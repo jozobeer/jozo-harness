@@ -1981,6 +1981,35 @@
   #send .icon-line {
     stroke-width: 2;
   }
+
+  /* An open microphone wears the accent and pulses, so the reader sees where the words come from. */
+  #voice[aria-pressed='true'] {
+    border-color: var(--accent-fill);
+    background: var(--accent-fill);
+    color: var(--accent-ink);
+    animation: jzh-voice 1.2s ease-in-out infinite;
+  }
+
+  #voice-listening,
+  #voice-reason {
+    margin: 0 0 6px;
+    padding: 0 14px;
+    font-size: var(--text-xs);
+  }
+
+  #voice-listening {
+    color: var(--dim);
+  }
+
+  #voice-reason {
+    color: var(--warn);
+  }
+
+  @keyframes jzh-voice {
+    50% {
+      opacity: 0.55;
+    }
+  }
 }
 
 /*

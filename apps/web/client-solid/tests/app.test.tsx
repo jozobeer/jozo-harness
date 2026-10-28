@@ -41,6 +41,15 @@ import {
 } from '../rail.ts'
 import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY } from '../recent.ts'
 import { BUSY_ENTER_KEY } from '../submission.ts'
+import {
+  INSECURE_PAGE,
+  NO_RECOGNITION,
+  failureReason,
+  type VoiceErrorEvent,
+  type VoiceRecognition,
+  type VoiceResultEvent,
+  type VoiceScope,
+} from '../voice.ts'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -3936,5 +3945,133 @@ describe('the finish the reader has seen', () => {
     })
     expect(looksFrom('not json', 7)).toEqual({ since: 7, at: {} })
     expect(looksFrom('{"since":"x"}', 7)).toEqual({ since: 7, at: {} })
+  })
+})
+
+describe('speech in the composer', () => {
+  /** A recognizer the test opens, hears through, and closes by hand. */
+  class FakeMic implements VoiceRecognition {
+    continuous = false
+    interimResults = false
+    onresult: ((event: VoiceResultEvent) => void) | null = null
+    onerror: ((event: VoiceErrorEvent) => void) | null = null
+    onend: (() => void) | null = null
+    starts = 0
+    stops = 0
+    aborts = 0
+
+    start(): void {
+      this.starts += 1
+    }
+
+    stop(): void {
+      this.stops += 1
+    }
+
+    abort(): void {
+      this.aborts += 1
+    }
+  }
+
+  const heard = (mic: FakeMic, text: string, final: boolean): void => {
+    mic.onresult?.({ resultIndex: 0, results: [{ isFinal: final, 0: { transcript: text } }] })
+  }
+
+  const voicePage = (mic: FakeMic): VoiceScope => ({ secure: true, recognition: () => mic })
+
+  test('the microphone writes what it hears into the draft, and only the human sends it', () => {
+    const { store, calls } = makeStore()
+    const mic = new FakeMic()
+    const { container } = render(() => <Composer store={store} voice={voicePage(mic)} />)
+    const input = container.querySelector('#input') as HTMLTextAreaElement
+    fireEvent.input(input, { target: { value: 'list the files' } })
+
+    fireEvent.click(container.querySelector('#voice') as Element)
+    expect(mic.starts).toBe(1)
+    expect(container.querySelector('#voice-listening')).not.toBeNull()
+    expect(container.querySelector('#voice')?.getAttribute('aria-pressed')).toBe('true')
+
+    heard(mic, 'that changed today', false)
+    expect(input.value).toBe('list the files that changed today')
+
+    heard(mic, 'that changed this week', true)
+    expect(input.value).toBe('list the files that changed this week')
+    expect(calls.filter((call) => call.kind === 'submit')).toHaveLength(0)
+
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(calls).toContainEqual({ kind: 'submit', mode: 'queue' })
+    // Words are the only thing the microphone handed the store; no audio rides along.
+    expect(calls.every((call) => call.kind === 'draft' || call.kind === 'submit')).toBe(true)
+    expect(mic.aborts).toBe(1)
+  })
+
+  test('stopping the microphone settles the phrase and keeps the words', () => {
+    const { store } = makeStore()
+    const mic = new FakeMic()
+    const { container } = render(() => <Composer store={store} voice={voicePage(mic)} />)
+    const input = container.querySelector('#input') as HTMLTextAreaElement
+
+    fireEvent.click(container.querySelector('#voice') as Element)
+    heard(mic, 'open the settings', false)
+    expect(input.value).toBe('open the settings')
+
+    fireEvent.click(container.querySelector('#voice') as Element)
+    expect(mic.stops).toBe(1)
+    expect(input.value).toBe('open the settings')
+
+    mic.onend?.()
+    expect(container.querySelector('#voice')?.getAttribute('aria-pressed')).toBe('false')
+    expect(container.querySelector('#voice-listening')).toBeNull()
+  })
+
+  test('a refused microphone keeps the draft and says why', () => {
+    const { store, calls } = makeStore()
+    const mic = new FakeMic()
+    const { container } = render(() => <Composer store={store} voice={voicePage(mic)} />)
+    const input = container.querySelector('#input') as HTMLTextAreaElement
+
+    fireEvent.input(input, { target: { value: 'keep this' } })
+    fireEvent.click(container.querySelector('#voice') as Element)
+    heard(mic, 'not this', false)
+    expect(input.value).toBe('keep this not this')
+
+    mic.onerror?.({ error: 'not-allowed' })
+    mic.onend?.()
+
+    expect(input.value).toBe('keep this')
+    expect(container.querySelector('#voice-reason')?.textContent).toBe(failureReason('not-allowed'))
+    expect(container.querySelector('#voice')?.getAttribute('aria-pressed')).toBe('false')
+
+    // The composer is still a keyboard: the line can be sent as it stands.
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(calls).toContainEqual({ kind: 'submit', mode: 'queue' })
+  })
+
+  test('a browser without speech says so, and a plain-http page asks for https', () => {
+    const bare = makeStore()
+    const withoutApi = render(() => <Composer store={bare.store} voice={{ secure: true }} />)
+    fireEvent.click(withoutApi.container.querySelector('#voice') as Element)
+    expect(withoutApi.container.querySelector('#voice-reason')?.textContent).toBe(NO_RECOGNITION)
+    withoutApi.unmount()
+
+    const insecure = makeStore()
+    const plain = render(() => <Composer store={insecure.store} voice={{ secure: false }} />)
+    fireEvent.click(plain.container.querySelector('#voice') as Element)
+    expect(plain.container.querySelector('#voice-reason')?.textContent).toBe(INSECURE_PAGE)
+
+    const input = plain.container.querySelector('#input') as HTMLTextAreaElement
+    fireEvent.input(input, { target: { value: 'typed instead' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(insecure.calls).toContainEqual({ kind: 'submit', mode: 'queue' })
+  })
+
+  test('leaving the page closes the microphone', () => {
+    const { store } = makeStore()
+    const mic = new FakeMic()
+    const { container, unmount } = render(() => <Composer store={store} voice={voicePage(mic)} />)
+
+    fireEvent.click(container.querySelector('#voice') as Element)
+    unmount()
+    expect(mic.aborts).toBe(1)
   })
 })
