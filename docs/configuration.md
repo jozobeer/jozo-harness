@@ -203,6 +203,13 @@ plugins:
 | `EXA_API_KEY` | `search: exa` のとき `web_search` が Exa の `/search` を呼ぶ。無い場合は tool error が `jzh auth set EXA_API_KEY` を案内する |
 | `PERPLEXITY_API_KEY` | `search: perplexity` のとき `web_search` が Perplexity の chat completions を呼ぶ。無い場合は tool error が `jzh auth set PERPLEXITY_API_KEY` を案内する |
 | `XDG_CONFIG_HOME` | `config.yaml` と `secrets.env` を置くディレクトリ |
+| `HTTP_PROXY` / `http_proxy` | http の外向き通信をこの forward proxy に送る |
+| `HTTPS_PROXY` / `https_proxy` | https の外向き通信（モデルへの接続を含む）をこの proxy に送る |
+| `NO_PROXY` / `no_proxy` | ここに挙げたホストは proxy を通らず直接つなぐ |
+
+proxy の判断はモデルへの接続と `web_fetch` が共有する。同じホストでも、http は `HTTP_PROXY`、https は `HTTPS_PROXY` を使う。大文字と小文字の両方があれば大文字が勝ち、空文字は無いものとして扱う。`NO_PROXY` はコンマ区切りで、ホスト名の完全一致、`.example.com` の接尾辞、裸の `example.com` の配下、`*`、`host:port` の形を受ける。一致は大文字小文字を区別しない。
+
+http は proxy に絶対 URI 形式で送り、https は `CONNECT` でトンネルを開ける。proxy URL に `user:password@` を書くと `Proxy-Authorization` に載せる。値はリクエストのたびに読み直すので、起動後に export しても効く。proxy の値が URL でなければ、どの変数が悪いかを添えて失敗する。検索 provider と browser の通信はまだこの判断を通らず、直接 fetch する。
 
 優先順位はシェル環境、作業ディレクトリに近い `.env`、`secrets.env` の順である。先に値がある場所が勝ち、後ろは空いているキーだけを埋める。どのファイルがそのキーを埋めたかは `jzh --dump-config` の `in effect for a run from here:` に出る。
 
