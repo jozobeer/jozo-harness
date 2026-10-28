@@ -172,6 +172,27 @@ describe('open in app', () => {
     )
   })
 
+  test('refuses a path that carries a shell metacharacter', async () => {
+    const root = await makeRoot()
+    await expect(resolveWorkspacePath(root, 'a;b')).rejects.toThrow(
+      'the path holds a shell metacharacter',
+    )
+    await expect(resolveWorkspacePath(root, 'a$(whoami)')).rejects.toThrow(
+      'the path holds a shell metacharacter',
+    )
+  })
+
+  test('keeps a folder with spaces as one argument', async () => {
+    const root = await makeRoot()
+    await mkdir(join(root, 'my project'))
+    const calls: Array<{ command: string; args: ReadonlyArray<string> }> = []
+    await openWorkspacePath(
+      { host: macHost(), launch: launchInto(calls) },
+      { app: 'finder', root, path: 'my project' },
+    )
+    expect(calls).toEqual([{ command: 'open', args: [join(await realpath(root), 'my project')] }])
+  })
+
   test('refuses an app the page made up', async () => {
     const root = await makeRoot()
     const calls: Array<unknown> = []

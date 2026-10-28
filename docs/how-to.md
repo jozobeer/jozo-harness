@@ -421,7 +421,7 @@ docx / pptx / xlsx は、PATH に LibreOffice（`soffice`）がある環境で�
 
 選択肢はサーバが起動時に検出したものだけで、ページからコマンド名や引数を指定することはできない。macOS は `/Applications` と `~/Applications` の bundle と、Terminal の標準の場所を見る。Linux は `xdg-open` / `code` / `cursor` が PATH にあるかを見る。どれも無ければ理由を出し、押しても何も起きないボタンは置かない。
 
-サーバは渡されたパスをワークスペースの根に解決し、`realpath` で symlink を解いた後も根の内側にあることを確かめる。絶対パス・制御文字・外へ出る symlink は起動前に断る。起動は `spawn` に argv 配列を渡し、shell を介さない。
+サーバは渡されたパスをワークスペースの根に解決し、`realpath` で symlink を解いた後も根の内側にあることを確かめる。絶対パス・制御文字・shell のメタ文字（`;` `&` `|` `$` など）・外へ出る symlink は起動前に断る。起動は `spawn` に argv 配列を渡し、shell を介さない。
 
 ### 提出された計画を会話のカードで読む
 

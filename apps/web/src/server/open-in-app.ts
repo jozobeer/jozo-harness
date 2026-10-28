@@ -4,19 +4,7 @@ import { realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { delimiter, isAbsolute, join, resolve, sep } from 'node:path'
 import { Effect } from 'effect'
-
-/** One installed app a page may ask the server to open a workspace with. */
-export interface OpenApp {
-  readonly id: string
-  readonly label: string
-}
-
-/** What the page learns about the machine's apps: which ones exist, or why none do. */
-export interface OpenAppsView {
-  readonly apps: ReadonlyArray<OpenApp>
-  /** Why there is nothing to offer; absent while at least one app exists. */
-  readonly reason?: string
-}
+import type { OpenAppView, OpenAppsView } from '../shared/rpc.ts'
 
 /** The machine facts detection reads, injected so a test never looks at the host. */
 export interface OpenAppHost {
@@ -39,7 +27,7 @@ export interface OpenWorkspaceRequest {
 export type Launch = (command: string, args: ReadonlyArray<string>) => Promise<void>
 
 interface Launcher {
-  readonly app: OpenApp
+  readonly app: OpenAppView
   readonly command: string
   readonly args: ReadonlyArray<string>
 }
@@ -105,7 +93,7 @@ const launchersOf = (host: OpenAppHost): ReadonlyArray<Launcher> => {
 }
 
 /** The apps this machine can open a workspace with, in the order the page offers them. */
-export const detectOpenApps = (host: OpenAppHost): ReadonlyArray<OpenApp> =>
+export const detectOpenApps = (host: OpenAppHost): ReadonlyArray<OpenAppView> =>
   launchersOf(host).map((launcher) => launcher.app)
 
 /** What a page shows: the detected apps, or the reason the machine has none. */
@@ -125,16 +113,27 @@ const hasControlCharacter = (value: string): boolean => {
   return false
 }
 
+/** Shell metacharacters are refused even though the launch never goes through a shell. */
+const SHELL_METACHARACTERS = new Set([';', '&', '|', '$', '`', '"', "'", '<', '>'])
+
+const hasShellMetacharacter = (value: string): boolean => {
+  for (let index = 0; index < value.length; index += 1) {
+    if (SHELL_METACHARACTERS.has(value.charAt(index))) return true
+  }
+  return false
+}
+
 const inside = (root: string, target: string): boolean =>
   target === root || target.startsWith(root.endsWith(sep) ? root : root + sep)
 
 /**
  * Resolves one path the page named to the real path inside the workspace. Absolute
- * paths, control characters, and anything a symlink points outside the root are
- * refused before any app sees them.
+ * paths, control and shell characters, and anything a symlink points outside the
+ * root are refused before any app sees them.
  */
 export const resolveWorkspacePath = async (root: string, path: string): Promise<string> => {
   if (hasControlCharacter(path)) throw new Error('the path holds a control character')
+  if (hasShellMetacharacter(path)) throw new Error('the path holds a shell metacharacter')
   if (isAbsolute(path)) throw new Error('only a path inside the workspace can be opened')
   const canonicalRoot = await realpath(root)
   const target = await realpath(resolve(canonicalRoot, path))
