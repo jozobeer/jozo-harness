@@ -1,24 +1,26 @@
 import { Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js'
 import type { Conversation as ConversationState } from '@jozo-harness/ui-view'
 import { followsBottom } from '../../src/ui/scroll.ts'
+import { useTranslate } from '../i18n.ts'
 import type { SessionStore } from '../store.ts'
 import { Turns } from './turns.tsx'
 
-const Welcome = () => (
-  <section class="welcome">
-    <h2>New session</h2>
-    <p class="welcome-lead">Nothing has been said yet. Type below and press Enter.</p>
-    <ul class="welcome-hints">
-      <li>
-        <code>/help</code> lists what a session answers; <code>/status</code> says where it stands
-      </li>
-      <li>a shell command asks before it runs</li>
-      <li>
-        the sheet on the right carries what the session works toward, its turns, jobs and settings
-      </li>
-    </ul>
-  </section>
-)
+const Welcome = () => {
+  const t = useTranslate()
+  return (
+    <section class="welcome">
+      <h2>{t('welcome.title')}</h2>
+      <p class="welcome-lead">{t('welcome.lead')}</p>
+      <ul class="welcome-hints">
+        <li>
+          <code>/help</code> {t('welcome.helpA')} <code>/status</code> {t('welcome.helpB')}
+        </li>
+        <li>{t('welcome.shell')}</li>
+        <li>{t('welcome.sheet')}</li>
+      </ul>
+    </section>
+  )
+}
 
 /** A session nobody has said anything to yet, and nothing waiting for an answer. */
 const isEmpty = (conversation: ConversationState): boolean =>

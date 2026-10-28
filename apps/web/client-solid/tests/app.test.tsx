@@ -40,6 +40,7 @@ import {
   railWidthFrom,
 } from '../rail.ts'
 import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY } from '../recent.ts'
+import { LOCALE_KEY } from '../locale.ts'
 import { BUSY_ENTER_KEY } from '../submission.ts'
 import {
   INSECURE_PAGE,
@@ -4073,5 +4074,56 @@ describe('speech in the composer', () => {
     fireEvent.click(container.querySelector('#voice') as Element)
     unmount()
     expect(mic.aborts).toBe(1)
+  })
+})
+
+describe('the language of the page', () => {
+  beforeEach(() => localStorage.clear())
+
+  const foldLabel = (container: HTMLElement): string | null | undefined =>
+    container.querySelector('#rail-fold')?.getAttribute('aria-label')
+
+  test('opens in the language kept from an earlier visit', () => {
+    localStorage.setItem(LOCALE_KEY, 'ja')
+    const { store } = makeStore()
+
+    const { container } = render(() => <App store={store} />)
+
+    expect(foldLabel(container)).toBe('セッションを隠す')
+    expect(container.querySelector('.lens-option')?.textContent).toContain('会話')
+    // Japanese leaves the page's own name to the default table, so the brand
+    // still reads as a name rather than a key.
+    expect(container.querySelector('.brand')?.textContent).toBe('jozo-harness')
+    expect(document.documentElement.lang).toBe('ja')
+  })
+
+  test('the settings choice switches the page at once and is kept for the next visit', () => {
+    const { store } = makeStore({ pane: { kind: 'settings' } })
+    const first = render(() => <App store={store} />)
+
+    fireEvent.click(first.container.querySelector('[data-locale="ja"]') as Element)
+
+    expect(foldLabel(first.container)).toBe('セッションを隠す')
+    expect(first.container.querySelector('[data-locale="ja"]')?.getAttribute('aria-pressed')).toBe(
+      'true',
+    )
+    expect(localStorage.getItem(LOCALE_KEY)).toBe('ja')
+
+    cleanup()
+    const next = render(() => <App store={store} />)
+    expect(foldLabel(next.container)).toBe('セッションを隠す')
+  })
+
+  test('the language choice leaves the model prompt alone', () => {
+    // The dictionary is the page's own; the store sends the reader's words and
+    // the core's prompt is built on the host, so choosing a language sends nothing.
+    const { store, calls } = makeStore({ pane: { kind: 'settings' } })
+    const { container } = render(() => <App store={store} />)
+
+    fireEvent.click(container.querySelector('[data-locale="ja"]') as Element)
+
+    expect(calls.filter((call) => call.kind === 'command' || call.kind === 'sendTo')).toHaveLength(
+      0,
+    )
   })
 })

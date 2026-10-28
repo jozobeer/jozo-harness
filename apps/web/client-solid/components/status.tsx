@@ -1,10 +1,12 @@
 import { Show, createMemo } from 'solid-js'
 import { boardOf } from '../../src/ui/board.ts'
+import { useTranslate } from '../i18n.ts'
 import { hintOf } from '../lib.ts'
 import type { SessionStore } from '../store.ts'
 
 /** The strip along the top: the connection, where the session runs, what happens next. */
 export const Status = (props: { store: SessionStore; drawer: boolean; onDrawer: () => void }) => {
+  const t = useTranslate()
   const state = () => props.store.state()
   /** An approval or a question waits on the reader: the one thing the strip should shout. */
   const waiting = (): boolean =>
@@ -21,7 +23,7 @@ export const Status = (props: { store: SessionStore; drawer: boolean; onDrawer: 
         id="drawer-toggle"
         class={'drawer-toggle' + (fleet().waiting.length > 0 ? ' waiting' : '')}
         type="button"
-        aria-label="sessions"
+        aria-label={t('drawer.sessions')}
         aria-controls="sidebar"
         aria-expanded={props.drawer}
         onClick={props.onDrawer}
@@ -41,9 +43,11 @@ export const Status = (props: { store: SessionStore; drawer: boolean; onDrawer: 
           <bdi>{branch()}</bdi>
         </span>
       </Show>
-      <span class={hintClass()}>{hintOf(state())}</span>
+      <span class={hintClass()}>{hintOf(state(), t)}</span>
       <Show when={fleet().waiting.length > 0}>
-        <span class="fleet waiting">{String(fleet().waiting.length) + ' waiting on you'}</span>
+        <span class="fleet waiting">
+          {String(fleet().waiting.length) + ' ' + t('status.waiting')}
+        </span>
       </Show>
     </>
   )
