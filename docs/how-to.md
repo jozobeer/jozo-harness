@@ -528,10 +528,11 @@ return review.text
 
 tier1 行がある run では、モデルに `run_code` が渡る。モデルは既定で async 関数の本体を書き、`await tools.name(args)` で可視の tool を呼べる。`runtime: 'python'` を渡すと python3 のスクリプトとして走り、同じ tool を `tools.name(...)` で呼べる。大量の read / grep を 1 step に畳むときに使う。
 
-実行は呼び出しごとの子プロセスで、bash と同じ sandbox の下で走る。中の tool 呼び出しも、直接呼んだときと同じ policy と承認を通る。戻るのは node なら `return` と `console.log`、python なら `print` だけで、途中の tool の結果は会話に入らない。python の呼び出しは同期で、1 本ずつ順に走る。
+実行はセッションごとの子プロセスで、bash と同じ sandbox の下で走る。中の tool 呼び出しも、直接呼んだときと同じ policy と承認を通る。戻るのは node なら `return` と `console.log`、python なら `print` だけで、途中の tool の結果は会話に入らない。python の呼び出しは同期で、1 本ずつ順に走る。
 
-- 打ち切り: 30 秒（`RUN_CODE_TIMEOUT_MS`）と 16,000 文字（`RUN_CODE_OUTPUT_LIMIT`）。切ったときは結果に印が付く。
-- 既定の子は JavaScript として走る。TypeScript の型注釈はまだ実行できない。
+- 記憶: node の子はセッションが閉じるまで残る。プログラムが `globalThis` に置いた値は、同じセッションの次の `run_code` から読める。python も同じ子の中で名前空間を保つので、前のプログラムの変数が残る。別のセッションや子 agent は別の子を持つ。セッションが閉じると子は終了し、値は消える。
+- 打ち切り: 30 秒（`RUN_CODE_TIMEOUT_MS`）と 16,000 文字（`RUN_CODE_OUTPUT_LIMIT`）。切ったときは結果に印が付く。時間切れになった子は捨てるので、次の呼び出しは新しい子で始まり、固まったプログラムの `globalThis` は残らない。
+- 型: コードは TypeScript として渡せる。型注釈・`as`・`satisfies`・`interface` は実行前に `node:module` の `stripTypeScriptTypes` で外す。外せない構文（`enum`・`namespace` など）は、壊れた JavaScript として走らせず、`invalid-arguments` として理由を返す。
 - python は run に python3 があるときだけ使える。無ければ `unavailable` になる。
 - `run_code` 自身はプログラムからは呼べない（入れ子の再帰を防ぐ）。
 

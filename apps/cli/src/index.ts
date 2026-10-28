@@ -135,6 +135,7 @@ import {
   renderSkillCatalog,
   skillRoots,
   tier1Tools,
+  makeRunCodeSessions,
   SessionSearchTools,
   type RunCodeHost,
   type SessionSearchHost,
@@ -454,6 +455,9 @@ const installTier1 = (
   unmount: (id: string) => Effect.Effect<PluginUnmount, ToolError>,
 ) =>
   Effect.gen(function* () {
+    // A run_code child outlives one call; the run's scope is what ends it, so the
+    // memory never reaches another session.
+    const runCodeSessions = yield* makeRunCodeSessions()
     // A run with nobody to answer leaves the seam unserved, so a question fails
     // at once instead of waiting forever for an answer that cannot come.
     const ask = installAsk(holder, agent.session)
@@ -489,6 +493,7 @@ const installTier1 = (
         // A nested call is part of what the session did, so it goes in the same log.
         append: (type, data) => agent.session.append(type, data),
         ...(sandbox === undefined ? {} : { sandbox }),
+        sessions: runCodeSessions,
       },
       sandbox,
     )) {

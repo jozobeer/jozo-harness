@@ -22,6 +22,7 @@ import {
   makeRunCodeTool,
   RUN_CODE_OUTPUT_LIMIT,
   type RunCodeHost,
+  type RunCodeTool,
 } from '../src/run-code.ts'
 
 const context = { sessionId: 's-1', cwd: process.cwd(), callId: 'call-1' }
@@ -63,7 +64,7 @@ const host = (
   ...(sandbox === undefined ? {} : { sandbox }),
 })
 
-const runWith = (tool: ToolDefinition<any, any>, args: Record<string, unknown>) =>
+const runWith = (tool: RunCodeTool, args: Record<string, unknown>) =>
   Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -77,10 +78,41 @@ const runWith = (tool: ToolDefinition<any, any>, args: Record<string, unknown>) 
           context,
         })
       }),
-    ),
+    ).pipe(Effect.ensuring(Effect.suspend(() => tool.closeSessions()))),
   )
 
-const run = (tool: ToolDefinition<any, any>, code: string) => runWith(tool, { code })
+const run = (tool: RunCodeTool, code: string) => runWith(tool, { code })
+
+/** Runs several calls through one tool, so the child between them is the session's. */
+const runCalls = (
+  tool: RunCodeTool,
+  calls: ReadonlyArray<{ readonly args: Record<string, unknown>; readonly sessionId?: string }>,
+) =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const services = yield* Layer.build(Layer.provideMerge(toolsLayer, HooksLive))
+        const tools = Context.get(services, Tools)
+        yield* tools.register(tool)
+        const results: Array<ToolExecutionResult> = []
+        for (const call of calls) {
+          const each = {
+            ...context,
+            ...(call.sessionId === undefined ? {} : { sessionId: call.sessionId }),
+          }
+          results.push(
+            yield* tools.call({
+              callId: each.callId,
+              tool: tool.name,
+              arguments: JSON.stringify(call.args),
+              context: each,
+            }),
+          )
+        }
+        return results
+      }),
+    ).pipe(Effect.ensuring(Effect.suspend(() => tool.closeSessions()))),
+  )
 
 describe('run_code', () => {
   test('calls a tool from the program and returns its output and value', async () => {
@@ -300,7 +332,7 @@ describe('run_code', () => {
   })
 
   test('a program still running at the timeout is ended', async () => {
-    const tool: ToolDefinition<any, any> = {
+    const tool: RunCodeTool = {
       ...makeRunCodeTool(host(() => Effect.succeed(ok('unused', {})))),
       timeoutMs: 100,
     }
@@ -458,6 +490,115 @@ describe('run_code', () => {
     expect(childArgv('python')).toEqual(['python3', '-c', expect.any(String)])
     expect(childArgv('node')[0]).toBe(process.execPath)
     expect(childArgv('node')[1]).toBe('-e')
+  })
+
+  test('the next call in the same session sees what the previous program put on globalThis', async () => {
+    const outcomes = await runCalls(makeRunCodeTool(host(() => Effect.succeed(ok('unused', {})))), [
+      { args: { code: 'globalThis.total = 41' } },
+      { args: { code: 'globalThis.total += 1\nreturn globalThis.total' } },
+    ])
+
+    expect(outcomes[0]?.isError).toBe(false)
+    expect(outcomes[1]?.isError).toBe(false)
+    expect(textOf(outcomes[1]?.content ?? [])).toContain('return: 42')
+  })
+
+  test('a program in another session does not see the values of the first', async () => {
+    const outcomes = await runCalls(makeRunCodeTool(host(() => Effect.succeed(ok('unused', {})))), [
+      { args: { code: 'globalThis.total = 41' } },
+      { args: { code: 'return typeof globalThis.total' }, sessionId: 's-2' },
+    ])
+
+    expect(textOf(outcomes[1]?.content ?? [])).toContain('return: "undefined"')
+  })
+
+  test('closing the session children forgets what the programs created', async () => {
+    const tool = makeRunCodeTool(host(() => Effect.succeed(ok('unused', {}))))
+    try {
+      await Effect.runPromise(tool.execute({ code: 'globalThis.total = 41' }, context))
+      await Effect.runPromise(tool.closeSessions())
+      const next = await Effect.runPromise(
+        tool.execute({ code: 'return typeof globalThis.total' }, context),
+      )
+
+      expect(next.output).toContain('return: "undefined"')
+    } finally {
+      await Effect.runPromise(tool.closeSessions())
+    }
+  })
+
+  test('a timed-out program takes its child with it, so the next call starts fresh', async () => {
+    const tool: RunCodeTool = {
+      ...makeRunCodeTool(host(() => Effect.succeed(ok('unused', {})))),
+      timeoutMs: 150,
+    }
+
+    const outcomes = await runCalls(tool, [
+      {
+        args: {
+          code: 'globalThis.hung = true\nawait new Promise((resolve) => setTimeout(resolve, 5000))',
+        },
+      },
+      { args: { code: 'return typeof globalThis.hung' } },
+    ])
+
+    expect(outcomes[0]?.isError).toBe(true)
+    expect(textOf(outcomes[0]?.content ?? [])).toContain('timed out after')
+    expect(textOf(outcomes[1]?.content ?? [])).toContain('return: "undefined"')
+  })
+
+  test('runs TypeScript after removing its annotations, as, and satisfies', async () => {
+    const tool = makeRunCodeTool(host(() => Effect.succeed(ok('unused', {}))))
+
+    const outcome = await run(
+      tool,
+      [
+        'interface Point { readonly x: number }',
+        'const declared: Point = { x: 3 }',
+        "const key = 'x' as keyof Point",
+        'return (declared satisfies Point)[key]',
+      ].join('\n'),
+    )
+
+    expect(outcome.isError).toBe(false)
+    expect(textOf(outcome.content)).toContain('return: 3')
+  })
+
+  test('a program whose types cannot be removed is refused before a child starts', async () => {
+    const seen: Array<ReadonlyArray<string>> = []
+    const sandbox: SandboxShape = {
+      name: 'probe',
+      confines: false,
+      mode: 'workspace-write',
+      wrap: (command) => {
+        seen.push(command.argv)
+        return Effect.succeed({
+          argv: command.argv,
+          cwd: command.cwd,
+          mode: 'workspace-write',
+          denialSignatures: [],
+        })
+      },
+    }
+    const tool = makeRunCodeTool(host(() => Effect.succeed(ok('unused', {})), sandbox))
+
+    const outcome = await run(tool, 'enum Colour { Red }\nreturn Colour.Red')
+
+    expect(outcome.isError).toBe(true)
+    expect(textOf(outcome.content)).toContain('could not remove the type annotations')
+    expect(textOf(outcome.content)).toContain('enum')
+    expect(seen).toHaveLength(0)
+  })
+
+  test('a python program sees the names the previous one bound', async () => {
+    const outcomes = await runCalls(makeRunCodeTool(host(() => Effect.succeed(ok('unused', {})))), [
+      { args: { runtime: 'python', code: 'total = 41' } },
+      { args: { runtime: 'python', code: 'print(total + 1)' } },
+    ])
+
+    expect(outcomes[0]?.isError).toBe(false)
+    expect(outcomes[1]?.isError).toBe(false)
+    expect(textOf(outcomes[1]?.content ?? [])).toContain('42')
   })
 
   test('tier 1 lists run_code only when it was given a host', async () => {
