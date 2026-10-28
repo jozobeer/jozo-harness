@@ -39,6 +39,7 @@ import type {
   DirectoryView,
   EditableSettingsView,
   RunSettingsInput,
+  RunStateView,
   SessionAction,
   WorkspacePreview,
 } from '../../src/shared/rpc.ts'
@@ -209,6 +210,27 @@ const makeStore = (
   }
   return { store, calls, browses, setState: update }
 }
+
+/** A run state with only the todos a composer test names; the rest stays empty. */
+const runWith = (todos: RunStateView['todos']): RunStateView => ({
+  goal: null,
+  schedules: [],
+  jobs: [],
+  subagents: [],
+  todos,
+  todoCounts: {
+    pending: todos.filter((todo) => todo.status === 'pending').length,
+    inProgress: todos.filter((todo) => todo.status === 'in_progress').length,
+    completed: todos.filter((todo) => todo.status === 'completed').length,
+  },
+  skills: [],
+  promptSections: [],
+  queued: [],
+  steering: [],
+  model: 'stub/model',
+  effort: '',
+  efforts: [],
+})
 
 /** jsdom has no clipboard; lend the page one, then take it back. */
 const lendClipboard = (writeText: (text: string) => Promise<void>): void => {
@@ -1443,6 +1465,69 @@ describe('the Solid page', () => {
       kind: 'command',
       command: { kind: 'approve', callId: 'c1', approved: false },
     })
+  })
+
+  test('the composer reads the todo dock from the run state above the input', () => {
+    const { store } = makeStore({
+      run: {
+        ...runWith([
+          { content: 'write the test', status: 'completed' },
+          { content: 'fix the code', status: 'in_progress' },
+          { content: 'wait for review', status: 'pending' },
+        ]),
+        queued: ['one more'],
+      },
+    })
+
+    const { container } = render(() => <Composer store={store} />)
+
+    // The closed line names how much is left and the step running now.
+    expect(container.querySelector('#todo-dock .todo-dock-count')?.textContent).toBe('2/3 left')
+    expect(container.querySelector('#todo-dock .todo-dock-current')?.textContent).toBe(
+      'fix the code',
+    )
+    // Opening it reads every step, with the marks the Run pane uses.
+    expect(container.querySelectorAll('#todo-dock .todo-dock-item')).toHaveLength(3)
+    expect(
+      container.querySelector('#todo-dock .todo-dock-item.completed .todo-dock-content')
+        ?.textContent,
+    ).toBe('write the test')
+    expect(labelOf(container, '#todo-dock .todo-dock-item.completed .todo-dock-mark')).toBe(
+      'completed',
+    )
+    // The dock joins the queue above the input instead of replacing it.
+    expect(container.querySelector('#queue .queued.queued')?.textContent).toContain('one more')
+  })
+
+  test('the todo dock reads the same steps the Run pane shows', () => {
+    const { store } = makeStore({
+      pane: { kind: 'run' },
+      run: runWith([
+        { content: 'write the test', status: 'completed' },
+        { content: 'fix the code', status: 'in_progress' },
+        { content: 'wait for review', status: 'pending' },
+      ]),
+    })
+
+    const dock = render(() => <Composer store={store} />)
+    const pane = render(() => <ContextPane store={store} />)
+
+    const docked = [...dock.container.querySelectorAll('.todo-dock-content')].map(
+      (step) => step.textContent,
+    )
+    const listed = [...pane.container.querySelectorAll('.run-todo-content')].map(
+      (step) => step.textContent,
+    )
+    expect(docked).toEqual(listed)
+  })
+
+  test('the todo dock takes no room when the session has no todo', () => {
+    const { store } = makeStore({ run: runWith([]) })
+
+    const { container } = render(() => <Composer store={store} />)
+
+    expect(container.querySelector('#todo-dock')).toBeNull()
+    expect(container.querySelector('#input')).not.toBeNull()
   })
 
   test('the composer keeps the draft and asks the store to submit it', () => {
