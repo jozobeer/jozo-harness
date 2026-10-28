@@ -11,6 +11,7 @@ import { Llm, LlmFailure, type LlmAdapter, type StreamChunk } from '@jozo-harnes
 import {
   SessionError,
   sessionsLayer,
+  shortenTitle,
   type OpenedSession,
   type SessionEvent,
   type SessionHeader,
@@ -28,7 +29,13 @@ import {
   type ToolRegistry,
 } from '@jozo-harness/tools'
 import { Effect, Layer, Schema, Scope, Stream } from 'effect'
-import { AgentLoop, agentLoopLayer, installRetry, type AgentRequest } from '../src/index.ts'
+import {
+  AgentLoop,
+  agentLoopEffect,
+  installRetry,
+  type AgentLoopConfig,
+  type AgentRequest,
+} from '../src/index.ts'
 
 type Script = () => Stream.Stream<StreamChunk, LlmFailure>
 
@@ -108,6 +115,7 @@ const scenario = <A>(
   scripts: ReadonlyArray<Script>,
   body: (ctx: Ctx) => Effect.Effect<A, AgentError | ToolError, Scope.Scope>,
   persistence: SessionPersistence = sessionPersistence(),
+  config: AgentLoopConfig = {},
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -120,7 +128,9 @@ const scenario = <A>(
         Layer.succeed(SystemPrompt, prompt),
         Layer.succeed(Llm, adapter(scripts)),
       )
-      const runner = yield* AgentLoop.pipe(Effect.provide(Layer.provide(agentLoopLayer, services)))
+      const runner = yield* AgentLoop.pipe(
+        Effect.provide(Layer.provide(Layer.effect(AgentLoop, agentLoopEffect(config)), services)),
+      )
       const app = Layer.provideMerge(
         Layer.provide(agentsLayer(runner), sessionsLayer(persistence, { now: () => 1 })),
         Layer.succeed(Hooks, hooks),
@@ -178,6 +188,78 @@ describe('agent loop', () => {
       .events()
       .flatMap((event) => (event.type === 'assistant/message' ? [event.data.content] : []))
     expect(assistant).toEqual([[{ type: 'text', text }]])
+  })
+
+  test('names a session with a shorter title from the first message', async () => {
+    const first = 'please fix the flaky login test that only fails on CI sometimes'
+    const title = 'flaky login test'
+    const events = await scenario(
+      [chunks(textTurn(title)), chunks(textTurn('done'))],
+      (ctx) =>
+        Effect.gen(function* () {
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.followup({ text: first, source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+      sessionPersistence(),
+      { title: { maxChars: 40 } },
+    )
+
+    const written = events.session
+      .events()
+      .flatMap((event) => (event.type === 'session/title' ? [event.data] : []))
+    expect(written).toEqual([{ title, source: 'model' }])
+    // The point of the call: the row says what the session is about, not the opening.
+    expect(written[0]?.title).not.toBe(shortenTitle(first))
+    expect(reason(events)).toEqual([{ kind: 'completed' }])
+  })
+
+  test('falls back to the cut first message when the title call fails', async () => {
+    const first = 'please fix the flaky login test that only fails on CI sometimes'
+    const events = await scenario(
+      [
+        fails(new LlmFailure({ code: 'PROVIDER', message: 'the title call failed' })),
+        chunks(textTurn('done')),
+      ],
+      (ctx) =>
+        Effect.gen(function* () {
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.followup({ text: first, source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+      sessionPersistence(),
+      { title: { maxChars: 20 } },
+    )
+
+    const written = events.session
+      .events()
+      .flatMap((event) => (event.type === 'session/title' ? [event.data] : []))
+    expect(written).toEqual([{ title: shortenTitle(first), source: 'fallback' }])
+    // A name that could not be written is no reason to lose the answer.
+    expect(reason(events)).toEqual([{ kind: 'completed' }])
+  })
+
+  test('does not name a session again after the first message', async () => {
+    const events = await scenario(
+      [chunks(textTurn('first title')), chunks(textTurn('first')), chunks(textTurn('second'))],
+      (ctx) =>
+        Effect.gen(function* () {
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.followup({ text: 'the opening', source: 'user' })
+          yield* agent.whenIdle
+          yield* agent.followup({ text: 'one more thing', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+      sessionPersistence(),
+      { title: {} },
+    )
+
+    const written = events.session.events().filter((event) => event.type === 'session/title')
+    expect(written).toHaveLength(1)
+    expect(types(events).filter((type) => type === 'turn/start')).toHaveLength(2)
   })
 
   test('a step cut off by the token cap ends the turn as max-tokens', async () => {

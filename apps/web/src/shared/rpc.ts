@@ -50,7 +50,7 @@ export const SessionSummarySchema = Schema.Struct({
   createdAt: Schema.Number,
   /** When the log last changed, in ms; the row a page lists by recency reads this. */
   updatedAt: Schema.Number,
-  /** The first thing the human typed in that session; '' when the log holds none yet. */
+  /** The name the log carries, model-written or the first message; '' when nothing named it. */
   title: Schema.String,
   /** Whether the reader put the session at the top of its group; absent reads as no. */
   pinned: Schema.optionalKey(Schema.Boolean),

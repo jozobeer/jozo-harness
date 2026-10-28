@@ -43,6 +43,13 @@ const catalog = new Map<string, Schema.Schema<unknown>>([
   ],
   ['session/repaired', Schema.Struct({ tornBytes: Schema.Int }) as Schema.Schema<unknown>],
   [
+    'session/title',
+    Schema.Struct({
+      title: Schema.String,
+      source: Schema.Literals(['model', 'human', 'fallback']),
+    }) as Schema.Schema<unknown>,
+  ],
+  [
     'compaction/prune',
     Schema.Struct({
       shadowedSeqs: Schema.Array(Schema.Int),
@@ -188,6 +195,7 @@ registerLogOnlySessionEvents([
   'session/header',
   'session/cwd/changed',
   'session/repaired',
+  'session/title',
   'turn/start',
   'turn/end',
   'step/start',

@@ -21,6 +21,18 @@ const patchWithRoot = async (dir: string): Promise<string> => {
       "    name: '@jozo-harness/session-jsonl'",
       '    config:',
       '      root: ' + join(dir, 'sessions'),
+      // The run under test is about input and error handling; a naming call would be a
+      // provider request nobody stubbed.
+      '  - id: agent-loop',
+      "    name: '@jozo-harness/agent-loop'",
+      '    config:',
+      '      title:',
+      '        enabled: false',
+      // The test process may itself be sandboxed; commands are not what this run tests.
+      '  - id: safety',
+      "    name: '@jozo-harness/safety'",
+      '    config:',
+      '      sandbox: none',
     ].join('\n'),
   )
   return path

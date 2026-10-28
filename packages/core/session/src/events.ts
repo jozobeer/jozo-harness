@@ -99,10 +99,25 @@ export interface SessionRepaired {
   readonly tornBytes: number
 }
 
+/**
+ * How a session's name came to be: the model's own words, a human's, or the
+ * truncated first message when the model could not answer. Folding a log keeps
+ * the human's name above the others, whatever order they arrived in.
+ */
+export const TITLE_SOURCES = ['model', 'human', 'fallback'] as const
+export type TitleSource = (typeof TITLE_SOURCES)[number]
+
+/** The name a log carries, and who gave it. */
+export interface SessionTitle {
+  readonly title: string
+  readonly source: TitleSource
+}
+
 export interface SessionEventMap {
   'session/header': SessionHeader
   'session/cwd/changed': CwdChanged
   'session/repaired': SessionRepaired
+  'session/title': SessionTitle
   'compaction/prune': CompactionPrune
   'compaction/checkpoint': CompactionCheckpoint
   'turn/start': { readonly turn: number }
