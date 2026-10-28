@@ -48,7 +48,7 @@ const stubLlm: Plugin<{}, Llm, never> = {
     } satisfies LlmAdapter),
 }
 
-const profile = (root: string): string =>
+const profile = (root: string, systemPrompt: ReadonlyArray<string> = []): string =>
   [
     'name: test',
     'plugins:',
@@ -64,6 +64,7 @@ const profile = (root: string): string =>
     "    name: '@jozo-harness/tools'",
     '  - id: system-prompt',
     "    name: '@jozo-harness/system-prompt'",
+    ...systemPrompt.map((line) => '    ' + line),
     '  - id: llm',
     '    name: stub-llm',
     '  - id: agent',
@@ -158,6 +159,115 @@ describe('the browser UI through the command', () => {
         return result
       }),
     )
+
+  /**
+   * Runs one turn through a real page and returns the session and the origin
+   * the server printed, so a test can read the log against the address it served.
+   */
+  const turnThroughPage = (
+    profileText: string,
+    workspace: string,
+  ): Promise<{ readonly id: string; readonly origin: string }> =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const ready = yield* Deferred.make<string>()
+          const stop = yield* Deferred.make<void>()
+          yield* Effect.forkScoped(
+            runCommand({
+              profiles: [profileText],
+              plugins,
+              cwd: workspace,
+              route: 'stub/model',
+              web: { port: 0, staticRoot },
+              stdout: () => undefined,
+              stderr: (text) => {
+                const match = /http:\/\/127\.0\.0\.1:\d+\/\S*/.exec(text)
+                if (match !== null) void Effect.runSync(Deferred.succeed(ready, match[0]))
+              },
+              interrupt: Deferred.await(stop),
+            }),
+          )
+          const page = new URL(yield* Deferred.await(ready))
+          const wsUrl = 'ws://' + page.host + '/ui?code=' + (page.searchParams.get('code') ?? '')
+          const used = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const opened = yield* client.open({})
+            const answered = yield* Deferred.make<void>()
+            yield* Effect.forkScoped(
+              client.events({ sessionId: opened.id }).pipe(
+                Stream.runForEach((event) =>
+                  Effect.gen(function* () {
+                    if (event.kind !== 'session' || event.event.type !== 'assistant/message') return
+                    yield* Deferred.succeed(answered, undefined)
+                  }),
+                ),
+              ),
+            )
+            yield* client.command({
+              sessionId: opened.id,
+              command: { kind: 'submit', text: 'where is the GUI?' },
+            })
+            yield* Deferred.await(answered)
+            return { id: opened.id, origin: page.origin }
+          })
+          const result = yield* used.pipe(clientLayers(wsUrl))
+          yield* Deferred.succeed(stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+  test('the model reads the GUI URL as a user context, not in the system prompt', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-gui-'))
+    const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-web-gui-ws-'))
+
+    const turn = await turnThroughPage(profile(root), workspace)
+    const session = await Effect.runPromise(jsonlSessions({ root }).open(turn.id))
+    const snapshots = session.events.flatMap((event) =>
+      event.type === 'user/message' && event.data.source === 'runtime-context'
+        ? [event.data.text]
+        : [],
+    )
+    const system = session.events.flatMap((event) =>
+      event.type === 'system/message' ? [event.data.text] : [],
+    )
+
+    // The page the human opened is named in the snapshot the model reads...
+    expect(snapshots).toHaveLength(1)
+    expect(snapshots[0]).toContain('- gui: ' + turn.origin)
+    // ...and the prompt the provider caches carries no address at all.
+    expect(system).toHaveLength(1)
+    expect(system[0]).not.toContain(turn.origin)
+
+    await rm(root, { recursive: true, force: true })
+    await rm(workspace, { recursive: true, force: true })
+  }, 30_000)
+
+  test('the system-prompt row keeps the GUI fact out of every session', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-nogui-'))
+    const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-web-nogui-ws-'))
+
+    const turn = await turnThroughPage(profile(root, ['config:', '  devContext: false']), workspace)
+    const session = await Effect.runPromise(jsonlSessions({ root }).open(turn.id))
+    const snapshots = session.events.flatMap((event) =>
+      event.type === 'user/message' && event.data.source === 'runtime-context'
+        ? [event.data.text]
+        : [],
+    )
+    const everything = session.events.flatMap((event) =>
+      event.type === 'system/message' || event.type === 'user/message' ? [event.data.text] : [],
+    )
+
+    // The workspace and the clock still arrive; the address the setting turned off does not.
+    expect(snapshots).toHaveLength(1)
+    expect(snapshots[0]).toContain('- cwd: ' + workspace)
+    expect(everything.join('\n')).not.toContain('gui:')
+    expect(everything.join('\n')).not.toContain(turn.origin)
+
+    await rm(root, { recursive: true, force: true })
+    await rm(workspace, { recursive: true, force: true })
+  }, 30_000)
 
   test('a model a page picks is what the session it opens next starts from', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-model-'))
