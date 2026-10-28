@@ -151,13 +151,22 @@ const rejection = (status: number, detail: string): LlmFailure => {
 }
 
 /**
+ * The official root names the provider but not the API version, while a gateway
+ * may already end at `/v1`. Both documented forms must reach `/v1/messages`.
+ */
+const messagesUrlOf = (baseUrl: string): string => {
+  const base = baseUrl.replace(/\/+$/, '')
+  return (base.endsWith('/v1') ? base : base + '/v1') + '/messages'
+}
+
+/**
  * The official DeepSeek Messages endpoint. One `stream` call is one provider
  * attempt, and the body carries only Messages fields: the OpenAI-compatible
  * adapter keeps the `/chat/completions` shape for endpoints that speak it.
  */
 export function deepSeekMessagesAdapter(options: DeepSeekMessagesOptions): LlmAdapter {
   const send = options.fetch ?? fetch
-  const url = `${options.baseUrl.replace(/\/$/, '')}/messages`
+  const url = messagesUrlOf(options.baseUrl)
   const extensions = options.extensions ?? {}
 
   return {

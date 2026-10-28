@@ -105,6 +105,20 @@ describe('deepSeekMessagesAdapter', () => {
     expect(sent).not.toHaveProperty('reasoning_effort')
   })
 
+  test('a base URL without the API version still lands on /v1/messages', async () => {
+    const { seen, send } = capture('')
+    const streaming = deepSeekMessagesAdapter({
+      baseUrl: 'https://api.deepseek.com/anthropic',
+      apiKey: () => 'key',
+      capabilities,
+      fetch: send,
+    })
+
+    await Effect.runPromise(Stream.runCollect(streaming.stream(request)))
+
+    expect(seen[0]?.url).toBe('https://api.deepseek.com/anthropic/v1/messages')
+  })
+
   test('a row bound applies unless the request names its own', async () => {
     const first = capture('')
     const second = capture('')

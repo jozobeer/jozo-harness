@@ -5,7 +5,7 @@ import { deepSeekMessagesAdapter } from './adapter.ts'
 
 /** Settings of the official DeepSeek Messages endpoint. */
 export const llmDeepSeekConfig = Schema.Struct({
-  /** Messages base URL, version included, e.g. https://api.deepseek.com/anthropic/v1. */
+  /** Messages root, e.g. https://api.deepseek.com/anthropic; a missing /v1 is added. */
   baseUrl: Schema.String,
   /** Name of the environment variable that holds the key. */
   apiKeyEnv: Schema.String,
