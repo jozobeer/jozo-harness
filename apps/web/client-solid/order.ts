@@ -47,11 +47,11 @@ export const keepOrder = (order: KeptOrder): void => {
  * Moves one row by one place, and returns the list unchanged when the row is
  * already at the end it was asked to leave. The list is not changed in place.
  */
-export const movedIn = (
-  ids: ReadonlyArray<string>,
-  id: string,
+export const movedIn = <T extends string>(
+  ids: ReadonlyArray<T>,
+  id: T,
   delta: number,
-): ReadonlyArray<string> => {
+): ReadonlyArray<T> => {
   const at = ids.indexOf(id)
   const to = at + delta
   if (at < 0 || to < 0 || to >= ids.length) return ids
