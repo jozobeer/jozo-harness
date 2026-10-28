@@ -150,10 +150,15 @@ import {
 import {
   Approval,
   Ask,
+  AutoReview,
+  Policy,
   Sandbox,
+  autoReviewGuard,
+  modelAutoReview,
   noneSandbox,
   approvalServiceLayer,
   askServiceLayer,
+  type AutoReviewCompletion,
   currentPlanMode,
   installAsk,
   makeAsk,
@@ -195,7 +200,7 @@ import {
   type TailnetAddresses,
   type WorkspacesPort,
 } from '@jozo-harness/web'
-import { Llm } from '@jozo-harness/llm'
+import { Llm, type LlmAdapter, type StreamChunk } from '@jozo-harness/llm'
 import { Cause, Context, Effect, Exit, Layer, Schema, Scope, Stream } from 'effect'
 import {
   EFFORT_KEY,
@@ -1339,6 +1344,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
     if (planMode !== undefined) {
       yield* planMode.install(tools)
     }
+    yield* installAutoReview(wiring, tools)
     // An active goal keeps going by itself: at the end of a turn of this agent, the
     // next round is queued before the turn closes, so the run cannot go idle in between.
     if (hasEnabledRow(wiring.rows, '@jozo-harness/tools-tier1')) {
@@ -1919,6 +1925,65 @@ const providerOfRoute = (route: string): string => {
   const index = route.indexOf('/')
   return index < 0 ? route : route.slice(0, index)
 }
+
+/**
+ * The one model round trip the auto preset makes per reviewed call. It takes the
+ * session's route and no tools, so the answer is a line of text and not another
+ * call to decide about.
+ */
+const autoReviewCompletion = (llm: LlmAdapter, route: () => string): AutoReviewCompletion => {
+  return (prompt) =>
+    llm
+      .stream({
+        provider: providerOfRoute(route()),
+        model: modelOfRoute(route()),
+        params: {},
+        tools: [],
+        messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+      })
+      .pipe(
+        Stream.runFold(
+          () => '',
+          (text: string, chunk: StreamChunk) =>
+            chunk.type === 'text-delta' ? text + chunk.text : text,
+        ),
+      )
+}
+
+/**
+ * Installs the review the auto preset promises. A profile without the safety row
+ * has no preset to read, and every other preset leaves the tool pipeline alone:
+ * their sandbox is their whole policy, exactly as before.
+ */
+const installAutoReview = (
+  wiring: ProfileWiring,
+  tools: ToolRegistry,
+): Effect.Effect<void, never, Scope.Scope> =>
+  Effect.gen(function* () {
+    if (!hasEnabledRow(wiring.rows, '@jozo-harness/safety')) return
+    const preset = Context.get(wiring.context, Policy).preset
+    if (preset !== 'auto') return
+    const review = Context.get(wiring.context, AutoReview)
+    const agents = Context.get(wiring.context, Agents)
+    yield* review.serve(
+      modelAutoReview(
+        autoReviewCompletion(Context.get(wiring.context, Llm), () => wiring.agent.options.route),
+      ),
+    )
+    yield* tools.guard(
+      autoReviewGuard({
+        preset,
+        review,
+        isReadOnly: (tool) => tools.isReadOnly(tool),
+        // A denied call lands in the log of the session that made it, which for a
+        // delegated call is the child's, not the parent's.
+        record: (reviewed) =>
+          (agents.get(reviewed.sessionId)?.session ?? wiring.agent.session)
+            .append('safety/auto/reviewed', reviewed)
+            .pipe(Effect.ignore),
+      }),
+    )
+  })
 
 /** Streams the run's text only when no UI owns the screen. */
 const installRunOutput = (wantsUi: boolean, hooks: HookRegistry, options: CommandOptions) =>

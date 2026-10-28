@@ -391,7 +391,7 @@ jzh config                         # 入ったことを確かめる
 
 ## 書き込みと実行の許可を変える
 
-`preset` はコマンドを走らせる sandbox モードを決める。`read-only` は書き込み不可、`workspace-write` はコマンドの cwd と一時ディレクトリと `writableRoots` に書き込み可、`full` は封じ込めなしである。同梱 `base` profile の `safety` 行に、変えたいキーだけを重ねる。
+`preset` はコマンドを走らせる sandbox モードを決める。`read-only` は書き込み不可、`workspace-write` はコマンドの cwd と一時ディレクトリと `writableRoots` に書き込み可、`full` は封じ込めなし、`auto` は `workspace-write` と同じ sandbox で副作用のある呼び出しを実行前に審査する。同梱 `base` profile の `safety` 行に、変えたいキーだけを重ねる。
 
 ```sh
 jzh config set plugins.safety.preset full
@@ -415,6 +415,29 @@ jzh --dump-config --patch full.yml   # 効いた行を確かめる
 ```
 
 `sandbox` 自体を外す（`sandbox: none`）と、preset に関わらず封じ込めは無くなる。`auto` で使える backend が無い場合や、明示した backend（`seatbelt` / `bwrap`）がその platform で動かない場合は、無制限に落ちずに起動が失敗する。
+
+## 副作用のある呼び出しを実行前に審査する（auto）
+
+`preset: auto` は `workspace-write` と同じ sandbox で走る。sandbox を緩めず、読み取り専用（`read` / `glob` / `grep` / `read_image` / `web_search`）以外の呼び出しだけ、実行前にモデルへ 1 往復して可否を取る。
+
+```sh
+jzh config set plugins.safety.preset auto
+```
+
+```yaml
+name: auto
+plugins:
+  - id: safety
+    name: '@jozo-harness/safety'
+    config:
+      preset: auto
+```
+
+審査は tool 名・引数・作業ディレクトリだけを見て、`ALLOW` か `DENY: <理由>` の 1 行を返す。拒否されると呼び出しは `denied` になり、tool は実行されない。決定は `safety/auto/reviewed` としてセッションログに残る（モデルの履歴には入らない）。審査が答えない、失敗する、30 秒を超えるときも拒否する。答える者がいない実行で審査を飛ばすより、その step を止める方が安全だからである。
+
+- 審査は 1 呼び出しにつき 1 往復で、会話は渡さない。引数だけでは危険と分からない呼び出しは通るので、sandbox と承認の代わりにはならない。
+- `run_code` の中の入れ子呼び出しは審査しない。外側の `run_code` 呼び出しを 1 回審査し、プログラムの中では繰り返さない（プログラムは審査の答えをモデルに返せない）。
+- 拒否は sandbox の拒否ではない。`sandbox_permissions` で広げても通らない。通したいときは preset を `workspace-write` に戻す。
 
 ## 拒否された呼び出しを1回だけ通す
 
@@ -565,7 +588,7 @@ system prompt には、その step で見える tool の署名が 1 行ずつ出
 
 tier1 行がある run では、モデルに `run_code` が渡る。モデルは既定で async 関数の本体を書き、`await tools.name(args)` で可視の tool を呼べる。`runtime: 'python'` を渡すと python3 のスクリプトとして走り、同じ tool を `tools.name(...)` で呼べる。大量の read / grep を 1 step に畳むときに使う。
 
-実行はセッションごとの子プロセスで、bash と同じ sandbox の下で走る。中の tool 呼び出しも、直接呼んだときと同じ policy と承認を通る。戻るのは node なら `return` と `console.log`、python なら `print` だけで、途中の tool の結果は会話に入らない。python の呼び出しは同期で、1 本ずつ順に走る。
+実行はセッションごとの子プロセスで、bash と同じ sandbox の下で走る。中の tool 呼び出しも、直接呼んだときと同じ policy と承認を通る。auto の審査だけは外側の `run_code` 呼び出しで 1 回行い、中の呼び出しでは繰り返さない。戻るのは node なら `return` と `console.log`、python なら `print` だけで、途中の tool の結果は会話に入らない。python の呼び出しは同期で、1 本ずつ順に走る。
 
 - 記憶: node の子はセッションが閉じるまで残る。プログラムが `globalThis` に置いた値は、同じセッションの次の `run_code` から読める。python も同じ子の中で名前空間を保つので、前のプログラムの変数が残る。別のセッションや子 agent は別の子を持つ。セッションが閉じると子は終了し、値は消える。
 - 打ち切り: 30 秒（`RUN_CODE_TIMEOUT_MS`）と 16,000 文字（`RUN_CODE_OUTPUT_LIMIT`）。切ったときは結果に印が付く。時間切れになった子は捨てるので、次の呼び出しは新しい子で始まり、固まったプログラムの `globalThis` は残らない。

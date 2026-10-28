@@ -494,7 +494,9 @@ const runSession = async (
         arguments: argumentsJson,
       }),
     )
-    const nested = { ...context, callId }
+    // A program's call is not a decision of its own: the review that let this
+    // program run already covered it, so the pipeline must not ask again.
+    const nested = { ...context, callId, nested: true as const }
     const result = await Effect.runPromise(host.call(message.name, argumentsJson, nested))
     // A nested tool's note belongs to the step the program runs in, so the outer
     // call carries it: the fragments leave in the order the program made the calls.
