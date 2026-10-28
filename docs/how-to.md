@@ -349,6 +349,8 @@ local daemon を止めて走らせると、リクエストは接続エラーに�
 ~/.jzh/skills/<name>/SKILL.md 自分のマシン全体
 ```
 
+`docx` / `pptx` / `xlsx` は jzh に同梱されている。どの作業ディレクトリからでも `skill` tool で読めて、追加インストールは要らない。PDF への変換のように外部の道具が要る操作は、LibreOffice などが無いときに「何が無いからできないか」を返す手順にしてある。
+
 `SKILL.md` の先頭に frontmatter を置く。
 
 ```markdown
@@ -361,6 +363,21 @@ description: リリース手順を踏むときに読む
 ```
 
 `description` はセッション開始時にモデルへ配る一覧に載る。`name` と `description` の無いファイルは無視される。別のディレクトリを足す場合は設定ファイルに書く。
+
+`modelInvocable` と `userInvocable` は、モデルと人間のどちらがその skill を呼べるかを分ける。どちらも既定は `true` で、`false` と書いたときだけ一覧から外れる。`true` / `false` として読めない値は無視して既定に倒す。書き間違いで skill ごと消えるより、今までどおり読めるほうが害が小さい。
+
+```markdown
+---
+name: handoff
+description: 引き継ぎのときだけ人間が読む
+modelInvocable: false
+---
+```
+
+| フラグ | `false` のとき |
+|---|---|
+| `modelInvocable` | モデルのカタログに載らない。人間の `/名前` では読める |
+| `userInvocable` | `/` の候補に載らない。モデルはカタログから `skill` tool で読める。`/名前` を直接打てば読める（候補に出ないだけ） |
 
 ```sh
 jzh config add skills ~/skills     # <name>/SKILL.md を持つディレクトリ

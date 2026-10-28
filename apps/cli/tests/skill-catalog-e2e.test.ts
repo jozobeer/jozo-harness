@@ -229,17 +229,18 @@ describe('skills through the command', () => {
     const tasks = opened.events.flatMap((event, index) =>
       event.type === 'user/message' && event.data.source === 'user' ? [index] : [],
     )
-    // Published once, after the first task and before the second one.
-    expect(catalogs).toHaveLength(1)
-    expect(catalogs[0]).toBeGreaterThan(tasks[0] ?? -1)
-    expect(catalogs[0]).toBeLessThan(tasks[1] ?? Number.MAX_SAFE_INTEGER)
+    // The bundled catalog opens the session; the changed one lands between the tasks.
+    expect(catalogs).toHaveLength(2)
+    expect(catalogs[0]).toBeLessThan(tasks[0] ?? Number.MAX_SAFE_INTEGER)
+    expect(catalogs[1]).toBeGreaterThan(tasks[0] ?? -1)
+    expect(catalogs[1]).toBeLessThan(tasks[1] ?? Number.MAX_SAFE_INTEGER)
 
     await rm(root, { recursive: true, force: true })
     await rm(workspace, { recursive: true, force: true })
     await rm(home, { recursive: true, force: true })
   })
 
-  test('a session without skills publishes no catalog', async () => {
+  test('a session without workspace skills publishes only the bundled catalog', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-skill-'))
     const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-ws-'))
     const home = await mkdtemp(join(tmpdir(), 'jozo-harness-home-'))
@@ -259,7 +260,11 @@ describe('skills through the command', () => {
     )
     expect(code).toBe(0)
 
-    expect(seen[0]).not.toContain('<available_skills>')
+    // The Office skills ship with jzh, so a blank workspace still opens with them.
+    expect(seen[0]).toContain('<available_skills>')
+    expect(seen[0]).toContain('- docx:')
+    expect(seen[0]).toContain('- pptx:')
+    expect(seen[0]).toContain('- xlsx:')
     const opened = await Effect.runPromise(
       jsonlSessions({ root }).open(
         (await Effect.runPromise(jsonlSessions({ root }).list()))[0]?.id ?? '',
@@ -267,9 +272,12 @@ describe('skills through the command', () => {
     )
     expect(
       opened.events.some(
-        (event) => event.type === 'user/message' && event.data.source === 'skill-catalog',
+        (event) =>
+          event.type === 'user/message' &&
+          event.data.source === 'skill-catalog' &&
+          event.data.text.includes('- docx:'),
       ),
-    ).toBe(false)
+    ).toBe(true)
 
     await rm(root, { recursive: true, force: true })
     await rm(workspace, { recursive: true, force: true })

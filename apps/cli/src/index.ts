@@ -134,6 +134,7 @@ import {
   discoverSkills,
   renderSkillCatalog,
   skillRoots,
+  userSkills,
   tier1Tools,
   makeRunCodeSessions,
   SessionSearchTools,
@@ -1762,10 +1763,10 @@ type BuiltSession =
 
 /**
  * What the human can type at one session, as a page's composer offers it: the
- * registry's commands first, then the skills its catalog lists. A name both sides
- * hold stays a command, because that is the one the slash actually runs.
+ * registry's commands first, then the skills a human may invoke. A name both
+ * sides hold stays a command, because that is the one the slash actually runs.
  */
-const commandViewsOf = (
+export const commandViewsOf = (
   commands: CommandsShape,
   skills: ReadonlyArray<SkillSummary> = [],
 ): ReadonlyArray<CommandView> => {
@@ -1777,7 +1778,7 @@ const commandViewsOf = (
       summary: command.summary,
       kind: 'command' as const,
     })),
-    ...skills
+    ...userSkills(skills)
       .filter((skill) => !named.has(skill.name))
       .map((skill) => ({
         name: skill.name,
