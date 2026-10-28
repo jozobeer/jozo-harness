@@ -1,4 +1,4 @@
-import { Effect, Layer, Schema } from 'effect'
+import { Context, Effect, Layer, Option, Schema, type Scope } from 'effect'
 import { PluginError } from './errors.ts'
 import type { Plugin } from './plugin.ts'
 import { isRowEnabled, mergeRows, type PluginRow } from './profile.ts'
@@ -6,6 +6,14 @@ import { isRowEnabled, mergeRows, type PluginRow } from './profile.ts'
 export interface LoadProfileOptions {
   readonly plugins: ReadonlyArray<Plugin<any, any, any>>
   readonly layers: ReadonlyArray<ReadonlyArray<PluginRow>>
+}
+
+export interface LoadRowOptions {
+  readonly plugins: ReadonlyArray<Plugin<any, any, any>>
+  /** The one row to build, as a profile or settings layer holds it. */
+  readonly row: PluginRow
+  /** The services the running application already holds. */
+  readonly context: Context.Context<never>
 }
 
 const dependentsOf = (
@@ -217,5 +225,72 @@ export function loadProfile(
     const ordered = yield* topologicalOrder(enabled, dependencies)
     const built = yield* buildLayers(ordered, pluginsByName, dependencies)
     return mergeLayers([...built.values()]) as Layer.Layer<any, PluginError, never>
+  })
+}
+
+const requireNewProviders = (
+  row: PluginRow,
+  plugin: Plugin<any, any, any>,
+  context: Context.Context<any>,
+): Effect.Effect<void, PluginError> => {
+  for (const service of plugin.provides) {
+    if (Option.isSome(Context.getOption(context, service))) {
+      return Effect.fail(
+        new PluginError({
+          code: 'duplicate-provider',
+          message: `service ${service.key} is already provided in this run`,
+          pluginId: row.id,
+          service: service.key,
+        }),
+      )
+    }
+  }
+  return Effect.void
+}
+
+const requireProvidersHere = (
+  row: PluginRow,
+  plugin: Plugin<any, any, any>,
+  context: Context.Context<any>,
+): Effect.Effect<void, PluginError> => {
+  for (const service of plugin.requires) {
+    if (Option.isNone(Context.getOption(context, service))) {
+      return Effect.fail(
+        new PluginError({
+          code: 'missing-provider',
+          message: `row ${row.id} requires ${service.key}, but this run does not hold it`,
+          pluginId: row.id,
+          service: service.key,
+        }),
+      )
+    }
+  }
+  return Effect.void
+}
+
+/**
+ * Builds one row over the services a running application already holds.
+ *
+ * This is the loader's one-row path: a row added after start is checked the
+ * same way (known name, fresh provider, present dependencies, matching config),
+ * and the services it provides are handed back without replacing the running
+ * application's context. The caller registers what the row contributes and
+ * closes the scope when the session ends.
+ */
+export function loadPluginRow(
+  options: LoadRowOptions,
+): Effect.Effect<Context.Context<any>, PluginError, Scope.Scope> {
+  return Effect.gen(function* () {
+    // A context is contravariant, so Context<never> is the widest input; the
+    // lookups below still need the concrete service union the caller holds.
+    const context = options.context as unknown as Context.Context<any>
+    const pluginsByName = yield* pluginMap(options.plugins)
+    yield* requireKnownPlugins([options.row], pluginsByName)
+    const plugin = pluginsByName.get(options.row.name)!
+    yield* requireNewProviders(options.row, plugin, context)
+    yield* requireProvidersHere(options.row, plugin, context)
+    const config = yield* decodeConfig(options.row, plugin)
+    const layer = plugin.layer(config) as Layer.Layer<any, any, any>
+    return yield* Layer.build(Layer.provide(layer, Layer.succeedContext(context)))
   })
 }

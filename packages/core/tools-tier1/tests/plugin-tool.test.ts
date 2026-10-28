@@ -1,10 +1,10 @@
 import { HooksLive } from '@jozo-harness/kernel'
 import type { AskRequested, AskShape } from '@jozo-harness/safety'
 import {
+  ToolError,
   Tools,
   toolsLayer,
   type ToolDefinition,
-  type ToolError,
   type ToolExecutionResult,
 } from '@jozo-harness/tools'
 import { Context, Effect, Layer } from 'effect'
@@ -21,10 +21,15 @@ const PROFILE_ROWS: ReadonlyArray<PluginRowSummary> = [
   { id: 'tier1', name: '@jozo-harness/tools-tier1', disabled: false },
 ]
 
-const KNOWN = ['@jozo-harness/kernel', '@jozo-harness/tools-tier1', '@jozo-harness/mcp']
+const KNOWN = [
+  '@jozo-harness/kernel',
+  '@jozo-harness/tools-tier1',
+  '@jozo-harness/mcp',
+  '@jozo-harness/lsp',
+]
 
 /** A settings file that only exists in this test's memory. */
-const fakeHost = (answer = 'approve') => {
+const fakeHost = (answer = 'approve', mounted: ReadonlyArray<string> = [], fail?: string) => {
   const settings: Array<PluginRowSummary> = []
   const asked: Array<AskRequested> = []
   const changes: Array<PluginChange> = []
@@ -32,22 +37,25 @@ const fakeHost = (answer = 'approve') => {
     rows: () => [...PROFILE_ROWS, ...settings],
     known: () => KNOWN,
     change: (change) =>
-      Effect.sync(() => {
+      Effect.gen(function* () {
+        if (fail !== undefined) {
+          return yield* Effect.fail(new ToolError({ code: 'execution', message: fail }))
+        }
         changes.push(change)
         if (change.kind === 'remove') {
           const index = settings.findIndex((row) => row.id === change.id)
           if (index >= 0) settings.splice(index, 1)
-          return [...settings]
+          return { rows: [...settings], mounted: [] }
         }
         if (change.kind === 'add') {
           settings.push({ id: change.id, name: change.name, disabled: false })
-          return [...settings]
+          return { rows: [...settings], mounted }
         }
         const index = settings.findIndex((each) => each.id === change.id)
         if (index >= 0) {
           settings[index] = { id: change.id, name: change.name, disabled: change.disabled }
         }
-        return [...settings]
+        return { rows: [...settings], mounted: [] }
       }),
     ask: {
       ask: (request: AskRequested) => {
@@ -163,5 +171,31 @@ describe('the plugin tool', () => {
     expect(result?.isError).toBe(true)
     expect(textOf(result)).toContain('no row with that id: nowhere')
     expect(asked).toEqual([])
+  })
+
+  test('an added row the host wires now says the tools are live', async () => {
+    const { host } = fakeHost('approve', ['lsp'])
+
+    const result = await Effect.runPromise(
+      call(makePluginTool(host), { action: 'add', id: 'lsp', name: '@jozo-harness/lsp' }),
+    )
+
+    expect(result?.value).toMatchObject({ changed: true })
+    expect(textOf(result)).toContain('lsp is wired into this run now')
+  })
+
+  test('a mount failure leaves the rows and the settings as they were', async () => {
+    const { host, asked, changes, settings } = fakeHost('approve', [], 'the row did not build')
+
+    const result = await Effect.runPromise(
+      call(makePluginTool(host), { action: 'add', id: 'lsp', name: '@jozo-harness/lsp' }),
+    )
+
+    expect(asked).toHaveLength(1)
+    expect(changes).toEqual([])
+    expect(settings).toEqual([])
+    expect(result?.isError).toBe(true)
+    expect(textOf(result)).toContain('the row did not build')
+    expect(host.rows()).toEqual(PROFILE_ROWS)
   })
 })

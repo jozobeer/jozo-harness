@@ -8,7 +8,7 @@ import { jsonlSessions, sessionJsonlPlugin } from '@jozo-harness/session-jsonl'
 import { systemPromptPlugin } from '@jozo-harness/system-prompt'
 import { toolsPlugin } from '@jozo-harness/tools'
 import { tier0Plugin } from '@jozo-harness/tools-tier0'
-import { mcpPlugin, tier1Plugin } from '@jozo-harness/tools-tier1'
+import { lspPlugin, mcpPlugin, tier1Plugin } from '@jozo-harness/tools-tier1'
 import { Effect, Layer, Schema, Stream } from 'effect'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -31,7 +31,10 @@ const toolTurn = (name: string, args: unknown): ReadonlyArray<StreamChunk> => [
   { type: 'finish', kind: 'tool-calls' },
 ]
 
-const stubLlm = (scripts: ReadonlyArray<ReadonlyArray<StreamChunk>>): Plugin<{}, Llm, never> => {
+const stubLlm = (
+  scripts: ReadonlyArray<ReadonlyArray<StreamChunk>>,
+  observe?: (tools: ReadonlyArray<string>) => void,
+): Plugin<{}, Llm, never> => {
   let step = 0
   return {
     name: 'stub-llm',
@@ -47,7 +50,8 @@ const stubLlm = (scripts: ReadonlyArray<ReadonlyArray<StreamChunk>>): Plugin<{},
           images: 'none',
           promptCacheControl: false,
         },
-        stream: () => {
+        stream: (request) => {
+          observe?.((request.tools ?? []).map((schema) => schema.name))
           const script = scripts[step] ?? textTurn('done')
           step += 1
           return Stream.fromIterable(script)
@@ -93,6 +97,7 @@ const profile = (root: string): string =>
 const run = async (
   scripts: ReadonlyArray<ReadonlyArray<StreamChunk>>,
   answer: string,
+  observe?: (tools: ReadonlyArray<string>) => void,
 ): Promise<{
   readonly code: number
   readonly settings: string
@@ -118,7 +123,8 @@ const run = async (
         tier0Plugin,
         tier1Plugin,
         mcpPlugin,
-        stubLlm(scripts),
+        lspPlugin,
+        stubLlm(scripts, observe),
         agentPlugin,
         agentLoopPlugin,
       ] as ReadonlyArray<Plugin<any, any, any>>,
@@ -185,5 +191,39 @@ describe('the plugin rows through the command', () => {
     expect(observed.code).toBe(0)
     expect(observed.settings).toBe('')
     expect(observed.results).toContain('kept the plugin rows as they are')
+  })
+
+  test('an added opt-in row is wired before the next step', async () => {
+    const offered: Array<ReadonlyArray<string>> = []
+    const observed = await run(
+      [
+        toolTurn('plugin', { action: 'add', id: 'lsp', name: '@jozo-harness/lsp' }),
+        textTurn('done'),
+      ],
+      'approve',
+      (tools) => offered.push(tools),
+    )
+
+    expect(observed.code).toBe(0)
+    expect(offered[0]).not.toContain('lsp')
+    expect(offered[1]).toContain('lsp')
+    expect(observed.settings).toContain('id: lsp')
+    expect(observed.results).toContain('lsp is wired into this run now')
+  })
+
+  test('a row that would add a second copy of a tool is refused and not written', async () => {
+    const observed = await run(
+      [
+        toolTurn('plugin', { action: 'add', id: 'lsp', name: '@jozo-harness/lsp' }),
+        toolTurn('plugin', { action: 'add', id: 'lsp-2', name: '@jozo-harness/lsp' }),
+        textTurn('done'),
+      ],
+      'approve',
+    )
+
+    expect(observed.code).toBe(0)
+    expect(observed.settings).toContain('id: lsp')
+    expect(observed.settings).not.toContain('lsp-2')
+    expect(observed.results).toContain('tool lsp is already registered')
   })
 })
