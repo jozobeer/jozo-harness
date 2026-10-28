@@ -13,6 +13,7 @@ import { Linkify } from './linkify.tsx'
 import { EndMark } from './ui/end-mark.tsx'
 import { Icon, toolIconOf } from './ui/icon.tsx'
 import { Mug } from './ui/mug.tsx'
+import { useTranslate } from '../i18n.ts'
 import { pagesIn, spanOf } from '../lib.ts'
 import { useSeen } from '../seen.ts'
 import type { SessionStore } from '../store.ts'
@@ -87,20 +88,23 @@ const ToolImage = (props: { image: TraceImage }) => {
 }
 
 /** A published page reads in place, and opens on its own for a reader who wants it. */
-const ToolPage = (props: { page: string }) => (
-  <div class="tool-page">
-    <iframe
-      class="tool-page-frame"
-      src={props.page}
-      title="published page"
-      sandbox="allow-scripts"
-      referrerpolicy="no-referrer"
-    />
-    <a class="tool-page-open" href={props.page} target="_blank" rel="noopener">
-      Open in a new tab
-    </a>
-  </div>
-)
+const ToolPage = (props: { page: string }) => {
+  const t = useTranslate()
+  return (
+    <div class="tool-page">
+      <iframe
+        class="tool-page-frame"
+        src={props.page}
+        title={t('turn.publishedPage')}
+        sandbox="allow-scripts"
+        referrerpolicy="no-referrer"
+      />
+      <a class="tool-page-open" href={props.page} target="_blank" rel="noopener">
+        {t('turn.openPage')}
+      </a>
+    </div>
+  )
+}
 
 /** The one line a failed card adds for the code the log kept, before the raw output. */
 const errorLineOf = (code: string): string => {
@@ -158,31 +162,39 @@ const skillNameOf = (args: string): string => {
  * A skill load reads as its own card: the name, where it was read from, and what
  * it is for stay on the folded line; the instructions wait inside.
  */
-const Skill = (props: { tool: TraceTool }) => (
-  <details class={'tool-card skill-card ' + props.tool.status} open={props.tool.status === 'error'}>
-    <summary class="tool-line">
-      <Icon name="skill" class="tool-icon" />
-      <span class="skill-label">skill</span>
-      <span class="skill-what">
-        <span class="skill-name">{skillNameOf(props.tool.args)}</span>
-        <span class="skill-source">
-          <Linkify text={props.tool.summary} stop />
+const Skill = (props: { tool: TraceTool }) => {
+  const t = useTranslate()
+  return (
+    <details
+      class={'tool-card skill-card ' + props.tool.status}
+      open={props.tool.status === 'error'}
+    >
+      <summary class="tool-line">
+        <Icon name="skill" class="tool-icon" />
+        <span class="skill-label">{t('turn.skill')}</span>
+        <span class="skill-what">
+          <span class="skill-name">{skillNameOf(props.tool.args)}</span>
+          <span class="skill-source">
+            <Linkify text={props.tool.summary} stop />
+          </span>
         </span>
-      </span>
-      <span class="skill-description">
-        <Linkify text={props.tool.result} stop />
-      </span>
-      <span class="tool-took">
-        {props.tool.endedAt === undefined ? '…' : spanOf(props.tool.endedAt - props.tool.startedAt)}
-      </span>
-    </summary>
-    <Show when={props.tool.output !== ''}>
-      <pre class="tool-output">
-        <Linkify text={plainText(props.tool.output)} />
-      </pre>
-    </Show>
-  </details>
-)
+        <span class="skill-description">
+          <Linkify text={props.tool.result} stop />
+        </span>
+        <span class="tool-took">
+          {props.tool.endedAt === undefined
+            ? '…'
+            : spanOf(props.tool.endedAt - props.tool.startedAt)}
+        </span>
+      </summary>
+      <Show when={props.tool.output !== ''}>
+        <pre class="tool-output">
+          <Linkify text={plainText(props.tool.output)} />
+        </pre>
+      </Show>
+    </details>
+  )
+}
 
 /** A call the log wrote outside any turn: its card stands alone because no turn holds it. */
 const Load = (props: { turn: TraceTurn }) => (
@@ -218,11 +230,12 @@ const Step = (props: { step: TraceStep; last: boolean }) => (
   </li>
 )
 
-const plural = (count: number, word: string): string =>
-  String(count) + ' ' + word + (count === 1 ? '' : 's')
+const plural = (count: number, one: string, many: string): string =>
+  String(count) + ' ' + (count === 1 ? one : many)
 
 /** The process folded to one line: how long, how much, and what went wrong. */
 const ProcessLine = (props: { turn: TraceTurn; now: number; sessionId: string }) => {
+  const t = useTranslate()
   const tools = () => toolsOf(props.turn)
   const failed = () => tools().filter((tool) => tool.status === 'error').length
   const running = () => props.turn.endedAt === undefined
@@ -234,7 +247,7 @@ const ProcessLine = (props: { turn: TraceTurn; now: number; sessionId: string })
   const doing = (): string => {
     const tool = current()
     return tool === undefined
-      ? 'thinking'
+      ? t('turn.thinking')
       : tool.name + ' ' + summaryBodyOf(tool.name, tool.summary)
   }
   return (
@@ -245,15 +258,19 @@ const ProcessLine = (props: { turn: TraceTurn; now: number; sessionId: string })
       >
         <Mug state="filling" since={props.turn.startedAt} />
       </Show>
-      <span class="process-state">{running() ? 'Working' : 'Worked'}</span>
+      <span class="process-state">{t(running() ? 'turn.working' : 'turn.worked')}</span>
       <span class="process-took">
         {spanOf((props.turn.endedAt ?? props.now) - props.turn.startedAt)}
       </span>
       <span class="process-count">
-        {plural(props.turn.steps.length, 'step') + ', ' + plural(tools().length, 'call')}
+        {plural(props.turn.steps.length, t('turn.step'), t('turn.stepMany')) +
+          ', ' +
+          plural(tools().length, t('turn.call'), t('turn.callMany'))}
       </span>
       <Show when={failed() > 0}>
-        <span class="process-failed">{plural(failed(), 'failure')}</span>
+        <span class="process-failed">
+          {plural(failed(), t('turn.failure'), t('turn.failureMany'))}
+        </span>
       </Show>
       <Icon name="chevron-down" class="process-chevron" />
       <Show when={running()}>
@@ -264,31 +281,40 @@ const ProcessLine = (props: { turn: TraceTurn; now: number; sessionId: string })
 }
 
 /** The files a turn wrote; one opens its changes in the pane. */
-const Changes = (props: { turn: TraceTurn; store: SessionStore }) => (
-  <Show when={props.turn.changed.length > 0}>
-    <section class="changes">
-      <div class="changes-head">{'Changed ' + plural(props.turn.changed.length, 'file')}</div>
-      <For each={props.turn.changed}>
-        {(file) => (
-          <button
-            class="change"
-            type="button"
-            onClick={() => props.store.showPane({ kind: 'changes', path: file.path })}
-          >
-            <span class="change-path">{file.path}</span>
-            <span class="change-edits">{plural(file.edits, 'edit')}</span>
-          </button>
-        )}
-      </For>
-    </section>
-  </Show>
-)
+const Changes = (props: { turn: TraceTurn; store: SessionStore }) => {
+  const t = useTranslate()
+  return (
+    <Show when={props.turn.changed.length > 0}>
+      <section class="changes">
+        <div class="changes-head">
+          {t('turn.changed') +
+            plural(props.turn.changed.length, t('turn.file'), t('turn.fileMany'))}
+        </div>
+        <For each={props.turn.changed}>
+          {(file) => (
+            <button
+              class="change"
+              type="button"
+              onClick={() => props.store.showPane({ kind: 'changes', path: file.path })}
+            >
+              <span class="change-path">{file.path}</span>
+              <span class="change-edits">
+                {plural(file.edits, t('turn.edit'), t('turn.editMany'))}
+              </span>
+            </button>
+          )}
+        </For>
+      </section>
+    </Show>
+  )
+}
 
 /**
  * The verdict under one answer. A click records it at once; the note is sent
  * with the same verdict when the human saves it, and the log keeps the latest.
  */
 const Feedback = (props: { turn: TraceTurn; store: SessionStore }) => {
+  const t = useTranslate()
   const [editing, setEditing] = createSignal(false)
   const [note, setNote] = createSignal(props.turn.feedback?.memo ?? '')
   // The click shows at once; the log answers in the next event, and a reload
@@ -307,14 +333,14 @@ const Feedback = (props: { turn: TraceTurn; store: SessionStore }) => {
     })
   }
   return (
-    <div class="feedback" aria-label="Rate this answer">
+    <div class="feedback" aria-label={t('turn.rate')}>
       <button
         type="button"
         class={'feedback-choice' + (chosen() === 'like' ? ' chosen' : '')}
         aria-pressed={chosen() === 'like'}
         onClick={() => send('like')}
       >
-        Good
+        {t('turn.good')}
       </button>
       <button
         type="button"
@@ -322,7 +348,7 @@ const Feedback = (props: { turn: TraceTurn; store: SessionStore }) => {
         aria-pressed={chosen() === 'dislike'}
         onClick={() => send('dislike')}
       >
-        Bad
+        {t('turn.bad')}
       </button>
       <Show when={chosen() !== undefined}>
         <Show
@@ -330,7 +356,7 @@ const Feedback = (props: { turn: TraceTurn; store: SessionStore }) => {
           fallback={
             <button type="button" class="feedback-note" onClick={() => setEditing(true)}>
               {props.turn.feedback?.memo === undefined || props.turn.feedback.memo === ''
-                ? 'Add a note'
+                ? t('turn.addNote')
                 : props.turn.feedback.memo}
             </button>
           }
@@ -339,8 +365,8 @@ const Feedback = (props: { turn: TraceTurn; store: SessionStore }) => {
             class="feedback-input"
             value={note()}
             maxlength={500}
-            placeholder="A short note"
-            aria-label="Note on this answer"
+            placeholder={t('turn.note')}
+            aria-label={t('turn.noteLabel')}
             onInput={(event) => setNote(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key !== 'Enter') return
@@ -358,7 +384,7 @@ const Feedback = (props: { turn: TraceTurn; store: SessionStore }) => {
               setEditing(false)
             }}
           >
-            Save
+            {t('turn.save')}
           </button>
         </Show>
       </Show>
@@ -386,21 +412,24 @@ const sizeOf = (bytes: number): string =>
       : (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 
 /** The files the message carried, as cards the reader can recognise after a reload. */
-const Attached = (props: { attachments: ReadonlyArray<Attachment> }) => (
-  <div class="attachments" aria-label="files the message attached">
-    <Index each={props.attachments}>
-      {(attachment) => (
-        <span class="attachment-card">
-          <span class="attachment-kind">
-            {attachment().mediaType.startsWith('image/') ? 'image' : 'file'}
+const Attached = (props: { attachments: ReadonlyArray<Attachment> }) => {
+  const t = useTranslate()
+  return (
+    <div class="attachments" aria-label={t('turn.attachments')}>
+      <Index each={props.attachments}>
+        {(attachment) => (
+          <span class="attachment-card">
+            <span class="attachment-kind">
+              {t(attachment().mediaType.startsWith('image/') ? 'turn.image' : 'turn.fileKind')}
+            </span>
+            <span class="attachment-name">{attachment().name}</span>
+            <span class="attachment-size">{sizeOf(attachment().bytes)}</span>
           </span>
-          <span class="attachment-name">{attachment().name}</span>
-          <span class="attachment-size">{sizeOf(attachment().bytes)}</span>
-        </span>
-      )}
-    </Index>
-  </div>
-)
+        )}
+      </Index>
+    </div>
+  )
+}
 
 /** What the turn asked: the files it attached, the passages it quoted, then the human's own words. */
 const Ask = (props: { turn: TraceTurn }) => (
@@ -427,6 +456,7 @@ const Ask = (props: { turn: TraceTurn }) => (
 
 /** One turn: what was asked, the work folded, the answer, and what it changed. */
 const Turn = (props: { turn: TraceTurn; live: string; now: number; store: SessionStore }) => {
+  const t = useTranslate()
   const running = () => props.turn.endedAt === undefined
   return (
     <article class={'block turn' + (running() ? ' running' : '')}>
@@ -457,7 +487,7 @@ const Turn = (props: { turn: TraceTurn; live: string; now: number; store: Sessio
         </div>
       </Show>
       <Show when={props.turn.outcome !== '' && props.turn.outcome !== 'completed'}>
-        <div class="notice warn">{'ended: ' + props.turn.outcome}</div>
+        <div class="notice warn">{t('turn.ended') + props.turn.outcome}</div>
       </Show>
       <Changes turn={props.turn} store={props.store} />
     </article>
