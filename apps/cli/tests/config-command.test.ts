@@ -168,14 +168,28 @@ describe('jzh config', () => {
     })
   })
 
+  test('sets the exa and perplexity providers', async () => {
+    await withHome(async (env, path) => {
+      for (const provider of ['exa', 'perplexity']) {
+        const sink = collector()
+
+        const code = await runConfig(['set', 'search', provider], sink.io, env)
+
+        expect(code).toBe(0)
+        expect(sink.errs.join('')).toBe('')
+        expect(readFileSync(path, 'utf8')).toContain('search: ' + provider)
+      }
+    })
+  })
+
   test('refuses a search provider it does not know', async () => {
     await withHome(async (env) => {
       const sink = collector()
 
-      const code = await runConfig(['set', 'search', 'exa'], sink.io, env)
+      const code = await runConfig(['set', 'search', 'google'], sink.io, env)
 
       expect(code).toBe(2)
-      expect(sink.errs.join('')).toContain('search takes brave or deepseek')
+      expect(sink.errs.join('')).toContain('search takes brave, deepseek, exa, or perplexity')
     })
   })
 

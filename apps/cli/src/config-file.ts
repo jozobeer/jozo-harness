@@ -11,7 +11,7 @@ export const ConfigFileSchema = Schema.Struct({
   profile: Schema.optionalKey(Schema.String),
   /** The port `jzh web` listens on; 0 asks the system for a free one. */
   port: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 65535 }))),
-  search: Schema.optionalKey(Schema.Literals(['brave', 'deepseek'])),
+  search: Schema.optionalKey(Schema.Literals(['brave', 'deepseek', 'exa', 'perplexity'])),
   deepseekToolsBaseUrl: Schema.optionalKey(Schema.String),
   skills: Schema.optionalKey(Schema.Array(Schema.String)),
   plugins: Schema.optionalKey(Schema.Array(PluginRowSchema)),
@@ -22,7 +22,7 @@ export interface JozoHarnessConfig {
   readonly effort?: string | undefined
   readonly profile?: string | undefined
   readonly port?: number | undefined
-  readonly search?: 'brave' | 'deepseek' | undefined
+  readonly search?: 'brave' | 'deepseek' | 'exa' | 'perplexity' | undefined
   readonly deepseekToolsBaseUrl?: string | undefined
   readonly skills?: ReadonlyArray<string> | undefined
   readonly plugins?: ReadonlyArray<PluginRow> | undefined

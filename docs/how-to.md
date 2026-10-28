@@ -433,6 +433,22 @@ jzh auth list         # 入っている名前を見る
 
 `.env` に書く場合は `OLLAMA_API_KEY=` を作業ディレクトリかその祖先に置く。どれが勝つかは [configuration.md](configuration.md) の環境変数の節にある。
 
+## web_search の provider を選ぶ
+
+```yaml
+# ~/.config/jzh/config.yaml
+search: exa
+```
+
+`search` は `brave` / `deepseek` / `exa` / `perplexity` を取る。未設定なら `BRAVE_API_KEY` があるときだけ brave を使う。Exa は `EXA_API_KEY`、Perplexity は `PERPLEXITY_API_KEY` を読む。
+
+```sh
+jzh auth set EXA_API_KEY            # 端末に打つ。secrets.env に置かれる
+jzh auth set PERPLEXITY_API_KEY
+```
+
+選んだ provider のキーが無い場合、`web_search` は最初の呼び出しで欠けている変数名と `jzh auth set ...` を返す。brave など別の provider へは落ちない。
+
 ## 管理した環境変数をすべてのコマンドに渡す
 
 profile か `--patch` の tier0 行に `env` を書く。`JZH_` で始まる名前だけを受け付ける。
