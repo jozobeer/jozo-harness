@@ -103,6 +103,11 @@ const catalog = new Map<string, Schema.Schema<unknown>>([
     Schema.Struct({
       text: Schema.String,
       source: Schema.Literals(USER_MESSAGE_SOURCES),
+      quotes: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({ text: Schema.String, sourceSeq: Schema.optionalKey(Schema.Int) }),
+        ),
+      ),
     }),
   ],
   [

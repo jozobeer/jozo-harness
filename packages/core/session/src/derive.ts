@@ -2,6 +2,7 @@ import type { RequestMessage } from '@jozo-harness/llm'
 import { SessionError } from './errors.ts'
 import type { SessionEvent, SessionEventType, SessionSeq } from './events.ts'
 import { logOnlyEventTypes, messageProjections, type MessageProjection } from './projections.ts'
+import { renderUserText } from './quote.ts'
 
 /** One model message with the event that produced it; pruning needs the seq back. */
 export interface DerivedMessage {
@@ -22,7 +23,12 @@ const toMessage = (event: SessionEvent): ReadonlyArray<RequestMessage> => {
     case 'system/message':
       return [{ role: 'system', content: [{ type: 'text', text: event.data.text }] }]
     case 'user/message':
-      return [{ role: 'user', content: [{ type: 'text', text: event.data.text }] }]
+      return [
+        {
+          role: 'user',
+          content: [{ type: 'text', text: renderUserText(event.data.text, event.data.quotes) }],
+        },
+      ]
     case 'assistant/message':
       return [{ role: 'assistant', content: event.data.content }]
     case 'tool/result':
