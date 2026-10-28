@@ -1,10 +1,12 @@
 import { Context, Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
 import { noneSandbox, type SandboxShape } from '@jozo-harness/safety'
-import type { ToolError } from '@jozo-harness/tools'
+import { makeHooks } from '@jozo-harness/kernel'
+import { makeTools, type ToolDefinition, type ToolError } from '@jozo-harness/tools'
 import { DelegateTools, delegatePlugin } from '../src/delegate.ts'
 import {
   MAX_DELEGATE_OUTPUT,
+  MAX_DELEGATE_STDERR,
   delegateArgv,
   makeDelegateTool,
   systemDelegateHost,
@@ -46,6 +48,26 @@ const delegate = (
         onFailure: (error) => ({ value: undefined, error }),
         onSuccess: (value) => ({ value, error: undefined }),
       },
+    ),
+  )
+
+/** Runs the tool through the real registry, where a failure must settle as a result. */
+const callThroughPipeline = (
+  tool: ToolDefinition<any, any>,
+  args: { command: string; task: string } = { command: 'codex', task: 't' },
+) =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const tools = makeTools(makeHooks())
+        yield* tools.register(tool)
+        return yield* tools.call({
+          callId: 'c1',
+          tool: tool.name,
+          arguments: JSON.stringify(args),
+          context: { sessionId: 's1', cwd: '/work', callId: 'c1' },
+        })
+      }),
     ),
   )
 
@@ -129,7 +151,51 @@ describe('delegate tool', () => {
     expect(error).toBeUndefined()
     expect(seen.argv).toEqual(['codex', 'exec', '--full-auto', 'summarize'])
     expect(seen.cwd).toBe('/elsewhere')
-    expect(value).toEqual({ command: 'codex', text: 'done\n', truncated: false })
+    expect(value).toEqual({
+      command: 'codex',
+      text: 'done\n',
+      stderr: '',
+      exitCode: 0,
+      truncated: false,
+      stderrTruncated: false,
+    })
+  })
+
+  test('takes the run working directory when cwd is left out, as subagent does', async () => {
+    const seen: { cwd?: string } = {}
+    const host = hostOf(['codex'], async (command) => {
+      seen.cwd = command.cwd
+      return { exitCode: 0, stdout: 'ok', stderr: '' }
+    })
+
+    const { error } = await delegate({ command: 'codex', task: 't' }, host)
+
+    expect(error).toBeUndefined()
+    expect(seen.cwd).toBe('/work')
+  })
+
+  test('keeps both streams and the exit code so the parent log shows what the child did', async () => {
+    const host = hostOf(['codex'], async () => ({
+      exitCode: 0,
+      stdout: 'the answer\n',
+      stderr: 'warning: cache cold\n',
+    }))
+
+    const { value } = await delegate({ command: 'codex', task: 't' }, host)
+
+    expect(value?.text).toBe('the answer\n')
+    expect(value?.stderr).toBe('warning: cache cold\n')
+    expect(value?.exitCode).toBe(0)
+  })
+
+  test('cuts stderr at its own cap and marks it', async () => {
+    const long = 'e'.repeat(MAX_DELEGATE_STDERR + 1)
+    const host = hostOf(['codex'], async () => ({ exitCode: 0, stdout: '', stderr: long }))
+
+    const { value } = await delegate({ command: 'codex', task: 't' }, host)
+
+    expect(value?.stderr.length).toBe(MAX_DELEGATE_STDERR)
+    expect(value?.stderrTruncated).toBe(true)
   })
 
   test('keeps the output under the cap and marks where it cut', async () => {
@@ -156,6 +222,77 @@ describe('delegate tool', () => {
     expect(error?.message).toContain('boom')
   })
 
+  test('reports a signal death as a failed call and keeps what the child wrote', async () => {
+    const host = hostOf(['codex'], async () => ({
+      // The process package reports a signal as 128 + the signal number.
+      exitCode: 137,
+      stdout: 'half an answer',
+      stderr: 'killed while working',
+    }))
+
+    const { error } = await delegate({ command: 'codex', task: 't' }, host)
+
+    expect(error?.code).toBe('unavailable')
+    expect(error?.message).toContain('exit 137')
+    expect(error?.message).toContain('killed while working')
+    expect(error?.message).toContain('half an answer')
+  })
+
+  test('a CLI that cannot start settles as one failed result that names the reason', async () => {
+    const host = hostOf(['codex'], async () => {
+      throw new Error('spawn EACCES')
+    })
+
+    const outcome = await callThroughPipeline(makeDelegateTool(allowed, noneSandbox, host))
+
+    expect(outcome.isError).toBe(true)
+    expect(outcome.error).toEqual({ name: 'ToolError', code: 'unavailable' })
+    expect(JSON.stringify(outcome.content)).toContain('spawn EACCES')
+  })
+
+  test('keeps the task in the call and both streams in the result the parent logs', async () => {
+    const seen: string[] = []
+    const host = hostOf(['codex'], async (command) => {
+      seen.push(command.argv[command.argv.length - 1] ?? '')
+      return { exitCode: 0, stdout: 'the answer', stderr: 'a warning' }
+    })
+    const tool = makeDelegateTool(allowed, noneSandbox, host)
+
+    const outcome = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const tools = makeTools(makeHooks())
+          yield* tools.register(tool)
+          const argumentsJson = JSON.stringify({ command: 'codex', task: 'fix the failing test' })
+          const callView = tools.presentCall('delegate', argumentsJson)
+          const result = yield* tools.call({
+            callId: 'c1',
+            tool: 'delegate',
+            arguments: argumentsJson,
+            context: { sessionId: 's1', cwd: '/work', callId: 'c1' },
+          })
+          return { argumentsJson, callView, result }
+        }),
+      ),
+    )
+
+    expect(seen).toEqual(['fix the failing test'])
+    expect(outcome.argumentsJson).toContain('fix the failing test')
+    expect(outcome.callView.summary).toContain('fix the failing test')
+    expect(JSON.stringify(outcome.result.content)).toContain('the answer')
+    expect(JSON.stringify(outcome.result.content)).toContain('a warning')
+  })
+
+  test('a stuck CLI times out as one failed call, not a failed turn', async () => {
+    const host = hostOf(['codex'], () => new Promise(() => {}))
+    const tool = makeDelegateTool(allowed, noneSandbox, host, 10)
+
+    const outcome = await callThroughPipeline(tool)
+
+    expect(outcome.isError).toBe(true)
+    expect(outcome.error).toEqual({ name: 'TimeoutError', code: 'timeout' })
+  })
+
   test('reports a host that cannot start the program, rather than failing the turn', async () => {
     const host = hostOf(['codex'], async () => {
       throw new Error('spawn EACCES')
@@ -173,9 +310,57 @@ describe('delegate tool', () => {
     expect(
       tool.output.render(
         { command: 'codex', task: 't' },
-        { command: 'codex', text: 'hi', truncated: false },
+        {
+          command: 'codex',
+          text: 'hi',
+          stderr: '',
+          exitCode: 0,
+          truncated: false,
+          stderrTruncated: false,
+        },
       ),
     ).toEqual([{ type: 'text', text: 'hi' }])
+  })
+
+  test('marks a cut stdout and a cut stderr in the rendered result', () => {
+    const tool = makeDelegateTool(allowed, noneSandbox, hostOf(['codex']))
+
+    expect(
+      tool.output.render(
+        { command: 'codex', task: 't' },
+        {
+          command: 'codex',
+          text: 'hi',
+          stderr: 'warn',
+          exitCode: 0,
+          truncated: true,
+          stderrTruncated: true,
+        },
+      ),
+    ).toEqual([
+      {
+        type: 'text',
+        text: 'hi\n\n[stdout truncated]\n\n[stderr]\nwarn\n[stderr truncated]',
+      },
+    ])
+  })
+
+  test('renders a clean exit with stderr beside the answer', () => {
+    const tool = makeDelegateTool(allowed, noneSandbox, hostOf(['codex']))
+
+    expect(
+      tool.output.render(
+        { command: 'codex', task: 't' },
+        {
+          command: 'codex',
+          text: 'hi',
+          stderr: 'warn',
+          exitCode: 0,
+          truncated: false,
+          stderrTruncated: false,
+        },
+      ),
+    ).toEqual([{ type: 'text', text: 'hi\n\n[stderr]\nwarn' }])
   })
 
   test('the plugin hands the tool to whatever sandbox the run has', () => {
@@ -202,7 +387,7 @@ describe('delegate tool', () => {
     const tool = makeDelegateTool(allowed, noneSandbox, hostOf(['codex']))
     const args = { command: 'codex', task: 't' }
 
-    expect(tool.presentCall?.(args)).toMatchObject({ summary: 'delegate to codex' })
+    expect(tool.presentCall?.(args)).toMatchObject({ summary: 'delegate to codex: t' })
     expect(tool.presentResult?.(args, { isError: false, summary: '' })).toMatchObject({
       summary: 'delegated to codex',
     })
