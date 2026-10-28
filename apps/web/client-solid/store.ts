@@ -2,6 +2,7 @@ import { Cause, Effect, Fiber, Queue, Stream } from 'effect'
 import { RpcClient, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
 import type {
+  Attachment,
   Quote,
   SubmitMode,
   UiCommand,
@@ -20,6 +21,7 @@ import {
 import {
   applyUiEvent,
   initialState,
+  withAttachments,
   withBlank,
   withBranch,
   withCommands,
@@ -196,6 +198,16 @@ type WorkspaceAsk =
     }
   | { readonly kind: 'add'; readonly cwd: string }
 
+/** The bytes of a browser file as base64, in chunks so a large image does not overflow an argument list. */
+const base64Of = (bytes: Uint8Array): string => {
+  let binary = ''
+  const chunk = 0x8000
+  for (let at = 0; at < bytes.length; at += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(at, at + chunk))
+  }
+  return btoa(binary)
+}
+
 /** What the Add workspace dialog heard about one folder. */
 export type BrowseAnswer =
   | { readonly kind: 'listed'; readonly view: DirectoryView }
@@ -224,12 +236,24 @@ type PanelAsk =
     }
   | { readonly kind: 'scheduleDelete'; readonly sessionId: string; readonly id: string }
   | { readonly kind: 'sessionAction'; readonly sessionId: string; readonly action: SessionAction }
+  | {
+      readonly kind: 'attach'
+      readonly name: string
+      readonly mediaType: string
+      readonly data: string
+      readonly reply: (answer: AttachAnswer) => void
+    }
 
 /** The panel asks that read or write what the page may offer to the next turn. */
 type SettingsAsk = Extract<
   PanelAsk,
   { kind: 'models' | 'commands' | 'files' | 'chooseModel' | 'setModel' }
 >
+
+/** What the server said about one upload: a stored reference, or why it refused. */
+export type AttachAnswer =
+  | { readonly kind: 'stored'; readonly attachment: Attachment }
+  | { readonly kind: 'refused'; readonly message: string }
 
 /** The panel asks about one running job or child agent. */
 type RunAsk = Extract<PanelAsk, { kind: 'job' | 'stopJob' | 'stopSubagent' }>
@@ -278,6 +302,10 @@ export interface SessionStore {
    * plain submit the page has always sent, which the core queues.
    */
   readonly submit: (mode?: SubmitMode) => void
+  /** Uploads one file from the composer and offers it to the next message. */
+  readonly attach: (file: File) => void
+  /** Drops one uploaded file, by its place in the composer. */
+  readonly removeAttachment: (index: number) => void
   /** Queues one passage the reader selected for the next message, newest last. */
   readonly addQuote: (text: string) => void
   /** Drops one queued passage, by its place in the list. */
@@ -464,7 +492,13 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
    * opened for it, and it is sent there; a session that cannot be opened gives
    * the line back to the composer rather than swallowing it.
    */
-  let owed: { readonly text: string; readonly quotes?: ReadonlyArray<Quote> } | undefined
+  let owed:
+    | {
+        readonly text: string
+        readonly quotes?: ReadonlyArray<Quote>
+        readonly attachments?: ReadonlyArray<Attachment>
+      }
+    | undefined
   /** The folder the blank page will start its session in; the last one the reader picked. */
   let blankCwd: string | undefined
   const commands = Effect.runSync(
@@ -902,8 +936,20 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       return answerScheduleDelete(asked)
     }
 
+    /** Uploads one file and hands the answer back to the composer that asked. */
+    const answerAttach = (asked: Extract<PanelAsk, { kind: 'attach' }>) =>
+      client.attach({ name: asked.name, mediaType: asked.mediaType, data: asked.data }).pipe(
+        Effect.map((attachment): AttachAnswer => ({ kind: 'stored', attachment })),
+        Effect.catchCause((cause) =>
+          Effect.succeed<AttachAnswer>({ kind: 'refused', message: causeText(cause) }),
+        ),
+        Effect.tap((answer) => Effect.sync(() => asked.reply(answer))),
+        Effect.asVoid,
+      )
+
     /** Answers one panel ask; every answer is addressed to the session that asked. */
     const answerPanelAsk = (asked: PanelAsk) => {
+      if (asked.kind === 'attach') return answerAttach(asked)
       if (isSettingsAsk(asked)) return answerSettingsAsk(asked)
       if (asked.kind === 'sessionAction') return applySessionAction(asked)
       if (isRunAsk(asked)) return answerRunAsk(asked)
@@ -987,7 +1033,12 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
                   const first = owed
                   owed = undefined
                   rememberDraft(state().sessionId, first.text)
-                  update((now) => withQuotes(withDraft(now, first.text), first.quotes ?? []))
+                  update((now) =>
+                    withAttachments(
+                      withQuotes(withDraft(now, first.text), first.quotes ?? []),
+                      first.attachments ?? [],
+                    ),
+                  )
                 }
                 update((now) => withProblem(now, causeText(cause)))
               }),
@@ -1026,23 +1077,34 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
   }
 
   /** Opens the session the first line starts and keeps that line for it. */
-  const startWithLine = (text: string, quotes: ReadonlyArray<Quote>): void => {
-    owed = quotes.length === 0 ? { text } : { text, quotes }
+  const startWithLine = (
+    text: string,
+    quotes: ReadonlyArray<Quote>,
+    attachments: ReadonlyArray<Attachment>,
+  ): void => {
+    owed = {
+      text,
+      ...(quotes.length === 0 ? {} : { quotes }),
+      ...(attachments.length === 0 ? {} : { attachments }),
+    }
     Queue.offerUnsafe(moves, { kind: 'open', id: undefined, cwd: blankCwd })
     clearDraft('')
-    update((now) => withQuotes(now, []))
+    update((now) => withAttachments(withQuotes(now, []), []))
   }
 
   /** What one line becomes: its body, the passages it quotes, and the mode it asked for. */
   const submitCommand = (
     text: string,
     quotes: ReadonlyArray<Quote>,
+    attachments: ReadonlyArray<Attachment>,
     mode: SubmitMode | undefined,
   ): UiCommand => {
-    const line =
-      quotes.length === 0
-        ? { kind: 'submit' as const, text }
-        : { kind: 'submit' as const, text, quotes }
+    const line = {
+      kind: 'submit' as const,
+      text,
+      ...(quotes.length === 0 ? {} : { quotes }),
+      ...(attachments.length === 0 ? {} : { attachments }),
+    }
     return mode === undefined ? line : { ...line, mode }
   }
 
@@ -1064,23 +1126,51 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       const value = current.draft.trim()
       // A message may be a body, a set of quotations, or both; neither is nothing.
       const quotes = current.quotes
-      if (value === '' && quotes.length === 0) return
+      const attachments = current.attachments
+      if (value === '' && quotes.length === 0 && attachments.length === 0) return
       if (current.sessionId === '') {
         // The session this line starts is already on its way; keep the line.
         if (owed !== undefined) return
-        startWithLine(value, quotes)
+        startWithLine(value, quotes, attachments)
         return
       }
       const ask = current.conversation.ask
       sendTo(
         current.sessionId,
         ask === undefined
-          ? submitCommand(value, quotes, mode)
+          ? submitCommand(value, quotes, attachments, mode)
           : { kind: 'answer', id: ask.id, answer: value },
       )
       clearDraft(current.sessionId)
-      update((now) => withQuotes(now, []))
+      update((now) => withAttachments(withQuotes(now, []), []))
     },
+    attach: (file) => {
+      void file.arrayBuffer().then(
+        (buffer) =>
+          Queue.offerUnsafe(panelAsks, {
+            kind: 'attach',
+            name: file.name,
+            mediaType: file.type,
+            data: base64Of(new Uint8Array(buffer)),
+            reply: (answer) => {
+              if (answer.kind === 'refused') {
+                update((now) => withProblem(now, answer.message))
+                return
+              }
+              update((now) => withAttachments(now, [...now.attachments, answer.attachment]))
+            },
+          }),
+        (error: unknown) =>
+          update((now) => withProblem(now, error instanceof Error ? error.message : String(error))),
+      )
+    },
+    removeAttachment: (index) =>
+      update((now) =>
+        withAttachments(
+          now,
+          now.attachments.filter((_attachment, at) => at !== index),
+        ),
+      ),
     addQuote: (text) => {
       const quote = text.trim()
       if (quote === '') return

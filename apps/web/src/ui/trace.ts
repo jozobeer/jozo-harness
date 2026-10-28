@@ -1,4 +1,4 @@
-import type { Quote, UiSessionEvent } from '@jozo-harness/ui-protocol'
+import type { Attachment, Quote, UiSessionEvent } from '@jozo-harness/ui-protocol'
 
 export type TraceToolStatus = 'running' | 'done' | 'error'
 
@@ -71,6 +71,8 @@ export interface TraceTurn {
   readonly prompt: string
   /** Passages the human quoted from earlier turns, in the order they were selected. */
   readonly quotes: ReadonlyArray<Quote>
+  /** Files the human attached to the message, in the order the composer showed them. */
+  readonly attachments: ReadonlyArray<Attachment>
   readonly startedAt: number
   readonly endedAt: number | undefined
   /** How the turn ended ('completed', 'cancelled', …); '' while it runs. */
@@ -183,6 +185,7 @@ const startTurn = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => [
     turn: numberOf(event.data, 'turn'),
     prompt: '',
     quotes: [],
+    attachments: [],
     startedAt: event.time,
     endedAt: undefined,
     outcome: '',
@@ -216,13 +219,34 @@ const quotesOf = (data: unknown): ReadonlyArray<Quote> => {
   return quotes
 }
 
+/** Reads the files a message carried, dropping any entry the page cannot read. */
+const attachmentsOf = (data: unknown): ReadonlyArray<Attachment> => {
+  const value = fieldOf(data, 'attachments')
+  if (!Array.isArray(value)) return []
+  const attachments: Array<Attachment> = []
+  for (const item of value) {
+    const hash = textOf(item, 'hash')
+    const mediaType = textOf(item, 'mediaType')
+    const name = textOf(item, 'name')
+    const bytes = numberOf(item, 'bytes')
+    if (hash === '' || name === '') continue
+    attachments.push({ hash, mediaType, name, bytes })
+  }
+  return attachments
+}
+
 /** The human's words reach the turn as an inbox claim; other sources are the harness's own. */
 const claimPrompt = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => {
   const message = fieldOf(event.data, 'message')
   if (textOf(message, 'source') !== 'user') return turns
   return inLastTurn(turns, (turn) =>
     turn.prompt === ''
-      ? { ...turn, prompt: textOf(message, 'text'), quotes: quotesOf(message) }
+      ? {
+          ...turn,
+          prompt: textOf(message, 'text'),
+          quotes: quotesOf(message),
+          attachments: attachmentsOf(message),
+        }
       : turn,
   )
 }
@@ -314,6 +338,7 @@ const standaloneTurn = (
     turn: 0,
     prompt: '',
     quotes: [],
+    attachments: [],
     startedAt: event.time,
     endedAt: undefined,
     outcome: '',

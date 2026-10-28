@@ -33,6 +33,7 @@ import {
   type SessionId,
   type SessionSummary,
 } from '@jozo-harness/session'
+import { attachmentRootOf } from '@jozo-harness/session/attachment-store'
 import { expandHome, makeSessionQuery } from '@jozo-harness/session-jsonl'
 import {
   SystemPrompt,
@@ -704,6 +705,7 @@ const createAgent = (
   effort: string,
   resume: SessionId | undefined,
   cwd: string,
+  attachmentDir: string,
 ) =>
   Effect.gen(function* () {
     const agentOptions: AgentOptions = {
@@ -713,6 +715,8 @@ const createAgent = (
       ...(spillBytes === undefined ? {} : { maxSpillBytes: spillBytes }),
       // Spilled text belongs in the jzh home, under the session that owns it.
       ...(options.jzhHome === undefined ? {} : { spillDir: join(options.jzhHome, 'spill') }),
+      // Attachments sit beside the session logs, so the store and the model read one place.
+      attachmentDir,
     }
     // A resumed session opens with the workspace its header recorded; `cwd` only
     // decides where a session that does not exist yet is created.
@@ -2127,7 +2131,16 @@ const buildSession = (
     )
 
     const agents = Context.get(context, Agents)
-    const agent = yield* createAgent(agents, options, route, spillBytes, effort, resume, cwd)
+    const agent = yield* createAgent(
+      agents,
+      options,
+      route,
+      spillBytes,
+      effort,
+      resume,
+      cwd,
+      attachmentRootOf(sessionRootOf(rows)),
+    )
     // The workspace belongs to the session, not to the run that serves it: tools,
     // instructions, and skill roots all read the cwd the session header recorded.
     const sessionOptions: CommandOptions = { ...options, cwd: agent.session.header.cwd }

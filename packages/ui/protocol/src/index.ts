@@ -7,8 +7,10 @@ import type {
   AskRequested,
 } from '@jozo-harness/safety'
 import {
+  AttachmentSchema,
   QuoteSchema,
   ReferenceSchema,
+  type Attachment,
   type FeedbackError,
   type FeedbackRating,
   type Quote,
@@ -19,6 +21,9 @@ import {
 
 /** The passage shape a page sends with a message; the session owns it. */
 export { QuoteSchema, type Quote }
+
+/** The file shape a page attaches; the store and the log share it. */
+export { AttachmentSchema, type Attachment }
 
 /**
  * The attached file or session shape, its budget, and its cut. The page and the
@@ -53,6 +58,8 @@ export const UiCommandSchema = Schema.Union([
     quotes: Schema.optionalKey(Schema.Array(QuoteSchema)),
     /** Files and sessions the human pointed at with @; they ride with the text. */
     references: Schema.optionalKey(Schema.Array(ReferenceSchema)),
+    /** Files the human attached from the composer; they ride with the text. */
+    attachments: Schema.optionalKey(Schema.Array(AttachmentSchema)),
   }),
   Schema.Struct({
     kind: Schema.Literal('approve'),
@@ -138,6 +145,7 @@ export interface UiHost {
     mode?: SubmitMode,
     quotes?: ReadonlyArray<Quote>,
     references?: ReadonlyArray<Reference>,
+    attachments?: ReadonlyArray<Attachment>,
   ) => Effect.Effect<void, SessionError>
   /** Answers one approval request. */
   readonly approve: (callId: string, approved: boolean) => Effect.Effect<void>
@@ -180,7 +188,13 @@ export const sendCommand = (
 ): Effect.Effect<void, SessionError | FeedbackError> => {
   switch (command.kind) {
     case 'submit':
-      return host.submit(command.text, command.mode, command.quotes, command.references)
+      return host.submit(
+        command.text,
+        command.mode,
+        command.quotes,
+        command.references,
+        command.attachments,
+      )
     case 'approve':
       return host.approve(command.callId, command.approved)
     case 'answer':

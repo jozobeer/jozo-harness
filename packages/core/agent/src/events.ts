@@ -1,9 +1,11 @@
 import {
+  AttachmentSchema,
   QuoteSchema,
   ReferenceSchema,
   USER_MESSAGE_SOURCES,
   registerLogOnlySessionEvents,
   registerSessionEventSchemas,
+  type Attachment,
   type Quote,
   type Reference,
   type SessionEventSchemaMap,
@@ -22,6 +24,8 @@ export interface UserMessage {
   readonly quotes?: ReadonlyArray<Quote>
   /** Files and sessions the human attached with @; they travel with the message to the log. */
   readonly references?: ReadonlyArray<Reference>
+  /** Files the human attached from the composer; they travel with the message to the log. */
+  readonly attachments?: ReadonlyArray<Attachment>
 }
 
 declare module '@jozo-harness/session/events' {
@@ -38,6 +42,7 @@ const UserMessageSchema = Schema.Struct({
   source: Schema.Literals(USER_MESSAGE_SOURCES),
   quotes: Schema.optionalKey(Schema.Array(QuoteSchema)),
   references: Schema.optionalKey(Schema.Array(ReferenceSchema)),
+  attachments: Schema.optionalKey(Schema.Array(AttachmentSchema)),
 })
 
 const InboxEventDataSchema = Schema.Struct({

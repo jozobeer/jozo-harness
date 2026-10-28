@@ -191,11 +191,14 @@ route は `opencode/<model>`、wire に送る model は `<model>` そのもの�
 | 設定 | `~/.config/jzh/config.yaml` | `--config`、`XDG_CONFIG_HOME` |
 | 秘密 | `~/.config/jzh/secrets.env`（モード 600） | `jzh auth add` / `set` / `remove` / `list` |
 | セッションログ | `~/.jzh/sessions/<id>/session.v1.jsonl` | `@jozo-harness/session-jsonl` 行の `root` |
+| 添付ファイル | session root の隣の `attachments/<sha256>`（既定は `~/.jzh/attachments/...`） | `@jozo-harness/session-jsonl` 行の `root` を変えると一緒に移る。内容のハッシュが名前なので、同じ内容は 1 ファイル |
 | 予定 | `~/.config/jzh/schedules.json` | `XDG_CONFIG_HOME`。キーは無い |
 | 公開ページ | session root の隣の `artifacts/<sessionId>/<name>.html`（既定は `~/.jzh/artifacts/...`） | `@jozo-harness/artifact` 行を足す（キーは無い）。`session-jsonl` 行の `root` を変えると一緒に移る |
 | Web UI | `127.0.0.1`。Tailscale を検出したときは tailnet IPv4 でも同じポートを listen する（`0.0.0.0` / `::` では受けない） | `--port`、設定ファイルの `port`。公開は `--public-url` |
 
 公開ページはセッションのログの隣に置く。セッションを削除するとページも `artifacts/<id>/` ごと消える（#291 の時点では残った）。ページだけを消したいときは `artifacts/<id>/` から消す。
+
+composer から添えたファイルもログの隣の `attachments/` に置く。保存名は本文の sha256 で、同じ内容は何度添っても同じ 1 ファイルを指す。1 メッセージ 8 件、画像 1 枚 10MB、テキスト 1 件 2MB、合計 20MB までで、テキストは先頭 32,000 文字をモデルに渡し、残りは保存域のパスと `read` の読み方を添える。対応しない種類、バイナリ、上限超えは保存せず、理由を返す。保存域を別に指定するキーは無く、`session-jsonl` 行の `root` に従う。
 
 `jzh web` は同じディレクトリを `GET /artifacts/<sessionId>` でも読める。返すのは HTML ページの配列で、各要素は `name`（`.html` を除いた名前）、`path`（`/artifact/<sessionId>/<name>`）、`bytes`（ファイルの大きさ）、`updatedAt`（mtime の ISO 8601）を持つ。並びは `name` の昇順で、ディレクトリが無ければ `[]` になる。`GET` 以外は 405、`Origin` を載せた要求は許可した origin 以外なら 403、cookie か起動 URL の token / code が無ければ 401 になる。画面はまだこの経路を呼ばず、Run ペインの `pages` はログの `page:` 行から組み立てる。
 

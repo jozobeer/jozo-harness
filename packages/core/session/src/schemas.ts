@@ -7,6 +7,8 @@ import {
 } from '@jozo-harness/llm'
 import { FileDiffSchema, ToolErrorInfoSchema } from '@jozo-harness/tools'
 import { Schema } from 'effect'
+import { AttachmentSchema } from './attachment.ts'
+import { ReferenceSchema } from './reference.ts'
 import { USER_MESSAGE_SOURCES, type TurnEndReason } from './events.ts'
 import { QuoteSchema } from './quote.ts'
 import { registerLogOnlySessionEvents } from './projections.ts'
@@ -105,6 +107,8 @@ const catalog = new Map<string, Schema.Schema<unknown>>([
       text: Schema.String,
       source: Schema.Literals(USER_MESSAGE_SOURCES),
       quotes: Schema.optionalKey(Schema.Array(QuoteSchema)),
+      references: Schema.optionalKey(Schema.Array(ReferenceSchema)),
+      attachments: Schema.optionalKey(Schema.Array(AttachmentSchema)),
     }),
   ],
   [

@@ -8,6 +8,7 @@ import type {
   LlmUsage,
   ToolSchema,
 } from '@jozo-harness/llm'
+import type { Attachment } from './attachment.ts'
 import type { Quote } from './quote.ts'
 import type { Reference } from './reference.ts'
 import type { Session } from './session.ts'
@@ -136,6 +137,8 @@ export interface SessionEventMap {
     readonly quotes?: ReadonlyArray<Quote>
     /** Files and sessions the human pointed at with @, kept apart from `text`. */
     readonly references?: ReadonlyArray<Reference>
+    /** Files the human attached from the composer, kept apart from `text`. */
+    readonly attachments?: ReadonlyArray<Attachment>
   }
   'assistant/message': AssistantMessageData
   'assistant/attempt': AssistantAttemptData

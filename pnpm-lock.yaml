@@ -272,6 +272,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@jozo-harness/session':
+        specifier: workspace:*
+        version: link:../../packages/core/session
       '@jozo-harness/tools-tier0':
         specifier: workspace:*
         version: link:../../packages/core/tools-tier0

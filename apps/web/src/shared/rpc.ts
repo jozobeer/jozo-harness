@@ -1,4 +1,4 @@
-import { UiCommandSchema, UiEventSchema } from '@jozo-harness/ui-protocol'
+import { AttachmentSchema, UiCommandSchema, UiEventSchema } from '@jozo-harness/ui-protocol'
 import { type Effect, Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
@@ -417,6 +417,21 @@ export const FilesRpc = Rpc.make('files', {
   error: Schema.String,
 })
 
+/**
+ * Keeps one file the composer attached under the hash of its bytes. The page
+ * sends the bytes; the server validates the type and size and returns the
+ * reference the message carries.
+ */
+export const AttachRpc = Rpc.make('attach', {
+  payload: Schema.Struct({
+    name: Schema.String,
+    mediaType: Schema.String,
+    data: Schema.String,
+  }),
+  success: AttachmentSchema,
+  error: Schema.String,
+})
+
 /** The goal and the schedules of one session, as of now. */
 export const StateRpc = Rpc.make('state', {
   payload: Schema.Struct({ sessionId: Schema.String }),
@@ -465,6 +480,7 @@ export const UiRpcs = RpcGroup.make(
   StoreChangedRpc,
   CommandsRpc,
   FilesRpc,
+  AttachRpc,
   StateRpc,
   ScheduleCreateRpc,
   SchedulePauseRpc,
