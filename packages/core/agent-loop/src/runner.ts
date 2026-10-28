@@ -34,7 +34,9 @@ import {
   messagesWithPrune,
   meterOf,
   pruneFor,
+  shortenTitle,
   summarizableMessages,
+  TITLE_MAX_CHARS,
   type CompactOptions,
   type CompactionCheckpoint,
   type RequestHeaderData,
@@ -46,7 +48,7 @@ import {
 import { SystemPrompt } from '@jozo-harness/system-prompt'
 import { applySpill, makeSpillWriter, type SpillOptions } from '@jozo-harness/tools'
 import { Tools, resultSummary } from '@jozo-harness/tools'
-import { Context, Effect, Exit, Layer, Queue, Schema, Stream } from 'effect'
+import { Context, Duration, Effect, Exit, Layer, Queue, Schema, Stream } from 'effect'
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -332,6 +334,23 @@ type CallOutcome = {
   readonly context: ReadonlyArray<string>
 }
 
+/** How long a model-written session name may be, unless the profile asks for less. */
+export const DEFAULT_TITLE_MAX_CHARS = 60
+/** How long the one naming call may take before the log keeps the truncated first line. */
+export const DEFAULT_TITLE_TIMEOUT_MS = 5_000
+
+/**
+ * The one prompt that asks a model for a name. It names the first message rather
+ * than the whole conversation: the name is written before the answer exists, and a
+ * title that quotes the opening is still a title. The limit is stated so the model
+ * rarely spends the log's own cut, and a reply that ignores it is cut anyway.
+ */
+const titlePrompt = (text: string, maxChars: number): string =>
+  `Name this chat session from its first message. Reply with one line of at most ${String(maxChars)} characters, in the language the message is written in: what the session is about, not a quote of the message, no quotation marks, no explanation.
+
+Message:
+${text}`
+
 /** What a step's calls add to the next request: one user message, duplicates dropped. */
 const contextMessageOf = (fragments: ReadonlyArray<string>): RequestMessage | undefined => {
   const unique = [...new Set(fragments.map((text) => text.trim()))].filter(
@@ -341,7 +360,7 @@ const contextMessageOf = (fragments: ReadonlyArray<string>): RequestMessage | un
   return { role: 'user', content: [{ type: 'text', text: unique.join('\n\n') }] }
 }
 
-const agentLoopEffect = (
+export const agentLoopEffect = (
   config: AgentLoopConfig = {},
 ): Effect.Effect<AgentRunner, never, Hooks | Tools | SystemPrompt | Llm> =>
   Effect.gen(function* () {
@@ -350,6 +369,12 @@ const agentLoopEffect = (
     const promptService = yield* SystemPrompt
     const llm = yield* Llm
     const { checkpointFor } = checkpointHelpersFor(llm)
+    const titleConfig = config.title
+    const titleMaxChars = Math.max(
+      1,
+      Math.min(titleConfig?.maxChars ?? DEFAULT_TITLE_MAX_CHARS, TITLE_MAX_CHARS),
+    )
+    const titleTimeoutMs = titleConfig?.timeoutMs ?? DEFAULT_TITLE_TIMEOUT_MS
     // The route is switchable while a session runs, so the budget is read per fold
     // rather than once when the layer is built.
     const budgetFor = (agent: Agent): TokenBudget =>
@@ -470,6 +495,57 @@ const agentLoopEffect = (
         for (const message of input) {
           yield* append(agent, 'user/message', { text: message.text, source: message.source })
         }
+      })
+
+    /**
+     * Writes the session's name once, from the first message the human sent. The
+     * call sits before the first request so the name stays within the head a
+     * listing reads; a failed, timed-out, or empty answer falls back to the
+     * truncated first line instead of failing the turn or naming the session twice.
+     * A name already in the log, a human's or an earlier model's, is never replaced.
+     */
+    const nameSession = (agent: Agent): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const title = titleConfig
+        if (title === undefined || title.enabled === false) return
+        const events = agent.session.events()
+        if (events.some((event) => event.type === 'session/title')) return
+        const first = events.find(
+          (event) => event.type === 'user/message' && event.data.source === 'user',
+        )
+        if (first === undefined || first.type !== 'user/message') return
+        const route = title.model ?? agent.options.route
+        const { provider, model } = splitRoute(route)
+        const written = yield* llm
+          .stream({
+            provider,
+            model,
+            params: {},
+            tools: [],
+            messages: [
+              {
+                role: 'user',
+                content: [{ type: 'text', text: titlePrompt(first.data.text, titleMaxChars) }],
+              },
+            ],
+          })
+          .pipe(
+            Stream.runFold(
+              () => '',
+              (answer: string, chunk: StreamChunk) =>
+                chunk.type === 'text-delta' ? answer + chunk.text : answer,
+            ),
+            Effect.map((answer) => shortenTitle(answer, titleMaxChars)),
+            Effect.timeout(Duration.millis(titleTimeoutMs)),
+            Effect.catchCause(() => Effect.succeed('')),
+          )
+        yield* append(
+          agent,
+          'session/title',
+          written === ''
+            ? { title: shortenTitle(first.data.text), source: 'fallback' }
+            : { title: written, source: 'model' },
+        )
       })
 
     /** Whether two headers describe the same assembled request. */
@@ -690,6 +766,7 @@ const agentLoopEffect = (
           cwdOf(agent.session.events(), agent.session.header),
           opening,
         )
+        yield* nameSession(agent)
         const envelope = envelopeOf(agent, build)
         yield* recordCompaction(agent, envelope)
         const rebuild = (): Effect.Effect<AgentRequest> =>
@@ -989,6 +1066,22 @@ const agentLoopEffect = (
 export const agentLoopLayer: Layer.Layer<AgentLoop, never, Hooks | Tools | SystemPrompt | Llm> =
   Layer.effect(AgentLoop, agentLoopEffect())
 
+/**
+ * The one naming call a session makes. The key is present or absent: without a
+ * `title` row the log keeps the first line, so a profile written for a provider
+ * with no spare route pays nothing.
+ */
+export const titleConfigSchema = Schema.Struct({
+  /** Whether the session is named; absent reads as yes, so the key's presence is enough. */
+  enabled: Schema.optionalKey(Schema.Boolean),
+  /** The route that writes the name; the session's own route when absent. */
+  model: Schema.optionalKey(Schema.String),
+  /** How long the name may be, in code units. Defaults to 60. */
+  maxChars: Schema.optionalKey(Schema.Int),
+  /** How long the call may take before the fallback, in ms. Defaults to 5000. */
+  timeoutMs: Schema.optionalKey(Schema.Int),
+})
+
 export const agentLoopConfigSchema = Schema.Struct({
   /** The tail this profile never prunes, in estimated tokens. Defaults to 16% of the window. */
   retainTokens: Schema.optionalKey(Schema.Int),
@@ -1023,6 +1116,8 @@ export const agentLoopConfigSchema = Schema.Struct({
   maxParallelToolCalls: Schema.optionalKey(Schema.Int),
   /** Transient provider failures worth another attempt, and how long to wait. */
   retry: Schema.optionalKey(retryConfigSchema),
+  /** Names the session from its first message; absent keeps the first line. */
+  title: Schema.optionalKey(titleConfigSchema),
 })
 
 export type AgentLoopConfig = Schema.Schema.Type<typeof agentLoopConfigSchema>

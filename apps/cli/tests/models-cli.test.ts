@@ -56,6 +56,17 @@ const setUp = async (baseUrl: string, settings?: string) => {
       "    name: '@jozo-harness/session-jsonl'",
       '    config:',
       '      root: ' + join(directory, 'sessions'),
+      // These tests count the requests the stub saw; a naming call is one more.
+      '  - id: agent-loop',
+      "    name: '@jozo-harness/agent-loop'",
+      '    config:',
+      '      title:',
+      '        enabled: false',
+      // The test process may itself be sandboxed; commands are not what this run tests.
+      '  - id: safety',
+      "    name: '@jozo-harness/safety'",
+      '    config:',
+      '      sandbox: none',
     ].join('\n'),
   )
   const config = join(directory, 'config.yaml')

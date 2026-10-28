@@ -1,29 +1,50 @@
-import { type SessionError, titleOfRecord } from '@jozo-harness/session'
+import {
+  betterTitle,
+  FIRST_MESSAGE_TITLE_RANK,
+  type SessionError,
+  type TitleCandidate,
+  TITLE_RANK,
+  titleEventOfRecord,
+  titleOfRecord,
+} from '@jozo-harness/session'
 import { Effect } from 'effect'
 import { persistenceError } from './errors.ts'
 import { readHead } from './head.ts'
 
 export { TITLE_MAX_CHARS } from '@jozo-harness/session'
 
-/** How much of a log is read to find the first thing the human typed. */
+/** How much of a log is read to find the name the session carries. */
 export const TITLE_READ_BYTES = 64 * 1024
 
-/** The title one line of a log carries, when that line is the human's own message. */
-const titleOfLine = (line: string): string | undefined => {
-  // Most lines are not the one: this spares a parse per event.
-  if (!line.includes('"user/message"')) return undefined
+/**
+ * The names one line of a log carries. A torn line carries none; the next one may.
+ * Most lines are neither a title nor a message, and are skipped without a parse.
+ */
+const candidatesOfLine = (line: string): ReadonlyArray<TitleCandidate> => {
+  if (!line.includes('"session/title"') && !line.includes('"user/message"')) return []
+  let record: { readonly type?: unknown; readonly data?: unknown }
   try {
-    const record = JSON.parse(line) as { readonly type?: unknown; readonly data?: unknown }
-    return titleOfRecord(record.type, record.data)
+    record = JSON.parse(line) as { readonly type?: unknown; readonly data?: unknown }
   } catch {
-    return undefined // a torn line is not a title; the next one may be
+    return []
   }
+  const written = titleEventOfRecord(record.type, record.data)
+  const first = titleOfRecord(record.type, record.data)
+  return [
+    ...(written === undefined ? [] : [{ title: written.title, rank: TITLE_RANK[written.source] }]),
+    ...(first === undefined || first === ''
+      ? []
+      : [{ title: first, rank: FIRST_MESSAGE_TITLE_RANK }]),
+  ]
 }
 
 /**
- * The first user message of a log, read without carrying the rest: a listing names
- * a session without reading the ten thousand events behind it. A log whose first
- * words sit past the budget stays unnamed rather than read whole.
+ * The name of a log, read without carrying the rest: a listing names a session
+ * without reading the ten thousand events behind it. A human's name wins, then the
+ * model's, then the fallback, then the first message; a log whose words sit past
+ * the budget stays unnamed rather than read whole. The model's name is written
+ * before the answer of the first step, so the head holding the first message also
+ * holds it.
  */
 export const readTitle = (
   path: string,
@@ -34,9 +55,11 @@ export const readTitle = (
       try: () => readHead(path, maxBytes),
       catch: (cause) => persistenceError(`cannot read ${path}`, cause),
     })
+    let best: TitleCandidate | undefined
     for (const line of text.split('\n')) {
-      const title = titleOfLine(line)
-      if (title !== undefined) return title
+      for (const candidate of candidatesOfLine(line)) {
+        best = betterTitle(best, candidate)
+      }
     }
-    return ''
+    return best?.title ?? ''
   })

@@ -16,6 +16,9 @@ const header = (): string =>
 const message = (seq: number, source: string, text: string): string =>
   JSON.stringify({ seq, time: seq, type: 'user/message', data: { text, source } })
 
+const titleEvent = (seq: number, title: string, source: 'model' | 'human' | 'fallback'): string =>
+  JSON.stringify({ seq, time: seq, type: 'session/title', data: { title, source } })
+
 /** One log file holding exactly these lines, and nothing else. */
 const writeLog = async (lines: ReadonlyArray<string>): Promise<{ root: string; path: string }> => {
   const root = await mkdtemp(join(tmpdir(), 'jozo-harness-title-'))
@@ -39,6 +42,29 @@ describe('the title of a session', () => {
     ])
     const title = await Effect.runPromise(readTitle(written.path))
     expect(title).toBe('count the files')
+    await rm(written.root, { recursive: true, force: true })
+  })
+
+  test('the name a model wrote is read from the same head as the message', async () => {
+    const written = await writeLog([
+      header(),
+      message(2, 'user', 'please fix the flaky login test that only fails on CI sometimes'),
+      titleEvent(3, 'flaky login test', 'model'),
+    ])
+    const title = await Effect.runPromise(readTitle(written.path))
+    expect(title).toBe('flaky login test')
+    await rm(written.root, { recursive: true, force: true })
+  })
+
+  test('a human name beats the model name in the head', async () => {
+    const written = await writeLog([
+      header(),
+      message(2, 'user', 'count the files'),
+      titleEvent(3, 'counting files', 'model'),
+      titleEvent(4, 'my own name', 'human'),
+    ])
+    const title = await Effect.runPromise(readTitle(written.path))
+    expect(title).toBe('my own name')
     await rm(written.root, { recursive: true, force: true })
   })
 

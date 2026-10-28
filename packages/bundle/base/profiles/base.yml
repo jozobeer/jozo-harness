@@ -39,6 +39,11 @@ plugins:
   - id: agent-loop
     name: '@jozo-harness/agent-loop'
     config:
+      # One short call names a session after its first message; the session's own
+      # route answers unless `model` points elsewhere. A failed call leaves the
+      # first line instead, so the row is never blank.
+      title:
+        maxChars: 60
       # The default route's window, so a 60k session never reaches the line. The
       # key is the route's model name; the local daemon's name is a wire detail.
       models:

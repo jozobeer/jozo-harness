@@ -24,6 +24,11 @@ describe('the tui through a real process', () => {
         "    name: '@jozo-harness/session-jsonl'",
         '    config:',
         '      root: ' + join(dir, 'sessions'),
+        // The test process may itself be sandboxed; this checks the terminal, not commands.
+        '  - id: safety',
+        "    name: '@jozo-harness/safety'",
+        '    config:',
+        '      sandbox: none',
       ].join('\n'),
     )
     const child = spawn(

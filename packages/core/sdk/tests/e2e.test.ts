@@ -101,6 +101,13 @@ describe('@jozo-harness/sdk against a real jzh acp process', () => {
         '    config:',
         '      preset: workspace-write',
         '      sandbox: none',
+        // The stub answers the turn, not a naming call; one more request would
+        // take the tool call the test is about.
+        '  - id: agent-loop',
+        "    name: '@jozo-harness/agent-loop'",
+        '    config:',
+        '      title:',
+        '        enabled: false',
       ].join('\n'),
     )
     const config = join(dir, 'config.yaml')

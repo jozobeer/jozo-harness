@@ -142,6 +142,9 @@ const runner = async (run: {
     { id: 'session-jsonl', name: '@jozo-harness/session-jsonl', config: { root: run.logs } },
     // The recording stands in for the provider the profile names.
     { id: 'llm', name: 'replay-llm', config: {} },
+    // The recordings hold the turns as they were made; a naming call would draw
+    // the next recorded stream and shift every event behind it.
+    { id: 'agent-loop', name: '@jozo-harness/agent-loop', config: { title: { enabled: false } } },
     ...(run.extraRows ?? []),
   ]
   const runOnce = async (extra: {

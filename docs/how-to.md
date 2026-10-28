@@ -252,6 +252,12 @@ turn が走っている間に composer から送った行は、既定では**次
 
 積まれた行は composer の上に出る。`queued` は次の turn、`steering` は走っている turn の next step。steer は turn を止めない。止めたいときは `Stop` を使う。
 
+## セッションに名前を付ける
+
+`agent-loop` の `title` 行があると、最初の発話のあとに 1 回だけ、モデルがそのセッションの短い名前を書く。名前は `session/title` としてログに残り、一覧（`jzh sessions`、`jzh web`）はその行を読む。モデルは最初の発話を要約した 1 行（既定 60 文字、`maxChars` で変える）を返し、失敗・timeout・空文字のときは最初の発話の切り詰め（120 文字、1 行）に落ちる。名前の生成で turn は落ちない。
+
+`jzh web` の行メニューから付けた名前は `.web-meta.json` に残り、モデルの名前より優先する。2 回目以降の発話では作り直さない。無効にしたいときは profile の `agent-loop` から `title` を外す。
+
 ## エディタから ACP で駆動する
 
 `jzh acp` は stdin/stdout で ACP（JSON-RPC 2.0）を話す。stdout に載るのは応答と通知だけで、ログや診断は stderr に出る。モデル・effort・プロファイルは通常の run と同じフラグ（`--model` / `--effort` / `--profile` / `--patch` / `--config`）で決める。
