@@ -21,7 +21,12 @@ import {
   type SessionSink,
   type SessionSummary,
 } from '@jozo-harness/session'
-import { SystemPrompt, makeSystemPrompt, type SystemPromptShape } from '@jozo-harness/system-prompt'
+import {
+  SystemPrompt,
+  makeSystemPrompt,
+  tmuxContextEntry,
+  type SystemPromptShape,
+} from '@jozo-harness/system-prompt'
 import {
   Tools,
   ToolError,
@@ -189,6 +194,44 @@ describe('agent loop', () => {
       .events()
       .flatMap((event) => (event.type === 'assistant/message' ? [event.data.content] : []))
     expect(assistant).toEqual([[{ type: 'text', text }]])
+  })
+
+  test('adds a runtime snapshot only when the tmux location changes', async () => {
+    let output = 'main:2.1'
+    const reader = {
+      env: { TMUX: '/tmp/tmux-501/default,1,0', TMUX_PANE: '%1' },
+      run: () => output,
+    }
+    const events = await scenario(
+      [chunks(textTurn('one')), chunks(textTurn('two')), chunks(textTurn('three'))],
+      (ctx) =>
+        Effect.gen(function* () {
+          yield* Effect.orDie(ctx.prompt.context(tmuxContextEntry(reader)))
+          const agent = yield* ctx.agents.create({
+            cwd: '/work',
+            options: { route: 'fake/model' },
+          })
+          yield* agent.followup({ text: 'one', source: 'user' })
+          yield* agent.whenIdle
+          yield* agent.followup({ text: 'two', source: 'user' })
+          yield* agent.whenIdle
+          output = 'main:2.2'
+          yield* agent.followup({ text: 'three', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+    )
+
+    const snapshots = events.session
+      .events()
+      .flatMap((event) =>
+        event.type === 'user/message' && event.data.source === 'runtime-context'
+          ? [event.data.text]
+          : [],
+      )
+    expect(snapshots).toHaveLength(2)
+    expect(snapshots[0]).toContain('pane 1')
+    expect(snapshots[1]).toContain('pane 2')
   })
 
   test('a quoted passage is logged with the message, cut to the size a log keeps', async () => {

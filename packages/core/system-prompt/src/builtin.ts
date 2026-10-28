@@ -1,5 +1,6 @@
 import type { ToolSchema } from '@jozo-harness/llm'
 import { Effect } from 'effect'
+import { tmuxContextEntry, type TmuxProbe } from './tmux.ts'
 import { toolSignatureText } from './tool-signatures.ts'
 import type {
   AssembleContext,
@@ -139,6 +140,10 @@ export interface BuiltinOptions {
   readonly includeToolSignatures?: boolean
   /** The workspace and the clock, always present in a runtime snapshot. */
   readonly includeRuntimeContext?: boolean
+  /** Adds the tmux session, window, and pane; off because most sessions have no tmux. */
+  readonly tmuxContext?: boolean
+  /** The tmux reader; tests replace it so they do not need a tmux server. */
+  readonly tmux?: TmuxProbe
 }
 
 /** Guidance for the tools of this assembly, in the table's fixed order. */
@@ -158,6 +163,7 @@ export function builtinContexts(options: BuiltinOptions = {}): ReadonlyArray<Run
       order: CWD_CONTEXT_ORDER,
       text: (subject: RuntimeContextSubject) => Effect.succeed('cwd: ' + subject.cwd),
     },
+    ...(options.tmuxContext === true ? [tmuxContextEntry(options.tmux)] : []),
     {
       name: 'time',
       order: TIME_CONTEXT_ORDER,

@@ -1,5 +1,6 @@
 export * from './plugin.ts'
 export * from './builtin.ts'
+export * from './tmux.ts'
 export * from './tool-signatures.ts'
 export * from './system-prompt.ts'
 export * from './types.ts'
