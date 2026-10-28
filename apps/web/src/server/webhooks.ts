@@ -161,6 +161,76 @@ const messageOf = (rule: WebhookRule, summary: string): string => {
   return prompt === '' ? summary : prompt + '\n\n' + summary
 }
 
+/** Why a body that never became bytes is refused; the cap is the sender's fault too. */
+const bodyRefusal = (
+  body: Exclude<BodyRead, { readonly kind: 'body' }>,
+): { readonly status: number; readonly message: string } => {
+  switch (body.kind) {
+    case 'too-large':
+      return { status: 400, message: 'the event is too large' }
+    case 'timed-out':
+      return { status: 408, message: 'the event did not arrive in time' }
+    case 'failed':
+      return { status: 400, message: 'the event could not be read' }
+  }
+}
+
+/** The delivery as a JSON object, or undefined when it is not one. */
+const payloadOf = (bytes: Buffer): Readonly<Record<string, unknown>> | undefined => {
+  try {
+    const payload: unknown = JSON.parse(bytes.toString('utf8'))
+    return isRecord(payload) ? payload : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Reads, verifies, and turns one delivery into a turn; the caller has matched the rule. */
+const answerDelivery = async (
+  request: IncomingMessage,
+  response: ServerResponse,
+  rule: WebhookRule,
+  gate: WebhookGate,
+): Promise<void> => {
+  const body = await readBody(request)
+  if (body.kind !== 'body') {
+    const refusal = bodyRefusal(body)
+    refuse(response, refusal.status, refusal.message)
+    return
+  }
+  const signature = request.headers['x-hub-signature-256']
+  if (
+    !signatureMatches(
+      rule.secret,
+      body.bytes,
+      typeof signature === 'string' ? signature : undefined,
+    )
+  ) {
+    refuse(response, 401, 'the signature does not match')
+    return
+  }
+  const payload = payloadOf(body.bytes)
+  if (payload === undefined) {
+    refuse(response, 400, 'the event is not a JSON object')
+    return
+  }
+  const event = request.headers['x-github-event']
+  const started = await startWithTimeout(
+    gate,
+    rule,
+    messageOf(rule, summaryOf(typeof event === 'string' ? event : 'unknown', payload)),
+  )
+  if (started.kind === 'timed-out') {
+    refuse(response, 504, 'the session did not start in time')
+    return
+  }
+  if (started.kind === 'unavailable') {
+    refuse(response, 502, 'the session could not start')
+    return
+  }
+  accept(response, started.sessionId)
+}
+
 /**
  * Answers a delivery to a configured rule. This route sits outside the page's
  * cookie and origin gate: the sender is a service, not a browser, so the body
@@ -184,57 +254,6 @@ export const answerWebhook = async (
     refuse(response, 405, 'method not allowed')
     return true
   }
-  const body = await readBody(request)
-  if (body.kind === 'too-large') {
-    // The cap and a body that is not JSON are both the sender's fault, so both
-    // answer 400; only the signature is a refusal about identity.
-    refuse(response, 400, 'the event is too large')
-    return true
-  }
-  if (body.kind === 'timed-out') {
-    refuse(response, 408, 'the event did not arrive in time')
-    return true
-  }
-  if (body.kind === 'failed') {
-    refuse(response, 400, 'the event could not be read')
-    return true
-  }
-  const signature = request.headers['x-hub-signature-256']
-  if (
-    !signatureMatches(
-      rule.secret,
-      body.bytes,
-      typeof signature === 'string' ? signature : undefined,
-    )
-  ) {
-    refuse(response, 401, 'the signature does not match')
-    return true
-  }
-  let payload: unknown
-  try {
-    payload = JSON.parse(body.bytes.toString('utf8'))
-  } catch {
-    refuse(response, 400, 'the event is not JSON')
-    return true
-  }
-  if (!isRecord(payload)) {
-    refuse(response, 400, 'the event is not a GitHub payload')
-    return true
-  }
-  const event = request.headers['x-github-event']
-  const started = await startWithTimeout(
-    gate,
-    rule,
-    messageOf(rule, summaryOf(typeof event === 'string' ? event : 'unknown', payload)),
-  )
-  if (started.kind === 'timed-out') {
-    refuse(response, 504, 'the session did not start in time')
-    return true
-  }
-  if (started.kind === 'unavailable') {
-    refuse(response, 502, 'the session could not start')
-    return true
-  }
-  accept(response, started.sessionId)
+  await answerDelivery(request, response, rule, gate)
   return true
 }

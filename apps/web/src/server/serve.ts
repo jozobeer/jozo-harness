@@ -527,6 +527,15 @@ const respondTo = async (
     })
   )
     return
+  await answerPage(response, staticRoot, path)
+}
+
+/** Serves the browser app's own files; every other path is 404. */
+const answerPage = async (
+  response: ServerResponse,
+  staticRoot: string,
+  path: string,
+): Promise<void> => {
   if (path === UI_PATH) {
     endWith(response, 426, 'websocket required')
     return
