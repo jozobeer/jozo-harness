@@ -94,6 +94,7 @@ type Call =
   | { readonly kind: 'act'; readonly sessionId: string; readonly action: SessionAction }
   | { readonly kind: 'askWorkspaces' }
   | { readonly kind: 'addWorkspace'; readonly cwd: string }
+  | { readonly kind: 'openWorkspace'; readonly app: string }
   | { readonly kind: 'browseDirectories'; readonly path: string }
   | { readonly kind: 'stopSubagent'; readonly id: string }
   | { readonly kind: 'openJob'; readonly id: string }
@@ -186,6 +187,7 @@ const makeStore = (
     referencePath: (path) => calls.push({ kind: 'referencePath', path }),
     previewPath: (path) => calls.push({ kind: 'previewPath', path }),
     addWorkspace: (cwd) => calls.push({ kind: 'addWorkspace', cwd }),
+    openWorkspace: (app) => calls.push({ kind: 'openWorkspace', app }),
     browseDirectories: (path, reply) => {
       calls.push({ kind: 'browseDirectories', path })
       browses.push({ path, reply })
@@ -3743,6 +3745,45 @@ describe('the rail', () => {
     const branch = container.querySelector('.branch')
     expect(branch?.textContent).toBe('feature/status-bar')
     expect(branch?.getAttribute('title')).toBe('git branch feature/status-bar')
+  })
+
+  test('the status bar opens the workspace in the app the reader picked', () => {
+    const { store, calls } = makeStore({
+      info: { cwd: '/work/project', model: '', turns: 0 },
+      openApps: {
+        apps: [
+          { id: 'finder', label: 'Finder' },
+          { id: 'vscode', label: 'Visual Studio Code' },
+        ],
+      },
+    })
+    const { container } = render(() => (
+      <Status store={store} drawer={false} onDrawer={() => undefined} />
+    ))
+
+    const picker = container.querySelector('.open-app select')
+    expect(picker?.getAttribute('aria-label')).toBe('Open workspace in')
+    fireEvent.change(picker as HTMLSelectElement, { target: { value: 'vscode' } })
+    fireEvent.click(container.querySelector('.open-app button') as HTMLButtonElement)
+    expect(calls).toContainEqual({ kind: 'openWorkspace', app: 'vscode' })
+  })
+
+  test('the status bar says no app can open the workspace instead of a dead control', () => {
+    const { store } = makeStore({
+      info: { cwd: '/work/project', model: '', turns: 0 },
+      openApps: { apps: [], reason: 'no app on this machine can open a workspace with a folder' },
+    })
+    const { container } = render(() => (
+      <Status store={store} drawer={false} onDrawer={() => undefined} />
+    ))
+
+    const note = container.querySelector('.open-app.none')
+    expect(note?.textContent).toBe('No app can open this workspace')
+    expect(note?.getAttribute('title')).toBe(
+      'no app on this machine can open a workspace with a folder',
+    )
+    expect(container.querySelector('.open-app select')).toBeNull()
+    expect(container.querySelector('.open-app button')).toBeNull()
   })
 
   test('the status bar leaves the branch out when the workspace names none', () => {
