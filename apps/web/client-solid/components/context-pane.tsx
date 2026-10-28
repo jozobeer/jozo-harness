@@ -1,6 +1,13 @@
 import { For, Match, Show, Switch, createEffect, createSignal, onCleanup, onMount } from 'solid-js'
 import type { ConversationBlock } from '@jozo-harness/ui-view'
-import type { PluginRowView, RunStateView, SettingsView } from '../../src/shared/rpc.ts'
+import type {
+  PluginCatalogView,
+  PluginChangeRequest,
+  PluginRowView,
+  PluginsView,
+  RunStateView,
+  SettingsView,
+} from '../../src/shared/rpc.ts'
 import type { Pane } from '../../src/ui/state.ts'
 import { THEMES, type Theme } from '../../src/ui/theme.ts'
 import type { TurnView } from '../../src/ui/trajectory.ts'
@@ -348,51 +355,218 @@ const Jobs = (props: { store: SessionStore; jobs: RunStateView['jobs'] }) => {
   )
 }
 
+/** Why a plugin request did not land, as one line. */
+const pluginProblem = (error: unknown): string =>
+  'the plugin change failed: ' + (error instanceof Error ? error.message : String(error))
+
+/** What a change just did, said in the pane's own words. */
+const pluginNote = (change: PluginChangeRequest, view: PluginsView): string => {
+  if (change.action === 'install') return 'installed; it takes effect at the next start'
+  if (change.action === 'retry') {
+    return view.failures.some((failure) => failure.id === change.id)
+      ? 'the row still fails; the reason is beside it'
+      : 'the row is wired into this run again'
+  }
+  return 'the settings changed; this run keeps the tools it already wired until the next start'
+}
+
 /**
- * The rows this run was built from. The route reads them on every request, so
- * opening the pane again shows the rows a change since the last look left.
+ * The rows this run was built from, the optional bundles the build carries, and
+ * the rows whose wiring failed. A change writes the settings the next start
+ * reads; only Retry touches the running run, by wiring the failed row again.
  */
 const Plugins = () => {
-  const [rows, setRows] = createSignal<ReadonlyArray<PluginRowView> | undefined>(undefined)
+  const [view, setView] = createSignal<PluginsView | undefined>(undefined)
   const [failed, setFailed] = createSignal(false)
+  const [busy, setBusy] = createSignal<string | undefined>(undefined)
+  const [problem, setProblem] = createSignal('')
+  const [notice, setNotice] = createSignal('')
+  /** The bundle whose install the page is asking the human to approve. */
+  const [confirming, setConfirming] = createSignal<string | undefined>(undefined)
+
+  const failureOf = (id: string): string | undefined =>
+    view()?.failures.find((failure) => failure.id === id)?.reason
+
+  const send = async (key: string, change: PluginChangeRequest): Promise<void> => {
+    if (busy() !== undefined) return
+    setBusy(key)
+    setProblem('')
+    setNotice('')
+    try {
+      const answer = await fetch('/plugins', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'X-Requested-With': 'fetch' },
+        body: JSON.stringify(change),
+      })
+      const text = await answer.text()
+      if (!answer.ok) {
+        setProblem(text)
+        return
+      }
+      const next = JSON.parse(text) as PluginsView
+      setView(next)
+      setConfirming(undefined)
+      setNotice(pluginNote(change, next))
+    } catch (error) {
+      setProblem(pluginProblem(error))
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
   onMount(() => {
     void (async () => {
       try {
         const answer = await fetch('/plugins')
         if (!answer.ok) throw new Error(String(answer.status))
-        const body: { readonly rows: ReadonlyArray<PluginRowView> } = await answer.json()
-        setRows(body.rows)
+        setView((await answer.json()) as PluginsView)
       } catch {
         setFailed(true)
       }
     })()
   })
+
   return (
     <section class="run-work run-work-plugins">
       <span class="run-section-title">plugins</span>
       <Show
-        when={rows()}
+        when={view()}
         fallback={
           <Show when={failed()} fallback={<div class="run-empty">reading…</div>}>
             <div class="run-empty">could not read the plugin rows</div>
           </Show>
         }
       >
-        {(list) => (
-          <Show when={list().length > 0} fallback={<div class="run-empty">no plugin rows</div>}>
-            <ul class="run-plugins">
-              <For each={list()}>
-                {(row) => (
-                  <li class="run-plugin" data-plugin={row.id}>
-                    <span class="run-plugin-name">{row.name}</span>
-                    <span class={'run-plugin-state ' + (row.enabled ? 'on' : 'off')}>
-                      {row.enabled ? 'on' : 'off'}
-                    </span>
-                  </li>
-                )}
-              </For>
-            </ul>
-          </Show>
+        {(current) => (
+          <>
+            <Show
+              when={current().rows.length > 0}
+              fallback={<div class="run-empty">no plugin rows</div>}
+            >
+              <ul class="run-plugins">
+                <For each={current().rows}>
+                  {(row: PluginRowView) => (
+                    <li class="run-plugin" data-plugin={row.id}>
+                      <span class="run-plugin-name">{row.name}</span>
+                      <span class={'run-plugin-state ' + (row.enabled ? 'on' : 'off')}>
+                        {row.enabled ? 'on' : 'off'}
+                      </span>
+                      <Show when={!row.running}>
+                        <span class="run-plugin-next">next start</span>
+                      </Show>
+                      <button
+                        class="run-plugin-toggle"
+                        type="button"
+                        data-plugin-toggle={row.id}
+                        disabled={busy() !== undefined}
+                        onClick={() =>
+                          void send(row.id, {
+                            action: 'set-enabled',
+                            id: row.id,
+                            enabled: !row.enabled,
+                          })
+                        }
+                      >
+                        {row.enabled ? 'Turn off' : 'Turn on'}
+                      </button>
+                      <Show when={failureOf(row.id)}>
+                        {(reason) => (
+                          <>
+                            <span class="run-plugin-failure" role="alert">
+                              {reason()}
+                            </span>
+                            <button
+                              class="run-plugin-retry"
+                              type="button"
+                              data-plugin-retry={row.id}
+                              disabled={busy() !== undefined}
+                              onClick={() => void send(row.id, { action: 'retry', id: row.id })}
+                            >
+                              Retry
+                            </button>
+                          </>
+                        )}
+                      </Show>
+                    </li>
+                  )}
+                </For>
+              </ul>
+            </Show>
+            <Show when={current().catalog.length > 0}>
+              <span class="run-section-title">optional bundles</span>
+              <ul class="run-plugin-catalog">
+                <For each={current().catalog}>
+                  {(bundle: PluginCatalogView) => (
+                    <li class="run-bundle" data-bundle={bundle.id}>
+                      <span class="run-plugin-name">{bundle.name}</span>
+                      <span class="run-bundle-summary">{bundle.summary}</span>
+                      <Show
+                        when={!bundle.installed}
+                        fallback={<span class="run-plugin-next">installed</span>}
+                      >
+                        <Show
+                          when={!bundle.needsConfig}
+                          fallback={
+                            <span class="run-plugin-next">needs config in the settings file</span>
+                          }
+                        >
+                          <Show
+                            when={confirming() === bundle.id}
+                            fallback={
+                              <button
+                                class="run-plugin-install"
+                                type="button"
+                                data-plugin-install={bundle.id}
+                                disabled={busy() !== undefined}
+                                onClick={() => setConfirming(bundle.id)}
+                              >
+                                Install
+                              </button>
+                            }
+                          >
+                            <span class="run-bundle-ask">
+                              {'Install ' + bundle.name + ' for the next start?'}
+                            </span>
+                            <button
+                              class="run-plugin-install"
+                              type="button"
+                              data-plugin-confirm={bundle.id}
+                              disabled={busy() !== undefined}
+                              onClick={() =>
+                                void send(bundle.id, {
+                                  action: 'install',
+                                  id: bundle.id,
+                                  name: bundle.name,
+                                })
+                              }
+                            >
+                              Install
+                            </button>
+                            <button
+                              class="run-plugin-cancel"
+                              type="button"
+                              data-plugin-cancel={bundle.id}
+                              onClick={() => setConfirming(undefined)}
+                            >
+                              Cancel
+                            </button>
+                          </Show>
+                        </Show>
+                      </Show>
+                    </li>
+                  )}
+                </For>
+              </ul>
+            </Show>
+            <Show when={problem() !== ''}>
+              <div class="run-plugin-problem" role="alert">
+                {problem()}
+              </div>
+            </Show>
+            <Show when={notice() !== ''}>
+              <div class="run-plugin-notice">{notice()}</div>
+            </Show>
+          </>
         )}
       </Show>
     </section>

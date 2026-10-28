@@ -371,7 +371,11 @@ const serve = (
         settings: (options.settings ?? makeSettings()).port,
         workspaces: workspacesPort,
         commands: () => [],
-        plugins: () => [],
+        plugins: {
+          view: () => ({ rows: [], catalog: [], failures: [] }),
+          known: () => [],
+          change: async () => ({ ok: true }),
+        },
         port: 0,
         staticRoot: root,
         onReady: (urls) => {

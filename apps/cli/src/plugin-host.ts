@@ -65,7 +65,16 @@ const unloadable = (
 ): ToolError | undefined => {
   if (change.kind !== 'add') return undefined
   const plugin: Plugin<any, any, any> | undefined = plugins.find((one) => one.name === change.name)
-  if (plugin === undefined) return undefined
+  if (plugin === undefined) {
+    return new ToolError({
+      code: 'invalid-arguments',
+      message:
+        'this build does not have ' +
+        change.name +
+        '; it has ' +
+        plugins.map((one) => one.name).join(', '),
+    })
+  }
   // `Plugin` erases the services a config needs; the loader narrows the same way.
   const config: Parameters<typeof Schema.decodeUnknownResult>[0] =
     plugin.config as unknown as Parameters<typeof Schema.decodeUnknownResult>[0]
