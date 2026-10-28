@@ -179,14 +179,28 @@ const NOTHING: Omit<Words, 'task'> = {
   sessionId: undefined,
 }
 
+/** The one-word subcommands; any other single word is a one-shot task. */
+const singleWord = (word: string | undefined): Words | undefined => {
+  switch (word) {
+    case 'models':
+      return { ...NOTHING, models: true, task: undefined }
+    case 'web':
+      return { ...NOTHING, web: true, task: undefined }
+    // An editor starts it; the protocol on stdin is the whole command.
+    case 'acp':
+      return { ...NOTHING, acp: true, task: undefined }
+    default:
+      return undefined
+  }
+}
+
 const wordsOf = (words: ReadonlyArray<string>): Words => {
-  const first = words[0]
-  if (words.length === 1 && first === 'models') return { ...NOTHING, models: true, task: undefined }
-  if (words.length === 1 && first === 'web') return { ...NOTHING, web: true, task: undefined }
-  // An editor starts it; the protocol on stdin is the whole command.
-  if (first === 'acp' && words.length === 1) return { ...NOTHING, acp: true, task: undefined }
+  if (words.length === 1) {
+    const single = singleWord(words[0])
+    if (single !== undefined) return single
+  }
   // `jzh sessions` lists them; `jzh sessions <id>` reads one back.
-  if (first === 'sessions' && words.length <= 2) {
+  if (words[0] === 'sessions' && words.length <= 2) {
     return { ...NOTHING, sessions: true, sessionId: words[1], task: undefined }
   }
   return { ...NOTHING, task: words.length === 0 ? undefined : words.join(' ') }

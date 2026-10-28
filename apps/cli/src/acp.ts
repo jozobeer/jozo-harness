@@ -48,17 +48,19 @@ export const approvedOf = (value: unknown): boolean => {
   return typeof optionId === 'string' && optionId === 'allow-once'
 }
 
+/** One content block's text, or undefined for a tool call or a malformed block. */
+const blockText = (block: unknown): string | undefined => {
+  if (!isRecord(block) || block['type'] !== 'text') return undefined
+  return typeof block['text'] === 'string' ? block['text'] : undefined
+}
+
 /** The text a settled assistant message carries, or undefined for a tool-only turn. */
 const textOf = (data: unknown): string | undefined => {
-  if (!isRecord(data)) return undefined
-  const content = data['content']
-  if (!Array.isArray(content)) return undefined
-  const parts: Array<string> = []
-  for (const block of content) {
-    if (!isRecord(block) || block['type'] !== 'text') continue
-    const text = block['text']
-    if (typeof text === 'string') parts.push(text)
-  }
+  if (!isRecord(data) || !Array.isArray(data['content'])) return undefined
+  const parts = data['content'].flatMap((block) => {
+    const text = blockText(block)
+    return text === undefined ? [] : [text]
+  })
   return parts.length === 0 ? undefined : parts.join('')
 }
 
@@ -133,23 +135,20 @@ export const acpSessionPortOf = (
         return askPermission(callId, tool, typeof reason === 'string' ? reason : '')
       }
 
-      const onTurnEvent = (type: string, data: unknown): Effect.Effect<void> => {
-        switch (type) {
-          case 'turn/start':
-            if (turn !== undefined) turnStarted = true
-            return Effect.void
-          case 'turn/end':
-            return ownsTurn()
-              ? settle({ stopReason: cancelled ? 'cancelled' : 'end-turn' })
-              : Effect.void
-          case 'assistant/message':
-            return forwardAssistantText(data)
-          case 'safety/approval/requested':
-            return askForApproval(data)
-          default:
-            return Effect.void
-        }
+      // A type this adapter does not draw on is simply not forwarded.
+      const turnHandlers: Readonly<Record<string, (data: unknown) => Effect.Effect<void>>> = {
+        'turn/start': () => {
+          if (turn !== undefined) turnStarted = true
+          return Effect.void
+        },
+        'turn/end': () =>
+          ownsTurn() ? settle({ stopReason: cancelled ? 'cancelled' : 'end-turn' }) : Effect.void,
+        'assistant/message': forwardAssistantText,
+        'safety/approval/requested': askForApproval,
       }
+
+      const onTurnEvent = (type: string, data: unknown): Effect.Effect<void> =>
+        turnHandlers[type]?.(data) ?? Effect.void
 
       const onEvent = (event: UiEvent): Effect.Effect<void> =>
         event.kind === 'session' ? onTurnEvent(event.event.type, event.event.data) : Effect.void
