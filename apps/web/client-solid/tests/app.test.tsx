@@ -560,6 +560,41 @@ describe('the Solid page', () => {
     expect(container.querySelector('.turn-ask .body')?.textContent).toBe('hello')
   })
 
+  test('an attached file keeps a card above the prompt and a chip in the composer', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const attachment = {
+      hash: 'a'.repeat(64),
+      mediaType: 'image/png',
+      name: 'diagram.png',
+      bytes: 2_048,
+    }
+    const { store } = makeStore({
+      conversation: { ...emptyConversation, blocks: [{ kind: 'user', text: 'what is this?' }] },
+      attachments: [attachment],
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'agent/inbox/claimed', {
+          message: { text: 'what is this?', source: 'user', attachments: [attachment] },
+        }),
+      ]),
+    })
+
+    const { container } = render(() => (
+      <>
+        <Conversation store={store} />
+        <Composer store={store} />
+      </>
+    ))
+
+    expect(
+      container.querySelector('.turn-ask .attachment-card .attachment-name')?.textContent,
+    ).toBe('diagram.png')
+    expect(container.querySelector('.turn-ask .attachment-size')?.textContent).toBe('2.0 KB')
+    expect(
+      container.querySelector('#attachments .attachment-chip .attachment-name')?.textContent,
+    ).toBe('diagram.png')
+  })
+
   test('selecting text in the conversation offers it to the next message as a quote', () => {
     const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
     const { store, calls } = makeStore({

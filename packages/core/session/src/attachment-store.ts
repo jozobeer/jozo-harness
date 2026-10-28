@@ -103,8 +103,9 @@ export const saveAttachment = (
       )
     }
     const declared = mediaTypeOf(name, input.mediaType)
-    const mediaType = yield* mediaTypeFor({ ...input, name, mediaType: declared })
-    const limit = isImageMediaType(mediaType)
+    // The size is checked before the content, so an oversized file is told it is
+    // too large rather than that its first bytes look binary.
+    const limit = isImageMediaType(declared)
       ? ATTACHMENT_LIMITS.maxImageBytes
       : ATTACHMENT_LIMITS.maxFileBytes
     if (input.data.byteLength > limit) {
@@ -122,6 +123,7 @@ export const saveAttachment = (
         }),
       )
     }
+    const mediaType = yield* mediaTypeFor({ ...input, name, mediaType: declared })
     const hash = createHash('sha256').update(input.data).digest('hex')
     const path = attachmentPathOf(root, hash)
     const present = yield* Effect.promise(() =>

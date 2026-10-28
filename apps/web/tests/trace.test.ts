@@ -47,6 +47,29 @@ describe('the trace', () => {
     expect(turn?.quotes).toEqual([{ text: 'only quoted' }])
   })
 
+  test('a message attached a file keeps its card on the turn after a reload', () => {
+    const attachment = {
+      hash: 'a'.repeat(64),
+      mediaType: 'image/png',
+      name: 'diagram.png',
+      bytes: 2_048,
+    }
+    const [turn] = traceOf([
+      event('turn/start', { turn: 1 }, 10),
+      event(
+        'agent/inbox/claimed',
+        {
+          target: 'next-turn',
+          message: { text: 'what is this?', source: 'user', attachments: [attachment] },
+        },
+        11,
+      ),
+    ])
+
+    expect(turn?.prompt).toBe('what is this?')
+    expect(turn?.attachments).toEqual([attachment])
+  })
+
   test('a turn holds the prompt, its steps and tools, the answer, and the files it wrote', () => {
     const [turn] = traceOf([
       event('turn/start', { turn: 1 }, 10),
