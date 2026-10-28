@@ -32,18 +32,27 @@ export function makeObservedFiles(): ObservedFiles {
   }
 }
 
-/** What the file on disk looks like now, or undefined when it is not there. */
+/**
+ * What the file on disk looks like now, or undefined when it is not there. A
+ * regular file that exists but cannot be read still gets an observation, so it
+ * never looks like new work that a write may create.
+ */
 export const look = (path: string): Effect.Effect<FileObservation | undefined> =>
-  Effect.promise(() =>
-    Promise.all([stat(path), readFile(path)]).then(
-      ([info, bytes]) => ({
-        bytes: bytes.byteLength,
-        mtimeMs: info.mtimeMs,
-        digest: createHash('sha256').update(bytes).digest('hex'),
-      }),
-      () => undefined,
-    ),
-  )
+  Effect.promise(async () => {
+    const info = await stat(path).catch(() => undefined)
+    if (info === undefined) return undefined
+    const bytes = await readFile(path).catch(() => undefined)
+    if (bytes === undefined) {
+      return info.isFile()
+        ? { bytes: info.size, mtimeMs: info.mtimeMs, digest: 'unreadable' }
+        : undefined
+    }
+    return {
+      bytes: bytes.byteLength,
+      mtimeMs: info.mtimeMs,
+      digest: createHash('sha256').update(bytes).digest('hex'),
+    }
+  })
 
 /** A file this session may not change because somebody else has been there. */
 const changed = (path: string): ToolError =>
