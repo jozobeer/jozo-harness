@@ -161,7 +161,7 @@ describe('autoReviewGuard', () => {
     const review = fakeReview({ kind: 'deny', reason: 'it writes outside the workspace' })
 
     const decision = await check(
-      { preset: 'auto', review, isReadOnly: () => false },
+      { preset: () => 'auto', review, isReadOnly: () => false },
       execution('write'),
     )
 
@@ -173,7 +173,7 @@ describe('autoReviewGuard', () => {
     const review = fakeReview({ kind: 'allow' })
 
     const decision = await check(
-      { preset: 'auto', review, isReadOnly: () => false },
+      { preset: () => 'auto', review, isReadOnly: () => false },
       execution('write'),
     )
 
@@ -185,7 +185,7 @@ describe('autoReviewGuard', () => {
     const review = fakeReview({ kind: 'deny', reason: 'never asked' })
 
     const decision = await check(
-      { preset: 'auto', review, isReadOnly: (tool) => tool === 'read' },
+      { preset: () => 'auto', review, isReadOnly: (tool) => tool === 'read' },
       execution('read'),
     )
 
@@ -197,7 +197,7 @@ describe('autoReviewGuard', () => {
     const review = fakeReview({ kind: 'deny', reason: 'never asked' })
 
     const decision = await check(
-      { preset: 'auto', review, isReadOnly: () => false },
+      { preset: () => 'auto', review, isReadOnly: () => false },
       execution('write', true),
     )
 
@@ -208,7 +208,10 @@ describe('autoReviewGuard', () => {
   test('leaves every other preset alone', async () => {
     for (const preset of ['read-only', 'workspace-write', 'full'] as const) {
       const review = fakeReview({ kind: 'deny', reason: 'never asked' })
-      const decision = await check({ preset, review, isReadOnly: () => false }, execution('write'))
+      const decision = await check(
+        { preset: () => preset, review, isReadOnly: () => false },
+        execution('write'),
+      )
       expect(decision).toEqual({ kind: 'abstain' })
       expect(review.seen).toHaveLength(0)
     }
@@ -220,7 +223,7 @@ describe('autoReviewGuard', () => {
 
     const denied = await check(
       {
-        preset: 'auto',
+        preset: () => 'auto',
         review,
         isReadOnly: () => false,
         record: (reviewed) => {
@@ -231,7 +234,7 @@ describe('autoReviewGuard', () => {
       execution('write'),
     )
     const allowed = await check(
-      { preset: 'auto', review: fakeReview({ kind: 'allow' }), isReadOnly: () => false },
+      { preset: () => 'auto', review: fakeReview({ kind: 'allow' }), isReadOnly: () => false },
       execution('write'),
     )
 
@@ -275,7 +278,7 @@ const callWith = (
         yield* tools.register(alwaysRun(ran, readOnly))
         const review = fakeReview(decision)
         yield* tools.guard({
-          ...autoReviewGuard({ preset, review, isReadOnly: () => readOnly }),
+          ...autoReviewGuard({ preset: () => preset, review, isReadOnly: () => readOnly }),
         })
         const outcome = yield* tools.call({
           callId: 'c1',

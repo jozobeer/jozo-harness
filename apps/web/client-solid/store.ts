@@ -166,6 +166,7 @@ const calledTool = (data: unknown): string => {
  */
 const needsRefresh = (event: UiSessionEvent): boolean =>
   event.type === 'turn/end' ||
+  event.type === 'permission/preset' ||
   event.type === 'goal/updated' ||
   event.type.startsWith('agent/inbox/') ||
   (event.type === 'tool/call' && calledTool(event.data) === 'skill')

@@ -6,6 +6,7 @@ import {
   type CompactionCheckpoint,
   type Session,
 } from '@jozo-harness/session'
+import { makePermission } from '@jozo-harness/safety'
 import { installBuiltinCommands, type BuiltinCommandOptions } from '../src/commands.ts'
 
 const header = () =>
@@ -94,6 +95,40 @@ describe('the built-in commands a session can switch with', () => {
       ok: true,
       text: 'effort: default',
     })
+  })
+
+  test('/permission switches the boundary for the next call and leaves it in the log', async () => {
+    const permission = makePermission('read-only')
+    const { commands, session } = await Effect.runPromise(build({ permission }))
+
+    const switched = await Effect.runPromise(
+      commands.run('/permission danger-full-access', session),
+    )
+
+    expect(switched).toEqual({ ok: true, text: 'permission: danger-full-access' })
+    expect(permission.mode()).toBe('danger-full-access')
+    const recorded = session.events().filter((event) => event.type === 'permission/preset')
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0]?.type === 'permission/preset' ? recorded[0].data.preset : '').toBe('full')
+    // A command is the human's line, not a request: no turn began here.
+    expect(session.events().some((event) => event.type === 'turn/start')).toBe(false)
+    const status = await Effect.runPromise(commands.run('/status', session))
+    expect(status?.text).toContain('permission: danger-full-access')
+  })
+
+  test('/permission alone reads the boundary and an unknown word changes nothing', async () => {
+    const permission = makePermission('workspace-write')
+    const { commands, session } = await Effect.runPromise(build({ permission }))
+
+    expect(await Effect.runPromise(commands.run('/permission', session))).toEqual({
+      ok: true,
+      text: 'permission: workspace-write',
+    })
+    const refused = await Effect.runPromise(commands.run('/permission yolo', session))
+    expect(refused?.ok).toBe(false)
+    expect(refused?.text).toContain('usage: /permission')
+    expect(permission.current()).toBe('workspace-write')
+    expect(session.events().some((event) => event.type === 'permission/preset')).toBe(false)
   })
 
   test('/compact prunes the oversized history now and says what it freed', async () => {

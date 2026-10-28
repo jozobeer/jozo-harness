@@ -154,6 +154,7 @@ import {
   Approval,
   Ask,
   AutoReview,
+  Permission,
   Policy,
   Sandbox,
   autoReviewGuard,
@@ -163,6 +164,7 @@ import {
   askServiceLayer,
   type AutoReviewCompletion,
   currentPlanMode,
+  resumedPermission,
   installAsk,
   lateAnswerMessage,
   makeAsk,
@@ -179,6 +181,8 @@ import {
   type AskBatchAnswerer,
   type AskRequested,
   type AskShape,
+  type PermissionShape,
+  permissionWordOf,
   type PlanModeShape,
   type SandboxShape,
 } from '@jozo-harness/safety'
@@ -1564,6 +1568,7 @@ const sessionFactoryOf = (
             built.runtime.agents.childrenOf(agent.id),
             built.runtime.budget,
             scheduleStoreOf(options),
+            built.runtime.permission,
           ),
         jobOutput: (jobId: string) => jobDetailOf(built.runtime.jobs, jobId),
         stopJob: (jobId: string) => stopJobOf(built.runtime.jobs, jobId),
@@ -1803,14 +1808,14 @@ const openSessionOf = (
   runtime: SessionRuntime,
   schedules: ScheduleStore,
 ): OpenSession | undefined => {
-  const { agent, ui, jobs, efforts, agents, budget } = runtime
+  const { agent, ui, jobs, efforts, agents, budget, permission } = runtime
   if (ui === undefined) return undefined
   return {
     summary: summaryOf(agent),
     host: ui,
     commands: () => commandViewsOf(runtime.commands, runtime.skillCatalog()),
     runState: () =>
-      runStateOf(agent, jobs, efforts, agents.childrenOf(agent.id), budget, schedules),
+      runStateOf(agent, jobs, efforts, agents.childrenOf(agent.id), budget, schedules, permission),
     jobOutput: (jobId: string) => jobDetailOf(jobs, jobId),
     stopJob: (jobId: string) => stopJobOf(jobs, jobId),
     stopSubagent: (childId: string) => stopSubagentOf(agents, agent.id, childId),
@@ -1889,6 +1894,8 @@ interface SessionRuntime {
   readonly spillTokens: number | undefined
   /** The budget the loop compacts with, so a page reads the same line it fires on. */
   readonly budget: TokenBudget
+  /** The live permission holder this session's tools and page read; absent without a safety row. */
+  readonly permission?: PermissionShape
   readonly layer: Layer.Layer<any, PluginError, never>
 }
 
@@ -1943,6 +1950,8 @@ const runStateOf = (
   budget: TokenBudget,
   /** The host's schedules, which outlive this session's process. */
   schedules: ScheduleStore,
+  /** The boundary this session's next tool call runs under; absent without a safety row. */
+  permission: PermissionShape | undefined,
 ): RunStateView => {
   const events = agent.session.events()
   const goal = currentGoal(events)
@@ -1953,6 +1962,7 @@ const runStateOf = (
     model: agent.options.route,
     effort: agent.options.reasoningEffort ?? '',
     efforts,
+    ...(permission === undefined ? {} : { permission: permissionWordOf(permission.current()) }),
     usage: usageViewOf(events, budget),
     todos: context.todos,
     todoCounts: context.todoCounts,
@@ -2038,8 +2048,8 @@ const installAutoReview = (
 ): Effect.Effect<void, never, Scope.Scope> =>
   Effect.gen(function* () {
     if (!hasEnabledRow(wiring.rows, '@jozo-harness/safety')) return
-    const preset = Context.get(wiring.context, Policy).preset
-    if (preset !== 'auto') return
+    const policy = Context.get(wiring.context, Policy)
+    if (policy.preset !== 'auto') return
     const review = Context.get(wiring.context, AutoReview)
     const agents = Context.get(wiring.context, Agents)
     yield* review.serve(
@@ -2049,7 +2059,8 @@ const installAutoReview = (
     )
     yield* tools.guard(
       autoReviewGuard({
-        preset,
+        // Read per call: a session that switches away from auto stops reviewing.
+        preset: () => policy.preset,
         review,
         isReadOnly: (tool) => tools.isReadOnly(tool),
         // A denied call lands in the log of the session that made it, which for a
@@ -2102,6 +2113,23 @@ const installHostClock = (
   })
 }
 
+/** The holder a session's tools read, seeded from its log; absent without a safety row. */
+const permissionFor = (
+  context: Context.Context<any>,
+  rows: ReadonlyArray<PluginRow>,
+  session: Session,
+): PermissionShape | undefined => {
+  if (!hasEnabledRow(rows, '@jozo-harness/safety')) return undefined
+  const permission = Context.get(context, Permission)
+  permission.apply(resumedPermission(session.events(), permission.current()))
+  return permission
+}
+
+/** The option key a caller adds only when the session has a safety row. */
+const permissionOption = (
+  permission: PermissionShape | undefined,
+): { readonly permission?: PermissionShape } => (permission === undefined ? {} : { permission })
+
 /** The scoped body that builds one session: its layer, agent, tools, and UI host. */
 const buildSession = (
   options: CommandOptions,
@@ -2141,6 +2169,9 @@ const buildSession = (
       cwd,
       attachmentRootOf(sessionRootOf(rows)),
     )
+    // The last explicit choice in the log outranks the profile: a resumed session
+    // continues at the boundary the human last picked, without asking again.
+    const permission = permissionFor(context, rows, agent.session)
     // The workspace belongs to the session, not to the run that serves it: tools,
     // instructions, and skill roots all read the cwd the session header recorded.
     const sessionOptions: CommandOptions = { ...options, cwd: agent.session.header.cwd }
@@ -2175,6 +2206,7 @@ const buildSession = (
     // step would take, so the checkpoint it records names the model it was made with.
     const { checkpointFor } = checkpointHelpersFor(Context.get(context, Llm))
     yield* installBuiltinCommands(commands, {
+      ...permissionOption(permission),
       budget,
       compactNow: () =>
         checkpointFor(
@@ -2273,6 +2305,7 @@ const buildSession = (
         skillCatalog: () => skillCatalog,
         spillTokens,
         budget,
+        ...permissionOption(permission),
         layer,
       },
     } satisfies BuiltSession

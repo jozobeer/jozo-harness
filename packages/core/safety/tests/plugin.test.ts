@@ -4,6 +4,7 @@ import { Context, Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
 import { SystemPrompt } from '@jozo-harness/system-prompt'
 import {
+  Permission,
   Policy,
   Sandbox,
   safetyPlugin,
@@ -67,6 +68,73 @@ describe('safetyPlugin', () => {
 
     expect(text).toContain('approval: workspace-write (')
     expect(text).toContain('sandbox: none (')
+  })
+
+  test('a switch changes what the policy and the approval line say from the next call on', async () => {
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const layer = yield* loadProfile({
+            plugins: [kernelPlugin, systemPromptPlugin, safetyPlugin],
+            layers: [
+              [
+                { id: 'kernel', name: '@jozo-harness/kernel', config: {} },
+                { id: 'system-prompt', name: '@jozo-harness/system-prompt', config: {} },
+                {
+                  id: 'safety',
+                  name: '@jozo-harness/safety',
+                  config: { preset: 'read-only', sandbox: 'none' },
+                },
+              ],
+            ],
+          })
+          const context = yield* Layer.build(layer)
+          Context.get(context, Permission).apply('workspace-write')
+          return {
+            policy: Context.get(context, Policy).preset,
+            approval: yield* Context.get(context, SystemPrompt).runtimeContext({ cwd: '/work' }),
+          }
+        }),
+      ),
+    )
+
+    expect(observed.policy).toBe('workspace-write')
+    expect(observed.approval).toContain('approval: workspace-write (')
+  })
+
+  test('two sessions built from one layer switch independently', async () => {
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const layer = yield* loadProfile({
+            plugins: [kernelPlugin, systemPromptPlugin, safetyPlugin],
+            layers: [
+              [
+                { id: 'kernel', name: '@jozo-harness/kernel', config: {} },
+                { id: 'system-prompt', name: '@jozo-harness/system-prompt', config: {} },
+                {
+                  id: 'safety',
+                  name: '@jozo-harness/safety',
+                  config: { preset: 'read-only', sandbox: 'none' },
+                },
+              ],
+            ],
+          })
+          const first = yield* Layer.build(layer)
+          const second = yield* Layer.build(layer)
+          Context.get(first, Permission).apply('full')
+          return {
+            first: Context.get(first, Policy).preset,
+            second: Context.get(second, Policy).preset,
+            secondMode: Context.get(second, Policy).mode,
+          }
+        }),
+      ),
+    )
+
+    expect(observed.first).toBe('full')
+    expect(observed.second).toBe('read-only')
+    expect(observed.secondMode).toBe('read-only')
   })
 
   test('the preset names the mode commands run under', async () => {
