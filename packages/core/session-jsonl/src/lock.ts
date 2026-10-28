@@ -1,7 +1,7 @@
 import type { SessionError, SessionId } from '@jozo-harness/session'
 import { Effect } from 'effect'
-import { unlinkSync } from 'node:fs'
-import { open, readFile, unlink } from 'node:fs/promises'
+import { readFileSync, unlinkSync } from 'node:fs'
+import { link, open, readFile, unlink } from 'node:fs/promises'
 import { persistenceError } from './errors.ts'
 
 /** Suffix of the file that marks a log as being written; the log itself never holds it. */
@@ -82,8 +82,12 @@ const held = (id: SessionId, path: string): SessionError =>
  * behind, and the next writer reads the dead pid and repairs the tail.
  */
 export const releaseAllLocks = (): void => {
-  for (const path of registry.keys()) {
+  for (const [path, heldLock] of registry) {
     try {
+      const text = readFileSync(path, 'utf8')
+      // A successor already published its own record under this name. Unlinking
+      // it would drop the only thing keeping a third process out.
+      if (recordOf(text)?.token !== heldLock.record.token) continue
       unlinkSync(path)
     } catch {
       // The lock is gone already; nothing to clean up.
@@ -123,22 +127,27 @@ const releaseOf = (path: string, record: LockRecord): Effect.Effect<void> =>
   })
 
 const createLock = async (path: string): Promise<LockRecord> => {
-  const handle = await open(path, 'wx')
   const record: LockRecord = { pid: process.pid, start: Date.now(), token: crypto.randomUUID() }
+  // Publish the name only after the record is durable. Opening the lock path
+  // first leaves it empty until the write lands, and another process reads that
+  // gap as a dead holder, unlinks it, and writes the log alongside this one.
+  const temporary = path + '.' + record.token + '.tmp'
+  const handle = await open(temporary, 'wx')
   try {
     await handle.writeFile(JSON.stringify(record))
     await handle.sync()
   } catch (error) {
-    await handle.close()
-    try {
-      await unlink(path)
-    } catch {
-      // Nothing was written, so there is nothing to clean up.
-    }
+    await handle.close().catch(() => undefined)
+    await unlink(temporary).catch(() => undefined)
     throw error
   }
   await handle.close()
-  return record
+  try {
+    await link(temporary, path)
+    return record
+  } finally {
+    await unlink(temporary).catch(() => undefined)
+  }
 }
 
 /** Creates the lock, or reports EEXIST as no record so the caller can look at the holder. */

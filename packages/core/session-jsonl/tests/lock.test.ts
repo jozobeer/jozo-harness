@@ -168,6 +168,78 @@ describe('the session log lock', () => {
     expect(await readFile(path + LOCK_SUFFIX, 'utf8').catch(() => '')).toBe('')
   })
 
+  test('the exit hook leaves a lock another writer took over', async () => {
+    const { root } = isolated()
+    await mkdir(root, { recursive: true })
+    const path = join(root, 'taken-over.log')
+    await Effect.runPromise(acquireLock(path, 'taken-over'))
+    await hold(path + LOCK_SUFFIX, 4_000_000, 'successor')
+
+    releaseAllLocks()
+
+    expect(
+      (JSON.parse(await readFile(path + LOCK_SUFFIX, 'utf8')) as { token: string }).token,
+    ).toBe('successor')
+  })
+
+  test('two processes cannot both take a lock that nobody holds', async () => {
+    const { root } = isolated()
+    await mkdir(root, { recursive: true })
+    const racer = join(import.meta.dirname, 'lock-racer.ts')
+    const start = (
+      logPath: string,
+      marker: string,
+    ): {
+      readonly outcome: Promise<string>
+      readonly release: () => void
+      readonly done: Promise<void>
+    } => {
+      const child = spawn(process.execPath, [racer, logPath, marker], {
+        stdio: ['pipe', 'pipe', 'inherit'],
+      })
+      let out = ''
+      const outcome = new Promise<string>((resolve, reject) => {
+        child.stdout?.on('data', (chunk: Buffer) => {
+          out += String(chunk)
+          const line = out.split('\n')[0]
+          if (out.includes('\n') && line !== undefined) resolve(line)
+        })
+        child.once('error', reject)
+        child.once('exit', (code) => {
+          if (!out.includes('\n')) reject(new Error('racer exited ' + String(code)))
+        })
+      })
+      const done = new Promise<void>((resolve) => child.once('exit', () => resolve()))
+      return {
+        outcome,
+        release: () => {
+          try {
+            child.stdin?.end('go')
+          } catch {
+            // The loser has already exited; its stdin is closed.
+          }
+        },
+        done,
+      }
+    }
+
+    // One round is not enough: the empty-file window is a schedule race, and a
+    // single pair often misses it. A handful of pairs hits it when the publish
+    // is not atomic.
+    for (let round = 0; round < 16; round += 1) {
+      const logPath = join(root, 'race-' + String(round) + '.log')
+      const marker = logPath + '.winners'
+      const left = start(logPath, marker)
+      const right = start(logPath, marker)
+      const outcomes = await Promise.all([left.outcome, right.outcome])
+      left.release()
+      right.release()
+      await Promise.all([left.done, right.done])
+      expect(outcomes.filter((line) => line === 'won')).toHaveLength(1)
+      expect((await readFile(marker, 'utf8')).trim().split('\n')).toHaveLength(1)
+    }
+  }, 20_000)
+
   test('the exit hook drops every lock this process holds', async () => {
     const { root } = isolated()
     await mkdir(root, { recursive: true })
