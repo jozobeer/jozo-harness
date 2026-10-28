@@ -89,7 +89,7 @@ jzh web              # トークン付きの URL を stderr に出す（--port �
 
 同じセッションを複数タブで購読できる。承認は Allow / Deny、質問は入力して Enter。サーバは 127.0.0.1 にだけ bind し、起動ごとのトークンと Host / Origin の検査で守る。トークンは stderr の URL に載る。
 
-セッションログは既定で `~/.jzh/sessions/<id>/session.v1.jsonl` に残る。設定ファイルのパスは `--config` で差し替えられる。
+セッションログは既定で `~/.jzh/sessions/<id>/session.v1.jsonl.zst` に残る。1 行 1 zstd フレームで追記する。既存の `session.v1.jsonl` はそのまま開ける（追記も平文のまま）。設定ファイルのパスは `--config` で差し替えられる。
 
 ## 開発
 

@@ -594,6 +594,8 @@ jzh --patch sessions.yml "…"
 
 `root` を変えると、その run の `artifact` が書くページと `jzh web` が配信するページも、この root の隣の `artifacts/` に移る。既定の `~/.jzh/sessions` のときは `~/.jzh/artifacts/` になる。
 
+新しいセッションのログは `session.v1.jsonl.zst` で、追記のたびに 1 つの zstd フレームが増える。プロセスが書き込んでいる途中で死んで末尾のフレームが切れたときは、最後の完全なフレームまでを読み、`session/repaired` を 1 フレーム足して記録する。既存の `session.v1.jsonl` はそのまま読み、追記も平文のまま続ける。形式を勝手に切り替えないのは、古い build が平文のつもりで zstd のファイルに追記するのを避けるためである。
+
 ## コマンドを sandbox の外で走らせる
 
 `@jozo-harness/safety` の `sandbox` は既定で `auto` である。macOS では `seatbelt`（`sandbox-exec`）、Linux では `bwrap`（bubblewrap）が走る。コマンドは自分が走るディレクトリと一時ディレクトリにだけ書ける。それ以外の場所に書こうとすると macOS では `Operation not permitted`、Linux では `Read-only file system` になる。読み取りは制限せず、`/dev/null` への書き込みは許可する。
