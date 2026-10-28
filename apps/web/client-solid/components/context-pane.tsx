@@ -14,10 +14,12 @@ import type { Pane } from '../../src/ui/state.ts'
 import { FONT_FAMILIES, FONT_SIZES, type FontFamily, type FontSize } from '../../src/ui/font.ts'
 import { THEMES, type Theme } from '../../src/ui/theme.ts'
 import type { TurnView } from '../../src/ui/trajectory.ts'
+import { createBrowser } from '../browser.ts'
 import { useLocaleChoice, useTranslate } from '../i18n.ts'
 import { basenameOf, childSessionsOf, elapsedOf, pagesOf } from '../lib.ts'
 import { LOCALES, type MessageKey } from '../locale.ts'
 import type { ScheduleDraft, SessionStore } from '../store.ts'
+import { BrowserPane } from './browser-pane.tsx'
 import { FilePreview } from './file-preview.tsx'
 import { FileTree } from './file-tree.tsx'
 import { Review } from './review.tsx'
@@ -1484,6 +1486,7 @@ const Job = (props: { store: SessionStore; pane: Extract<Pane, { kind: 'job' }> 
 const PANES = [
   { kind: 'changes', label: 'pane.changes', icon: 'changes' },
   { kind: 'files', label: 'pane.files', icon: 'folder' },
+  { kind: 'browser', label: 'pane.browser', icon: 'web' },
   { kind: 'run', label: 'pane.run', icon: 'run' },
   { kind: 'settings', label: 'pane.settings', icon: 'settings' },
   { kind: 'trajectory', label: 'pane.turns', icon: 'turns' },
@@ -1504,6 +1507,8 @@ const paneFor = (kind: Tab): Pane => (kind === 'changes' ? { kind, path: undefin
 /** The right column: what the session runs toward, is set to, did, or one job. */
 export const ContextPane = (props: { store: SessionStore }) => {
   const t = useTranslate()
+  /** The reader's pages stay beside the pane, so a look at another tab keeps them. */
+  const browser = createBrowser()
   const pane = () => props.store.state().pane
   let strip: HTMLElement | undefined
   /** What the body shows while the sheet slides out; undefined once it has. */
@@ -1602,6 +1607,9 @@ export const ContextPane = (props: { store: SessionStore }) => {
           </Match>
           <Match when={body()?.kind === 'files'}>
             <FileTree store={props.store} />
+          </Match>
+          <Match when={body()?.kind === 'browser'}>
+            <BrowserPane browser={browser} />
           </Match>
           <Match when={ofKind(body(), 'inspect')}>
             {(inspect) => (

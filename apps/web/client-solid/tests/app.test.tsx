@@ -2318,6 +2318,155 @@ describe('the Solid page', () => {
     expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'trajectory' } })
   })
 
+  test('the pane strip offers a browser tab beside the session readings', () => {
+    const { store, calls } = makeStore()
+    const { container } = render(() => <ContextPane store={store} />)
+
+    const browser = [...container.querySelectorAll('button.tab')].find(
+      (tab) => tab.textContent === 'browser',
+    )
+    fireEvent.click(browser as Element)
+
+    expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'browser' } })
+  })
+
+  test('the browser pane opens an http address in a frame and keeps each page on its own tab', () => {
+    const { store } = makeStore({ pane: { kind: 'browser' } })
+    const { container } = render(() => <ContextPane store={store} />)
+    const form = container.querySelector('form.browser-bar') as HTMLFormElement
+    const address = container.querySelector('.browser-address') as HTMLInputElement
+
+    fireEvent.input(address, { target: { value: ' https://example.com/one ' } })
+    fireEvent.submit(form)
+    expect(container.querySelector('.browser-frame')?.getAttribute('src')).toBe(
+      'https://example.com/one',
+    )
+
+    fireEvent.input(address, { target: { value: 'https://example.org/two' } })
+    fireEvent.submit(form)
+    expect(container.querySelector('.browser-frame')?.getAttribute('src')).toBe(
+      'https://example.org/two',
+    )
+    expect(
+      [...container.querySelectorAll('.browser-tab-name')].map((tab) => tab.textContent),
+    ).toEqual(['example.com', 'example.org'])
+
+    // The reader can take the current page out of the pane when a site refuses the frame.
+    const detach = container.querySelector('.browser-detach')
+    expect(detach?.getAttribute('href')).toBe('https://example.org/two')
+    expect(detach?.getAttribute('target')).toBe('_blank')
+    expect(container.querySelector('.browser-refused')?.textContent).toContain(
+      'refuse to be embedded',
+    )
+
+    fireEvent.click(container.querySelectorAll('.browser-tab-name')[0] as Element)
+    expect(container.querySelector('.browser-frame')?.getAttribute('src')).toBe(
+      'https://example.com/one',
+    )
+  })
+
+  test('the browser pane closes the current page and falls back to the page before it', () => {
+    const { store } = makeStore({ pane: { kind: 'browser' } })
+    const { container } = render(() => <ContextPane store={store} />)
+    const form = container.querySelector('form.browser-bar') as HTMLFormElement
+    const address = container.querySelector('.browser-address') as HTMLInputElement
+
+    for (const url of ['https://example.com/one', 'https://example.org/two']) {
+      fireEvent.input(address, { target: { value: url } })
+      fireEvent.submit(form)
+    }
+
+    fireEvent.click(container.querySelector('.browser-tab.active .browser-tab-close') as Element)
+    expect(container.querySelector('.browser-frame')?.getAttribute('src')).toBe(
+      'https://example.com/one',
+    )
+
+    fireEvent.click(container.querySelector('.browser-tab .browser-tab-close') as Element)
+    expect(container.querySelector('.browser-frame')).toBeNull()
+    expect(container.querySelector('.browser-empty')?.textContent).toBe('No page is open yet.')
+  })
+
+  test('the browser pane refuses a page whose address is not http or https', () => {
+    const { store } = makeStore({ pane: { kind: 'browser' } })
+    const { container } = render(() => <ContextPane store={store} />)
+    const form = container.querySelector('form.browser-bar') as HTMLFormElement
+    const address = container.querySelector('.browser-address') as HTMLInputElement
+
+    for (const url of ['javascript:alert(1)', 'file:///etc/passwd', 'example.com']) {
+      fireEvent.input(address, { target: { value: url } })
+      fireEvent.submit(form)
+    }
+
+    expect(container.querySelector('.browser-frame')).toBeNull()
+    expect(container.querySelector('.browser-problem')?.textContent).toBe(
+      'Only http and https addresses open here.',
+    )
+  })
+
+  test('the browser pane keeps the addresses the reader opens out of the session and its tools', () => {
+    const { store, calls } = makeStore({ pane: { kind: 'browser' } })
+    const { container } = render(() => <ContextPane store={store} />)
+    const form = container.querySelector('form.browser-bar') as HTMLFormElement
+    const address = container.querySelector('.browser-address') as HTMLInputElement
+
+    fireEvent.input(address, { target: { value: 'https://example.com/private' } })
+    fireEvent.submit(form)
+    fireEvent.input(address, { target: { value: 'https://example.org/other' } })
+    fireEvent.submit(form)
+    fireEvent.click(container.querySelectorAll('.browser-tab-name')[0] as Element)
+
+    // Typing a URL is the reader's act: no draft, message, command, or tool call leaves the page.
+    expect(calls).toEqual([])
+    expect(store.state().draft).toBe('')
+    expect(store.state().conversation.blocks).toEqual([])
+    expect(store.state().pane).toEqual({ kind: 'browser' })
+  })
+
+  test('the browser pane leaves a published page in the conversation where it was published', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const { store } = makeStore({
+      pane: { kind: 'browser' },
+      conversation: { ...emptyConversation, blocks: [{ kind: 'user', text: 'go' }] },
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'step/start', { step: 1 }),
+        at(3, 'tool/call', {
+          callId: 'c1',
+          name: 'artifact',
+          arguments: '{"name":"report"}',
+          summary: 'artifact report',
+        }),
+        at(4, 'tool/result', {
+          callId: 'c1',
+          isError: false,
+          summary: 'report',
+          content: [{ type: 'text', text: 'page: /artifact/s1/report' }],
+        }),
+        at(5, 'step/end', { step: 1 }),
+        at(6, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      ]),
+    })
+
+    const { container } = render(() => (
+      <>
+        <Conversation store={store} />
+        <ContextPane store={store} />
+      </>
+    ))
+    const form = container.querySelector('form.browser-bar') as HTMLFormElement
+    const address = container.querySelector('.browser-address') as HTMLInputElement
+    fireEvent.input(address, { target: { value: 'https://example.com/notes' } })
+    fireEvent.submit(form)
+
+    expect(container.querySelector('.browser-frame')?.getAttribute('src')).toBe(
+      'https://example.com/notes',
+    )
+    // The model's artifact keeps its place in the conversation; the reader's page is elsewhere.
+    expect(container.querySelector('.tool-card iframe')?.getAttribute('src')).toBe(
+      '/artifact/s1/report',
+    )
+  })
+
   test('the run pane switches permission and asks once before danger-full-access', () => {
     const { store, calls } = makeStore({
       pane: { kind: 'run' },
