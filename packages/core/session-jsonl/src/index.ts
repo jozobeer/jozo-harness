@@ -14,11 +14,12 @@ import { Effect } from 'effect'
 import type { Dirent } from 'node:fs'
 import { appendFile, mkdir, open, readdir, readFile, stat as statFile } from 'node:fs/promises'
 import { upgradeHeaderLine } from './upgrade.ts'
-import { splitTornTail, type SplitLog } from './repair.ts'
+import { splitTornTail } from './repair.ts'
 import { isMissing, notFound, persistenceError } from './errors.ts'
-import { readFirstLine } from './first-line.ts'
-import { readTitle } from './title.ts'
-import { expandHome, SESSION_FILE_NAME } from './paths.ts'
+import { readFirstLine, readZstdFirstLine } from './first-line.ts'
+import { readTitle, readZstdTitle } from './title.ts'
+import { expandHome, newSessionLog, resolveSessionLog, type SessionLogFile } from './paths.ts'
+import { encodeZstdFrame, splitZstdLog } from './zstd-frames.ts'
 import { replaceFile } from './replace-file.ts'
 import { join } from 'node:path'
 
@@ -28,8 +29,6 @@ export interface JsonlSessionsOptions {
   /** Event schemas beyond the core catalog, keyed by event type. */
   readonly schemas?: SessionEventSchemaMap
 }
-
-const FILE_NAME = SESSION_FILE_NAME
 
 const parseLine = (
   id: SessionId,
@@ -111,7 +110,38 @@ const upgradeFirstLine = (
     return event.data
   })
 
-const sinkFor = (path: string, id: SessionId, tornPrefix?: string): SessionSink => {
+/** What one read of a log gave back: the text it can serve, and the bytes a crash left. */
+interface ReadLog {
+  readonly text: string
+  readonly tornBytes: number
+  /** The complete bytes a repair rewrites; the torn tail is not among them. */
+  readonly kept: Uint8Array
+}
+
+const readLog = (id: SessionId, file: SessionLogFile): Effect.Effect<ReadLog, SessionError> =>
+  Effect.tryPromise({
+    try: async () => {
+      const buffer = await readFile(file.path)
+      if (file.format === 'zstd') {
+        const split = splitZstdLog(buffer)
+        return {
+          text: split.text,
+          tornBytes: split.tornBytes,
+          kept: Buffer.concat(split.frames),
+        }
+      }
+      const split = splitTornTail(buffer.toString('utf8'))
+      return { text: split.keep, tornBytes: split.tornBytes, kept: Buffer.from(split.keep) }
+    },
+    catch: (cause) =>
+      isMissing(cause) ? notFound(id) : persistenceError(`cannot read session ${id}`, cause),
+  })
+
+/** The bytes one appended line takes, in the log's own format. */
+const lineBytes = (file: SessionLogFile, line: string): Uint8Array =>
+  file.format === 'zstd' ? encodeZstdFrame(line) : Buffer.from(line)
+
+const sinkFor = (file: SessionLogFile, id: SessionId, tornPrefix?: Uint8Array): SessionSink => {
   // Set when a repair could not be written. The next append rewrites this prefix
   // first: appending would glue the new line onto the torn tail, and that line
   // would then end in a newline, so the next open would parse it and refuse the log.
@@ -120,13 +150,13 @@ const sinkFor = (path: string, id: SessionId, tornPrefix?: string): SessionSink 
     append: (event) =>
       Effect.tryPromise({
         try: async () => {
-          const line = JSON.stringify(event) + '\n'
+          const line = lineBytes(file, JSON.stringify(event) + '\n')
           const prefix = pending
           if (prefix === undefined) {
-            await appendFile(path, line)
+            await appendFile(file.path, line)
             return
           }
-          await replaceFile(path, prefix + line)
+          await replaceFile(file.path, Buffer.concat([prefix, line]))
           pending = undefined
         },
         catch: (cause) => persistenceError(`cannot append to session ${id}`, cause),
@@ -139,7 +169,7 @@ const sinkFor = (path: string, id: SessionId, tornPrefix?: string): SessionSink 
         try: async () => {
           // Open for update rather than append: a log that was deleted under the
           // session must fail the checkpoint, not come back as an empty file.
-          const handle = await open(path, 'r+')
+          const handle = await open(file.path, 'r+')
           try {
             await handle.sync()
           } finally {
@@ -151,24 +181,53 @@ const sinkFor = (path: string, id: SessionId, tornPrefix?: string): SessionSink 
   }
 }
 
-/** Stores each session as one JSONL file under `root/<id>/session.v1.jsonl`. */
+/** What a listing reads from a log: the first line, and the bytes its header took. */
+interface HeaderRead {
+  readonly line: string
+  /** Bytes up to and including the header's line; a longer log holds more. */
+  readonly bytes: number
+}
+
+/**
+ * Stores each session as one log under `root/<id>/`. New sessions are
+ * `session.v1.jsonl.zst`, one line per zstd frame. A session that still has
+ * `session.v1.jsonl` opens and appends as plaintext: switching the format under a
+ * session would make an older build append a frame into a plaintext file.
+ */
 export function jsonlSessions(options: JsonlSessionsOptions): SessionPersistence {
   const root = expandHome(options.root)
   const directoryOf = (id: SessionId): string => join(root, id)
-  const fileOf = (id: SessionId): string => join(directoryOf(id), FILE_NAME)
 
-  const readText = (id: SessionId): Effect.Effect<string, SessionError> =>
+  const logFileOf = (id: SessionId): Effect.Effect<SessionLogFile, SessionError> =>
+    Effect.gen(function* () {
+      const file = yield* Effect.tryPromise({
+        try: () => resolveSessionLog(directoryOf(id)),
+        catch: (cause) => persistenceError(`cannot look at session ${id}`, cause),
+      })
+      if (file === undefined) return yield* Effect.fail(notFound(id))
+      return file
+    })
+
+  const infoOf = (
+    file: SessionLogFile,
+    id: SessionId,
+  ): Effect.Effect<{ mtimeMs: number; size: number }, SessionError> =>
     Effect.tryPromise({
-      try: () => readFile(fileOf(id), 'utf8'),
+      try: async () => {
+        const info = await statFile(file.path)
+        return { mtimeMs: info.mtimeMs, size: info.size }
+      },
       catch: (cause) =>
-        isMissing(cause) ? notFound(id) : persistenceError(`cannot read session ${id}`, cause),
+        isMissing(cause) ? notFound(id) : persistenceError(`cannot look at session ${id}`, cause),
     })
 
   const create = (header: SessionHeader): Effect.Effect<OpenedSession, SessionError> =>
     Effect.gen(function* () {
       const id = crypto.randomUUID()
+      const directory = directoryOf(id)
+      const file = newSessionLog(directory)
       yield* Effect.tryPromise({
-        try: () => mkdir(directoryOf(id), { recursive: true }),
+        try: () => mkdir(directory, { recursive: true }),
         catch: (cause) => persistenceError(`cannot create session ${id}`, cause),
       })
       const first: SessionEvent = {
@@ -177,27 +236,15 @@ export function jsonlSessions(options: JsonlSessionsOptions): SessionPersistence
         type: 'session/header',
         data: header,
       }
-      const sink = sinkFor(fileOf(id), id)
+      const sink = sinkFor(file, id)
       yield* sink.append(first)
       return { id, events: [first], sink }
     })
 
-  /** The file's time and size: what a listing needs to tell an empty log from one with events. */
-  const fileInfoOf = (
-    id: SessionId,
-  ): Effect.Effect<{ mtimeMs: number; size: number }, SessionError> =>
-    Effect.tryPromise({
-      try: async () => {
-        const info = await statFile(fileOf(id))
-        return { mtimeMs: info.mtimeMs, size: info.size }
-      },
-      catch: (cause) =>
-        isMissing(cause) ? notFound(id) : persistenceError(`cannot look at session ${id}`, cause),
-    })
-
   const openRepaired = (
     id: SessionId,
-    split: SplitLog,
+    file: SessionLogFile,
+    read: ReadLog,
     events: ReadonlyArray<SessionEvent>,
   ): Effect.Effect<OpenedSession, SessionError> =>
     Effect.gen(function* () {
@@ -206,11 +253,11 @@ export function jsonlSessions(options: JsonlSessionsOptions): SessionPersistence
         seq: lastSeq + 1,
         time: Date.now(),
         type: 'session/repaired',
-        data: { tornBytes: split.tornBytes },
+        data: { tornBytes: read.tornBytes },
       }
-      const prefix = split.keep + JSON.stringify(note) + '\n'
+      const prefix = Buffer.concat([read.kept, lineBytes(file, JSON.stringify(note) + '\n')])
       const wrote = yield* Effect.tryPromise({
-        try: () => replaceFile(fileOf(id), prefix),
+        try: () => replaceFile(file.path, prefix),
         catch: (cause) => persistenceError(`cannot repair session ${id}`, cause),
       }).pipe(Effect.match({ onFailure: () => false, onSuccess: () => true }))
       // The note stays in the session when the disk write fails, so a later line
@@ -219,42 +266,54 @@ export function jsonlSessions(options: JsonlSessionsOptions): SessionPersistence
       return {
         id,
         events: [...events, note],
-        sink: wrote ? sinkFor(fileOf(id), id) : sinkFor(fileOf(id), id, prefix),
+        sink: wrote ? sinkFor(file, id) : sinkFor(file, id, prefix),
       }
     })
 
   const open = (id: SessionId): Effect.Effect<OpenedSession, SessionError> =>
     Effect.gen(function* () {
-      const { mtimeMs } = yield* fileInfoOf(id)
-      const split = splitTornTail(yield* readText(id))
-      if (split.keep === '' && split.tornBytes > 0) {
+      const file = yield* logFileOf(id)
+      const { mtimeMs } = yield* infoOf(file, id)
+      const read = yield* readLog(id, file)
+      if (read.text === '' && read.tornBytes > 0) {
         return yield* Effect.fail(
           persistenceError(`session ${id} was cut off before its header was written`),
         )
       }
-      const decoded = yield* decodeEvents(id, split.keep, mtimeMs, options.schemas)
-      if (split.tornBytes === 0) {
-        return { id, events: decoded.events, sink: sinkFor(fileOf(id), id) }
+      const decoded = yield* decodeEvents(id, read.text, mtimeMs, options.schemas)
+      if (read.tornBytes === 0) {
+        return { id, events: decoded.events, sink: sinkFor(file, id) }
       }
-      return yield* openRepaired(id, split, decoded.events)
+      return yield* openRepaired(id, file, read, decoded.events)
     })
+
+  const readHeader = (file: SessionLogFile): Effect.Effect<HeaderRead, SessionError> =>
+    file.format === 'zstd'
+      ? readZstdFirstLine(file.path).pipe(
+          Effect.map((read) => ({ line: read.line, bytes: read.firstFrameEnd })),
+        )
+      : readFirstLine(file.path).pipe(
+          Effect.map((line) => ({ line, bytes: Buffer.byteLength(line) + 1 })),
+        )
 
   const stat = (id: SessionId): Effect.Effect<SessionSummary, SessionError> =>
     Effect.gen(function* () {
-      const { mtimeMs, size } = yield* fileInfoOf(id)
-      // Listing reads the first line only and never repairs, so a look at the
+      const file = yield* logFileOf(id)
+      const { mtimeMs, size } = yield* infoOf(file, id)
+      // Listing reads the head only and never repairs, so a look at the
       // sessions leaves them alone however long the log behind the header is.
-      const firstLine = yield* readFirstLine(fileOf(id))
-      const header = yield* upgradeFirstLine(id, firstLine, mtimeMs, options.schemas)
+      const header = yield* readHeader(file)
+      const head = yield* upgradeFirstLine(id, header.line, mtimeMs, options.schemas)
       // The name is read from the head of the same file, under the same budget.
-      const title = yield* readTitle(fileOf(id))
-      // The header line and its newline are the whole file exactly when nothing
-      // was ever said: a repair note or any event makes the log longer than that.
-      const empty = size <= Buffer.byteLength(firstLine) + 1
+      const title =
+        file.format === 'zstd' ? yield* readZstdTitle(file.path) : yield* readTitle(file.path)
+      // The header bytes are the whole file exactly when nothing was ever said: a
+      // repair note or any event makes the log longer than its first frame.
+      const empty = size <= header.bytes
       return {
         id,
-        cwd: header.cwd,
-        createdAt: header.createdAt,
+        cwd: head.cwd,
+        createdAt: head.createdAt,
         updatedAt: mtimeMs,
         title,
         empty,
@@ -297,3 +356,5 @@ export * from './first-line.ts'
 export * from './title.ts'
 export * from './paths.ts'
 export * from './query.ts'
+export * from './zstd-frames.ts'
+export * from './zstd-log.ts'

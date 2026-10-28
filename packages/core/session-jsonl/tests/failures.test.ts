@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Effect } from 'effect'
 import { SESSION_FORMAT_VERSION, type SessionHeader } from '@jozo-harness/session'
-import { jsonlSessions } from '../src/index.ts'
+import {
+  encodeZstdFrame,
+  jsonlSessions,
+  SESSION_ZSTD_FILE_NAME,
+  splitZstdLog,
+} from '../src/index.ts'
 
 /** A root this test process owns; every test takes a directory of its own inside it. */
 const tempRoot = await mkdtemp(join(tmpdir(), 'jozo-harness-jsonl-failures-'))
@@ -20,7 +25,19 @@ const header = (cwd = '/work'): SessionHeader => ({
   cwd,
 })
 
-const fileOf = (root: string, id: string): string => join(root, id, 'session.v1.jsonl')
+const fileOf = (root: string, id: string): string => join(root, id, SESSION_ZSTD_FILE_NAME)
+
+/** A frame a crash cut inside: the frame header is whole, the line behind it is not. */
+const tornFrame = (text: string): Buffer => {
+  const frame = encodeZstdFrame(text)
+  return frame.subarray(0, frame.byteLength - 1)
+}
+
+const linesOf = (buffer: Buffer): ReadonlyArray<{ type: string; seq: number }> =>
+  splitZstdLog(buffer)
+    .text.trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as { type: string; seq: number })
 
 afterAll(async () => {
   await rm(tempRoot, { recursive: true, force: true })
@@ -41,7 +58,9 @@ describe('jsonlSessions failures', () => {
 
     await Effect.runPromise(created.sink.flush())
 
-    const lines = (await readFile(fileOf(root, created.id), 'utf8')).trim().split('\n')
+    const lines = splitZstdLog(await readFile(fileOf(root, created.id)))
+      .text.trim()
+      .split('\n')
     expect(lines).toHaveLength(2)
   })
 
@@ -103,9 +122,9 @@ describe('jsonlSessions failures', () => {
     const created = await Effect.runPromise(persistence.create(header()))
     const file = fileOf(root, created.id)
     const directory = join(root, created.id)
-    // A torn tail: a line that never finished, so the log is worth repairing.
-    await appendFile(file, '{"seq":2,"time":101,"type":"user/message"')
-    const before = await readFile(file, 'utf8')
+    // A torn tail: a frame that never finished, so the log is worth repairing.
+    await appendFile(file, tornFrame('{"seq":2,"time":101,"type":"user/message"'))
+    const before = await readFile(file)
     // The directory, not the file: a rename can replace a read-only inode.
     await chmod(directory, 0o500)
 
@@ -118,7 +137,7 @@ describe('jsonlSessions failures', () => {
         'session/header',
         'session/repaired',
       ])
-      expect(await readFile(file, 'utf8')).toBe(before)
+      expect(await readFile(file)).toEqual(before)
     } finally {
       await chmod(directory, 0o700)
     }
@@ -129,7 +148,7 @@ describe('jsonlSessions failures', () => {
     const created = await Effect.runPromise(persistence.create(header()))
     const file = fileOf(root, created.id)
     const directory = join(root, created.id)
-    const torn = '{"seq":2,"time":101,"type":"user/message"'
+    const torn = tornFrame('{"seq":2,"time":101,"type":"user/message"')
     await appendFile(file, torn)
     await chmod(directory, 0o500)
     const opened = await Effect.runPromise(persistence.open(created.id))
@@ -144,12 +163,7 @@ describe('jsonlSessions failures', () => {
       }),
     )
 
-    const text = await readFile(file, 'utf8')
-    expect(text.includes(torn)).toBe(false)
-    const parsed = text
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line) as { type: string; seq: number })
+    const parsed = linesOf(await readFile(file))
     expect(parsed.map((event) => event.type)).toEqual([
       'session/header',
       'session/repaired',
@@ -169,9 +183,9 @@ describe('jsonlSessions failures', () => {
     const created = await Effect.runPromise(persistence.create(header()))
     const file = fileOf(root, created.id)
     const directory = join(root, created.id)
-    await appendFile(file, '{"seq":2,"time":101,"type":"user/message"')
+    await appendFile(file, tornFrame('{"seq":2,"time":101,"type":"user/message"'))
     await chmod(directory, 0o500)
-    const before = await readFile(file, 'utf8')
+    const before = await readFile(file)
 
     try {
       const opened = await Effect.runPromise(persistence.open(created.id))
@@ -187,7 +201,7 @@ describe('jsonlSessions failures', () => {
       )
 
       expect(error.message).toContain('cannot append')
-      expect(await readFile(file, 'utf8')).toBe(before)
+      expect(await readFile(file)).toEqual(before)
     } finally {
       await chmod(directory, 0o700)
     }
