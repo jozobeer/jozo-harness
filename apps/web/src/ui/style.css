@@ -1299,6 +1299,63 @@ body:has(.context-body[data-open='false'][data-closing='false']) #status {
   word-break: break-word;
 }
 
+/* The verdict sits under the answer, quiet until the reader reaches for it. */
+.feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  margin-top: var(--s2);
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.feedback-choice,
+.feedback-note,
+.feedback-save {
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 2px var(--s2);
+  cursor: pointer;
+}
+
+.feedback-choice:hover,
+.feedback-note:hover,
+.feedback-save:hover {
+  color: var(--text);
+  border-color: var(--line);
+}
+
+.feedback-choice.chosen {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.feedback-note {
+  max-width: 30em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feedback-input {
+  min-width: 14em;
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  padding: 2px var(--s2);
+}
+
+.feedback-save {
+  color: var(--accent);
+}
+
 /*
  * The spine: what the agent says and does hangs from one line on the left, and
  * the line runs on through the gap to the next block until the human speaks.

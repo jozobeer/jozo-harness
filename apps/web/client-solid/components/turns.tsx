@@ -283,6 +283,88 @@ const Changes = (props: { turn: TraceTurn; store: SessionStore }) => (
   </Show>
 )
 
+/**
+ * The verdict under one answer. A click records it at once; the note is sent
+ * with the same verdict when the human saves it, and the log keeps the latest.
+ */
+const Feedback = (props: { turn: TraceTurn; store: SessionStore }) => {
+  const [editing, setEditing] = createSignal(false)
+  const [note, setNote] = createSignal(props.turn.feedback?.memo ?? '')
+  // The click shows at once; the log answers in the next event, and a reload
+  // starts from the verdict folded there.
+  const [chosen, setChosen] = createSignal<'like' | 'dislike' | undefined>(
+    props.turn.feedback?.rating,
+  )
+  const send = (rating: 'like' | 'dislike'): void => {
+    setChosen(rating)
+    const memo = note().trim()
+    props.store.send({
+      kind: 'feedback',
+      target: props.turn.answerSeq,
+      rating,
+      ...(memo === '' ? {} : { memo }),
+    })
+  }
+  return (
+    <div class="feedback" aria-label="Rate this answer">
+      <button
+        type="button"
+        class={'feedback-choice' + (chosen() === 'like' ? ' chosen' : '')}
+        aria-pressed={chosen() === 'like'}
+        onClick={() => send('like')}
+      >
+        Good
+      </button>
+      <button
+        type="button"
+        class={'feedback-choice' + (chosen() === 'dislike' ? ' chosen' : '')}
+        aria-pressed={chosen() === 'dislike'}
+        onClick={() => send('dislike')}
+      >
+        Bad
+      </button>
+      <Show when={chosen() !== undefined}>
+        <Show
+          when={editing()}
+          fallback={
+            <button type="button" class="feedback-note" onClick={() => setEditing(true)}>
+              {props.turn.feedback?.memo === undefined || props.turn.feedback.memo === ''
+                ? 'Add a note'
+                : props.turn.feedback.memo}
+            </button>
+          }
+        >
+          <input
+            class="feedback-input"
+            value={note()}
+            maxlength={500}
+            placeholder="A short note"
+            aria-label="Note on this answer"
+            onInput={(event) => setNote(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') return
+              const rating = chosen()
+              if (rating !== undefined) send(rating)
+              setEditing(false)
+            }}
+          />
+          <button
+            type="button"
+            class="feedback-save"
+            onClick={() => {
+              const rating = chosen()
+              if (rating !== undefined) send(rating)
+              setEditing(false)
+            }}
+          >
+            Save
+          </button>
+        </Show>
+      </Show>
+    </div>
+  )
+}
+
 /** One turn: what was asked, the work folded, the answer, and what it changed. */
 const Turn = (props: { turn: TraceTurn; live: string; now: number; store: SessionStore }) => {
   const running = () => props.turn.endedAt === undefined
@@ -313,6 +395,7 @@ const Turn = (props: { turn: TraceTurn; live: string; now: number; store: Sessio
       </Show>
       <Show when={props.turn.answer !== '' && !running()}>
         <Markdown text={props.turn.answer} class="body answer" />
+        <Feedback turn={props.turn} store={props.store} />
       </Show>
       <Show when={running() && (props.live !== '' || props.turn.answer !== '')}>
         <div class="block assistant live">

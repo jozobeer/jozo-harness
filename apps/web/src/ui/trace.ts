@@ -57,6 +57,13 @@ export interface ChangedFile {
   readonly edits: number
 }
 
+/** The human's verdict on one answer, as the log last recorded it. */
+export interface TraceFeedback {
+  readonly rating: 'like' | 'dislike'
+  /** The short note the human added; '' when the verdict stands alone. */
+  readonly memo: string
+}
+
 /** One turn as a reader takes it in: what was asked, how it went, what it left. */
 export interface TraceTurn {
   readonly turn: number
@@ -69,6 +76,10 @@ export interface TraceTurn {
   readonly steps: ReadonlyArray<TraceStep>
   /** The text of the last step that said anything: the turn's answer. */
   readonly answer: string
+  /** The seq of the assistant message that carries the answer; 0 before one. */
+  readonly answerSeq: number
+  /** The newest verdict on the answer; undefined until the human gives one. */
+  readonly feedback: TraceFeedback | undefined
   readonly changed: ReadonlyArray<ChangedFile>
   /** True when the log wrote the call outside any turn, as a forced skill load does. */
   readonly standalone: boolean
@@ -174,6 +185,8 @@ const startTurn = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => [
     outcome: '',
     steps: [],
     answer: '',
+    answerSeq: 0,
+    feedback: undefined,
     changed: [],
     standalone: false,
   },
@@ -222,7 +235,24 @@ const assistantSaid = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) =
     reasoning: partsOf(content, 'reasoning'),
     text,
   }))
-  return text === '' ? said : inLastTurn(said, (turn) => ({ ...turn, answer: text }))
+  return text === ''
+    ? said
+    : inLastTurn(said, (turn) => ({ ...turn, answer: text, answerSeq: event.seq }))
+}
+
+/** A later verdict on the same answer replaces the earlier one, as the log folds newest last. */
+const rateAnswer = (
+  turns: ReadonlyArray<TraceTurn>,
+  event: UiSessionEvent,
+): ReadonlyArray<TraceTurn> => {
+  const target = numberOf(event.data, 'target')
+  const rating = textOf(event.data, 'rating')
+  if (rating !== 'like' && rating !== 'dislike') return turns
+  return turns.map((turn) =>
+    turn.answerSeq === target
+      ? { ...turn, feedback: { rating, memo: textOf(event.data, 'memo') } }
+      : turn,
+  )
 }
 
 const withChange = (
@@ -278,6 +308,8 @@ const standaloneTurn = (
       },
     ],
     answer: '',
+    answerSeq: 0,
+    feedback: undefined,
     changed: [],
     standalone: true,
   },
@@ -325,6 +357,7 @@ const FOLDS: Readonly<Record<string, Fold>> = {
   'assistant/message': assistantSaid,
   'tool/call': callTool,
   'tool/result': settleTool,
+  'feedback/rated': rateAnswer,
 }
 
 /** Folds one event into the turns so far. */

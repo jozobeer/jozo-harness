@@ -210,6 +210,7 @@ const makeHost = (id: string, cwd = '/work', working = true): FakeHost => {
       answerApproval: () => Effect.succeed(true),
       answerAsk: () => Effect.succeed(''),
       serveQuestions: () => Effect.succeed([]),
+      rate: () => Effect.void,
     },
   }
 }

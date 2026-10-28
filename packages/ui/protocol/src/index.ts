@@ -6,7 +6,13 @@ import type {
   AskBatchRequested,
   AskRequested,
 } from '@jozo-harness/safety'
-import type { SessionError, SessionEvent } from '@jozo-harness/session'
+import type {
+  FeedbackError,
+  FeedbackRating,
+  SessionError,
+  SessionEvent,
+} from '@jozo-harness/session'
+import { FEEDBACK_RATINGS } from '@jozo-harness/session'
 import { Effect, Schema, Stream } from 'effect'
 
 /**
@@ -35,6 +41,13 @@ export const UiCommandSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal('effort'), effort: Schema.String }),
   // What this session runs on from its next request: `provider/model`.
   Schema.Struct({ kind: Schema.Literal('model'), model: Schema.String }),
+  // A verdict on one answer, named by the seq of its assistant message.
+  Schema.Struct({
+    kind: Schema.Literal('feedback'),
+    target: Schema.Int,
+    rating: Schema.Literals(FEEDBACK_RATINGS),
+    memo: Schema.optionalKey(Schema.String),
+  }),
 ])
 
 export type UiCommand = typeof UiCommandSchema.Type
@@ -118,13 +131,22 @@ export interface UiHost {
   readonly answerAsk: (request: AskRequested) => Effect.Effect<string>
   /** The batch answerer handed to `installAsk`; absent means a batch fails at once. */
   readonly serveQuestions: (request: AskBatchRequested) => Effect.Effect<ReadonlyArray<AskAnswer>>
+  /**
+   * Rates one answer, named by the seq of its assistant message. The rating is
+   * the human's: it reaches the page and never the next request.
+   */
+  readonly rate: (
+    target: number,
+    rating: FeedbackRating,
+    memo?: string,
+  ) => Effect.Effect<void, SessionError | FeedbackError>
 }
 
 /** Runs one command against a host; the transports share this mapping. */
 export const sendCommand = (
   host: UiHost,
   command: UiCommand,
-): Effect.Effect<void, SessionError> => {
+): Effect.Effect<void, SessionError | FeedbackError> => {
   switch (command.kind) {
     case 'submit':
       return host.submit(command.text, command.mode)
@@ -138,5 +160,7 @@ export const sendCommand = (
       return host.setEffort(command.effort)
     case 'model':
       return host.setModel(command.model)
+    case 'feedback':
+      return host.rate(command.target, command.rating, command.memo)
   }
 }

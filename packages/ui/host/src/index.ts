@@ -3,6 +3,7 @@ import { repairInterruptedRun } from '@jozo-harness/agent-loop'
 import type { HookRegistry } from '@jozo-harness/kernel'
 import {
   parseCommand,
+  rateFeedback,
   type CommandsShape,
   type Session,
   type SessionError,
@@ -304,5 +305,11 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
       answerApproval: (request) => waitFor(approvals, request.callId, false),
       answerAsk: (request) => waitFor(asks, request.id, ''),
       serveQuestions,
+      rate: (target, rating, memo) =>
+        rateFeedback(options.session, {
+          target,
+          rating,
+          ...(memo === undefined ? {} : { memo }),
+        }).pipe(Effect.asVoid),
     }
   })
