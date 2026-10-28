@@ -320,4 +320,41 @@ describe('makeAcpConnection', () => {
     expect(error).toBeInstanceOf(AcpTimeout)
     expect(connection.pending()).toBe(0)
   })
+
+  test('notify writes one JSON-RPC notification and waits for no answer', async () => {
+    const lines: Array<string> = []
+    const connection = makeAcpConnection({
+      registry: makeAcpHandlerRegistry(),
+      write: (line) => lines.push(line),
+    })
+
+    await Effect.runPromise(connection.notify('session/update', { sessionId: 's-1' }))
+
+    expect(lines).toEqual([
+      JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's-1' } }),
+    ])
+    expect(connection.pending()).toBe(0)
+  })
+
+  test('an input that fails ends the server instead of throwing', async () => {
+    const lines: Array<string> = []
+    const input: AsyncIterable<string> = {
+      [Symbol.asyncIterator]: () => ({
+        next: () => Promise.reject(new Error('stdin failed')),
+      }),
+    }
+
+    await expect(
+      Effect.runPromise(
+        Effect.scoped(
+          serveAcp({
+            input,
+            write: (line) => lines.push(line),
+            sessions: portOf(() => Effect.succeed(hostOf('s-1'))),
+          }),
+        ),
+      ),
+    ).resolves.toBeUndefined()
+    expect(lines).toEqual([])
+  })
 })

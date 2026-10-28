@@ -369,4 +369,74 @@ describe('HarnessClient', () => {
 
     await expect(pending).rejects.toThrow('Harness process exited')
   })
+
+  test('fails a waiting call when the harness stdout breaks', async () => {
+    const stdout = new PassThrough()
+    const child: HarnessChild = {
+      stdin: new PassThrough(),
+      stdout,
+      exited: new Promise<void>(() => undefined),
+      kill: () => undefined,
+    }
+    const client = new HarnessClient({ spawn: () => child })
+    const pending = client.initialize()
+
+    stdout.emit('error', new Error('broken pipe'))
+
+    await expect(pending).rejects.toThrow('Harness stdout failed')
+  })
+
+  test('fails a waiting call when the child cannot report a clean exit', async () => {
+    const child: HarnessChild = {
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      exited: Promise.reject(new Error('spawn failed')),
+      kill: () => undefined,
+    }
+    const client = new HarnessClient({ spawn: () => child })
+
+    await expect(client.initialize()).rejects.toThrow('Harness process exited')
+  })
+
+  test('close resolves when the child exit reports a failure', async () => {
+    let killed = false
+    const child: HarnessChild = {
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      exited: Promise.reject(new Error('already gone')),
+      kill: () => {
+        killed = true
+      },
+    }
+    const client = new HarnessClient({ spawn: () => child })
+
+    await expect(client.close()).resolves.toBeUndefined()
+    expect(killed).toBe(true)
+  })
+
+  test('answers a permission request the handler settles later', async () => {
+    const harness = makeHarness(
+      (request) =>
+        [permissionRequest(901), answer(request, { protocolVersion: 1, agentName: 'jzh' })].join(
+          '\n',
+        ),
+      {
+        answerPermission: async () => ({
+          outcome: { outcome: 'selected', optionId: 'allow-once' },
+        }),
+      },
+    )
+
+    await harness.client.initialize()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(harness.responses).toEqual([
+      {
+        jsonrpc: '2.0',
+        id: 901,
+        result: { outcome: { outcome: 'selected', optionId: 'allow-once' } },
+      },
+    ])
+  })
 })
