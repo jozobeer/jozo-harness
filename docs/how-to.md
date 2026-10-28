@@ -693,8 +693,10 @@ plugins:
       endpoint: https://collector.example.com
       scope: feedback        # off（既定）/ feedback / all
       headers:
-        authorization: Bearer <collector の token>
+        x-collector-tenant: team-a
 ```
+
+`headers` は `--dump-config` にも出る。秘密はここに置かず、collector の認証は手前の proxy か localhost の relay で受ける。
 
 送り先は `POST <endpoint>/v1/logs` で、本文は OTLP/HTTP の JSON である。`scope: feedback` は `feedback/rated` だけ、`scope: all` はすべてのセッションイベントを送る。バッチは 20 件ずつ、2 秒ごとに送る。待ちが 200 件を超えたら古いものから捨てる。
 
