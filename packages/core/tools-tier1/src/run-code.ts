@@ -107,6 +107,8 @@ export interface RunCodeHost {
   readonly sandbox?: SandboxShape
   /** The children this run keeps; absent leaves the tool to end its own. */
   readonly sessions?: RunCodeSessions
+  /** The environment the program inherits, with managed values already applied. */
+  readonly env?: NodeJS.ProcessEnv
 }
 
 const Parameters = Schema.Struct({
@@ -669,11 +671,21 @@ export const makeRunCodeTool = (host: RunCodeHost): RunCodeTool => {
                           }),
                       ),
                     )
+            const environment = host.env
+            if (environment !== undefined) {
+              const names = Object.keys(environment)
+                .filter((name) => name.startsWith('JZH_'))
+                .sort()
+              if (names.length > 0) {
+                process.stderr.write('[managed env] ' + names.join(', ') + '\n')
+              }
+            }
             return yield* Effect.try({
               try: () =>
                 makeWorker(
                   spawn(wrapped.argv, {
                     cwd: wrapped.cwd,
+                    ...(environment === undefined ? {} : { env: environment }),
                     stdin: 'pipe',
                     stdout: 'pipe',
                     stderr: 'pipe',

@@ -212,6 +212,21 @@ describe('jobs', () => {
     expect(ended[0]).toMatchObject({ type: 'ended', id: observed, status: 'killed' })
   })
 
+  test('a background command inherits the managed environment', async () => {
+    const observed = await Effect.runPromise(
+      Effect.gen(function* () {
+        const jobs = yield* makeJobs({
+          env: { ...process.env, JZH_JOB: 'managed-job' },
+        })
+        const running = yield* jobs.start('printf %s "$JZH_JOB"', '/tmp')
+        yield* Effect.sleep('200 millis')
+        return yield* jobs.read(running.id)
+      }),
+    )
+
+    expect(observed.output).toBe('managed-job')
+  })
+
   test('an unknown job is an error', async () => {
     const failed = await Effect.runPromise(
       Effect.gen(function* () {

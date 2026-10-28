@@ -277,4 +277,23 @@ describe('bash session', () => {
     expect(third.stdout.trim()).toBe('kept')
     sessions.closeAll()
   })
+
+  test('a session call applies its env and lets the managed value win', async () => {
+    const sessions = makeShellSessions()
+    const tool = makeBashTool(undefined, undefined, undefined, undefined, sessions, {
+      JZH_MODE: 'managed',
+    })
+    const result = valueOf(
+      await Effect.runPromise(
+        call(tool, {
+          command: 'printf %s "$JZH_MODE"',
+          session: 'env',
+          env: { JZH_MODE: 'caller' },
+        }),
+      ),
+    )
+
+    expect(result.stdout).toBe('managed')
+    sessions.closeAll()
+  })
 })

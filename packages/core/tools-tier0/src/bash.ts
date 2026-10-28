@@ -26,6 +26,7 @@ import {
 } from './shells.ts'
 import { resolveInside } from './workspace.ts'
 import { exitSummaryOf } from './present.ts'
+import { childEnvironment, logManagedEnv, type ManagedEnv } from './managed-env.ts'
 
 /** A command that has not finished by then is promoted to a job, or killed when there is none. */
 export const BASH_DEFAULT_TIMEOUT_MS = 120_000
@@ -120,6 +121,12 @@ const Parameters = Schema.Struct({
         'Keep one shell alive under this name, so the next call with the same name still sees its directory and variables, when it uses the same shell, directory, and sandbox mode. A different one is refused. Omit it for a shell of its own that ends with the call.',
     }),
   ),
+  env: Schema.optionalKey(
+    Schema.Record(Schema.String, Schema.String).annotate({
+      description:
+        'Variables for this command, written over the process environment. A managed JZH_* variable keeps its value even when this map names it.',
+    }),
+  ),
   ...escalationFields('a command', 'command'),
 })
 
@@ -139,6 +146,9 @@ export interface BashValue {
     readonly failure: SandboxFailure
   }
 }
+
+/** A variable name a shell accepts; a map key with a space or "=" would not reach the child. */
+const SHELL_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 /** The timeout a call actually gets: a default, never more than the tool allows. */
 export const clampTimeout = (asked: number | undefined): number => {
@@ -161,10 +171,12 @@ const openSession = (
   session: string,
   launch: ShellLaunch,
   wrapped: { readonly argv: ReadonlyArray<string>; readonly cwd: string },
+  environment: NodeJS.ProcessEnv,
 ): OpenedSession =>
   sessions.open(session, launch, () =>
     spawn([...wrapped.argv], {
       cwd: wrapped.cwd,
+      env: environment,
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -218,9 +230,10 @@ const adoptSession = (
   name: string | undefined,
   launch: ShellLaunch,
   wrapped: { readonly argv: ReadonlyArray<string>; readonly cwd: string },
+  environment: NodeJS.ProcessEnv,
 ): Effect.Effect<ShellSession | undefined, ToolError> => {
   if (name === undefined) return Effect.succeed(undefined)
-  const opened = openSession(sessions, name, launch, wrapped)
+  const opened = openSession(sessions, name, launch, wrapped, environment)
   if (opened.kind === 'mismatch') {
     return Effect.fail(
       new ToolError({
@@ -271,9 +284,11 @@ const killWrapped = async (child: Child): Promise<number> => {
 const runToKill = async (
   wrapped: { readonly argv: ReadonlyArray<string>; readonly cwd: string },
   timeoutMs: number,
+  environment: NodeJS.ProcessEnv,
 ): Promise<Run> => {
   const child = spawn([...wrapped.argv], {
     cwd: wrapped.cwd,
+    env: environment,
     stdout: 'pipe',
     stderr: 'pipe',
   })
@@ -292,9 +307,11 @@ const runToPromote = async (
   timeoutMs: number,
   command: string,
   jobs: TimeoutJobs,
+  environment: NodeJS.ProcessEnv,
 ): Promise<Run> => {
   const child = spawn([...wrapped.argv], {
     cwd: wrapped.cwd,
+    env: environment,
     stdout: 'pipe',
     stderr: 'pipe',
   })
@@ -316,10 +333,34 @@ const runWrapped = async (
   timeoutMs: number,
   command: string,
   jobs: TimeoutJobs | undefined,
+  environment: NodeJS.ProcessEnv,
 ): Promise<Run> =>
   jobs === undefined
-    ? runToKill(wrapped, timeoutMs)
-    : runToPromote(wrapped, timeoutMs, command, jobs)
+    ? runToKill(wrapped, timeoutMs, environment)
+    : runToPromote(wrapped, timeoutMs, command, jobs, environment)
+
+/** A shell assignment for the commands that follow it, with the value quoted. */
+const assignment = (shell: ShellName, name: string, value: string): string =>
+  shell === 'bash'
+    ? 'export ' + name + "='" + value.replaceAll("'", "'\\''") + "'"
+    : '$env:' + name + " = '" + value.replaceAll("'", "''") + "'"
+
+/**
+ * A live shell keeps its variables, so a call writes its own env and then the
+ * managed values before the command. Managed ones go last and win.
+ */
+const sessionCommand = (
+  shell: ShellName,
+  command: string,
+  requested: ManagedEnv,
+  managed: ManagedEnv,
+): string => {
+  const lines = [
+    ...Object.entries(requested).map(([name, value]) => assignment(shell, name, value)),
+    ...Object.entries(managed).map(([name, value]) => assignment(shell, name, value)),
+  ]
+  return lines.length === 0 ? command : lines.join('\n') + '\n' + command
+}
 
 /**
  * Runs the command in a live session. A timeout ends that shell: a command still
@@ -378,6 +419,8 @@ export const makeBashTool = (
   shells: ShellAvailability = shellOnPath,
   /** The live shells a named session keeps; one run owns them and closes them at its end. */
   sessions: ShellSessions = makeShellSessions(),
+  /** The harness-owned variables every child gets, whatever the call asks for. */
+  managed: ManagedEnv = {},
 ): ToolDefinition<BashArgs, BashValue> => {
   const canEscalate = escalates(sandbox, approval)
   return {
@@ -416,6 +459,16 @@ export const makeBashTool = (
             new ToolError({ code: 'execution', message: missingShellMessage(shell) }),
           )
         }
+        const requested = args.env ?? {}
+        const invalidName = Object.keys(requested).find((name) => !SHELL_ENV_NAME.test(name))
+        if (invalidName !== undefined) {
+          return yield* Effect.fail(
+            new ToolError({
+              code: 'invalid-arguments',
+              message: 'environment variable names must be shell identifiers: ' + invalidName,
+            }),
+          )
+        }
         const cwd =
           args.cwd === undefined ? context.cwd : yield* resolveInside(context.cwd, args.cwd)
         const refused = reusedSessionRefusal(
@@ -452,12 +505,24 @@ export const makeBashTool = (
         const timeoutMs = clampTimeout(args.timeoutMs)
         // The mode is known only after approval, so a standing mode the live shell
         // was not spawned with is refused here, before the command is written.
-        const session = yield* adoptSession(sessions, args.session, { shell, mode, cwd }, wrapped)
+        const environment = childEnvironment(managed, requested)
+        logManagedEnv(environment)
+        const session = yield* adoptSession(
+          sessions,
+          args.session,
+          { shell, mode, cwd },
+          wrapped,
+          environment,
+        )
         const run = yield* Effect.tryPromise({
           try: () =>
             session === undefined
-              ? runWrapped(wrapped, timeoutMs, args.command, jobs)
-              : runInSession(session, args.command, timeoutMs),
+              ? runWrapped(wrapped, timeoutMs, args.command, jobs, environment)
+              : runInSession(
+                  session,
+                  sessionCommand(shell, args.command, requested, managed),
+                  timeoutMs,
+                ),
           catch: () => new ToolError({ code: 'execution', message: 'cannot run: ' + args.command }),
         })
         return {
