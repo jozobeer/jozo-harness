@@ -4515,8 +4515,10 @@ describe('the workspace file tree', () => {
     const { store, calls } = makeStore({ pane: { kind: 'files' }, tree: treeOf() })
     const { container } = render(() => <ContextPane store={store} />)
 
-    // The pane asks for the root itself, not for each child in turn.
+    // The pane asks for the root itself, not for each child in turn, and reads
+    // the folders it already shows again in case the disk changed meanwhile.
     expect(calls).toContainEqual({ kind: 'openFolder', path: '' })
+    expect(calls).toContainEqual({ kind: 'refreshTree' })
     const rows = Array.from(container.querySelectorAll('.tree-row'))
     expect(rows.map((row) => row.textContent)).toEqual(['apps', 'README.md'])
     expect(rows[0]?.getAttribute('aria-expanded')).toBe('false')

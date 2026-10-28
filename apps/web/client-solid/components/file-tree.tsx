@@ -17,12 +17,15 @@ export const FileTree = (props: { store: SessionStore }) => {
   const rows = () => treeRows(tree())
   const read = () => tree()?.folders.some((one) => one.path === '') === true
 
-  // The tree opens at the workspace root: the first listing is the only one the
-  // page asks for before the reader opens a folder.
+  // The tree opens at the workspace root. The tab may be opened again after files
+  // changed on disk, so every folder it already shows is read again with it.
   createEffect(
     on(
       () => props.store.state().sessionId,
-      () => props.store.openFolder(''),
+      () => {
+        props.store.openFolder('')
+        props.store.refreshTree()
+      },
     ),
   )
 
