@@ -433,6 +433,98 @@ body {
   color: var(--danger, #c0392b);
 }
 
+/* The one-field way into a file the tree has not scrolled to. */
+.tree-open {
+  display: flex;
+  gap: var(--s1);
+  margin-bottom: var(--s2);
+}
+
+.tree-path {
+  flex: 1;
+  min-width: 0;
+  padding: 3px var(--s2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+/* A workspace file in the right pane, from its head to its reader. */
+.preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+}
+
+.preview-path {
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+
+.preview-meta {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--s1);
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.preview-hint {
+  margin: 0;
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.preview-problem {
+  margin: 0;
+  color: var(--danger, #c0392b);
+  font-size: var(--text-sm);
+}
+
+.preview-text {
+  margin: 0;
+  padding: var(--s3);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.preview-markdown {
+  overflow-wrap: anywhere;
+}
+
+.preview-image {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.preview-frame,
+.preview-pdf {
+  width: 100%;
+  height: 65vh;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
 .pane-label {
   display: block;
   margin: var(--s5) 0 var(--s2);

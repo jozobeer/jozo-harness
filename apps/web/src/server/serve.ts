@@ -46,6 +46,7 @@ import { answerSessionExport } from './session-export.ts'
 import { answerPlugins, type PluginsPort } from './plugins.ts'
 import { answerWebhook, type WebhookGate, type WebhookRule } from './webhooks.ts'
 import { listWorkspaceDirectory, searchWorkspaceFiles } from './files.ts'
+import { readWorkspaceFile } from './preview.ts'
 import {
   resolveReferences,
   sessionCandidateTargets,
@@ -306,6 +307,17 @@ const handlersOf = (
             : registry.sessionOf(sessionId)?.summary.cwd
         if (cwd === undefined) return yield* Effect.fail('the session is not open')
         return yield* listWorkspaceDirectory(cwd, path)
+      }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
+    workspaceFile: ({ sessionId, path }) =>
+      Effect.gen(function* () {
+        // The same workspace the tree reads: the blank page asks the run's own
+        // folder, and a session names the folder it was opened in.
+        const cwd =
+          sessionId === ''
+            ? (yield* settings.read()).cwd
+            : registry.sessionOf(sessionId)?.summary.cwd
+        if (cwd === undefined) return yield* Effect.fail('the session is not open')
+        return yield* readWorkspaceFile(cwd, path)
       }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
     attach: ({ name, mediaType, data }) =>
       Effect.gen(function* () {

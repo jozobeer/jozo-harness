@@ -19,6 +19,7 @@ import {
   type RunSettingsInput,
   type RunStateView,
   type SessionAction,
+  type WorkspacePreview,
 } from '../src/shared/rpc.ts'
 import {
   applyUiEvent,
@@ -37,6 +38,9 @@ import {
   withModels,
   withOpened,
   withPane,
+  withPreviewProblem,
+  withPreviewReading,
+  withPreviewView,
   withProblem,
   withQuotes,
   withRun,
@@ -288,6 +292,12 @@ export type AttachAnswer =
 /** What the file tree asked the server: one folder to read, or every open one again. */
 type TreeAsk = { readonly kind: 'read'; readonly path: string } | { readonly kind: 'refresh' }
 
+/** One file the right pane asked for, in the session that was on screen when it asked. */
+interface PreviewAsk {
+  readonly sessionId: string
+  readonly path: string
+}
+
 /** The panel asks about one running job or child agent. */
 type RunAsk = Extract<PanelAsk, { kind: 'job' | 'stopJob' | 'stopSubagent' }>
 
@@ -389,6 +399,8 @@ export interface SessionStore {
   readonly refreshTree: () => void
   /** Puts one workspace path into the composer as an @ reference. */
   readonly referencePath: (path: string) => void
+  /** Reads one workspace file and shows it in the right pane. */
+  readonly previewPath: (path: string) => void
   /**
    * Reads one folder for the Add workspace dialog; the folders inside it, or
    * why they could not be read, go to `reply`. A blank path starts at the run's
@@ -564,6 +576,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
   const effortAsks = Effect.runSync(Queue.unbounded<string>())
   const workspaceAsks = Effect.runSync(Queue.unbounded<WorkspaceAsk>())
   const treeAsks = Effect.runSync(Queue.unbounded<TreeAsk>())
+  const previewAsks = Effect.runSync(Queue.unbounded<PreviewAsk>())
   let following: Fiber.Fiber<void, unknown> | undefined
   const bridge = makeBridge((message) => update((current) => withProblem(current, message)))
 
@@ -1122,6 +1135,27 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       ),
     )
 
+    /**
+     * One file the reader picked. The session and path travel with the ask, so an
+     * answer that arrives after a move lands nowhere rather than on another file.
+     */
+    const readPreview = (asked: PreviewAsk) =>
+      client.workspaceFile({ sessionId: asked.sessionId, path: asked.path }).pipe(
+        Effect.tap((view: WorkspacePreview) =>
+          Effect.sync(() =>
+            update((now) => withPreviewView(now, asked.sessionId, asked.path, view)),
+          ),
+        ),
+        Effect.catchCause((cause) =>
+          Effect.sync(() =>
+            update((now) => withPreviewProblem(now, asked.sessionId, asked.path, causeText(cause))),
+          ),
+        ),
+        Effect.asVoid,
+      )
+
+    yield* Effect.forkScoped(Stream.runForEach(Stream.fromQueue(previewAsks), readPreview))
+
     const settings = yield* client.settings()
     yield* Effect.sync(() => update((now) => withSettings(now, settings)))
     const editable = yield* client.runSettings()
@@ -1363,6 +1397,11 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     closeFolder: (path) => update((now) => withTreeClosed(now, path)),
     refreshTree: () => Queue.offerUnsafe(treeAsks, { kind: 'refresh' }),
     referencePath: (path) => update((now) => withDraft(now, draftWithReference(now.draft, path))),
+    previewPath: (path) => {
+      const sessionId = state().sessionId
+      update((now) => withPane(withPreviewReading(now, path), { kind: 'preview', path }))
+      Queue.offerUnsafe(previewAsks, { sessionId, path })
+    },
     chooseModel: (model) => {
       const current = state()
       // The session on screen switches with the command; the choice is the run's, so

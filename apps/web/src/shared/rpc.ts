@@ -520,6 +520,40 @@ export const WorkspaceDirectoryRpc = Rpc.make('workspaceDirectory', {
 })
 
 /**
+ * What one workspace file shows as in the right pane: its text, an image or a
+ * PDF as base64, or the reason it has no preview. The server reads the file
+ * through the same gate as the tree and never writes to it.
+ */
+export const WorkspacePreviewSchema = Schema.Struct({
+  /** The path relative to the workspace root, as the tree names it. */
+  path: Schema.String,
+  kind: Schema.Literals(['text', 'markdown', 'image', 'pdf', 'html', 'unsupported']),
+  mediaType: Schema.String,
+  /** The file's size on disk, so a shortened preview can say what it left out. */
+  size: Schema.Number,
+  /** The head of a text file, decoded as UTF-8. */
+  text: Schema.optionalKey(Schema.String),
+  /** The bytes of an image or a PDF, base64 encoded for JSON. */
+  data: Schema.optionalKey(Schema.String),
+  /** True when `text` is only the head of a larger file. */
+  truncated: Schema.Boolean,
+  /** Why a file has no preview, shown as it is. */
+  reason: Schema.optionalKey(Schema.String),
+})
+
+export type WorkspacePreview = typeof WorkspacePreviewSchema.Type
+
+/**
+ * One file of the session's workspace, read when the reader picks it in the
+ * tree or names its path. The blank id asks the run itself, as the tree does.
+ */
+export const WorkspaceFileRpc = Rpc.make('workspaceFile', {
+  payload: Schema.Struct({ sessionId: Schema.String, path: Schema.String }),
+  success: WorkspacePreviewSchema,
+  error: Schema.String,
+})
+
+/**
  * Keeps one file the composer attached under the hash of its bytes. The page
  * sends the bytes; the server validates the type and size and returns the
  * reference the message carries.
@@ -596,6 +630,7 @@ export const UiRpcs = RpcGroup.make(
   CommandsRpc,
   FilesRpc,
   WorkspaceDirectoryRpc,
+  WorkspaceFileRpc,
   AttachRpc,
   StateRpc,
   ScheduleCreateRpc,

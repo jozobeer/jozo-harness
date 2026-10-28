@@ -9,6 +9,7 @@ import type {
   SessionSummary,
   SettingsView,
   WorkspaceEntry,
+  WorkspacePreview,
   WorkspaceView,
 } from '../shared/rpc.ts'
 import { DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, type FontFamily, type FontSize } from './font.ts'
@@ -36,6 +37,7 @@ export type Pane =
   | { readonly kind: 'settings' }
   | { readonly kind: 'trajectory' }
   | { readonly kind: 'job'; readonly id: string; readonly detail: JobDetailView | undefined }
+  | { readonly kind: 'preview'; readonly path: string }
 
 /** What the browser shows: the conversation, the socket, the draft, and the sessions. */
 export interface WebState {
@@ -81,6 +83,8 @@ export interface WebState {
   readonly pane: Pane | undefined
   /** The workspace tree the right pane shows; undefined before the pane has opened it. */
   readonly tree: WorkspaceTree | undefined
+  /** The workspace file the right pane reads, and what it found. */
+  readonly preview: FilePreview | undefined
   /** Every turn this session ran, oldest first, as the log recorded it. */
   readonly turns: ReadonlyArray<TurnView>
   /** What the session says it works toward; undefined until the page has asked. */
@@ -121,6 +125,16 @@ export interface WorkspaceTree {
 
 const noTree: WorkspaceTree = { folders: [], open: [], problem: '' }
 
+/** One file the right pane is reading: the name it asked for, and the answer or why. */
+export interface FilePreview {
+  /** The path relative to the workspace root, as the tree names it. */
+  readonly path: string
+  /** What the server answered; undefined while the read is still on its way. */
+  readonly view: WorkspacePreview | undefined
+  /** Why the last read failed; '' when nothing did. */
+  readonly problem: string
+}
+
 /** One answer to a reference query: the paths, and the session and word that asked. */
 export interface FileMatches {
   readonly sessionId: string
@@ -152,6 +166,7 @@ export const initialState: WebState = {
   workspaces: undefined,
   pane: { kind: 'run' },
   tree: undefined,
+  preview: undefined,
   turns: [],
   run: undefined,
   trace: [],
@@ -258,6 +273,34 @@ export const withPane = (state: WebState, pane: Pane | undefined): WebState => (
   pane,
 })
 
+/** Starts reading one file; its answer replaces this when it arrives. */
+export const withPreviewReading = (state: WebState, path: string): WebState => ({
+  ...state,
+  preview: { path, view: undefined, problem: '' },
+})
+
+/** Takes an answer only while the page still shows the session and file that asked. */
+export const withPreviewView = (
+  state: WebState,
+  sessionId: string,
+  path: string,
+  view: WorkspacePreview,
+): WebState =>
+  state.sessionId === sessionId && state.preview?.path === path
+    ? { ...state, preview: { path, view, problem: '' } }
+    : state
+
+/** Says why the file could not be read, under the same session and path check. */
+export const withPreviewProblem = (
+  state: WebState,
+  sessionId: string,
+  path: string,
+  problem: string,
+): WebState =>
+  state.sessionId === sessionId && state.preview?.path === path
+    ? { ...state, preview: { path, view: undefined, problem } }
+    : state
+
 /**
  * Keeps one folder's answer, and shows it: the tree asks for a folder only when
  * the reader opens it, so the answer and the opening are one step.
@@ -334,6 +377,7 @@ export const withBlank = (state: WebState): WebState => ({
   files: undefined,
   // The tree belonged to the workspace left behind; the next one reads its own.
   tree: undefined,
+  preview: undefined,
   turns: [],
   trace: [],
 })
@@ -363,6 +407,7 @@ export const withSession = (state: WebState, summary: SessionSummary): WebState 
     commands: state.sessionId === summary.id ? state.commands : undefined,
     files: state.sessionId === summary.id ? state.files : undefined,
     tree: state.sessionId === summary.id ? state.tree : undefined,
+    preview: state.sessionId === summary.id ? state.preview : undefined,
     turns: [],
     trace: [],
     deletedPages: [],

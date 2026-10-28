@@ -18,6 +18,7 @@ import { useLocaleChoice, useTranslate } from '../i18n.ts'
 import { basenameOf, childSessionsOf, elapsedOf, pagesOf } from '../lib.ts'
 import { LOCALES, type MessageKey } from '../locale.ts'
 import type { ScheduleDraft, SessionStore } from '../store.ts'
+import { FilePreview } from './file-preview.tsx'
 import { FileTree } from './file-tree.tsx'
 import { Review } from './review.tsx'
 import { Inspector } from './inspector.tsx'
@@ -1572,6 +1573,13 @@ export const ContextPane = (props: { store: SessionStore }) => {
               </button>
             )}
           </Show>
+          <Show when={ofKind(pane(), 'preview')}>
+            {(preview) => (
+              <button class="tab active" type="button" title={preview().path}>
+                {preview().path.split('/').at(-1) ?? preview().path}
+              </button>
+            )}
+          </Show>
         </nav>
         <button
           id="panel-close"
@@ -1611,6 +1619,9 @@ export const ContextPane = (props: { store: SessionStore }) => {
           </Match>
           <Match when={ofKind(body(), 'job')}>
             {(job) => <Job store={props.store} pane={job()} />}
+          </Match>
+          <Match when={ofKind(body(), 'preview')}>
+            {(preview) => <FilePreview store={props.store} path={preview().path} />}
           </Match>
         </Switch>
       </div>

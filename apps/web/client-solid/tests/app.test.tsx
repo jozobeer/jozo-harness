@@ -39,6 +39,7 @@ import type {
   EditableSettingsView,
   RunSettingsInput,
   SessionAction,
+  WorkspacePreview,
 } from '../../src/shared/rpc.ts'
 import { traceOf } from '../../src/ui/trace.ts'
 import {
@@ -101,6 +102,7 @@ type Call =
   | { readonly kind: 'closeFolder'; readonly path: string }
   | { readonly kind: 'refreshTree' }
   | { readonly kind: 'referencePath'; readonly path: string }
+  | { readonly kind: 'previewPath'; readonly path: string }
 
 /** What the Add workspace dialog heard about one folder. */
 type BrowseAnswer =
@@ -182,6 +184,7 @@ const makeStore = (
     closeFolder: (path) => calls.push({ kind: 'closeFolder', path }),
     refreshTree: () => calls.push({ kind: 'refreshTree' }),
     referencePath: (path) => calls.push({ kind: 'referencePath', path }),
+    previewPath: (path) => calls.push({ kind: 'previewPath', path }),
     addWorkspace: (cwd) => calls.push({ kind: 'addWorkspace', cwd }),
     browseDirectories: (path, reply) => {
       calls.push({ kind: 'browseDirectories', path })
@@ -4557,12 +4560,24 @@ describe('the workspace file tree', () => {
     expect(calls).toContainEqual({ kind: 'closeFolder', path: 'apps' })
   })
 
-  test('a click on a file puts its path in the composer as an @ reference', () => {
+  test('a click on a file opens its preview in the right pane', () => {
     const { store, calls } = makeStore({ pane: { kind: 'files' }, tree: treeOf() })
     const { container } = render(() => <ContextPane store={store} />)
 
     fireEvent.click(container.querySelectorAll('.tree-name')[1] as Element)
-    expect(calls).toContainEqual({ kind: 'referencePath', path: 'README.md' })
+    expect(calls).toContainEqual({ kind: 'previewPath', path: 'README.md' })
+  })
+
+  test('a path typed under the tree opens a file the tree does not show', () => {
+    const { store, calls } = makeStore({ pane: { kind: 'files' }, tree: treeOf() })
+    const { container } = render(() => <ContextPane store={store} />)
+
+    const field = container.querySelector('.tree-path') as HTMLInputElement
+    fireEvent.input(field, { target: { value: ' src/app.ts ' } })
+    fireEvent.submit(container.querySelector('.tree-open') as Element)
+
+    expect(calls).toContainEqual({ kind: 'previewPath', path: 'src/app.ts' })
+    expect(field.value).toBe('')
   })
 
   test('the tree reads what changed when the reader asks it to', () => {
@@ -4609,5 +4624,114 @@ describe('the workspace file tree', () => {
 
     fireEvent.click(container.querySelector('#files') as Element)
     expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'files' } })
+  })
+})
+
+describe('the workspace file preview', () => {
+  const showing = (view: WorkspacePreview) => ({
+    pane: { kind: 'preview' as const, path: view.path },
+    preview: { path: view.path, view, problem: '' },
+  })
+
+  test('a Markdown file is drawn as prose and keeps its path and size', () => {
+    const view: WorkspacePreview = {
+      path: 'README.md',
+      kind: 'markdown',
+      mediaType: 'text/markdown',
+      size: 12,
+      text: '# Title\n\nbody',
+      truncated: false,
+    }
+    const { store, calls } = makeStore(showing(view))
+    const { container } = render(() => <ContextPane store={store} />)
+
+    expect(container.querySelector('.preview-path')?.textContent).toBe('README.md')
+    expect(container.querySelector('.preview-markdown h1')?.textContent).toBe('Title')
+    expect(container.textContent).toContain('12 bytes')
+    fireEvent.click(container.querySelector('#preview-reference') as Element)
+    expect(calls).toContainEqual({ kind: 'referencePath', path: 'README.md' })
+  })
+
+  test('an image shows from the bytes the server read', () => {
+    const view: WorkspacePreview = {
+      path: 'pixel.png',
+      kind: 'image',
+      mediaType: 'image/png',
+      size: 2,
+      data: 'aGk=',
+      truncated: false,
+    }
+    const { store } = makeStore(showing(view))
+    const { container } = render(() => <ContextPane store={store} />)
+
+    const image = container.querySelector('.preview-image') as HTMLImageElement
+    expect(image.getAttribute('src')).toBe('data:image/png;base64,aGk=')
+    expect(image.getAttribute('alt')).toBe('pixel.png')
+  })
+
+  test('HTML is framed with scripts off, so the file is read and not run', () => {
+    const view: WorkspacePreview = {
+      path: 'page.html',
+      kind: 'html',
+      mediaType: 'text/html',
+      size: 20,
+      text: '<h1>Hello</h1>',
+      truncated: false,
+    }
+    const { store } = makeStore(showing(view))
+    const { container } = render(() => <ContextPane store={store} />)
+
+    const frame = container.querySelector('.preview-frame') as HTMLIFrameElement
+    expect(frame.getAttribute('sandbox')).toBe('')
+    expect(frame.getAttribute('srcdoc')).toBe('<h1>Hello</h1>')
+  })
+
+  test('a shortened file says so, and one without a preview says why', () => {
+    const text: WorkspacePreview = {
+      path: 'log.txt',
+      kind: 'text',
+      mediaType: 'text/plain',
+      size: 9_000,
+      text: 'start',
+      truncated: true,
+    }
+    const first = makeStore(showing(text))
+    const shown = render(() => <ContextPane store={first.store} />)
+    expect(shown.container.textContent).toContain('only the start is shown')
+    cleanup()
+
+    const unsupported: WorkspacePreview = {
+      path: 'deck.pptx',
+      kind: 'unsupported',
+      mediaType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      size: 4,
+      truncated: false,
+      reason: 'this host cannot convert pptx to PDF',
+    }
+    const { store } = makeStore(showing(unsupported))
+    const { container } = render(() => <ContextPane store={store} />)
+    expect(container.querySelector('.preview-problem')?.textContent).toBe(
+      'this host cannot convert pptx to PDF',
+    )
+  })
+
+  test('a preview not asked for says how to pick one, and a refused read says why', () => {
+    const empty = makeStore({ pane: { kind: 'preview', path: 'README.md' } })
+    const first = render(() => <ContextPane store={empty.store} />)
+    expect(first.container.textContent).toContain('choose a file in the tree')
+    cleanup()
+
+    const refused = makeStore({
+      pane: { kind: 'preview', path: 'secret.txt' },
+      preview: {
+        path: 'secret.txt',
+        view: undefined,
+        problem: 'the file is outside the workspace',
+      },
+    })
+    const { container } = render(() => <ContextPane store={refused.store} />)
+    expect(container.querySelector('.preview-problem')?.textContent).toBe(
+      'the file is outside the workspace',
+    )
   })
 })
