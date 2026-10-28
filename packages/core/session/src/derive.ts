@@ -103,11 +103,24 @@ export function deriveMessagesWithSeqs(
   events: ReadonlyArray<SessionEvent>,
   extra: ReadonlyArray<MessageProjection> = [],
 ): ReadonlyArray<DerivedMessage> {
+  return continueMessagesWithSeqs(events, [], extra)
+}
+
+/**
+ * Folds the events that come after a projection checkpoint into the messages it
+ * already produced. A checkpoint carries the fold's state, not a hint, so the
+ * result matches folding the whole log from the start.
+ */
+export function continueMessagesWithSeqs(
+  events: ReadonlyArray<SessionEvent>,
+  derived: ReadonlyArray<DerivedMessage>,
+  extra: ReadonlyArray<MessageProjection> = [],
+): ReadonlyArray<DerivedMessage> {
   const projections = projectionMap(extra)
   const logOnly = logOnlyEventTypes()
-  let derived: ReadonlyArray<DerivedMessage> = []
-  for (const event of events) derived = foldOne(derived, event, projections, logOnly)
-  return derived
+  let folded = derived
+  for (const event of events) folded = foldOne(folded, event, projections, logOnly)
+  return folded
 }
 
 /** The events a recorded prune already shadows; a later prune leaves them alone. */

@@ -22,7 +22,8 @@ import { expandHome, newSessionLog, resolveSessionLog, type SessionLogFile } fro
 import { encodeZstdFrame, splitZstdLog } from './zstd-frames.ts'
 import { replaceFile } from './replace-file.ts'
 import { acquireLock } from './lock.ts'
-import { join } from 'node:path'
+import { PROJECTION_FILE_NAME, readProjection, writeProjection } from './projection.ts'
+import { dirname, join } from 'node:path'
 
 export interface JsonlSessionsOptions {
   /** Directory that holds one subdirectory per session. */
@@ -143,6 +144,7 @@ const lineBytes = (file: SessionLogFile, line: string): Uint8Array =>
   file.format === 'zstd' ? encodeZstdFrame(line) : Buffer.from(line)
 
 const sinkFor = (file: SessionLogFile, id: SessionId, tornPrefix?: Uint8Array): SessionSink => {
+  const projectionFile = join(dirname(file.path), PROJECTION_FILE_NAME)
   // Set when a repair could not be written. The next append rewrites this prefix
   // first: appending would glue the new line onto the torn tail, and that line
   // would then end in a newline, so the next open would parse it and refuse the log.
@@ -179,6 +181,8 @@ const sinkFor = (file: SessionLogFile, id: SessionId, tornPrefix?: Uint8Array): 
         },
         catch: (cause) => persistenceError('cannot flush session ' + id, cause),
       }),
+    loadProjection: () => readProjection(projectionFile, file.path),
+    saveProjection: (seq, derived) => writeProjection(projectionFile, file.path, id, seq, derived),
   }
 }
 
@@ -383,3 +387,4 @@ export * from './query.ts'
 export * from './zstd-frames.ts'
 export * from './zstd-log.ts'
 export * from './lock.ts'
+export * from './projection.ts'

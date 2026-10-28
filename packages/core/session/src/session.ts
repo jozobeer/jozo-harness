@@ -1,7 +1,8 @@
 import { Effect, Semaphore } from 'effect'
 import type { RequestMessage } from '@jozo-harness/llm'
-import { deriveMessages } from './derive.ts'
+import { deriveMessagesWithSeqs, type DerivedMessage } from './derive.ts'
 import type { MessageProjection } from './projections.ts'
+import { makeProjectionKeeper } from './projection-keeper.ts'
 import { SessionError } from './errors.ts'
 import type { SessionEvent, SessionEventMap, SessionHeader, SessionId } from './events.ts'
 import { isJsonValue } from './json.ts'
@@ -23,6 +24,8 @@ export interface Session {
     options?: AppendOptions,
   ): Effect.Effect<void, SessionError>
   flush(): Effect.Effect<void, SessionError>
+  /** The fold with the event each message came from, resumed from the checkpoint. */
+  deriveWithSeqs(projections?: ReadonlyArray<MessageProjection>): ReadonlyArray<DerivedMessage>
   derive(projections?: ReadonlyArray<MessageProjection>): ReadonlyArray<RequestMessage>
 }
 
@@ -59,6 +62,9 @@ export function makeSession(options: MakeSessionOptions): Effect.Effect<Session,
     // two writers cannot share one. The observer runs inside the permit and must
     // not append to this session, or it would wait for a permit it already holds.
     const writes = Semaphore.makeUnsafe(1)
+    // The checkpoint resumes the fold here; a sink that keeps none returns undefined
+    // and every derive() folds the whole log as before.
+    const keeper = yield* makeProjectionKeeper(options.sink, log, now)
 
     const append = <K extends keyof SessionEventMap>(
       type: K,
@@ -86,6 +92,7 @@ export function makeSession(options: MakeSessionOptions): Effect.Effect<Session,
             yield* options.sink.append(event)
             highest = event.seq
             log.push(event)
+            keeper?.appended(event)
             if (options.notify !== undefined) {
               yield* options
                 .notify(event)
@@ -95,17 +102,40 @@ export function makeSession(options: MakeSessionOptions): Effect.Effect<Session,
                   ),
                 )
             }
+            if (keeper?.due() === true) yield* keeper.save(log, highest)
           }),
         )
       })
+
+    // The checkpoint holds the fold with the registered projections, so a caller
+    // that brings its own projections still folds the log from the start.
+    const deriveWithSeqs = (
+      projections?: ReadonlyArray<MessageProjection>,
+    ): ReadonlyArray<DerivedMessage> => {
+      const usesRegistered = projections === undefined || projections.length === 0
+      if (!usesRegistered) return deriveMessagesWithSeqs(log, projections)
+      const stored = keeper?.messages()
+      if (stored !== undefined) return stored
+      const derived = deriveMessagesWithSeqs(log)
+      keeper?.adopt(derived, highest)
+      return derived
+    }
 
     return {
       id: options.id,
       header: first.data,
       events: () => [...log],
       append,
-      flush: options.sink.flush,
-      derive: (projections?: ReadonlyArray<MessageProjection>) => deriveMessages(log, projections),
+      flush: () =>
+        Effect.gen(function* () {
+          yield* options.sink.flush()
+          // The close still leaves a checkpoint for the next open, even if no
+          // derive() ran during this process.
+          if (keeper !== undefined) yield* keeper.save(log, highest)
+        }),
+      deriveWithSeqs,
+      derive: (projections?: ReadonlyArray<MessageProjection>) =>
+        deriveWithSeqs(projections).map((entry) => entry.message),
     }
   })
 }
