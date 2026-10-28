@@ -6,6 +6,8 @@ import { Effect } from 'effect'
 import {
   detectOpenApps,
   makeOpenInApp,
+  noOpenInApp,
+  nodeOpenAppHost,
   openAppsViewOf,
   openWorkspacePath,
   resolveWorkspacePath,
@@ -232,5 +234,28 @@ describe('open in app', () => {
 
   test('reports a command that is not there instead of a silent success', async () => {
     await expect(spawnLaunch('jzh-no-such-command-394', [])).rejects.toThrow()
+  })
+
+  test('resolves once the app has started, without waiting for it to exit', async () => {
+    await expect(spawnLaunch(process.execPath, ['-e', ''])).resolves.toBeUndefined()
+  })
+
+  test('the no-app default says why and refuses to open', async () => {
+    expect(noOpenInApp.apps()).toEqual({
+      apps: [],
+      reason: 'this run has no app to open a workspace with',
+    })
+    const reason = await Effect.runPromise(
+      noOpenInApp.open({ app: 'finder', root: '/', path: '' }).pipe(Effect.flip),
+    )
+    expect(reason).toBe('no app is available to open this workspace')
+  })
+
+  test('the real host reads this machine and does not invent a command', () => {
+    const host = nodeOpenAppHost()
+    expect(host.platform).toBe(process.platform)
+    expect(host.home).not.toBe('')
+    expect(host.exists('/')).toBe(true)
+    expect(host.onPath('jzh-no-such-command-394')).toBe(false)
   })
 })

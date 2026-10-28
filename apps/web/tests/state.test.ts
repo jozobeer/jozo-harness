@@ -1,12 +1,13 @@
 import { describe, expect, test } from 'vitest'
 import type { UiEvent } from '@jozo-harness/ui-protocol'
-import type { WorkspacePreview } from '../src/shared/rpc.ts'
+import type { ScheduleView, WorkspacePreview } from '../src/shared/rpc.ts'
 import {
   applyUiEvent,
   initialState,
   withBranch,
   withCommands,
   withConnection,
+  withDeletedPage,
   withDraft,
   withFiles,
   withFontFamily,
@@ -18,6 +19,7 @@ import {
   withPreviewView,
   withProblem,
   withRun,
+  withRunSchedules,
   withSession,
   withSessions,
   withSettings,
@@ -213,6 +215,43 @@ describe('the browser state', () => {
     // None of the moves names the conversation or the trace, so both stay as they were.
     expect(state.conversation).toBe(initialState.conversation)
     expect(state.trace).toBe(initialState.trace)
+  })
+
+  test('a page the server no longer holds leaves the run pane once', () => {
+    const closed = withDeletedPage(initialState, 'p-1')
+    expect(closed.deletedPages).toEqual(['p-1'])
+    // Closing the same page twice must not grow the list the pane filters.
+    expect(withDeletedPage(closed, 'p-1')).toBe(closed)
+  })
+
+  test('a schedule list from the server replaces the run on screen, and a blank page has none', () => {
+    const schedule: ScheduleView = {
+      id: 's-1',
+      when: 'every 10 minutes',
+      title: 'check the build',
+      prompt: 'check the build',
+      lastFiredAt: 0,
+    }
+    const run = {
+      goal: null,
+      schedules: [],
+      jobs: [],
+      subagents: [],
+      todos: [],
+      todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+      skills: [],
+      promptSections: [],
+      queued: [],
+      steering: [],
+      model: 'stub/model',
+      effort: '',
+      efforts: [],
+    }
+    expect(withRunSchedules(withRun(initialState, run), [schedule]).run?.schedules).toEqual([
+      schedule,
+    ])
+    // Nothing is on screen before a session opens, so there is no list to replace.
+    expect(withRunSchedules(initialState, [schedule])).toBe(initialState)
   })
 })
 

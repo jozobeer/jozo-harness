@@ -26,7 +26,7 @@
 
 ## 検証
 
-- `pnpm exec vp test apps/web/tests/open-in-app.test.ts`: 16 passed（検出・範囲検査・symlink・argv・失敗理由。アプリは起動しない）
-- `pnpm exec vp test apps/web/tests/server.test.ts -t "viewer opens the session workspace"`: 1 passed（RPC が port に届き、host の command は空のまま）
+- `pnpm exec vp test apps/web/tests/open-in-app.test.ts apps/web/tests/state.test.ts apps/web/tests/server.test.ts`: 88 passed（検出・範囲検査・symlink・argv・起動の成功と失敗理由。アプリは起動しない）
 - `pnpm exec vp test`（`apps/web/client-solid`）: 210 passed（ステータスバーの選択と理由の 2 件を含む）
-- `pnpm run check`, `pnpm run build:web`: 以下で確認する。
+- `vp test --coverage --coverage.reporter=lcov` の lcov 集計: functions 4440/4815 = 92.21%（floor 92%）
+- `pnpm run check:static`: 通る（fmt / lint / typecheck / doc gate / 重複検出 / complexity / cargo check）。

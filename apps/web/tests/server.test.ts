@@ -1933,6 +1933,77 @@ describe('the web transport', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('a run without an app tells the page why it has nothing to open the workspace with', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-open-none-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, makeWeb('a'), makeSettings())
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            return yield* client.openApps()
+          }).pipe(clientLayers(started.wsUrl))
+          const result = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    expect(observed).toEqual({
+      apps: [],
+      reason: 'this run has no app to open a workspace with',
+    })
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('the open route refuses a session that is not open and repeats why the app failed', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-open-refused-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const openInApp: OpenInAppPort = {
+      apps: () => ({ apps: [{ id: 'finder', label: 'Finder' }] }),
+      open: () => Effect.fail('the app could not open the folder'),
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(
+            root,
+            makeWeb('a'),
+            makeSettings(),
+            makeWorkspaces(),
+            undefined,
+            undefined,
+            undefined,
+            () => Effect.succeed([]),
+            [],
+            openInApp,
+          )
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const closed = yield* client
+              .openInApp({ sessionId: 'gone', app: 'finder', path: '' })
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
+            const refused = yield* client
+              .openInApp({ sessionId: 'a', app: 'finder', path: '' })
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
+            return { closed, refused }
+          }).pipe(clientLayers(started.wsUrl))
+          const result = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    expect(observed.closed).toBe('the session is not open')
+    expect(observed.refused).toBe('the app could not open the folder')
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('a page opens a session in the workspace it names, and resuming keeps the header one', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-cwd-'))
     await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
