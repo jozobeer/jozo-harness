@@ -156,6 +156,10 @@ export const clampTimeout = (asked: number | undefined): number => {
   return Math.min(Math.max(asked, 1), BASH_MAX_TIMEOUT_MS)
 }
 
+/** The wait a call asks for, or the run's current default when it asks for none. */
+const waitOf = (asked: number | undefined, fallback: () => number | undefined): number =>
+  clampTimeout(asked === undefined ? fallback() : asked)
+
 interface Run {
   readonly exitCode: number
   readonly stdout: string
@@ -421,6 +425,11 @@ export const makeBashTool = (
   sessions: ShellSessions = makeShellSessions(),
   /** The harness-owned variables every child gets, whatever the call asks for. */
   managed: ManagedEnv = {},
+  /**
+   * The wait a call gets when it names none. A function rather than a number so a
+   * run can change its own default and the next call reads the new one.
+   */
+  defaultTimeoutMs: () => number | undefined = () => undefined,
 ): ToolDefinition<BashArgs, BashValue> => {
   const canEscalate = escalates(sandbox, approval)
   return {
@@ -502,7 +511,7 @@ export const makeBashTool = (
           )
         // A sandbox that refuses the command is an infrastructure failure; a command
         // that runs and exits non-zero is not.
-        const timeoutMs = clampTimeout(args.timeoutMs)
+        const timeoutMs = waitOf(args.timeoutMs, defaultTimeoutMs)
         // The mode is known only after approval, so a standing mode the live shell
         // was not spawned with is refused here, before the command is written.
         const environment = childEnvironment(managed, requested)
