@@ -56,18 +56,23 @@ const grow = (node: HTMLTextAreaElement): void => {
 }
 
 /** Input waiting for its turn, each line labelled with where it is waiting. */
-const Waiting = (props: { label: 'queued' | 'steering'; messages: ReadonlyArray<string> }) => (
-  <For each={props.messages}>
-    {(message) => (
-      <div class={'queued ' + props.label}>
-        <span class="queued-label">{props.label}</span>
-        <span class="queued-text">
-          <Linkify text={plainText(message)} />
-        </span>
-      </div>
-    )}
-  </For>
-)
+const Waiting = (props: { label: 'queued' | 'steering'; messages: ReadonlyArray<string> }) => {
+  const t = useTranslate()
+  return (
+    <For each={props.messages}>
+      {(message) => (
+        <div class={'queued ' + props.label}>
+          <span class="queued-label">
+            {t(props.label === 'queued' ? 'composer.queued' : 'composer.steering')}
+          </span>
+          <span class="queued-text">
+            <Linkify text={plainText(message)} />
+          </span>
+        </div>
+      )}
+    </For>
+  )
+}
 
 /**
  * What waits above the composer: a steer joins the running turn's next step,
@@ -85,16 +90,23 @@ const Queue = (props: { store: SessionStore }) => (
  * command the human would type, so the rules of a goal stay in one place.
  */
 const GoalBar = (props: { store: SessionStore; onEdit: (objective: string) => void }) => {
+  const t = useTranslate()
   const goal = () => props.store.state().run?.goal
   const run = (text: string): void => props.store.send({ kind: 'submit', text })
   return (
     <Show when={goal()}>
       {(current) => (
-        <section id="goal-bar" class="goal-bar" aria-label="the goal this session works toward">
+        <section id="goal-bar" class="goal-bar" aria-label={t('composer.goalBar')}>
           <div class="goal-line">
             <span class={'goal-phase ' + current().phase}>
               <GoalMark phase={current().phase} />
-              {current().phase}
+              {t(
+                current().phase === 'active'
+                  ? 'composer.goalActive'
+                  : current().phase === 'paused'
+                    ? 'composer.goalPaused'
+                    : 'composer.goalComplete',
+              )}
             </span>
             <span class="goal-objective">{current().objective}</span>
             <span class="goal-rounds">{roundsOf(current().rounds, current().maxRounds)}</span>
@@ -105,39 +117,39 @@ const GoalBar = (props: { store: SessionStore; onEdit: (objective: string) => vo
                 <Button
                   type="button"
                   data-goal-action="pause"
-                  title="stop the next round from starting"
+                  title={t('composer.pauseHint')}
                   onClick={() => run('/goal pause')}
                 >
-                  Pause
+                  {t('composer.pause')}
                 </Button>
               </Match>
               <Match when={current().phase === 'paused'}>
                 <Button
                   type="button"
                   data-goal-action="resume"
-                  title="let the next round start again"
+                  title={t('composer.resumeHint')}
                   onClick={() => run('/goal resume')}
                 >
-                  Resume
+                  {t('composer.resume')}
                 </Button>
               </Match>
             </Switch>
             <Button
               type="button"
               data-goal-action="edit"
-              title="change the objective in the composer"
+              title={t('composer.editHint')}
               onClick={() => props.onEdit(current().objective)}
             >
-              Edit
+              {t('composer.edit')}
             </Button>
             <Show when={current().phase !== 'complete'}>
               <Button
                 type="button"
                 data-goal-action="done"
-                title="mark the objective achieved"
+                title={t('composer.doneHint')}
                 onClick={() => run('/goal done')}
               >
-                Done
+                {t('composer.done')}
               </Button>
             </Show>
           </div>
@@ -252,6 +264,7 @@ const Takeover = (props: { store: SessionStore }) => {
  * the seat keeps its line before the first message.
  */
 const Effort = (props: { store: SessionStore }) => {
+  const t = useTranslate()
   /**
    * What the next request asks: the open session's own effort, else the run's
    * choice for a session opened now. '' leaves the choice to the provider.
@@ -285,12 +298,12 @@ const Effort = (props: { store: SessionStore }) => {
         <select
           id="seat-effort"
           class="seat-effort"
-          title="the reasoning effort the next request asks for"
-          aria-label="the reasoning effort the next request asks for"
+          title={t('composer.effortTitle')}
+          aria-label={t('composer.effortTitle')}
           value={current()}
           onChange={(event) => props.store.chooseEffort(event.currentTarget.value)}
         >
-          <option value="">default</option>
+          <option value="">{t('composer.defaultEffort')}</option>
           <For each={declared()}>{(effort) => <option value={effort}>{effort}</option>}</For>
           <Show when={extra()}>{(effort) => <option value={effort()}>{effort()}</option>}</Show>
         </select>
@@ -307,6 +320,7 @@ const Effort = (props: { store: SessionStore }) => {
  * page load; the pick lands on the next request.
  */
 const Model = (props: { store: SessionStore }) => {
+  const t = useTranslate()
   const [open, setOpen] = createSignal(false)
   let seat: HTMLDivElement | undefined
 
@@ -357,20 +371,18 @@ const Model = (props: { store: SessionStore }) => {
           class="seat-chip"
           type="button"
           aria-expanded={open()}
-          title="the model this session asks; pick another one here"
+          title={t('composer.modelTitle')}
           onClick={toggle}
         >
           <Icon name="model" />
           <span>{current()}</span>
         </button>
         <Show when={open()}>
-          <div
-            id="model-list"
-            class="model-list"
-            role="group"
-            aria-label="the models this provider offers"
-          >
-            <Show when={models()} fallback={<div class="card-hint">reading the models…</div>}>
+          <div id="model-list" class="model-list" role="group" aria-label={t('composer.models')}>
+            <Show
+              when={models()}
+              fallback={<div class="card-hint">{t('composer.readingModels')}</div>}
+            >
               {(routes) => (
                 <>
                   <For each={routes()}>
@@ -390,9 +402,11 @@ const Model = (props: { store: SessionStore }) => {
                     )}
                   </For>
                   <div class="card-hint">
-                    {props.store.state().sessionId === ''
-                      ? 'the next session starts from it; the settings sheet keeps it for later runs'
-                      : 'this session and the next ones; the settings sheet keeps it for later runs'}
+                    {t(
+                      props.store.state().sessionId === ''
+                        ? 'composer.modelHintNew'
+                        : 'composer.modelHintOpen',
+                    )}
                   </div>
                 </>
               )}
@@ -415,6 +429,7 @@ const Plus = (props: {
   /** The seat's chips, when the composer is too narrow to keep them in the row. */
   seat?: (() => JSX.Element) | undefined
 }) => {
+  const t = useTranslate()
   const [open, setOpen] = createSignal(false)
   let menu: HTMLDivElement | undefined
 
@@ -457,18 +472,13 @@ const Plus = (props: {
         type="button"
         aria-haspopup="menu"
         aria-expanded={open()}
-        title="commands that shape this session"
+        title={t('composer.commandsTitle')}
         onClick={() => setOpen(!open())}
       >
         <Icon name="plus" />
       </button>
       <Show when={open()}>
-        <div
-          id="plus-list"
-          class="plus-list"
-          role="menu"
-          aria-label="the commands this menu starts"
-        >
+        <div id="plus-list" class="plus-list" role="menu" aria-label={t('composer.commandsMenu')}>
           <Show when={props.seat}>{(draw) => <div class="plus-seat">{draw()()}</div>}</Show>
           <button
             type="button"
@@ -476,7 +486,7 @@ const Plus = (props: {
             data-plus-action="goal"
             onClick={() => start('/goal ')}
           >
-            Goal…
+            {t('composer.goalItem')}
           </button>
           <button
             type="button"
@@ -484,7 +494,7 @@ const Plus = (props: {
             data-plus-action="compact"
             onClick={() => send('/compact')}
           >
-            Compact
+            {t('composer.compactItem')}
           </button>
           <button
             type="button"
@@ -492,7 +502,7 @@ const Plus = (props: {
             data-plus-action="model"
             onClick={() => start('/model ')}
           >
-            Model…
+            {t('composer.modelItem')}
           </button>
           <button
             type="button"
@@ -500,7 +510,7 @@ const Plus = (props: {
             data-plus-action="effort"
             onClick={() => start('/effort ')}
           >
-            Effort…
+            {t('composer.effortItem')}
           </button>
         </div>
       </Show>
@@ -516,6 +526,7 @@ const Completion = (props: {
   onSelect: (index: number) => void
   onAccept: (name: string) => void
 }) => {
+  const t = useTranslate()
   const candidates = (): ReadonlyArray<CommandView> =>
     commandCandidates(props.store.state().commands ?? [], props.token)
 
@@ -524,15 +535,15 @@ const Completion = (props: {
       id="command-list"
       class="command-list"
       role="listbox"
-      aria-label="the commands this session answers"
+      aria-label={t('composer.commandsList')}
     >
       <Show
         when={props.store.state().commands}
-        fallback={<div class="card-hint">reading the commands…</div>}
+        fallback={<div class="card-hint">{t('composer.readingCommands')}</div>}
       >
         <Show
           when={candidates().length > 0}
-          fallback={<div class="card-hint">no command matches</div>}
+          fallback={<div class="card-hint">{t('composer.noCommand')}</div>}
         >
           <For each={candidates()}>
             {(command, index) => (
@@ -565,38 +576,44 @@ const Reference = (props: {
   selected: number
   onSelect: (index: number) => void
   onAccept: (path: string) => void
-}) => (
-  <div
-    id="reference-list"
-    class="command-list"
-    role="listbox"
-    aria-label="the files and sessions this word names"
-  >
-    <Show when={props.answered} fallback={<div class="card-hint">reading the files…</div>}>
+}) => {
+  const t = useTranslate()
+  return (
+    <div
+      id="reference-list"
+      class="command-list"
+      role="listbox"
+      aria-label={t('composer.filesList')}
+    >
       <Show
-        when={props.paths.length > 0}
-        fallback={<div class="card-hint">no file or session matches</div>}
+        when={props.answered}
+        fallback={<div class="card-hint">{t('composer.readingFiles')}</div>}
       >
-        <For each={props.paths}>
-          {(path, index) => (
-            <button
-              type="button"
-              role="option"
-              class="command-option"
-              data-reference={path}
-              aria-selected={index() === props.selected}
-              onMouseDown={(event) => event.preventDefault()}
-              onMouseEnter={() => props.onSelect(index())}
-              onClick={() => props.onAccept(path)}
-            >
-              <span class="command-name">{'@' + path}</span>
-            </button>
-          )}
-        </For>
+        <Show
+          when={props.paths.length > 0}
+          fallback={<div class="card-hint">{t('composer.noReference')}</div>}
+        >
+          <For each={props.paths}>
+            {(path, index) => (
+              <button
+                type="button"
+                role="option"
+                class="command-option"
+                data-reference={path}
+                aria-selected={index() === props.selected}
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => props.onSelect(index())}
+                onClick={() => props.onAccept(path)}
+              >
+                <span class="command-name">{'@' + path}</span>
+              </button>
+            )}
+          </For>
+        </Show>
       </Show>
-    </Show>
-  </div>
-)
+    </div>
+  )
+}
 
 /**
  * The mode Enter uses while a turn runs. It is a setting, so it stays where the
@@ -607,24 +624,23 @@ const BusyEnter = (props: {
   store: SessionStore
   mode: SubmitMode
   onChoose: (mode: SubmitMode) => void
-}) => (
-  <Show when={props.store.state().conversation.running}>
-    <button
-      id="busy-enter"
-      class="seat-chip"
-      type="button"
-      aria-pressed={props.mode === 'steer'}
-      title={
-        'Enter while a turn runs sends ' +
-        props.mode +
-        '; Cmd/Ctrl+Enter sends the other. Click to switch.'
-      }
-      onClick={() => props.onChoose(oppositeMode(props.mode))}
-    >
-      {props.mode}
-    </button>
-  </Show>
-)
+}) => {
+  const t = useTranslate()
+  return (
+    <Show when={props.store.state().conversation.running}>
+      <button
+        id="busy-enter"
+        class="seat-chip"
+        type="button"
+        aria-pressed={props.mode === 'steer'}
+        title={t('composer.busyEnterTitle') + props.mode + t('composer.busyEnterTail')}
+        onClick={() => props.onChoose(oppositeMode(props.mode))}
+      >
+        {props.mode}
+      </button>
+    </Show>
+  )
+}
 
 /** Below this width the seat folds into + whatever it holds: a phone keeps the row for typing. */
 const COMPACT_WIDTH = 560
