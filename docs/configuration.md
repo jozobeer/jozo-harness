@@ -149,7 +149,7 @@ route は `opencode/<model>`、wire に送る model は `<model>` そのもの�
 | `--dump-config` | 設定面を出力して終わる |
 | `--help` | 使い方を出力して終わる |
 
-サブコマンドは `models`（provider のモデル一覧）、`web`（ブラウザ UI）、`sessions`（ログの一覧と 1 つの読み戻し）、`config`（設定の表示と書き込み）、`auth`（秘密の保存）である。それ以外の位置引数は1 turn のタスクになる。
+サブコマンドは `models`（provider のモデル一覧）、`web`（ブラウザ UI）、`acp`（エディタ向けの ACP サーバ）、`sessions`（ログの一覧と 1 つの読み戻し）、`config`（設定の表示と書き込み）、`auth`（秘密の保存）である。それ以外の位置引数は1 turn のタスクになる。
 
 `jzh config` は引数なしで今の設定を表示する。書き込みは次の通りで、いずれも書く前に schema で検証し、ファイルのコメントと他のキーは残す。
 
