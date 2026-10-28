@@ -96,6 +96,26 @@ describe('hydrating attachments for a request', () => {
     }
   })
 
+  test('a body that carries a fence opens a longer one', async () => {
+    const root = await makeRoot()
+    const body = 'before\n\u0060\u0060\u0060js\nconst x = 1\n\u0060\u0060\u0060\nafter'
+    const attachment = await saved(
+      root,
+      'snippet.md',
+      'text/markdown',
+      new TextEncoder().encode(body),
+    )
+
+    const [message] = await messagesOf(root, [attachment])
+    const text = message?.content[0]
+
+    expect(text?.type).toBe('text')
+    if (text?.type === 'text') {
+      expect(text.text).toContain('\u0060\u0060\u0060\u0060')
+      expect(text.text).toContain('const x = 1')
+    }
+  })
+
   test('says when the stored bytes are gone instead of sending nothing', async () => {
     const root = await makeRoot()
     const [message] = await messagesOf(root, [

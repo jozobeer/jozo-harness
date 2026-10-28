@@ -134,6 +134,23 @@ describe('the attachment store', () => {
     expect(Result.isFailure(answer)).toBe(true)
   })
 
+  test('reports a store it cannot create instead of throwing', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'jzh-attachment-blocked-'))
+    roots.push(parent)
+    const blocked = join(parent, 'not-a-directory')
+    await Effect.runPromise(
+      Effect.promise(async () => {
+        const { writeFile } = await import('node:fs/promises')
+        await writeFile(blocked, 'a file where the store should be')
+      }),
+    )
+
+    const answer = await store(blocked, 'notes.md', 'text/markdown', new TextEncoder().encode('hi'))
+
+    expect(Result.isFailure(answer)).toBe(true)
+    if (Result.isFailure(answer)) expect(answer.failure.code).toBe('invalid')
+  })
+
   test('reads a missing object as a reason rather than empty bytes', async () => {
     const root = await makeRoot()
     const answer = await Effect.runPromise(
