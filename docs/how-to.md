@@ -596,6 +596,10 @@ jzh --patch sessions.yml "…"
 
 新しいセッションのログは `session.v1.jsonl.zst` で、追記のたびに 1 つの zstd フレームが増える。プロセスが書き込んでいる途中で死んで末尾のフレームが切れたときは、最後の完全なフレームまでを読み、`session/repaired` を 1 フレーム足して記録する。既存の `session.v1.jsonl` はそのまま読み、追記も平文のまま続ける。形式を勝手に切り替えないのは、古い build が平文のつもりで zstd のファイルに追記するのを避けるためである。
 
+書き込み用にログを開くプロセスは、ログの隣に `<log>.lock` を排他作成し、中に自分の pid と開始時刻を書く。同じログを別のプロセスが開くと、その pid が生きている限り `being written by another process` で拒否される。pid がもう居なければ stale とみなし、lock を引き取って切れた末尾を修復してから書き始める。lock はプロセスが正常終了しても例外で終わっても消える。強制終了で残ったものは次の書き手が stale として回収する。
+
+読取専用の経路（一覧・検索・`jzh web` の表示）は lock を取らない。書き手が居てもログは読めるが、書き込み途中の切れた末尾は読み飛ばす。pid の生死は同じマシンの中でしか正しく分からないので、ネットワークファイルシステムを複数のマシンで共有する置き場では、この lock を排他の根拠にしない。
+
 ## コマンドを sandbox の外で走らせる
 
 `@jozo-harness/safety` の `sandbox` は既定で `auto` である。macOS では `seatbelt`（`sandbox-exec`）、Linux では `bwrap`（bubblewrap）が走る。コマンドは自分が走るディレクトリと一時ディレクトリにだけ書ける。それ以外の場所に書こうとすると macOS では `Operation not permitted`、Linux では `Read-only file system` になる。読み取りは制限せず、`/dev/null` への書き込みは許可する。
