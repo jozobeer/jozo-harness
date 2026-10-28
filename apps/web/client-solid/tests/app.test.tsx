@@ -628,6 +628,8 @@ describe('the Solid page', () => {
     expect(body.textContent).toBe('use sk-…0123')
     expect(container.textContent).not.toContain(key)
     expect(container.querySelector('.wf-turn-prompt')?.textContent).toBe('use sk-…0123')
+    // The mask is a display rule: the trace keeps what the model was given.
+    expect(store.state().trace[0]?.prompt).toBe(prompt)
   })
 
   test('an attached file keeps a card above the prompt and a chip in the composer', () => {
