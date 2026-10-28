@@ -1,11 +1,13 @@
-import { Effect } from 'effect'
+import { Context, Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
 import { noneSandbox, type SandboxShape } from '@jozo-harness/safety'
 import type { ToolError } from '@jozo-harness/tools'
+import { DelegateTools, delegatePlugin } from '../src/delegate.ts'
 import {
   MAX_DELEGATE_OUTPUT,
   delegateArgv,
   makeDelegateTool,
+  systemDelegateHost,
   type DelegateHost,
   type DelegateValue,
   type ExternalAgent,
@@ -163,6 +165,37 @@ describe('delegate tool', () => {
 
     expect(error?.code).toBe('unavailable')
     expect(error?.message).toContain('spawn EACCES')
+  })
+
+  test('renders the output as one text block', () => {
+    const tool = makeDelegateTool(allowed, noneSandbox, hostOf(['codex']))
+
+    expect(
+      tool.output.render(
+        { command: 'codex', task: 't' },
+        { command: 'codex', text: 'hi', truncated: false },
+      ),
+    ).toEqual([{ type: 'text', text: 'hi' }])
+  })
+
+  test('the plugin hands the tool to whatever sandbox the run has', () => {
+    const built = Effect.runSync(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const services = yield* Layer.build(delegatePlugin.layer({ tools: allowed }))
+          return Context.get(services, DelegateTools)
+        }),
+      ),
+    )
+
+    expect(built(noneSandbox).map((tool) => tool.name)).toEqual(['delegate'])
+  })
+
+  test('the system host finds a program on PATH and runs it', async () => {
+    expect(systemDelegateHost.hasProgram('sh')).toBe(true)
+    expect(systemDelegateHost.hasProgram('not-a-program-anywhere-xyz')).toBe(false)
+    const ran = await systemDelegateHost.run({ argv: ['sh', '-c', 'echo hi'], cwd: '.' })
+    expect(ran.stdout.trim()).toBe('hi')
   })
 
   test('names the agent in the call and the result, and may run beside another call', () => {
