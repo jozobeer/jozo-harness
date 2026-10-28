@@ -51,6 +51,19 @@ const isLogStamp = (value: unknown): value is ProjectionCheckpoint['log'] =>
   Number.isInteger(value.size) &&
   value.size >= 0
 
+const decodeSeq = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 1 ? value : undefined
+
+const decodeDerived = (value: unknown, seq: number): ReadonlyArray<DerivedMessage> | undefined => {
+  if (!Array.isArray(value)) return undefined
+  const derived: Array<DerivedMessage> = []
+  for (const entry of value) {
+    if (!isDerived(entry, seq)) return undefined
+    derived.push(entry)
+  }
+  return derived
+}
+
 /**
  * Reads one checkpoint. A file this build cannot understand is a miss, not an
  * error: the caller folds the whole log instead of refusing the session.
@@ -58,16 +71,12 @@ const isLogStamp = (value: unknown): value is ProjectionCheckpoint['log'] =>
 export function decodeProjectionCheckpoint(value: unknown): ProjectionCheckpoint | undefined {
   if (!isRecord(value)) return undefined
   if (value.version !== PROJECTION_CHECKPOINT_VERSION) return undefined
-  const seq = value.seq
-  if (typeof seq !== 'number' || !Number.isInteger(seq) || seq < 1) return undefined
+  const seq = decodeSeq(value.seq)
+  if (seq === undefined) return undefined
   const log = value.log
   if (!isLogStamp(log)) return undefined
-  if (!Array.isArray(value.derived)) return undefined
-  const derived: Array<DerivedMessage> = []
-  for (const entry of value.derived) {
-    if (!isDerived(entry, seq)) return undefined
-    derived.push(entry)
-  }
+  const derived = decodeDerived(value.derived, seq)
+  if (derived === undefined) return undefined
   return { version: PROJECTION_CHECKPOINT_VERSION, seq, log, derived }
 }
 
