@@ -1,6 +1,11 @@
 import type { TimedStreamChunk } from '@jozo-harness/llm'
 import { StreamChunkSchema } from '@jozo-harness/llm'
-import type { ApprovalRequested, AskRequested } from '@jozo-harness/safety'
+import type {
+  ApprovalRequested,
+  AskAnswer,
+  AskBatchRequested,
+  AskRequested,
+} from '@jozo-harness/safety'
 import type { SessionError, SessionEvent } from '@jozo-harness/session'
 import { Effect, Schema, Stream } from 'effect'
 
@@ -111,6 +116,8 @@ export interface UiHost {
   readonly answerApproval: (request: ApprovalRequested) => Effect.Effect<boolean>
   /** The answerer handed to `installAsk`. */
   readonly answerAsk: (request: AskRequested) => Effect.Effect<string>
+  /** The batch answerer handed to `installAsk`; absent means a batch fails at once. */
+  readonly serveQuestions: (request: AskBatchRequested) => Effect.Effect<ReadonlyArray<AskAnswer>>
 }
 
 /** Runs one command against a host; the transports share this mapping. */

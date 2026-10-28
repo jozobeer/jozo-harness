@@ -29,6 +29,7 @@ const hostOf = (): UiHost => ({
   setModel: () => Effect.succeed(undefined),
   answerApproval: () => Effect.succeed(true),
   answerAsk: () => Effect.succeed(''),
+  serveQuestions: () => Effect.succeed([]),
 })
 
 interface Fake {

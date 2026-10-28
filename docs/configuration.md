@@ -60,7 +60,7 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 
 ## plugin が受け取る config キー
 
-同梱の plugin のうち `config` にキーを持つのは7つで、残りはキーを持たない。
+同梱の plugin のうち `config` にキーを持つのは8つで、残りはキーを持たない。
 
 | plugin | キー |
 |---|---|
@@ -71,6 +71,7 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 | `@jozo-harness/mcp` | `command`（必須）、`prefix` |
 | `@jozo-harness/delegate` | `tools`（必須）— 委譲してよい外部 CLI の配列。各要素は `name`（tool の `command` に渡す名前）と `argv`（起動する argv。タスクは最後の引数として足す） |
 | `@jozo-harness/workspace-dependencies` | `dir`（必須）— この配布が同梱するランタイムの payload ディレクトリ（絶対パス、または `~` で始める）。`dir/runtime.json` が payload からの相対パスで `python`（必須）、`node`、`pnpm` を並べる |
+| `@jozo-harness/tools-tier1` | `timeLimitMs` — `ask_user` が複数の質問を待つ既定の時間（ミリ秒、1 以上）。省略すると回答があるまで待つ。呼び出しの `time_limit_ms` が優先する |
 
 `@jozo-harness/artifact` はキーを持たない。行を足すと、そのセッションのモデルに `artifact` tool が渡り、モデルは 1 枚の HTML ページを session root の隣の `artifacts/<sessionId>/<name>.html` に書ける。`deliverable: { path, title? }` を渡したときはページを書かず、cwd 内の既存ファイルを成果物として宣言して `deliverable: <path>` の 1 行を返す（cwd 外・不在・ディレクトリは `invalid-arguments`）。ページは `images` に渡した png / jpeg / webp / gif のパスを data URL に畳んだ 1 ファイルで（1 枚 2MB・合計 10MB まで）、`http://` / `https://` / `//` の外部サブリソースを参照する HTML は保存時に拒否する。preset が `read-only` の run では書かず、`denied` を返す。配信は jzh web の `/artifact/<sessionId>/<name>` が行う。同梱 profile に入れていないのは、ページを書かないセッションの tool 一覧を太らせないためである（既定では入らない）。
 

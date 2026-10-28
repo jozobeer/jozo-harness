@@ -192,6 +192,17 @@ const withSkills = <A, E>(
     ),
   )
 
+/** Waits until the log holds that many synthetic questions; the host asks them in turn. */
+const askedTimes = (input: FakeInput, count: number): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    while (
+      input.session.events().filter((event) => event.type === 'interaction/ask/requested').length <
+      count
+    ) {
+      yield* Effect.yieldNow
+    }
+  })
+
 describe('ui host', () => {
   test('a slash naming a skill loads it and sends its arguments as the turn', async () => {
     const input = makeInput()
@@ -491,6 +502,50 @@ describe('ui host', () => {
         )
         yield* host.answer('a1', 'the second')
         expect(yield* Fiber.join(waiting)).toBe('the second')
+      }),
+    )
+  })
+
+  test('a batch asks its questions through the card and returns structured answers', async () => {
+    const input = makeInput()
+    await withHost(input, (host) =>
+      Effect.gen(function* () {
+        const waiting = yield* Effect.forkScoped(
+          host.serveQuestions({
+            callId: 'call-1',
+            questions: [
+              {
+                id: 'colour',
+                question: 'which colour?',
+                options: [{ label: 'blue' }, { label: 'red' }],
+                multiSelect: false,
+              },
+              {
+                id: 'size',
+                question: 'which size?',
+                options: [{ label: 'small' }, { label: 'large' }],
+                multiSelect: false,
+              },
+            ],
+          }),
+        )
+        yield* askedTimes(input, 1)
+        yield* host.answer('call-1/colour', 'blue')
+        yield* askedTimes(input, 2)
+        yield* host.answer('call-1/size', 'large')
+        expect(yield* Fiber.join(waiting)).toEqual([
+          { id: 'colour', selected: ['blue'] },
+          { id: 'size', selected: ['large'] },
+        ])
+        expect(
+          input.session
+            .events()
+            .filter((event) => event.type === 'interaction/ask/answered')
+            .map((event) => (event.type === 'interaction/ask/answered' ? event.data : undefined)),
+        ).toEqual([
+          { id: 'call-1/colour', answer: 'blue' },
+          { id: 'call-1/size', answer: 'large' },
+        ])
       }),
     )
   })

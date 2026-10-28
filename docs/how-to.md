@@ -580,6 +580,14 @@ return review.text
 - `maxChildren` の既定は 12。deadline は 10 分（`WORKFLOW_SCRIPT_TIMEOUT_MS`）。出力は 16,000 文字で切る。
 - 単純な同時実行は `tasks` のほうが短い。
 
+## モデルにまとめて質問させる（ask_user）
+
+`ask_user` は 1 回の呼び出しで複数の質問を出せる。`questions` に `id`（呼び出し内で一意）、`question`、任意の `header` / `options` / `multi_select` を並べる。同じ id が 2 つある呼び出しは、誰かに聞く前に `invalid-arguments` で拒否される。答えは質問ごとに `{ id, selected, custom? }` で返り、`multi_select` が true なら `selected` に複数が入る。選択肢に無い答えは `custom` に入る。
+
+`time_limit_ms` を渡すと、その時間で待つのをやめ、未回答の質問 id を `pending: true` と `unanswered` に残して呼び出しを終える。モデルはそのまま別の作業を続けられる。待っていた答えは捨てず、人間が答えた時点で `ask_user call <call id>` と質問 id を含む user メッセージとしてセッションに届く。ログには `interaction/ask/questions` / `interaction/ask/answers` / `interaction/ask/pending` が残るので、どの呼び出しへの答えかはそこから辿れる。
+
+`- id: tier1` の `timeLimitMs` を設定すると、`time_limit_ms` を省いた呼び出しもその時間で保留になる。既定は無効で、回答があるまで待つ。単一の質問だけを聞く従来の `question` / `options` の形も受け付け、その結果は `{ id, question, answer }` のままである。この形は制限時間を使わないので、保留にしたいときは `questions` を使う。
+
 ## ツールの引数と戻り値の型を system prompt で見せる
 
 system prompt には、その step で見える tool の署名が 1 行ずつ出る。引数は必須と任意（`?`）を区別し、戻り値は tool の `output` schema から描く。plan mode や子 agent の制限で見えない tool は出ない。schema を型として読めない部分は `unknown` になる。

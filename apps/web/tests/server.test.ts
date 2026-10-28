@@ -209,6 +209,7 @@ const makeHost = (id: string, cwd = '/work', working = true): FakeHost => {
       setModel: (model) => record({ kind: 'model', model }),
       answerApproval: () => Effect.succeed(true),
       answerAsk: () => Effect.succeed(''),
+      serveQuestions: () => Effect.succeed([]),
     },
   }
 }

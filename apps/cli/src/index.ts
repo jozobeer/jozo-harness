@@ -161,8 +161,10 @@ import {
   type AutoReviewCompletion,
   currentPlanMode,
   installAsk,
+  lateAnswerMessage,
   makeAsk,
   makePlanMode,
+  answerOf,
   safetyConfigSchema,
   seatbeltStartupNotice,
   type SafetyConfig,
@@ -171,6 +173,7 @@ import {
   type ApprovalAnswerer,
   type ApprovalRequested,
   type ApprovalShape,
+  type AskBatchAnswerer,
   type AskRequested,
   type AskShape,
   type PlanModeShape,
@@ -446,6 +449,13 @@ const installTier0 = (
     for (const tool of tier0(approval, jobs, worktree, sessions)) yield* tools.register(tool)
   })
 
+/** The ask tool's configured batch wait, when the tier1 row opts in. */
+const timeLimitMsOf = (rows: ReadonlyArray<PluginRow>): number | undefined => {
+  const config = rows.find((row) => row.name === '@jozo-harness/tools-tier1')?.config
+  const value = (config as { readonly timeLimitMs?: unknown } | undefined)?.timeLimitMs
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined
+}
+
 /** Tier 1 tools ask the user; their questions and answers join the log. */
 const installTier1 = (
   tools: ToolRegistry,
@@ -455,6 +465,7 @@ const installTier1 = (
   agent: Agent,
   route: string,
   answer: CommandOptions['answer'],
+  answerBatch: AskBatchAnswerer | undefined,
   skills: ReadonlyArray<string>,
   /** Present only when the profile asked for plan mode; the tool that leaves it needs it. */
   planMode: PlanModeShape | undefined,
@@ -477,6 +488,14 @@ const installTier1 = (
     // at once instead of waiting forever for an answer that cannot come.
     const ask = installAsk(holder, agent.session)
     if (answer !== undefined) yield* holder.serve((request) => answer(request))
+    if (answerBatch !== undefined) {
+      yield* holder.serveBatch(answerBatch)
+      // The answerer stays attached after a timed-out batch, so this message is
+      // the only place a later answer reaches the model and the log.
+      ask.onLateAnswer((answered) =>
+        agent.followup({ text: lateAnswerMessage(answered), source: 'user' }).pipe(Effect.ignore),
+      )
+    }
     const pluginHost = makePluginHost({
       rows,
       plugins: options.plugins,
@@ -511,6 +530,7 @@ const installTier1 = (
         sessions: runCodeSessions,
       },
       sandbox,
+      timeLimitMsOf(rows),
     )) {
       yield* tools.register(tool)
     }
@@ -572,8 +592,10 @@ const tier1ToolList = (
   runCode: RunCodeHost,
   /** The boundary the run's commands are confined to; a workflow script's child uses it too. */
   sandbox: SandboxShape | undefined,
+  /** The ask tool's default wait for a batch; absent waits until answered. */
+  timeLimitMs: number | undefined,
 ) => {
-  const list = [...tier1Tools(ask, skills, runCode)]
+  const list = [...tier1Tools(ask, skills, runCode, timeLimitMs)]
   list.push(makePluginTool(pluginHost))
   if (options.search !== undefined) list.push(makeWebSearchTool(options.search))
   for (const tool of jobTools(jobs)) list.push(tool)
@@ -885,6 +907,8 @@ interface ProfileWiring {
   readonly route: string
   readonly agent: Agent
   readonly answer: CommandOptions['answer']
+  /** The batch seam; absent when neither a UI nor an answer hook can answer one. */
+  readonly answerBatch: AskBatchAnswerer | undefined
   readonly approve: CommandOptions['approve']
   readonly hooks: HookRegistry
   /** The skill roots of this run, so the tool and the catalog search the same ones. */
@@ -1300,6 +1324,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
         wiring.agent,
         wiring.route,
         wiring.answer,
+        wiring.answerBatch,
         wiring.skills,
         planMode,
         wiring.rows,
@@ -1782,12 +1807,33 @@ const serveUi = (
   return undefined
 }
 
+/** Turns the one-string answer hook into the batch seam; labels select, other text is custom. */
+const batchAnswersOf =
+  (answer: (request: AskRequested) => Effect.Effect<string>): AskBatchAnswerer =>
+  (request) =>
+    Effect.forEach(
+      request.questions,
+      (question) =>
+        answer({
+          id: question.id,
+          question: question.question,
+          options: question.options.map((option) => option.label),
+        }).pipe(Effect.map((text) => answerOf(question, text))),
+      { concurrency: 1 },
+    )
+
 /** A UI answers approvals and questions through its host; a caller through its own hook. */
 const answerersOf = (
   ui: UiHost | undefined,
   options: CommandOptions,
-): Pick<ProfileWiring, 'answer' | 'approve'> => ({
+): Pick<ProfileWiring, 'answer' | 'answerBatch' | 'approve'> => ({
   answer: ui === undefined ? options.answer : ui.answerAsk,
+  answerBatch:
+    ui === undefined
+      ? options.answer === undefined
+        ? undefined
+        : batchAnswersOf(options.answer)
+      : ui.serveQuestions,
   approve: ui === undefined ? options.approve : ui.answerApproval,
 })
 

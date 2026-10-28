@@ -7,6 +7,7 @@
     "@jozo-harness/agent": "workspace:*",
     "@jozo-harness/agent-loop": "workspace:*",
     "@jozo-harness/kernel": "workspace:*",
+    "@jozo-harness/safety": "workspace:*",
     "@jozo-harness/session": "workspace:*",
     "@jozo-harness/tools-tier1": "workspace:*",
     "@jozo-harness/ui-protocol": "workspace:*",
