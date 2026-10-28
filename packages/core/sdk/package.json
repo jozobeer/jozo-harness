@@ -5,6 +5,10 @@
   "exports": "./src/index.ts",
   "dependencies": {
     "@jozo-harness/acp": "workspace:*",
+    "@jozo-harness/process": "workspace:*",
     "effect": "4.0.3"
+  },
+  "devDependencies": {
+    "@jozo-harness/test-support-stub": "workspace:*"
   }
 }

@@ -64,6 +64,22 @@ const textOf = (data: unknown): string | undefined => {
   return parts.length === 0 ? undefined : parts.join('')
 }
 
+/** The text a tool returned, joined from its text blocks. */
+const toolTextOf = (content: unknown): string => {
+  if (!Array.isArray(content)) return ''
+  return content.flatMap((block) => blockText(block) ?? []).join('')
+}
+
+/** The arguments as the model sent them, parsed when they were JSON. */
+const parsedArguments = (raw: unknown): unknown => {
+  if (typeof raw !== 'string') return raw
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return raw
+  }
+}
+
 /**
  * Turns the UI host of one core into the ACP session an editor drives. The
  * host already owns the wait for an approval; this adapter carries that wait to
@@ -135,6 +151,41 @@ export const acpSessionPortOf = (
         return askPermission(callId, tool, typeof reason === 'string' ? reason : '')
       }
 
+      const forwardToolCall = (data: unknown): Effect.Effect<void> => {
+        if (!ownsTurn() || !isRecord(data)) return Effect.void
+        const callId = data['callId']
+        const name = data['name']
+        if (typeof callId !== 'string' || typeof name !== 'string') return Effect.void
+        const summary = data['summary']
+        return client.notify('session/update', {
+          sessionId: session.id,
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId: callId,
+            title: typeof summary === 'string' && summary !== '' ? summary : name,
+            kind: name,
+            status: 'pending',
+            rawInput: parsedArguments(data['arguments']),
+          },
+        })
+      }
+
+      const forwardToolResult = (data: unknown): Effect.Effect<void> => {
+        if (!ownsTurn() || !isRecord(data)) return Effect.void
+        const callId = data['callId']
+        if (typeof callId !== 'string') return Effect.void
+        const text = toolTextOf(data['content'])
+        return client.notify('session/update', {
+          sessionId: session.id,
+          update: {
+            sessionUpdate: 'tool_call_update',
+            toolCallId: callId,
+            status: data['isError'] === true ? 'failed' : 'completed',
+            ...(text === '' ? {} : { content: [{ type: 'text' as const, text }] }),
+          },
+        })
+      }
+
       // A type this adapter does not draw on is simply not forwarded.
       const turnHandlers: Readonly<Record<string, (data: unknown) => Effect.Effect<void>>> = {
         'turn/start': () => {
@@ -144,6 +195,8 @@ export const acpSessionPortOf = (
         'turn/end': () =>
           ownsTurn() ? settle({ stopReason: cancelled ? 'cancelled' : 'end-turn' }) : Effect.void,
         'assistant/message': forwardAssistantText,
+        'tool/call': forwardToolCall,
+        'tool/result': forwardToolResult,
         'safety/approval/requested': askForApproval,
       }
 

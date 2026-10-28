@@ -37,8 +37,13 @@ export {
   type SessionNewResult,
   type SessionPromptParams,
   type SessionPromptResult,
+  type SessionUpdate,
   type SessionUpdateParams,
   type StopReason,
+  type ToolCallContent,
+  type ToolCallStart,
+  type ToolCallStatus,
+  type ToolCallUpdate,
 } from './methods.ts'
 export { dispatchJsonRpc, type DispatchResult } from './dispatcher.ts'
 export {

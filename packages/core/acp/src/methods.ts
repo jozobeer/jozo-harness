@@ -92,9 +92,45 @@ export interface AgentMessageChunk {
   readonly content: { readonly type: 'text'; readonly text: string }
 }
 
+/** How far one tool call has got, as an editor draws its card. */
+export type ToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed'
+
+/**
+ * A tool call the agent started. jzh carries its tool name in `kind`, the same
+ * field a permission card already fills with the tool, so an editor needs no
+ * second naming convention.
+ */
+export interface ToolCallStart {
+  readonly sessionUpdate: 'tool_call'
+  readonly toolCallId: string
+  /** The one line an editor shows for the call. */
+  readonly title: string
+  readonly kind: string
+  readonly status: ToolCallStatus
+  /** The arguments the model sent, parsed when they were JSON. */
+  readonly rawInput?: unknown
+}
+
+/** One text block of a tool's output. */
+export interface ToolCallContent {
+  readonly type: 'text'
+  readonly text: string
+}
+
+/** What became of a tool call; the output is the text the tool returned. */
+export interface ToolCallUpdate {
+  readonly sessionUpdate: 'tool_call_update'
+  readonly toolCallId: string
+  readonly status: ToolCallStatus
+  readonly content?: ReadonlyArray<ToolCallContent>
+}
+
+/** Every update a session sends to an editor. */
+export type SessionUpdate = AgentMessageChunk | ToolCallStart | ToolCallUpdate
+
 export interface SessionUpdateParams {
   readonly sessionId: string
-  readonly update: AgentMessageChunk
+  readonly update: SessionUpdate
 }
 
 /** What each method takes and returns; the dispatcher itself only sees unknown values. */
