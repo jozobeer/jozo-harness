@@ -5,6 +5,7 @@ import { Effect } from 'effect'
 import { describe, expect, test } from 'vitest'
 import {
   applyMeta,
+  markFork,
   metaPathOf,
   readMeta,
   sessionActionOf,
@@ -70,6 +71,21 @@ describe('the session metadata beside the logs', () => {
     await expect(access(join(root, 'cccc'))).rejects.toThrow()
     await expect(access(pages)).rejects.toThrow()
     expect(await Effect.runPromise(readMeta(root))).toEqual({})
+  })
+
+  test('a fork records the session it came from, and no other', async () => {
+    const root = await rootOf()
+    await mkdir(join(root, 'child'), { recursive: true })
+    await mkdir(join(root, 'parent'), { recursive: true })
+
+    await Effect.runPromise(markFork(root, 'child', 'parent'))
+
+    const meta = await Effect.runPromise(readMeta(root))
+    expect(withMeta(summaryOf('child', 'branch'), meta.child)).toMatchObject({
+      title: 'branch',
+      forkOf: 'parent',
+    })
+    expect(withMeta(summaryOf('parent', 'trunk'), meta.parent).forkOf).toBeUndefined()
   })
 
   test('a name that would leave the session root is refused', async () => {

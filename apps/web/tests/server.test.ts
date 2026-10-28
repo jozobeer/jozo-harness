@@ -258,6 +258,10 @@ interface FakeWeb {
   readonly hosts: Map<string, FakeHost>
   /** The boot sessions the server released, in the order it asked. */
   readonly closed: Array<string>
+  /** The events each created session started from. */
+  readonly seeds: Array<ReadonlyArray<SessionEvent> | undefined>
+  /** The log a fork reads, as the store would hand it back. */
+  readonly log: Array<SessionEvent>
 }
 
 /** The sessions one fake store holds: the boot one, plus whatever a page opens. */
@@ -265,9 +269,16 @@ const makeWeb = (initialId: string, cwd = '/work', working = true): FakeWeb => {
   const first = makeHost(initialId, cwd, working)
   const hosts = new Map<string, FakeHost>([[initialId, first]])
   const closed: Array<string> = []
+  const seeds: Array<ReadonlyArray<SessionEvent> | undefined> = []
+  const log: Array<SessionEvent> = [
+    { seq: 1, time: 1, type: 'user/message', data: { text: 'first ask', source: 'user' } },
+    { seq: 2, time: 2, type: 'user/message', data: { text: 'second ask', source: 'user' } },
+  ]
   return {
     hosts,
     closed,
+    seeds,
+    log,
     initial: {
       summary: first.summary,
       host: first.host,
@@ -285,8 +296,10 @@ const makeWeb = (initialId: string, cwd = '/work', working = true): FakeWeb => {
       }),
     factory: {
       list: () => Effect.succeed([...hosts.values()].map((fake) => fake.summary)),
-      open: (id, cwd) =>
+      read: () => Effect.succeed(log),
+      open: (id, cwd, seed) =>
         Effect.sync(() => {
+          seeds.push(seed)
           const made = id ?? 'new-' + String(hosts.size + 1)
           const known = hosts.get(made)
           if (known !== undefined) {
@@ -2178,6 +2191,54 @@ describe('the web transport', () => {
     expect(observed.refused).toBe('the session is not open')
     await rm(root, { recursive: true, force: true })
     await rm(workspace, { recursive: true, force: true })
+  })
+
+  test('a fork copies the parent log into a new session and records where it began', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-fork-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const home = await mkdtemp(join(tmpdir(), 'jozo-harness-web-fork-home-'))
+    const sessionRoot = join(home, 'sessions')
+    await mkdir(join(sessionRoot, 'a'), { recursive: true })
+    await mkdir(join(sessionRoot, 'b'), { recursive: true })
+    // The fake store names the next session new-2, and the route checks its log exists.
+    await mkdir(join(sessionRoot, 'new-2'), { recursive: true })
+    const web = makeWeb('a', '/work', false)
+    const base = makeSettings()
+    const settings = {
+      ...base,
+      port: {
+        ...base.port,
+        read: () => Effect.succeed({ ...settingsView, sessionRoot }),
+      } satisfies SettingsPort,
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const wsUrl = started.wsUrl
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const forked = yield* client.forkSession({ sessionId: 'a' })
+            const listed = yield* client.sessions()
+            return { forked, listed, seeds: web.seeds }
+          }).pipe(clientLayers(wsUrl))
+          const result = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    expect(observed.forked.id).toBe('new-2')
+    expect(observed.forked.forkOf).toBe('a')
+    // The last user message is the task the parent ran; the fork starts before it.
+    expect(observed.seeds.at(-1)?.map((event) => event.seq)).toEqual([1])
+    expect(observed.listed.items.find((item) => item.id === 'a')?.forkOf).toBeUndefined()
+    expect(observed.listed.items.map((item) => item.id)).toContain('new-2')
+    expect(observed.listed.opened).toContain('new-2')
+    await rm(root, { recursive: true, force: true })
+    await rm(home, { recursive: true, force: true })
   })
 
   test('the row menu deletes an open session, and its pages with it', async () => {

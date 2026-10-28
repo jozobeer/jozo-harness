@@ -739,6 +739,7 @@ const createAgent = (
   resume: SessionId | undefined,
   cwd: string,
   attachmentDir: string,
+  seed?: ReadonlyArray<SessionEvent>,
 ) =>
   Effect.gen(function* () {
     const agentOptions: AgentOptions = {
@@ -754,7 +755,11 @@ const createAgent = (
     // A resumed session opens with the workspace its header recorded; `cwd` only
     // decides where a session that does not exist yet is created.
     return resume === undefined
-      ? yield* agents.create({ cwd, options: agentOptions })
+      ? yield* agents.create({
+          cwd,
+          options: agentOptions,
+          ...(seed === undefined ? {} : { seed }),
+        })
       : yield* agents.create({ cwd, resume, options: agentOptions })
   })
 
@@ -1657,12 +1662,17 @@ const sessionFactoryOf = (
   spillTokens: number | undefined,
   live: LiveRunSettings,
   listSessions: SessionRuntime['listSessions'],
+  readSessionEvents: (id: string) => Effect.Effect<ReadonlyArray<SessionEvent>, SessionError>,
   plugins: PluginWiringState,
   gui: GuiEndpoint,
 ): SessionFactory => ({
   list: () =>
     listSessions().pipe(Effect.mapError((error) => new WebError({ message: messageOf(error) }))),
-  open: (id, cwd) =>
+  read: (id) =>
+    readSessionEvents(id).pipe(
+      Effect.mapError((error) => new WebError({ message: messageOf(error) })),
+    ),
+  open: (id, cwd, seed) =>
     Effect.gen(function* () {
       // The choices are read per open: a page may have picked another model or
       // effort since.
@@ -1683,6 +1693,7 @@ const sessionFactoryOf = (
         plugins,
         gui,
         live,
+        seed,
       )
       if (built.kind === 'refused') {
         return yield* Effect.fail(new WebError({ message: built.message }))
@@ -1919,6 +1930,7 @@ const serveWebUi = (
             spillTokens,
             live,
             reading.listSessions,
+            reading.readSessionEvents,
             wiring,
             gui,
           ),
@@ -2313,6 +2325,8 @@ const buildSession = (
   gui?: GuiEndpoint,
   /** The live limits; absent seeds them from the rows, as a one-shot run does. */
   live?: LiveRunSettings,
+  /** Events a new session starts from, e.g. a fork of another log. */
+  seed?: ReadonlyArray<SessionEvent>,
 ) =>
   Effect.gen(function* () {
     const liveSettings = live ?? liveSettingsOf(options, rows)
@@ -2334,6 +2348,7 @@ const buildSession = (
       resume,
       cwd,
       attachmentRootOf(sessionRootOf(rows)),
+      seed,
     )
     // The last explicit choice in the log outranks the profile: a resumed session
     // continues at the boundary the human last picked, without asking again.

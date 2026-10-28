@@ -10,6 +10,8 @@ export interface SessionMeta {
   readonly title?: string
   readonly pinned?: boolean
   readonly archived?: boolean
+  /** The session this one was forked from, as the row menu's fork wrote it. */
+  readonly forkOf?: string
 }
 
 /** Every session the reader touched, keyed by the id the rail lists. */
@@ -49,10 +51,11 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const metaOfValue = (value: unknown): SessionMeta | undefined => {
   if (!isRecord(value)) return undefined
-  const meta: { title?: string; pinned?: boolean; archived?: boolean } = {}
+  const meta: { title?: string; pinned?: boolean; archived?: boolean; forkOf?: string } = {}
   if (typeof value.title === 'string' && value.title !== '') meta.title = value.title
   if (typeof value.pinned === 'boolean') meta.pinned = value.pinned
   if (typeof value.archived === 'boolean') meta.archived = value.archived
+  if (typeof value.forkOf === 'string' && value.forkOf !== '') meta.forkOf = value.forkOf
   return meta
 }
 
@@ -128,6 +131,7 @@ export const withMeta = (
   title: meta?.title ?? summary.title,
   pinned: meta?.pinned === true,
   archived: meta?.archived === true,
+  ...(meta?.forkOf === undefined ? {} : { forkOf: meta.forkOf }),
 })
 
 /** Every summary in the list, wearing what the reader last said about it. */
@@ -147,6 +151,15 @@ const removeArtifacts = (root: string, id: string): Effect.Effect<void, WebError
       new WebError({
         message: 'cannot delete the pages of session ' + id + ': ' + messageOf(cause),
       }),
+  })
+
+/** Remembers which session a fork came from, so the child can say where it began. */
+export const markFork = (root: string, id: string, parent: string): Effect.Effect<void, WebError> =>
+  Effect.gen(function* () {
+    const safe = yield* checkId(id)
+    const from = yield* checkId(parent)
+    yield* ensureSession(root, safe)
+    yield* patchMeta(root, safe, { forkOf: from })
   })
 
 /**

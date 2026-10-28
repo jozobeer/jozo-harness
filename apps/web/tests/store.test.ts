@@ -420,6 +420,7 @@ const serve = (
     let opens = 0
     const factory: SessionFactory = {
       list: () => Effect.succeed([host.summary]),
+      read: () => Effect.succeed([]),
       open: () => {
         opens += 1
         return host.refusing

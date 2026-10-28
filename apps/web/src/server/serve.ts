@@ -34,7 +34,7 @@ import {
 import { makeParticipantRegistry, type ParticipantRegistry } from './participants.ts'
 import { makeWebProtocol, type Connection } from './protocol.ts'
 import { answerShare } from './share.ts'
-import { applyMeta, readMeta, sessionActionOf, withMeta } from './session-meta.ts'
+import { applyMeta, markFork, readMeta, sessionActionOf, withMeta } from './session-meta.ts'
 import {
   makeSessionRegistry,
   type InitialSession,
@@ -189,6 +189,17 @@ const handlersOf = (
         // A rename, a pin, or a delete is another device's row as well.
         store.notify()
         return true
+      }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
+    forkSession: ({ sessionId }) =>
+      Effect.gen(function* () {
+        const forked = yield* registry.fork(sessionId)
+        const view = yield* settings.read()
+        // The child's log carries the work; the metadata carries where it began.
+        yield* markFork(view.sessionRoot, forked.summary.id, sessionId)
+        // A fork is a new row for every page, not only the one that asked.
+        store.notify()
+        const meta = yield* readMeta(view.sessionRoot)
+        return withMeta(forked.summary, meta[forked.summary.id])
       }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
     command: ({ sessionId, command }) => {
       const host = registry.hostOf(sessionId)

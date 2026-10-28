@@ -58,6 +58,8 @@ export const SessionSummarySchema = Schema.Struct({
   archived: Schema.optionalKey(Schema.Boolean),
   /** Whether the log holds nothing but its header; absent reads as no. */
   empty: Schema.optionalKey(Schema.Boolean),
+  /** The session this one was forked from; absent for a session nobody forked. */
+  forkOf: Schema.optionalKey(Schema.String),
 })
 
 /** The wire shape of one session summary; the store's own summary carries these fields. */
@@ -155,6 +157,16 @@ export const AddWorkspaceRpc = Rpc.make('addWorkspace', {
 export const SessionActionRpc = Rpc.make('sessionAction', {
   payload: Schema.Struct({ sessionId: Schema.String, action: SessionActionSchema }),
   success: Schema.Boolean,
+  error: Schema.String,
+})
+
+/**
+ * Copies one session's log into a new session. The parent keeps its log; the
+ * child records the parent and starts ready for its own task.
+ */
+export const ForkSessionRpc = Rpc.make('forkSession', {
+  payload: Schema.Struct({ sessionId: Schema.String }),
+  success: SessionSummarySchema,
   error: Schema.String,
 })
 
@@ -681,6 +693,7 @@ export const UiRpcs = RpcGroup.make(
   BrowseDirectoriesRpc,
   AddWorkspaceRpc,
   SessionActionRpc,
+  ForkSessionRpc,
   UiCommandRpc,
   UiEventsRpc,
   StoreChangedRpc,
