@@ -11,6 +11,7 @@
     "@jozo-harness/agent": "workspace:*",
     "@jozo-harness/agent-loop": "workspace:*",
     "@jozo-harness/bundle-base": "workspace:*",
+    "@jozo-harness/hooks-json": "workspace:*",
     "@jozo-harness/kernel": "workspace:*",
     "@jozo-harness/llm": "workspace:*",
     "@jozo-harness/llm-deepseek": "workspace:*",

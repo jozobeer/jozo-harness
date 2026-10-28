@@ -199,6 +199,9 @@ importers:
       '@jozo-harness/bundle-base':
         specifier: workspace:*
         version: link:../../packages/bundle/base
+      '@jozo-harness/hooks-json':
+        specifier: workspace:*
+        version: link:../../packages/core/hooks-json
       '@jozo-harness/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel/kernel
@@ -333,6 +336,9 @@ importers:
       '@jozo-harness/agent-loop':
         specifier: workspace:*
         version: link:../../core/agent-loop
+      '@jozo-harness/hooks-json':
+        specifier: workspace:*
+        version: link:../../core/hooks-json
       '@jozo-harness/kernel':
         specifier: workspace:*
         version: link:../../kernel/kernel
@@ -405,6 +411,24 @@ importers:
       '@jozo-harness/system-prompt':
         specifier: workspace:*
         version: link:../system-prompt
+      '@jozo-harness/tools':
+        specifier: workspace:*
+        version: link:../tools
+      effect:
+        specifier: 4.0.3
+        version: 4.0.3
+
+  packages/core/hooks-json:
+    dependencies:
+      '@jozo-harness/kernel':
+        specifier: workspace:*
+        version: link:../../kernel/kernel
+      '@jozo-harness/process':
+        specifier: workspace:*
+        version: link:../../kernel/process
+      '@jozo-harness/safety':
+        specifier: workspace:*
+        version: link:../safety
       '@jozo-harness/tools':
         specifier: workspace:*
         version: link:../tools

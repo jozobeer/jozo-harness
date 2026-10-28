@@ -1,6 +1,7 @@
 import { agentPlugin } from '@jozo-harness/agent'
 import { agentLoopPlugin } from '@jozo-harness/agent-loop'
 import { loadBundledProfile } from '@jozo-harness/bundle-base'
+import { hooksJsonPlugin } from '@jozo-harness/hooks-json'
 import { kernelPlugin, type Plugin } from '@jozo-harness/kernel'
 import { llmOpenAiPlugin } from '@jozo-harness/llm-openai'
 import { askPlugin, safetyPlugin } from '@jozo-harness/safety'
@@ -49,6 +50,7 @@ describe('the real provider', () => {
             toolsPlugin,
             systemPromptPlugin,
             safetyPlugin,
+            hooksJsonPlugin,
             askPlugin,
             tier0Plugin,
             tier1Plugin,

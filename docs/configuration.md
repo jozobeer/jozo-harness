@@ -60,7 +60,7 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 
 ## plugin が受け取る config キー
 
-同梱の plugin のうち `config` にキーを持つのは12個で、残りはキーを持たない。
+同梱の plugin のうち `config` にキーを持つのは13個で、残りはキーを持たない。
 
 | plugin | キー |
 |---|---|
@@ -76,6 +76,7 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 | `@jozo-harness/workspace-dependencies` | `dir`（必須）— この配布が同梱するランタイムの payload ディレクトリ（絶対パス、または `~` で始める）。`dir/runtime.json` が payload からの相対パスで `python`（必須）、`node`、`pnpm` を並べる |
 | `@jozo-harness/tools-tier0` | `env` — `JZH_` で始まる名前だけを持つ map。bash、背景ジョブ、run_code の子がこの値を環境に持ち、モデルが `env` 引数で同じ名前を渡してもこの値が勝つ。名前は `JZH_` のあとに大文字・数字・`_` だけを置け、`=` や空白を含む名前は起動時に拒否する。値は設定のリテラルだけで、`secrets.env` や `.env` は読まない。秘密は `jzh auth` の経路に置く |
 | `@jozo-harness/tools-tier1` | `timeLimitMs` — `ask_user` が複数の質問を待つ既定の時間（ミリ秒、1 以上）。省略すると回答があるまで待つ。呼び出しの `time_limit_ms` が優先する |
+| `@jozo-harness/hooks-json` | `path` — 読む hooks.json の場所（既定 `hooks.json`）。相対パスは各 tool 呼び出しの cwd から解決する、`timeoutMs` — フックが `timeout` を書かないときの 1 コマンドの上限（ミリ秒、既定 600000） |
 
 `@jozo-harness/session-telemetry-otlp` は `base` profile に `scope: off` の行として入っている。何も設定しなければ外部へ送らない。`endpoint` と `scope` の両方を設定したときだけ、セッションイベントを 20 件ずつ OTLP/HTTP の JSON にまとめて送る。匿名 id は resource にだけ載り、ログ本文にも `--dump-config` にも出ない。送信は turn の外で走り、失敗したバッチは警告を 1 行残して捨てるので、collector が落ちていてもセッションは続く。
 
