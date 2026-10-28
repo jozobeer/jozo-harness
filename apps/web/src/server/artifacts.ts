@@ -1,16 +1,7 @@
 import { readFile, readdir, stat, unlink } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join } from 'node:path'
-import {
-  codeFromUrl,
-  COOKIE_NAME,
-  cookieOf,
-  originAllowed,
-  tokenFromUrl,
-  tokenMatches,
-  type CodeExchange,
-  type PublicOrigin,
-} from './auth.ts'
+import { originAllowed, requestAuthorized, type CodeExchange, type PublicOrigin } from './auth.ts'
 import type { TailnetAddresses } from './tailnet.ts'
 
 /** A session id or artifact name the route may hand to the filesystem. */
@@ -59,13 +50,6 @@ export interface ArtifactGate {
   readonly codes: CodeExchange
 }
 
-/** The token either the cookie or the URL repeats, or a startup code still worth trading. */
-const authorized = (request: IncomingMessage, gate: ArtifactGate): boolean => {
-  const url = request.url ?? ''
-  const offered = cookieOf(request.headers.cookie, COOKIE_NAME) ?? tokenFromUrl(url)
-  return tokenMatches(offered, gate.token) || gate.codes.peek(codeFromUrl(url))
-}
-
 const refuse = (response: ServerResponse, status: number, body: string): void => {
   response.writeHead(status, { 'content-type': 'text/plain; charset=utf-8' })
   response.end(body)
@@ -105,7 +89,7 @@ const admitted = (
     refuse(response, 403, 'forbidden')
     return false
   }
-  if (!authorized(request, gate)) {
+  if (!requestAuthorized(request.url ?? '', request.headers.cookie, gate)) {
     refuse(response, 401, 'a token or a code is required')
     return false
   }

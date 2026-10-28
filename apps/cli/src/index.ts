@@ -1554,6 +1554,8 @@ const serveWebUi = (
           settings: settingsPortOf(options, { rows, efforts: reading.efforts }, choice),
           workspaces: workspacesPortOf(options, reading.listSessions),
           commands: () => defaultCommands,
+          plugins: () =>
+            rows.map((row) => ({ id: row.id, name: row.name, enabled: row.disabled !== true })),
           port: work.port,
           staticRoot,
           ...(work.publicUrl === undefined ? {} : { publicUrl: work.publicUrl }),
