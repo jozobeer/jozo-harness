@@ -1,9 +1,5 @@
 import type { RequestMessage } from '@jozo-harness/llm'
-import {
-  continueMessagesWithSeqs,
-  deriveMessagesWithSeqs,
-  type DerivedMessage,
-} from './derive.ts'
+import { continueMessagesWithSeqs, deriveMessagesWithSeqs, type DerivedMessage } from './derive.ts'
 import type { SessionEvent, SessionSeq } from './events.ts'
 import type { MessageProjection } from './projections.ts'
 
@@ -88,7 +84,8 @@ export function resumeProjection(
   checkpoint: ProjectionCheckpoint | undefined,
   extra: ReadonlyArray<MessageProjection> = [],
 ): ResumedProjection {
-  const at = checkpoint === undefined ? -1 : events.findIndex((event) => event.seq === checkpoint.seq)
+  const at =
+    checkpoint === undefined ? -1 : events.findIndex((event) => event.seq === checkpoint.seq)
   if (checkpoint === undefined || at < 0) {
     return {
       derived: deriveMessagesWithSeqs(events, extra),

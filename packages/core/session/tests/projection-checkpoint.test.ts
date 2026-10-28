@@ -43,10 +43,7 @@ registerMessageProjection({
 
 const stamp = { mtimeMs: 1_000, size: 4_096 }
 
-const checkpointAt = (
-  events: ReadonlyArray<SessionEvent>,
-  seq: number,
-): ProjectionCheckpoint => ({
+const checkpointAt = (events: ReadonlyArray<SessionEvent>, seq: number): ProjectionCheckpoint => ({
   version: PROJECTION_CHECKPOINT_VERSION,
   seq,
   log: stamp,
@@ -61,7 +58,10 @@ const user = (seq: number, text: string): SessionEvent =>
 
 describe('resumeProjection', () => {
   test('resumes from the checkpoint and folds only the events after it', () => {
-    const events = [headerEvent(), ...Array.from({ length: 20 }, (_, index) => user(index + 2, `m${index + 2}`))]
+    const events = [
+      headerEvent(),
+      ...Array.from({ length: 20 }, (_, index) => user(index + 2, `m${index + 2}`)),
+    ]
     const checkpoint = checkpointAt(events, 15)
 
     const resumed = resumeProjection(events, checkpoint)
@@ -94,8 +94,12 @@ describe('resumeProjection', () => {
   test('a broken checkpoint is a miss, never an error', () => {
     expect(decodeProjectionCheckpoint(undefined)).toBeUndefined()
     expect(decodeProjectionCheckpoint({})).toBeUndefined()
-    expect(decodeProjectionCheckpoint({ version: 2, seq: 2, log: stamp, derived: [] })).toBeUndefined()
-    expect(decodeProjectionCheckpoint({ version: 1, seq: 2, log: stamp, derived: 'no' })).toBeUndefined()
+    expect(
+      decodeProjectionCheckpoint({ version: 2, seq: 2, log: stamp, derived: [] }),
+    ).toBeUndefined()
+    expect(
+      decodeProjectionCheckpoint({ version: 1, seq: 2, log: stamp, derived: 'no' }),
+    ).toBeUndefined()
     expect(
       decodeProjectionCheckpoint({
         version: 1,
