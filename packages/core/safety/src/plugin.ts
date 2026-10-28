@@ -16,7 +16,7 @@ import { modeOf, type SandboxMode } from './policy.ts'
 import { AutoReview, autoReviewServiceLayer } from './auto-review.ts'
 import {
   Permission,
-  makePermission,
+  permissionLayer,
   policyOf,
   sandboxWithPermission,
   type PermissionShape,
@@ -178,10 +178,12 @@ const sandboxOf = (
 const layerForDecision = (
   config: SafetyConfig,
   decision: SandboxDecision,
-  permission: PermissionShape,
-): Layer.Layer<Sandbox, PluginError> =>
+): Layer.Layer<Sandbox, PluginError, Permission> =>
   decision._tag === 'available'
-    ? Layer.succeed(Sandbox, sandboxOf(config, decision, permission))
+    ? Layer.effect(
+        Sandbox,
+        Effect.map(Permission, (permission) => sandboxOf(config, decision, permission)),
+      )
     : Layer.effect(
         Sandbox,
         Effect.fail(new PluginError({ code: 'unavailable', message: decision.message })),
@@ -199,10 +201,8 @@ export const sandboxLayerFor = (
   platform: string,
   bwrapUsable: () => boolean = probeBwrap,
 ): Layer.Layer<Sandbox, PluginError> =>
-  layerForDecision(
-    config,
-    decideSandbox(config, platform, bwrapUsable),
-    makePermission(config.preset),
+  layerForDecision(config, decideSandbox(config, platform, bwrapUsable)).pipe(
+    Layer.provide(permissionLayer(config.preset)),
   )
 
 /**
@@ -214,12 +214,12 @@ const policyLayerWithContexts = (
   config: SafetyConfig,
   decision: SandboxDecision,
   probe: SeatbeltProbeResult | undefined,
-  permission: PermissionShape,
-): Layer.Layer<Policy, never, SystemPrompt> =>
+): Layer.Layer<Policy, never, SystemPrompt | Permission> =>
   Layer.effect(
     Policy,
     Effect.gen(function* () {
       const prompt = yield* SystemPrompt
+      const permission = yield* Permission
       yield* prompt.context({
         name: 'approval',
         order: APPROVAL_CONTEXT_ORDER,
@@ -246,24 +246,27 @@ const policyLayerWithContexts = (
  * review seam. The seam is provided for every preset because the preset decides
  * who asks it; the auto preset installs the guard that does.
  */
-export const safetyPlugin: Plugin<SafetyConfig, Policy | Sandbox | AutoReview, SystemPrompt> = {
+export const safetyPlugin: Plugin<
+  SafetyConfig,
+  Policy | Sandbox | AutoReview | Permission,
+  SystemPrompt
+> = {
   name: '@jozo-harness/safety',
   config: safetyConfigSchema,
-  provides: [Policy, Sandbox, AutoReview],
+  provides: [Policy, Sandbox, AutoReview, Permission],
   requires: [SystemPrompt],
   layer: (config) => {
     const decision = decideSandbox(config, process.platform, probeBwrap)
     // One probe per build: every runtime context and every wrapped command share it.
     const probe = underSeatbelt(config, decision) ? probeSeatbelt() : undefined
-    // One holder per session build: a switch reaches the policy, the prompt, and
-    // every provider that session's tools captured.
-    const permission = makePermission(config.preset)
-    return Layer.mergeAll(
-      policyLayerWithContexts(config, decision, probe, permission),
-      layerForDecision(config, decision, permission),
-      Layer.succeed(Permission, permission),
+    // The holder is an effect, not a captured value: building the same layer for a
+    // second session gives that session its own boundary.
+    const services = Layer.mergeAll(
+      policyLayerWithContexts(config, decision, probe),
+      layerForDecision(config, decision),
       autoReviewServiceLayer,
     )
+    return services.pipe(Layer.provideMerge(permissionLayer(config.preset)))
   },
 }
 

@@ -5,7 +5,7 @@ import {
   type SessionEventSchemaMap,
 } from '@jozo-harness/session'
 import type { SessionEvent } from '@jozo-harness/session'
-import { Context, Data, Effect, Schema } from 'effect'
+import { Context, Data, Effect, Layer, Schema } from 'effect'
 import { modeOf, type PermissionPreset, type SandboxMode } from './policy.ts'
 import type { PolicyShape } from './policy-service.ts'
 import type { SandboxShape } from './sandbox.ts'
@@ -155,6 +155,13 @@ export const makePermission = (initial: PermissionPreset): PermissionShape => {
     },
   }
 }
+
+/** One holder per build, so two sessions over one layer never share a boundary. */
+export const permissionLayer = (initial: PermissionPreset): Layer.Layer<Permission> =>
+  Layer.effect(
+    Permission,
+    Effect.sync(() => makePermission(initial)),
+  )
 
 /** The policy tools see, read through the holder rather than copied at startup. */
 export const policyOf = (permission: PermissionShape): PolicyShape => ({
