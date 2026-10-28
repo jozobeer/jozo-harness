@@ -67,6 +67,7 @@ const renderGlob = (
 /** Lists workspace files whose relative path matches a glob, newest modification last. Dot-entries are walked; .git and node_modules are not. */
 export const globTool: ToolDefinition<GlobArgs, GlobValue> = {
   name: 'glob',
+  readOnly: true,
   presentCall: (args) => ({ summary: 'glob ' + args.pattern }),
   description:
     'Lists workspace files matching a glob pattern, in modification-time order (oldest first). Use it to find files by name; use grep to search inside them. Dot-entries such as .github are walked; only node_modules and .git are never walked. A list too long to show is stored whole; read that file with offset and limit.',

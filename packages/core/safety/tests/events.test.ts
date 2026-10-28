@@ -4,11 +4,32 @@ import { Effect } from 'effect'
 import { approvalEventSchemas } from '../src/index.ts'
 
 describe('approval events', () => {
-  test('registers both approval events in the catalog', () => {
+  test('registers the approval and review events in the catalog', () => {
     expect([...approvalEventSchemas.keys()]).toEqual([
       'safety/approval/requested',
       'safety/approval/answered',
+      'safety/auto/reviewed',
     ])
+  })
+
+  test('a review decodes from the log', async () => {
+    const event = await Effect.runPromise(
+      decodeSessionEvent({
+        seq: 4,
+        time: 1,
+        type: 'safety/auto/reviewed',
+        data: {
+          sessionId: 's1',
+          callId: 'c1',
+          tool: 'bash',
+          decision: 'denied',
+          reason: 'it removes the worktree',
+        },
+      }),
+    )
+
+    expect(event?.type).toBe('safety/auto/reviewed')
+    expect(event?.type === 'safety/auto/reviewed' ? event.data.decision : '').toBe('denied')
   })
 
   test('a request decodes from the log', async () => {

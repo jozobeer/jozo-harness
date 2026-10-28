@@ -1,5 +1,9 @@
-/** A named permission level a profile chooses. */
-export type PermissionPreset = 'read-only' | 'workspace-write' | 'full'
+/**
+ * A named permission level a profile chooses. `auto` runs with the
+ * workspace-write sandbox and has every call that can touch something outside its
+ * own result reviewed first, so it adds a check rather than a wider boundary.
+ */
+export type PermissionPreset = 'read-only' | 'workspace-write' | 'full' | 'auto'
 
 /**
  * How far a command's file effects may reach while it runs. The preset picks the
@@ -12,6 +16,7 @@ export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
 const MODES: Readonly<Record<PermissionPreset, SandboxMode>> = {
   'read-only': 'read-only',
   'workspace-write': 'workspace-write',
+  auto: 'workspace-write',
   full: 'danger-full-access',
 }
 
