@@ -23,6 +23,8 @@ export interface Child {
   readonly stdout: ReadableStream<Uint8Array>
   readonly stderr: ReadableStream<Uint8Array>
   readonly stdin: ChildInput
+  /** The process id, when the platform assigned one. */
+  readonly pid: number | undefined
   /** Sends the signal (SIGTERM by default) to the child. */
   kill(signal?: NodeJS.Signals | number): void
 }
@@ -70,6 +72,7 @@ export const spawn = (command: ReadonlyArray<string>, options: SpawnOptions = {}
     }),
     stdout: streamOf(child.stdout),
     stderr: streamOf(child.stderr),
+    pid: child.pid,
     stdin: {
       write: (text) => {
         child.stdin?.write(text)

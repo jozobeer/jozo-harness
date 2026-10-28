@@ -429,9 +429,16 @@ importers:
       '@jozo-harness/acp':
         specifier: workspace:*
         version: link:../acp
+      '@jozo-harness/process':
+        specifier: workspace:*
+        version: link:../../kernel/process
       effect:
         specifier: 4.0.3
         version: 4.0.3
+    devDependencies:
+      '@jozo-harness/test-support-stub':
+        specifier: workspace:*
+        version: link:../../test-support/stub
 
   packages/core/session:
     dependencies:

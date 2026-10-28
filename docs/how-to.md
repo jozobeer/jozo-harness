@@ -260,7 +260,7 @@ turn が走っている間に composer から送った行は、既定では**次
 
 1. `initialize`（`protocolVersion`）→ サーバは `protocolVersion: 1` と `agentName` を返す。
 2. `session/new`（`cwd`）→ `sessionId` を返す。セッションはその場で作られ、以降の turn はその cwd で走る。
-3. `session/prompt`（`sessionId` と `prompt: ["..."]`）→ 1 turn 走る。assistant のテキストは `session/update` の `agent_message_chunk` として届き、最後に `{stopReason: "end-turn"}` を返す。
+3. `session/prompt`（`sessionId` と `prompt: ["..."]`）→ 1 turn 走る。assistant のテキストは `session/update` の `agent_message_chunk`、tool call は `tool_call`、その結果は `tool_call_update` として届き、最後に `{stopReason: "end-turn"}` を返す。
 4. 途中で止めるときは `session/cancel` を notification として送る。
 
 承認が要る呼び出しは、サーバから `session/request_permission` の要求として届く。`options` は `allow-once` と `reject-once` の2つで、`{"outcome": {"outcome": "selected", "optionId": "allow-once"}}` を返したときだけツールが走る。既定では120秒答えがないと拒否として扱い、ツールは走らない。答えはその1回の呼び出しだけに効く。
@@ -268,6 +268,43 @@ turn が走っている間に composer から送った行は、既定では**次
 セッションは既存の JSONL に書く。`jzh sessions` で一覧と読み戻しができ、`jzh web` のセッション一覧も同じ保存域を見る。
 
 壊れた JSON は `-32700`、未知のメソッドは `-32601`、未知の `sessionId` は `-32602` で返り、プロセスは落ちない。
+
+## TypeScript から jzh を駆動する
+
+`@jozo-harness/sdk` の `HarnessClient` は `jzh acp` を子プロセスとして起こし、1 turn を JSON-RPC で流す。モデルと設定は通常の run と同じフラグで選ぶ。
+
+```sh
+pnpm add @jozo-harness/sdk
+```
+
+```ts
+import { HarnessClient, spawnHarness } from '@jozo-harness/sdk'
+
+const client = new HarnessClient({
+  spawn: () => spawnHarness(['jzh', 'acp', '--model', 'ollama/deepseek-v4.1-flash']),
+  // 承認が要る呼び出しを1回だけ通す。省略すると拒否する。
+  answerPermission: () => ({ outcome: { outcome: 'selected', optionId: 'allow-once' } }),
+})
+
+try {
+  await client.initialize()
+  const { sessionId } = await client.newSession(process.cwd())
+  const turn = await client.prompt(sessionId, 'README を読んで要約して')
+
+  console.log(turn.text) // 最終のテキスト
+  for (const call of turn.toolCalls) {
+    console.log(call.name, call.status, call.output) // tool call と tool result
+  }
+} finally {
+  await client.close() // 子を止め、exit を待つ
+}
+```
+
+- `HARNESS_METHODS` と `HARNESS_NOTIFICATIONS` がプロトコル名の正本である。`HARNESS_METHODS.prompt` などを使えば、メソッド名を文字列で書かなくてよい。
+- `prompt()` は、その turn の `agent_message_chunk` を `text` に、`tool_call` / `tool_call_update` を `toolCalls` に畳んで返す。`output` は tool が返したテキストで、失敗した呼び出しは `failed: true` になる。
+- `close()` は保留中の要求を reject し、子プロセスを kill して exit を待つ。呼び忘れると `jzh acp` が残る。
+- `spawnHarness()` は子を独立したプロセスグループで起こすので、close は tool が起こしたコマンドにも届く。
+- 通知を自分で見たいときは `onUpdate`、承認の判断を変えたいときは `answerPermission` を渡す。
 
 ## 設定ファイルを雛形から始める
 
