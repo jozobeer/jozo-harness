@@ -144,7 +144,8 @@ export const modelAutoReview = (
 }
 
 export interface AutoReviewGuardOptions {
-  readonly preset: PermissionPreset
+  /** Read on each call so a session that leaves auto stops asking the reviewer. */
+  readonly preset: () => PermissionPreset
   readonly review: AutoReviewShape
   /** Whether one tool's calls have no effect outside their own result. */
   readonly isReadOnly: (tool: string) => boolean
@@ -178,7 +179,7 @@ export const autoReviewGuard = (options: AutoReviewGuardOptions): ToolGuard => (
   name: 'auto-review',
   check: (exec) =>
     Effect.gen(function* () {
-      if (options.preset !== 'auto') return { kind: 'abstain' as const }
+      if (options.preset() !== 'auto') return { kind: 'abstain' as const }
       if (exec.context.nested === true) return { kind: 'abstain' as const }
       if (options.isReadOnly(exec.tool)) return { kind: 'abstain' as const }
       const decision = yield* options.review.review({

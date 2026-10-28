@@ -345,6 +345,10 @@ export const RunStateViewSchema = Schema.Struct({
   effort: Schema.String,
   /** The effort words the provider takes, as a page offers them; empty declares none. */
   efforts: Schema.Array(Schema.String),
+  /** The boundary the next tool call runs under, as this session currently holds it. */
+  permission: Schema.optionalKey(
+    Schema.Literals(['read-only', 'workspace-write', 'danger-full-access']),
+  ),
   /** Tokens, speed and context, as the Run pane and the composer's ring draw them. */
   usage: Schema.optionalKey(UsageViewSchema),
 })

@@ -42,6 +42,7 @@ const MODELS: ReadonlyArray<string> = [
 ]
 
 const RUN: RunStateView = {
+  permission: 'workspace-write',
   goal: {
     objective: '再接続しても turn を一度だけ数える',
     phase: 'active',

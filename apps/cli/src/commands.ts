@@ -18,6 +18,13 @@ import {
   type TokenBudget,
 } from '@jozo-harness/session'
 import {
+  PERMISSION_USAGE,
+  permissionPresetOf,
+  permissionWordOf,
+  switchPermission,
+  type PermissionShape,
+} from '@jozo-harness/safety'
+import {
   currentGoal,
   currentSchedules,
   goalRounds,
@@ -177,6 +184,8 @@ const goalLogOf = (session: Session): GoalLog => ({
 
 /** What a command registry needs from the session it answers for. */
 export interface BuiltinCommandOptions {
+  /** The permission holder of the session these commands answer for. */
+  readonly permission?: PermissionShape
   /** The budget the loop compacts with; absent leaves the context stat unknown. */
   readonly budget?: TokenBudget
   /**
@@ -235,6 +244,28 @@ export const installBuiltinCommands = (
             ok: true,
             text: 'effort: ' + shownEffort(word === '' ? control.effort() : effort),
           }
+        }),
+    })
+    yield* commands.register({
+      name: 'permission',
+      summary:
+        'switch this session between read-only, workspace-write, and danger-full-access; alone reads it',
+      run: (input, context) =>
+        Effect.gen(function* () {
+          const permission = options.permission
+          if (permission === undefined) return { ok: false, text: 'no permission preset here' }
+          const word = input.trim()
+          if (word === '')
+            return { ok: true, text: 'permission: ' + permissionWordOf(permission.current()) }
+          const preset = permissionPresetOf(word)
+          if (preset === undefined) return { ok: false, text: PERMISSION_USAGE }
+          // The human typed this line, which is the explicit act danger-full-access needs.
+          return yield* switchPermission(context.session, permission, preset, {
+            confirmed: true,
+          }).pipe(
+            Effect.map(() => ({ ok: true, text: 'permission: ' + word })),
+            Effect.catch((error) => Effect.succeed({ ok: false, text: error.message })),
+          )
         }),
     })
     yield* commands.register({

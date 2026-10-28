@@ -2190,4 +2190,54 @@
   .actions > #seat {
     flex: 0 1 auto;
   }
+
+  /* The boundary is chosen in place; danger asks once more before it comes off. */
+  .permission-choice {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 4px 0 var(--s2);
+  }
+
+  .permission {
+    padding: 2px 9px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: none;
+    color: var(--dim);
+    font: inherit;
+    font-size: var(--text-xs);
+    cursor: pointer;
+  }
+
+  .permission:hover {
+    border-color: var(--line-strong);
+    color: var(--text);
+  }
+
+  .permission.active {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .permission-confirm {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: var(--s2);
+    margin: 4px 0 var(--s2);
+    border: 1px solid color-mix(in srgb, var(--warn) 50%, var(--line));
+    border-radius: 8px;
+    color: var(--warn);
+    font-size: var(--text-xs);
+  }
+
+  .permission-cancel {
+    border: 0;
+    background: none;
+    color: var(--dim);
+    font: inherit;
+    cursor: pointer;
+  }
 }

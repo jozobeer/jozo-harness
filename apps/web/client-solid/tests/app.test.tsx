@@ -2061,6 +2061,50 @@ describe('the Solid page', () => {
     expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'trajectory' } })
   })
 
+  test('the run pane switches permission and asks once before danger-full-access', () => {
+    const { store, calls } = makeStore({
+      pane: { kind: 'run' },
+      run: {
+        permission: 'read-only',
+        goal: null,
+        schedules: [],
+        jobs: [],
+        subagents: [],
+        todos: [],
+        todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+        skills: [],
+        promptSections: [],
+        queued: [],
+        steering: [],
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+      },
+    })
+
+    const { container } = render(() => <ContextPane store={store} />)
+    const choice = (name: string): Element | null =>
+      container.querySelector('[data-permission="' + name + '"]')
+
+    expect(choice('read-only')?.classList.contains('active')).toBe(true)
+    fireEvent.click(choice('workspace-write') as Element)
+    expect(calls).toContainEqual({
+      kind: 'command',
+      command: { kind: 'submit', text: '/permission workspace-write' },
+    })
+
+    fireEvent.click(choice('danger-full-access') as Element)
+    expect(container.querySelector('.permission-confirm')).not.toBeNull()
+    // The first click only asks; the boundary moves when the human confirms.
+    expect(calls.filter((call) => call.kind === 'command')).toHaveLength(1)
+
+    fireEvent.click(container.querySelector('#confirm-permission') as Element)
+    expect(calls).toContainEqual({
+      kind: 'command',
+      command: { kind: 'submit', text: '/permission danger-full-access' },
+    })
+  })
+
   test('the run pane lists each page the session published, newest first and once', () => {
     const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
     const publish = (seq: number, callId: string, page: string) => [

@@ -800,6 +800,66 @@ const SessionExport = (props: { store: SessionStore }) => {
   )
 }
 
+const PERMISSION_CHOICES = ['read-only', 'workspace-write', 'danger-full-access'] as const
+
+type PermissionChoice = (typeof PERMISSION_CHOICES)[number]
+
+/**
+ * The boundary the next tool call runs under. A click sends the same slash
+ * command a human would type, so the switch lands in the log like any other.
+ * danger-full-access only asks on the page after a second, explicit confirm:
+ * the model must not be able to widen itself, and the page is the human's act.
+ */
+const Permission = (props: { store: SessionStore; current: PermissionChoice }) => {
+  const [confirming, setConfirming] = createSignal(false)
+  const send = (choice: PermissionChoice): void => {
+    setConfirming(false)
+    props.store.send({ kind: 'submit', text: '/permission ' + choice })
+  }
+  const choose = (choice: PermissionChoice): void => {
+    if (choice === props.current) return
+    if (choice === 'danger-full-access') setConfirming(true)
+    else send(choice)
+  }
+  return (
+    <div class="run-section">
+      <span class="run-section-title">permission</span>
+      <div class="permission-choice">
+        <For each={PERMISSION_CHOICES}>
+          {(choice) => (
+            <button
+              class={'permission' + (choice === props.current ? ' active' : '')}
+              type="button"
+              data-permission={choice}
+              aria-pressed={choice === props.current}
+              onClick={() => choose(choice)}
+            >
+              {choice}
+            </button>
+          )}
+        </For>
+      </div>
+      <Show when={confirming()}>
+        <div class="permission-confirm" role="alert">
+          <span>danger-full-access removes the sandbox for every later call.</span>
+          <Button
+            id="confirm-permission"
+            variant="primary"
+            type="button"
+            onClick={() => send('danger-full-access')}
+          >
+            Confirm danger-full-access
+          </Button>
+          <button class="permission-cancel" type="button" onClick={() => setConfirming(false)}>
+            Cancel
+          </button>
+        </div>
+      </Show>
+      <div class="card-hint">applies to the next tool call and stays in this session's log</div>
+    </div>
+  )
+}
+
 const Run = (props: { store: SessionStore }) => {
   const run = () => props.store.state().run
   return (
@@ -810,6 +870,7 @@ const Run = (props: { store: SessionStore }) => {
           <>
             <Goal goal={state().goal} />
             <Usage usage={state().usage} />
+            <Permission store={props.store} current={state().permission ?? 'workspace-write'} />
             <Plugins />
             <Todos todos={state().todos} counts={state().todoCounts} />
             <Skills skills={state().skills} />
