@@ -7,6 +7,8 @@ export interface ModelEndpoint {
   readonly provider: string
   readonly baseUrl: string
   readonly apiKeyEnv: string
+  /** A reference in the credentials store, used when the environment has no key. */
+  readonly apiKeyRef?: string
 }
 
 const LLM_ROW = '@jozo-harness/llm-openai'
@@ -28,9 +30,14 @@ export function modelEndpointOf(rows: ReadonlyArray<PluginRow>): ModelEndpoint |
   const row = rows.find((candidate) => candidate.name === LLM_ROW && candidate.disabled !== true)
   const config = row?.config
   if (!isRecord(config)) return undefined
-  const { baseUrl, apiKeyEnv } = config
+  const { baseUrl, apiKeyEnv, apiKeyRef } = config
   if (typeof baseUrl !== 'string' || typeof apiKeyEnv !== 'string') return undefined
-  return { provider: providerOf(baseUrl), baseUrl, apiKeyEnv }
+  return {
+    provider: providerOf(baseUrl),
+    baseUrl,
+    apiKeyEnv,
+    ...(typeof apiKeyRef === 'string' && apiKeyRef !== '' ? { apiKeyRef } : {}),
+  }
 }
 
 const authorization = (key: string | undefined): Record<string, string> =>

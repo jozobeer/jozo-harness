@@ -1,4 +1,5 @@
 import { configPaths, type ConfigPaths } from './config.ts'
+import { writeCredential } from './credentials.ts'
 import { PROVIDERS, providerByEnv, providerByName } from './providers.ts'
 import { listSecrets, removeSecret, writeSecret } from './secrets-file.ts'
 
@@ -18,6 +19,7 @@ const usage = (io: AuthIo): number => {
       ')\n',
   )
   io.stderr('jzh auth set NAME      store one secret under an exact name\n')
+  io.stderr('jzh auth ref NAME      store a referenced secret in credentials.json\n')
   io.stderr('jzh auth list          show which services have a key\n')
   io.stderr('jzh auth remove NAME   forget one secret\n')
   return 2
@@ -55,6 +57,20 @@ const setName: AuthCommand = async (argv, io, paths) => {
   return storeSecret(paths, io, name, name + ': ', name)
 }
 
+/** Stores a value the settings reach by name instead of by environment variable. */
+const setReference: AuthCommand = async (argv, io, paths) => {
+  const name = argv[0] ?? ''
+  if (!NAME.test(name)) return usage(io)
+  const value = (await io.readLine('reference ' + name + ': ')).trim()
+  if (value === '') {
+    io.stderr('jzh: nothing was read, so nothing was stored\n')
+    return 2
+  }
+  writeCredential(paths.credentials, name, value)
+  io.stdout('jzh: stored the reference "' + name + '" in ' + paths.credentials + '\n')
+  return 0
+}
+
 const listNames: AuthCommand = async (_argv, io, paths) => {
   const names = listSecrets(paths.secrets)
   if (names.length === 0) {
@@ -79,6 +95,7 @@ const removeName: AuthCommand = async (argv, io, paths) => {
 const COMMANDS: Readonly<Record<string, AuthCommand | undefined>> = {
   add: addProvider,
   set: setName,
+  ref: setReference,
   list: listNames,
   remove: removeName,
 }

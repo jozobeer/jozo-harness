@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -17,6 +18,24 @@ const collector = (value: string): { io: AuthIo; out: Array<string>; err: Array<
     },
   }
 }
+
+describe('jzh auth ref', () => {
+  test('stores a referenced secret with 600 and never echoes it', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'jozo-harness-auth-ref-'))
+    const env = { XDG_CONFIG_HOME: directory }
+    const { io, out } = collector('ref-value')
+
+    const code = await runAuth(['ref', 'openrouter'], io, env)
+
+    const path = join(directory, 'jzh', 'credentials.json')
+    expect(code).toBe(0)
+    expect(statSync(path).mode & 0o777).toBe(0o600)
+    expect(await readFile(path, 'utf8')).toContain('"openrouter": "ref-value"')
+    expect(out.join('')).toContain('stored the reference "openrouter"')
+    expect(out.join('')).not.toContain('ref-value')
+    await rm(directory, { recursive: true, force: true })
+  })
+})
 
 describe('jzh auth add', () => {
   test('stores a provider key under its environment name', async () => {

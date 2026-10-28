@@ -129,8 +129,11 @@ export const resolveSettings = (inputs: SettingsInputs): EffectiveSettings => ({
   plugins: fromFile(inputs.settings.plugins, inputs.settingsPath, [], 'no extra plugin rows'),
 })
 
-/** The file a credential came from: the shell, the nearest .env, or secrets.env. */
-export type CredentialSource = 'environment' | 'dotenv' | 'secrets'
+/**
+ * The store a credential came from: the shell, the nearest .env, secrets.env,
+ * or the reference a settings row names in the credentials store.
+ */
+export type CredentialSource = 'environment' | 'dotenv' | 'secrets' | 'credentials'
 
 export interface CredentialInputs {
   readonly name: string

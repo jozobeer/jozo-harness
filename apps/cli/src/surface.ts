@@ -194,26 +194,48 @@ const describeValue = (value: unknown): string =>
       ? 'not set'
       : String(value)
 
-const credentialLine = (credential: {
+interface CredentialLine {
   readonly name: string
   readonly source: CredentialSource | undefined
-}): string => {
-  if (credential.source === undefined) {
-    return '  - ' + credential.name + ': not set, and the profile asks for it'
+  /** The reference the row names, when it names one. */
+  readonly ref?: string | undefined
+  /** The credentials store the reference points into. */
+  readonly store?: string | undefined
+}
+
+const referenceText = (credential: CredentialLine): string =>
+  credential.ref === undefined
+    ? ''
+    : 'the reference "' + credential.ref + '" in ' + (credential.store ?? 'the credentials store')
+
+const sourceWhere = (source: Exclude<CredentialSource, 'credentials'>): string =>
+  source === 'environment' ? 'the shell' : source === 'dotenv' ? 'the nearest .env' : 'secrets.env'
+
+const credentialLine = (credential: CredentialLine): string => {
+  const reference = referenceText(credential)
+  if (credential.source === 'credentials') {
+    return '  - ' + credential.name + ': credentials (' + reference + ')'
   }
-  const where =
-    credential.source === 'environment'
-      ? 'the shell'
-      : credential.source === 'dotenv'
-        ? 'the nearest .env'
-        : 'secrets.env'
-  return '  - ' + credential.name + ': ' + credential.source + ' (' + where + ')'
+  if (credential.source === undefined) {
+    return credential.ref === undefined
+      ? '  - ' + credential.name + ': not set, and the profile asks for it'
+      : '  - ' + credential.name + ': not set; ' + reference + ' has no value'
+  }
+  return (
+    '  - ' +
+    credential.name +
+    ': ' +
+    credential.source +
+    ' (' +
+    sourceWhere(credential.source) +
+    ')'
+  )
 }
 
 /** What a run from here would resolve, and where each value came from. */
 export const renderEffective = (
   surface: SettingsSurface | undefined,
-  credential: { readonly name: string; readonly source: CredentialSource | undefined } | undefined,
+  credential: CredentialLine | undefined,
 ): string => {
   if (surface === undefined) return ''
   const { effective } = surface

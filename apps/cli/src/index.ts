@@ -97,6 +97,7 @@ import { stopSubagentOf, subagentsOf } from './subagents.ts'
 import { sessionRootOf } from './session-list.ts'
 import { credentialSource, type SettingsSurface } from './settings.ts'
 import { configPaths } from './config.ts'
+import { resolveCredentialRef, type CredentialRefResult } from './credentials.ts'
 import { makePluginHost } from './plugin-host.ts'
 import { makeWebPluginsPort } from './plugin-web.ts'
 import { makePluginWiringState, type PluginWiringState } from './plugin-wiring.ts'
@@ -269,6 +270,8 @@ export interface CommandOptions {
   readonly jzhHome?: string
   /** What is in effect for this run and which file filled each credential. */
   readonly surface?: SettingsSurface
+  /** The credentials store a row's apiKeyRef points into; tests pass one under their own root. */
+  readonly credentialsPath?: string
   /** Continue even when this run's composition differs from the one the session recorded. */
   readonly allowPresetChange?: boolean
   /** Lets the model run tasks in child agents. */
@@ -2488,6 +2491,43 @@ const runSession = (
     return yield* serveAgent(built.runtime.agent, options, work, built.runtime.commands)
   })
 
+/** What `--dump-config` says about the key: the variable, and the store that filled it. */
+const dumpCredential = (
+  rows: ReadonlyArray<PluginRow>,
+  options: CommandOptions,
+  reference: CredentialRefResult,
+) => {
+  const endpoint = modelEndpointOf(rows)
+  if (endpoint === undefined || options.surface === undefined) return undefined
+  return {
+    name: endpoint.apiKeyEnv,
+    source:
+      reference.kind === 'filled'
+        ? 'credentials'
+        : credentialSource({
+            name: endpoint.apiKeyEnv,
+            environment: process.env,
+            ...options.surface.filled,
+          }),
+    ...(reference.kind === 'none'
+      ? {}
+      : { ref: reference.credential.ref, store: reference.credential.store }),
+  }
+}
+
+const dumpText = (
+  options: CommandOptions,
+  rows: ReadonlyArray<PluginRow>,
+  route: string,
+  effort: string,
+  reference: CredentialRefResult,
+): string =>
+  renderModelInEffect(route, effort) +
+  renderConfig(rows) +
+  renderPluginKeys(options.plugins) +
+  renderSurface(options.settingsPath, options.settings) +
+  renderEffective(options.surface, dumpCredential(rows, options, reference))
+
 /**
  * Runs one `jzh` command over a profile: build the layer, start the agent,
  * wait for the turn, and return the process exit code (0 completed, 1 error).
@@ -2495,31 +2535,23 @@ const runSession = (
 export function runCommand(options: CommandOptions): Effect.Effect<number> {
   return Effect.gen(function* () {
     const rows = yield* profileRows(options)
+    // The environment chain ran first; the reference fills only what it left
+    // empty. A reference the store does not hold stops a run and names itself,
+    // never a value.
+    const reference = resolveCredentialRef(
+      modelEndpointOf(rows),
+      process.env,
+      options.credentialsPath ?? configPaths().credentials,
+    )
+    if (reference.kind === 'missing' && options.dumpConfig !== true) {
+      options.stderr('jzh: ' + reference.reason + '\n')
+      return 1
+    }
     const route = options.route !== '' ? options.route : routeFromRows(rows)
     const effort = effortInEffect(options, rows)
 
     if (options.dumpConfig === true) {
-      // The profile's llm row names the variable the key comes from; the surface
-      // says which file filled it.
-      const endpoint = modelEndpointOf(rows)
-      const credential =
-        endpoint === undefined || options.surface === undefined
-          ? undefined
-          : {
-              name: endpoint.apiKeyEnv,
-              source: credentialSource({
-                name: endpoint.apiKeyEnv,
-                environment: process.env,
-                ...options.surface.filled,
-              }),
-            }
-      const text =
-        renderModelInEffect(route, effort) +
-        renderConfig(rows) +
-        renderPluginKeys(options.plugins) +
-        renderSurface(options.settingsPath, options.settings) +
-        renderEffective(options.surface, credential)
-      options.stdout(text)
+      options.stdout(dumpText(options, rows, route, effort, reference))
       return 0
     }
 

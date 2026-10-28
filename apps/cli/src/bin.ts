@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { type SearchHost } from '@jozo-harness/tools-tier1'
 import { parseArgs, type ParsedArgs } from './args.ts'
 import { configPaths, loadSecrets } from './config.ts'
+import { resolveCredentialRef } from './credentials.ts'
 import { loadConfigFile, type JozoHarnessConfig } from './config-file.ts'
 import { loadEnvFrom } from './env-file.ts'
 import { resolveSettings, type SettingsSurface } from './settings.ts'
@@ -71,6 +72,8 @@ interface CommandInputs {
   readonly settings: JozoHarnessConfig
   /** The file the settings came from, so `--dump-config` can name it. */
   readonly settingsPath: string
+  /** Where a row's apiKeyRef finds its value. */
+  readonly credentialsPath: string
   /** What is in effect and which file filled each credential. */
   readonly surface: SettingsSurface
   readonly route: string
@@ -92,8 +95,9 @@ const loadInputs = (parsed: ParsedArgs, io: MainIo): Effect.Effect<CommandInputs
     // The nearest .env fills what the environment does not define; the
     // secrets file is separate so it can stay unreadable.
     const fromDotenv = loadEnvFrom(io.cwd)
-    const fromSecrets = loadSecrets(configPaths().secrets, process.env, io.stderr)
-    const settingsPath = parsed.config ?? configPaths().config
+    const paths = configPaths()
+    const fromSecrets = loadSecrets(paths.secrets, process.env, io.stderr)
+    const settingsPath = parsed.config ?? paths.config
     const settings = yield* loadConfigFile(settingsPath)
     // One resolver answers what is in effect, for the run and for --dump-config.
     const effective = resolveSettings({
@@ -129,6 +133,7 @@ const loadInputs = (parsed: ParsedArgs, io: MainIo): Effect.Effect<CommandInputs
     return {
       settings,
       settingsPath,
+      credentialsPath: paths.credentials,
       surface: { effective, filled: { fromDotenv, fromSecrets } },
       route,
       effort,
@@ -243,6 +248,7 @@ const commandOptions = (parsed: ParsedArgs, io: MainIo, inputs: CommandInputs): 
   // The jzh home: where the sessions root lives, so user-global instructions sit there too.
   jzhHome: join(homedir(), '.jzh'),
   settingsPath: inputs.settingsPath,
+  credentialsPath: inputs.credentialsPath,
   settings: inputs.settings,
   stdout: io.stdout,
   stderr: io.stderr,
@@ -271,7 +277,15 @@ const printModels = (inputs: CommandInputs, io: MainIo): Effect.Effect<number> =
     patches: inputs.patches,
     ...optional('extraRows', inputs.settings.plugins),
   }).pipe(
-    Effect.flatMap(routesOf),
+    Effect.flatMap((rows) => {
+      const reference = resolveCredentialRef(
+        modelEndpointOf(rows),
+        process.env,
+        inputs.credentialsPath,
+      )
+      if (reference.kind === 'missing') return Effect.fail(new Error(reference.reason))
+      return routesOf(rows)
+    }),
     Effect.match({
       onFailure: (error) => {
         io.stderr(`jzh: ${error.message}\n`)
