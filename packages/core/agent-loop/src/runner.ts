@@ -35,6 +35,7 @@ import {
   messageBudgetOf,
   messagesWithPrune,
   meterOf,
+  presetTools,
   pruneFor,
   shortenTitle,
   summarizableMessages,
@@ -53,6 +54,7 @@ import {
   makeImageSpillWriter,
   makeSpillWriter,
   type SpillOptions,
+  type ToolRegistry,
 } from '@jozo-harness/tools'
 import { Tools, resultSummary } from '@jozo-harness/tools'
 import { Context, Duration, Effect, Exit, Layer, Queue, Schema, Stream } from 'effect'
@@ -847,9 +849,19 @@ export const agentLoopEffect = (
       context: ReadonlyArray<string>,
     ): Effect.Effect<StepOutcome> =>
       Effect.gen(function* () {
+        // A session that chose a smaller set is offered that set from the next
+        // step on: the registry behind the run is untouched, so the layers and
+        // the tools they already started keep running.
+        const visible = presetTools(agent.session.events(), tools.schemas())
+        const named = new Set(visible.map((schema) => schema.name))
+        const promptTools: ToolRegistry = {
+          ...tools,
+          schemas: () => visible,
+          signatures: () => tools.signatures().filter((signature) => named.has(signature.name)),
+        }
         const build = yield* promptService
           .build({ variables: {} })
-          .pipe(Effect.provideService(Tools, tools), Effect.orDie)
+          .pipe(Effect.provideService(Tools, promptTools), Effect.orDie)
         yield* recordInput(
           agent,
           build,

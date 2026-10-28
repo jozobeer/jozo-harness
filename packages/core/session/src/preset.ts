@@ -74,6 +74,52 @@ export const presetChange = (recorded: Preset, current: Preset): PresetChange | 
 }
 
 /**
+ * The composition after a human picked a tool set. The profiles stay what the
+ * session was built from; only what the model is offered changes.
+ */
+export const presetWithTools = (preset: Preset, tools: ReadonlyArray<string>): Preset => ({
+  profiles: preset.profiles,
+  tools: [...tools],
+})
+
+/** What choosing one tool set against the set in effect would take. */
+export interface CompositionPlan {
+  /** Asked for, but this run cannot offer it, so the set cannot be written. */
+  readonly missing: ReadonlyArray<string>
+  /** Offered now, not in the set. */
+  readonly added: ReadonlyArray<string>
+  /** In the set, not asked for now. */
+  readonly removed: ReadonlyArray<string>
+}
+
+/** The difference a choice would make, computed before anything is written. */
+export const compositionPlan = (
+  offered: ReadonlyArray<string>,
+  current: ReadonlyArray<string>,
+  wanted: ReadonlyArray<string>,
+): CompositionPlan => ({
+  missing: sorted(wanted.filter((name) => !offered.includes(name))),
+  added: difference(wanted, current).filter((name) => offered.includes(name)),
+  removed: difference(current, wanted),
+})
+
+/** Whether a set may be written as it is: a tool this run cannot offer is no choice. */
+export const compositionWritable = (plan: CompositionPlan): boolean => plan.missing.length === 0
+
+/**
+ * The tools the newest record offers the model, or every tool when the session
+ * recorded none. A session that chose a smaller set keeps that set for its next
+ * turn; the layers behind it stay as they were built.
+ */
+export const presetTools = <A extends { readonly name: string }>(
+  events: ReadonlyArray<SessionEvent>,
+  tools: ReadonlyArray<A>,
+): ReadonlyArray<A> => {
+  const preset = currentPreset(events)
+  return preset === undefined ? tools : tools.filter((tool) => preset.tools.includes(tool.name))
+}
+
+/**
  * Whether this run may pick up the change without asking. A tool the build added
  * is one more thing the session can do; losing a tool or changing the profile
  * changes what the session is, and only the human can say that.
