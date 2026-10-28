@@ -113,6 +113,7 @@ import {
   ArtifactTools,
   LspTools,
   ScreenCaptureTools,
+  BrowserTools,
   teamIdentityLine,
   teamIdentityOf,
   makeScheduleTool,
@@ -1033,6 +1034,11 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
         return (source) =>
           Effect.succeed(Context.get(source, ScreenCaptureTools)(sandboxOf(wiring) ?? noneSandbox))
       }
+      if (name === '@jozo-harness/browser') {
+        // The browser runs through the run's sandbox, so an unconfined run wraps nothing.
+        return (source) =>
+          Effect.succeed(Context.get(source, BrowserTools)(sandboxOf(wiring) ?? noneSandbox))
+      }
       return undefined
     }
 
@@ -1197,6 +1203,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
     yield* installWiredRow('@jozo-harness/artifact')
     yield* installWiredRow('@jozo-harness/session-search')
     yield* installWiredRow('@jozo-harness/screen-capture')
+    yield* installWiredRow('@jozo-harness/browser')
     // A failed provider attempt is retried for the codes the loop row lists; the
     // loop only decides what to do when a listener answers, so this is the wiring
     // that makes the retry path part of a run.
