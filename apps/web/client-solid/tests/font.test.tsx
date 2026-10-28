@@ -52,5 +52,12 @@ describe('the face and size a page keeps', () => {
     }
     expect(stylesheet).toContain('var(--font-scale)')
     expect(stylesheet).toContain('font: var(--text-base) / 1.6 var(--font-family);')
+    // No rule pins a face of its own, so the choice reaches every label too.
+    expect(
+      stylesheet
+        .split('\n')
+        .filter((line) => line.includes('font-family: var(--sans)'))
+        .map((line) => line.trim()),
+    ).toEqual(['--font-family: var(--sans);'])
   })
 })

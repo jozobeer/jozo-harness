@@ -1762,7 +1762,7 @@ summary.tool-head:hover .tool-summary {
 .tool-state {
   flex: none;
   color: var(--dim);
-  font-family: var(--sans);
+  font-family: var(--font-family);
   font-size: var(--text-xs);
 }
 
