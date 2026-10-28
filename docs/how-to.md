@@ -447,7 +447,7 @@ jzh auth set EXA_API_KEY            # 端末に打つ。secrets.env に置かれ
 jzh auth set PERPLEXITY_API_KEY
 ```
 
-選んだ provider のキーが無い場合、`web_search` は最初の呼び出しで欠けている変数名と `jzh auth set ...` を返す。brave など別の provider へは落ちない。
+選んだ provider のキーが無い場合、`web_search` は最初の呼び出しで欠けている変数名と `jzh auth set ...` を返す。brave など別の provider へは落ちない。`search: brave` を明示したときも同じで、`BRAVE_API_KEY` が無ければ最初の呼び出しが失敗する。`search` を書かずに `BRAVE_API_KEY` も無い場合は、従来どおり `web_search` を登録しない。
 
 ## 管理した環境変数をすべてのコマンドに渡す
 

@@ -19,14 +19,10 @@ export const EXA_KEY_ENV = 'EXA_API_KEY'
 /** The key the Perplexity chat completions API reads. */
 export const PERPLEXITY_KEY_ENV = 'PERPLEXITY_API_KEY'
 
-/**
- * The provider the settings name, or brave when only its key is present.
- * A named provider with no key still returns a host, so the first call says
- * which variable is missing instead of silently searching through another.
- */
-export const searchFromEnv = (
+/** The provider the settings name, with its key if the environment holds one. */
+const configuredHost = (
   env: Readonly<Record<string, string | undefined>>,
-  settings: JozoHarnessConfig = {},
+  settings: JozoHarnessConfig,
 ): SearchHost | undefined => {
   if (settings.search === 'deepseek') {
     return deepseekSearch({
@@ -38,6 +34,20 @@ export const searchFromEnv = (
   }
   if (settings.search === 'exa') return exaSearch({ apiKey: env[EXA_KEY_ENV] })
   if (settings.search === 'perplexity') return perplexitySearch({ apiKey: env[PERPLEXITY_KEY_ENV] })
+  if (settings.search === 'brave') return braveSearch({ apiKey: env[SEARCH_KEY_ENV] })
+  return undefined
+}
+
+/**
+ * The provider the settings name, or brave when only its key is present.
+ * A named provider with no key still returns a host, so the first call says
+ * which variable is missing instead of silently searching through another.
+ */
+export const searchFromEnv = (
+  env: Readonly<Record<string, string | undefined>>,
+  settings: JozoHarnessConfig = {},
+): SearchHost | undefined => {
+  if (settings.search !== undefined) return configuredHost(env, settings)
   const key = env[SEARCH_KEY_ENV]
   if (key === undefined || key === '') return undefined
   return braveSearch({ apiKey: key })

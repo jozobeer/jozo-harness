@@ -53,6 +53,19 @@ describe('searchFromEnv', () => {
     expect(searchFromEnv({ DEEPSEEK_API_KEY: 'secret' })).toBeUndefined()
   })
 
+  test('an explicit brave selection without a key says which variable is missing', async () => {
+    const host = searchFromEnv({}, { search: 'brave' })
+    const message = await Effect.runPromise(
+      Effect.match(host?.search('jozo', 1) ?? Effect.die('no provider'), {
+        onFailure: (error) => error.message,
+        onSuccess: () => 'ok',
+      }),
+    )
+
+    expect(message).toContain('BRAVE_API_KEY')
+    expect(message).toContain('jzh auth set BRAVE_API_KEY')
+  })
+
   test('the settings choose exa, and its missing key does not fall back to brave', async () => {
     const host = searchFromEnv({ [SEARCH_KEY_ENV]: 'brave-secret' }, { search: 'exa' })
     const message = await Effect.runPromise(

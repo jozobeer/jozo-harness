@@ -36,6 +36,18 @@ describe('braveSearch', () => {
     expect(seen.url).toContain('count=2')
   })
 
+  test('a missing key is a tool error that names the variable', async () => {
+    const message = await Effect.runPromise(
+      Effect.match(braveSearch({ apiKey: undefined }).search('jozo-harness', 1), {
+        onFailure: (error) => error.message,
+        onSuccess: () => 'ok',
+      }),
+    )
+
+    expect(message).toContain('BRAVE_API_KEY')
+    expect(message).toContain('jzh auth set BRAVE_API_KEY')
+  })
+
   test('a failing provider becomes a tool error', async () => {
     const server = await startStubServer(() => new Response('nope', { status: 500 }))
     const baseUrl = server.origin + '/search'
