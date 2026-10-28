@@ -20,6 +20,17 @@ export interface TraceDiff {
   readonly added: ReadonlyArray<string>
 }
 
+/**
+ * A question a call put to the human, when it put one: the choices it offered
+ * and the answer it got. The log writes both, so a reload keeps them.
+ */
+export interface TraceAsk {
+  readonly question: string
+  readonly options: ReadonlyArray<string>
+  /** The answer in the human's own words; '' while the question waits. */
+  readonly answer: string
+}
+
 /** One tool call: what was asked, when, and what came back. */
 export interface TraceTool {
   readonly callId: string
@@ -39,6 +50,8 @@ export interface TraceTool {
   readonly images: ReadonlyArray<TraceImage>
   /** The file changes the call recorded; empty for an old log or a read. */
   readonly diffs: ReadonlyArray<TraceDiff>
+  /** The question the call asked; undefined for a call that asked none. */
+  readonly ask: TraceAsk | undefined
 }
 
 /** One model call and the tools it asked for. */
@@ -319,6 +332,7 @@ const toolOf = (event: UiSessionEvent): TraceTool => ({
   output: '',
   images: [],
   diffs: [],
+  ask: undefined,
 })
 
 /** True while the last entry is a turn still running; a load written outside one is not. */
@@ -390,6 +404,44 @@ const settleTool = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => {
   return inLastTurn(settled, (turn) => (turn.standalone ? { ...turn, endedAt: event.time } : turn))
 }
 
+/**
+ * One call, wherever the turn it belongs to sits: a question is asked after the
+ * call that asks it, and the answer may follow in a later event.
+ */
+const inTool = (
+  turns: ReadonlyArray<TraceTurn>,
+  callId: string,
+  change: (tool: TraceTool) => TraceTool,
+): ReadonlyArray<TraceTurn> =>
+  turns.map((turn) => ({
+    ...turn,
+    steps: turn.steps.map((step) => ({
+      ...step,
+      tools: step.tools.map((tool) => (tool.callId === callId ? change(tool) : tool)),
+    })),
+  }))
+
+/** A question kept with the call that asked it, so its card can show what was chosen. */
+const askedHuman = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => {
+  const id = textOf(event.data, 'id')
+  const question = textOf(event.data, 'question')
+  if (id === '' || question === '') return turns
+  return inTool(turns, id, (tool) => ({
+    ...tool,
+    ask: { question, options: stringsOf(fieldOf(event.data, 'options')), answer: '' },
+  }))
+}
+
+/** The answer lands on the call that asked; a call that asked nothing has none to take. */
+const answeredHuman = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => {
+  const id = textOf(event.data, 'id')
+  const answer = textOf(event.data, 'answer')
+  if (id === '' || answer === '') return turns
+  return inTool(turns, id, (tool) =>
+    tool.ask === undefined ? tool : { ...tool, ask: { ...tool.ask, answer } },
+  )
+}
+
 type Fold = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => ReadonlyArray<TraceTurn>
 
 /** The events the trace reads, by name: one lookup instead of a chain of tests. */
@@ -402,6 +454,8 @@ const FOLDS: Readonly<Record<string, Fold>> = {
   'assistant/message': assistantSaid,
   'tool/call': callTool,
   'tool/result': settleTool,
+  'interaction/ask/requested': askedHuman,
+  'interaction/ask/answered': answeredHuman,
   'feedback/rated': rateAnswer,
 }
 
