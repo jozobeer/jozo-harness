@@ -355,6 +355,39 @@ The user's own message follows:
 - ディレクトリと、読めないファイルの本文。
 
 
+## HTTP のイベントからセッションを始める（webhook）
+
+GitHub などの配送をきっかけに、決めたワークスペースでセッションを 1 つ起こせる。既定では閉じている。
+
+`~/.config/jzh/config.yaml` に規則を書く。経路は `/hooks/` 以下で、`cwd` はその配送を調べるワークスペース、`prompt` は最初のメッセージの先頭に置く指示、`secret` は配送の署名に使う共有秘密である。
+
+```yaml
+webhooks:
+  - path: /hooks/deploy
+    cwd: /home/me/src/app
+    prompt: 配備の結果を読み、失敗していれば原因を調べる。
+    secret: '<GitHub の webhook に設定したのと同じ秘密>'
+```
+
+`jzh web` を、送信元から届くアドレスで動かす。GitHub の repository webhook なら Payload URL を `https://<jzh のアドレス>/hooks/deploy`、Content type を `application/json`、Secret を設定ファイルと同じ値にする。
+
+配送は `X-Hub-Signature-256` の HMAC-SHA256 で本文を検証してから処理する。署名が無い・合わない POST は 401 で、セッションは増えない。セッションは規則の `cwd` に作られ、最初の user メッセージは `prompt` とイベントの要約（event、action、repository、送信者）になり、そのまま 1 turn 走る。作られたセッションは `jzh web` の一覧にそのまま出て、開ける。
+
+手元から試すときは本文と秘密から署名を作る。
+
+```sh
+body='{"action":"completed","repository":{"full_name":"acme/app"}}'
+sig=$(printf '%s' "$body" | openssl dgst -sha256 -hmac 's3cret' | sed 's/^.* //')
+curl -X POST http://127.0.0.1:4310/hooks/deploy \
+  -H 'content-type: application/json' \
+  -H 'x-github-event: workflow_run' \
+  -H "x-hub-signature-256: sha256=$sig" \
+  --data "$body"
+```
+
+本文は 1 MiB まで、受信は 10 秒まで、セッションが turn を始めるまでは 30 秒まで待つ。規則に無い `/hooks/` のパスは 404、本文が大きすぎる・JSON の object でないときは 400、セッションを起こせなかったときは 502、時間切れはそれぞれ 408（本文）と 504（turn）になる。経路は page の cookie と origin の gate を通らない（送信元はブラウザではない）。代わりに署名だけで確かめるので、秘密は設定ファイルの外に出さない。
+
+
 ## セッションに名前を付ける
 
 `agent-loop` の `title` 行があると、最初の発話のあとに 1 回だけ、モデルがそのセッションの短い名前を書く。名前は `session/title` としてログに残り、一覧（`jzh sessions`、`jzh web`）はその行を読む。モデルは最初の発話を要約した 1 行（既定 60 文字、`maxChars` で変える）を返し、失敗・timeout・空文字のときは最初の発話の切り詰め（120 文字、1 行）に落ちる。名前の生成で turn は落ちない。

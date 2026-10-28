@@ -1786,6 +1786,9 @@ const serveWebUi = (
           schedules: scheduleStoreOf(options),
           workspaces: workspacesPortOf(options, reading.listSessions),
           readSessionEvents: reading.readSessionEvents,
+          ...(options.settings?.webhooks === undefined
+            ? {}
+            : { webhooks: options.settings.webhooks }),
           commands: () => defaultCommands,
           plugins,
           port: work.port,

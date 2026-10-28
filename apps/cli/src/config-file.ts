@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { parse } from 'yaml'
 import { PluginError, PluginRowSchema, yamlFailure, type PluginRow } from '@jozo-harness/kernel'
+import { WebhookRuleSchema, type WebhookRule } from '@jozo-harness/web'
 import { Effect, Schema } from 'effect'
 
 /** The settings file: defaults for the command line plus extra plugin rows. */
@@ -15,6 +16,8 @@ export const ConfigFileSchema = Schema.Struct({
   deepseekToolsBaseUrl: Schema.optionalKey(Schema.String),
   skills: Schema.optionalKey(Schema.Array(Schema.String)),
   plugins: Schema.optionalKey(Schema.Array(PluginRowSchema)),
+  /** The routes an external event may start a session on; absent means none. */
+  webhooks: Schema.optionalKey(Schema.Array(WebhookRuleSchema)),
 })
 
 export interface JozoHarnessConfig {
@@ -26,6 +29,7 @@ export interface JozoHarnessConfig {
   readonly deepseekToolsBaseUrl?: string | undefined
   readonly skills?: ReadonlyArray<string> | undefined
   readonly plugins?: ReadonlyArray<PluginRow> | undefined
+  readonly webhooks?: ReadonlyArray<WebhookRule> | undefined
 }
 
 const configError = (message: string): PluginError => new PluginError({ code: 'config', message })

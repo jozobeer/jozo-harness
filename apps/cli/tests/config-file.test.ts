@@ -56,6 +56,45 @@ describe('parseConfigText', () => {
     }
   })
 
+  test('reads the webhook rules an external event starts a session with', async () => {
+    const config = await Effect.runPromise(
+      parseConfigText(
+        [
+          'webhooks:',
+          '  - path: /hooks/deploy',
+          '    cwd: /work/app',
+          '    prompt: read the delivery',
+          '    secret: s3cret',
+        ].join('\n'),
+      ),
+    )
+
+    expect(config.webhooks).toEqual([
+      { path: '/hooks/deploy', cwd: '/work/app', prompt: 'read the delivery', secret: 's3cret' },
+    ])
+  })
+
+  test('refuses a webhook path outside /hooks/ or an empty secret', async () => {
+    const failed = async (text: string): Promise<string> =>
+      await Effect.runPromise(
+        Effect.match(parseConfigText(text), {
+          onFailure: () => 'refused',
+          onSuccess: () => 'parsed',
+        }),
+      )
+
+    expect(
+      await failed(
+        'webhooks:\n  - path: /plugins\n    cwd: /work\n    prompt: go\n    secret: s3cret',
+      ),
+    ).toBe('refused')
+    expect(
+      await failed(
+        'webhooks:\n  - path: /hooks/deploy\n    cwd: /work\n    prompt: go\n    secret: ""',
+      ),
+    ).toBe('refused')
+  })
+
   test('refuses a port outside 0..65535 or not a whole number', async () => {
     const messageOf = async (text: string): Promise<string> =>
       await Effect.runPromise(
