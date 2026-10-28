@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { PluginChangeRequest, PluginsView } from '../shared/rpc.ts'
-import { originAllowed, requestAuthorized, type CodeExchange, type PublicOrigin } from './auth.ts'
+import { refusedBy, type CodeExchange, type PublicOrigin } from './auth.ts'
 import type { TailnetAddresses } from './tailnet.ts'
 
 /** What one change left behind; a refusal names the status and the reason the page shows. */
@@ -133,15 +133,10 @@ const installRefusal = (
 
 /** The browser page's origin and credential, checked before a row is read or written. */
 const gated = (request: IncomingMessage, response: ServerResponse, gate: PluginsGate): boolean => {
-  if (!originAllowed(request.headers.origin, gate.port, gate.publicOrigin, gate.tailnet)) {
-    refuse(response, 403, 'forbidden')
-    return false
-  }
-  if (!requestAuthorized(request.url ?? '', request.headers.cookie, gate)) {
-    refuse(response, 401, 'a token or a code is required')
-    return false
-  }
-  return true
+  const refusal = refusedBy(request, gate)
+  if (refusal === undefined) return true
+  refuse(response, refusal.status, refusal.message)
+  return false
 }
 
 /** Applies one JSON change; a body this route cannot take never reaches the port. */

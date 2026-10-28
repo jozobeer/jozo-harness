@@ -5,7 +5,7 @@ import { deflateRawSync } from 'node:zlib'
 import { renderTranscriptMarkdown } from '@jozo-harness/session'
 import type { SessionError, SessionEvent } from '@jozo-harness/ui-protocol'
 import { Effect, Exit } from 'effect'
-import { originAllowed, requestAuthorized, type CodeExchange, type PublicOrigin } from './auth.ts'
+import { refusedBy, type CodeExchange, type PublicOrigin } from './auth.ts'
 import type { TailnetAddresses } from './tailnet.ts'
 
 /** A session id the route may hand to the filesystem. */
@@ -65,15 +65,10 @@ const admitted = (
     refuse(response, 405, 'method not allowed')
     return false
   }
-  if (!originAllowed(request.headers.origin, gate.port, gate.publicOrigin, gate.tailnet)) {
-    refuse(response, 403, 'forbidden')
-    return false
-  }
-  if (!requestAuthorized(request.url ?? '', request.headers.cookie, gate)) {
-    refuse(response, 401, 'a token or a code is required')
-    return false
-  }
-  return true
+  const refusal = refusedBy(request, gate)
+  if (refusal === undefined) return true
+  refuse(response, refusal.status, refusal.message)
+  return false
 }
 
 /** The table every byte of a log is folded through, built once for the process. */

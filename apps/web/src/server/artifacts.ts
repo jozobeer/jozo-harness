@@ -1,7 +1,7 @@
 import { readFile, readdir, stat, unlink } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join } from 'node:path'
-import { originAllowed, requestAuthorized, type CodeExchange, type PublicOrigin } from './auth.ts'
+import { originAllowed, refusedBy, type CodeExchange, type PublicOrigin } from './auth.ts'
 import type { TailnetAddresses } from './tailnet.ts'
 
 /** A session id or artifact name the route may hand to the filesystem. */
@@ -80,20 +80,15 @@ const admitted = (
     refuse(response, 405, 'method not allowed')
     return false
   }
-  if (!originAllowed(request.headers.origin, gate.port, gate.publicOrigin, gate.tailnet)) {
-    refuse(response, 403, 'forbidden')
-    return false
-  }
   // A same-site GET is harmless; a delete must also prove the caller meant it.
   if (request.method === 'DELETE' && !deleteConfirmed(request, gate)) {
     refuse(response, 403, 'forbidden')
     return false
   }
-  if (!requestAuthorized(request.url ?? '', request.headers.cookie, gate)) {
-    refuse(response, 401, 'a token or a code is required')
-    return false
-  }
-  return true
+  const refusal = refusedBy(request, gate)
+  if (refusal === undefined) return true
+  refuse(response, refusal.status, refusal.message)
+  return false
 }
 
 /** One artifact as the list names it: the route that opens it and what the file weighed. */

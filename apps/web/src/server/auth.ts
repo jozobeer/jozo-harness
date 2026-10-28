@@ -1,4 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
+import type { IncomingMessage } from 'node:http'
 import type { TailnetAddresses } from './tailnet.ts'
 
 /**
@@ -178,6 +179,37 @@ export const requestAuthorized = (
 ): boolean =>
   tokenMatches(cookieOf(cookie, COOKIE_NAME) ?? tokenFromUrl(url), gate.token) ||
   gate.codes.peek(codeFromUrl(url))
+
+/** The names and the credential a read route checks before it answers. */
+export interface RequestGate {
+  readonly port: number
+  readonly publicOrigin: PublicOrigin | undefined
+  readonly tailnet: TailnetAddresses | undefined
+  readonly token: string
+  readonly codes: CodeExchange
+}
+
+/** What a refused read would answer: the status and the one line the page shows. */
+export interface GateRefusal {
+  readonly status: number
+  readonly message: string
+}
+
+/**
+ * Why the shared gate refuses this request, or undefined when it admits it.
+ * The artifact, plugin, and session export routes all sit behind this check, so
+ * a foreign origin and a request without the cookie, a code, or the token are
+ * refused the same way before any route reads a file.
+ */
+export const refusedBy = (request: IncomingMessage, gate: RequestGate): GateRefusal | undefined => {
+  if (!originAllowed(request.headers.origin, gate.port, gate.publicOrigin, gate.tailnet)) {
+    return { status: 403, message: 'forbidden' }
+  }
+  if (!requestAuthorized(request.url ?? '', request.headers.cookie, gate)) {
+    return { status: 401, message: 'a token or a code is required' }
+  }
+  return undefined
+}
 
 /** Compares the token in constant time, so a reply says only match or no match. */
 export const tokenMatches = (given: string | undefined, expected: string): boolean => {
