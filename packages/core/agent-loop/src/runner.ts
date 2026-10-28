@@ -48,7 +48,12 @@ import {
   type TokenBudget,
 } from '@jozo-harness/session'
 import { SystemPrompt } from '@jozo-harness/system-prompt'
-import { applySpill, makeSpillWriter, type SpillOptions } from '@jozo-harness/tools'
+import {
+  applySpill,
+  makeImageSpillWriter,
+  makeSpillWriter,
+  type SpillOptions,
+} from '@jozo-harness/tools'
 import { Tools, resultSummary } from '@jozo-harness/tools'
 import { Context, Duration, Effect, Exit, Layer, Queue, Schema, Stream } from 'effect'
 import { randomUUID } from 'node:crypto'
@@ -100,19 +105,23 @@ export const DEFAULT_MAX_PARALLEL_TOOL_CALLS = 10
 const maxParallelCallsOf = (config: AgentLoopConfig): number =>
   Math.max(1, config.maxParallelToolCalls ?? DEFAULT_MAX_PARALLEL_TOOL_CALLS)
 
-/** Results larger than this are written to a file; only their head stays in the log. */
-const SPILL_BYTES = 32_000
+/** Results estimated above this many tokens keep only their ends in the log. */
+const SPILL_TOKENS = 8_000
 
 /** Where spilled text goes without a profile saying otherwise: the managed default. */
 const SPILL_ROOT = join(tmpdir(), 'jzh-spill')
 
-const spillOf = (agent: Agent): SpillOptions => ({
-  maxSpillBytes: agent.options.maxSpillBytes ?? SPILL_BYTES,
-  spill: makeSpillWriter({
+const spillOf = (agent: Agent): SpillOptions => {
+  const store = {
     root: agent.options.spillDir ?? SPILL_ROOT,
     sessionId: agent.id,
-  }),
-})
+  }
+  return {
+    maxSpillTokens: agent.options.maxSpillTokens ?? SPILL_TOKENS,
+    spill: makeSpillWriter(store),
+    spillImage: makeImageSpillWriter(store),
+  }
+}
 
 const isToolCall = (block: ContentBlock): block is ToolCall => block.type === 'tool-call'
 

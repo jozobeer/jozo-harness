@@ -64,10 +64,7 @@ export interface SpillStoreOptions {
  * sessions that went stale. Both kinds of spill open the same directory, so the
  * cleanup is shared rather than run twice.
  */
-const openSession = async (
-  options: SpillStoreOptions,
-  directory: string,
-): Promise<void> => {
+const openSession = async (options: SpillStoreOptions, directory: string): Promise<void> => {
   const known = await pathExists(directory)
   await mkdir(directory, { recursive: true, mode: 0o700 })
   if (known) return

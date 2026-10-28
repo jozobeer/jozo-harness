@@ -61,9 +61,7 @@ describe('makeImageSpillWriter', () => {
     const write = makeImageSpillWriter({ root: store, sessionId: 'session-1' })
     const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3])
 
-    const path = await Effect.runPromise(
-      write('call-1', bytes.toString('base64'), 'image/png'),
-    )
+    const path = await Effect.runPromise(write('call-1', bytes.toString('base64'), 'image/png'))
 
     expect(path).toBe(join(store, 'session-1', 'call-1.png'))
     expect(await readFile(path)).toEqual(bytes)

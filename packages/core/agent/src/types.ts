@@ -10,8 +10,8 @@ export type AgentStatus = 'idle' | 'running' | 'cancelling' | 'disposed'
 export type AgentCancelCause = TurnCancelCause
 
 export interface AgentOptions {
-  /** Results larger than this are written away; unset keeps the loop default. */
-  readonly maxSpillBytes?: number
+  /** Results estimated above this many tokens are written away; unset keeps the loop default. */
+  readonly maxSpillTokens?: number
   /** Where spilled text is kept; unset keeps the loop's managed default. */
   readonly spillDir?: string
   /** Where content-addressed attachments live; unset leaves them unresolvable. */

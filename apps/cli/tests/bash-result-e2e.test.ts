@@ -70,7 +70,8 @@ const stubLlm = (seen: Array<string>): Plugin<{}, Llm, never> => {
             )
           }
           if (call === 3) {
-            const path = /\[spilled to (.+?): \d+ lines/.exec(text)?.[1] ?? 'missing'
+            const path =
+              /… middle omitted \(\d+ bytes\); read ([^\n]+)/.exec(text)?.[1] ?? 'missing'
             return Stream.fromIterable(
               toolTurn('tail -n 2 ' + path.replace('/dev/null', '') + ' # read the spill tail'),
             )
@@ -160,8 +161,8 @@ describe('what a bash call leaves behind', () => {
 
     // The model was told where the rest of the output went.
     const notice = JSON.stringify(huge?.content ?? [])
-    expect(notice).toContain('[spilled to ')
-    expect(notice).not.toContain(MARKER)
+    expect(notice).toContain('middle omitted')
+    expect(notice).toContain('/spill/')
     // And it could go back for the part it could not see.
     expect(seen[3]).toContain(MARKER)
 

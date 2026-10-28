@@ -75,7 +75,7 @@ const profile = (root: string): string =>
     '  - id: tools',
     "    name: '@jozo-harness/tools'",
     '    config:',
-    '      maxSpillBytes: 100',
+    '      maxSpillTokens: 25',
     '  - id: system-prompt',
     "    name: '@jozo-harness/system-prompt'",
     '  - id: safety',
@@ -97,7 +97,7 @@ const profile = (root: string): string =>
   ].join('\n')
 
 describe('spill threshold from the profile', () => {
-  test('a 100 byte limit spills a 400 byte result', async () => {
+  test('a 25 token budget spills a 400 byte result', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jzh-spill-'))
     const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-ws-'))
     const err: Array<string> = []
@@ -137,7 +137,7 @@ describe('spill threshold from the profile', () => {
     expect({
       code,
       stderr: err.join('').slice(0, 300),
-      spilled: text.includes('[spilled to '),
+      spilled: text.includes('middle omitted'),
     }).toEqual({
       code: 0,
       stderr: '',

@@ -127,10 +127,10 @@ describe('spilling through the command', () => {
     const opened = await Effect.runPromise(jsonlSessions({ root }).open(sessions[0]?.id ?? ''))
     const result = opened.events.find((event) => event.type === 'tool/result')
     const text = result?.type === 'tool/result' ? JSON.stringify(result.data.content) : ''
-    const match = /\[spilled to ([^\]]+): /.exec(text)
+    const match = /… middle omitted \(\d+ bytes\); read ([^"\\]+)/.exec(text)
     const path = match?.[1] ?? ''
 
-    expect(text).toContain('[spilled to ')
+    expect(text).toContain('middle omitted')
     expect(path.length).toBeGreaterThan(0)
     expect((await readFile(path, 'utf8')).length).toBe(40_000)
     // The session directory goes with the run; the spill root stays for the next one.

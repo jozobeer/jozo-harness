@@ -170,13 +170,7 @@ const offloadImage = (
         Effect.catchCause(() => Effect.succeed(undefined)),
       )
 
-/**
- * Replaces an oversized result with its ends and a reference. Errors are left
- * alone: the model needs to see what failed. Tools whose result can be read again
- * are left alone too, because spilling them would hide the way back. A store that
- * cannot write leaves the content inline rather than failing the call. Images are
- * written as files because base64 in the request is the cost being removed.
- */
+/** Whether a result costs more than the budget and a store can take it. */
 const shouldSpill = (
   result: ToolExecutionResult,
   subject: SpillSubject,
@@ -188,6 +182,24 @@ const shouldSpill = (
   return tokensOf(result.content) > budget
 }
 
+/** The blocks a spilled result hands the model: its ends, then one locator per image. */
+const contentAfterSpill = (
+  hasText: boolean,
+  keptText: string,
+  images: ReadonlyArray<Extract<ContentBlock, { type: 'image' }>>,
+  locators: ReadonlyArray<ContentBlock | undefined>,
+): ReadonlyArray<ContentBlock> => [
+  ...(hasText ? [{ type: 'text' as const, text: keptText }] : []),
+  ...images.map((image, index) => locators[index] ?? image),
+]
+
+/**
+ * Replaces an oversized result with its ends and a reference. Errors are left
+ * alone: the model needs to see what failed. Tools whose result can be read again
+ * are left alone too, because spilling them would hide the way back. A store that
+ * cannot write leaves the content inline rather than failing the call. Images are
+ * written as files because base64 in the request is the cost being removed.
+ */
 export function applySpill(
   result: ToolExecutionResult,
   subject: SpillSubject,
@@ -196,33 +208,21 @@ export function applySpill(
   return Effect.gen(function* () {
     if (!shouldSpill(result, subject, options)) return result
     const budget = options.maxSpillTokens ?? 0
-
     const text = textOf(result.content)
     const plan = planSpill(result.content, budget)
-    const reference = yield* offloadText(plan, options.spill, subject.callId)
     const images = result.content.filter(isImage)
+    const reference = yield* offloadText(plan, options.spill, subject.callId)
     const locators = yield* Effect.forEach(images, (image, index) =>
       offloadImage(image, options.spillImage, subject.callId, index),
     )
     if (reference === undefined && locators.every((locator) => locator === undefined)) {
       return result
     }
-    const keptText = reference === undefined ? text : spilledText(plan, reference)
-    const content: Array<ContentBlock> = []
-    let emittedText = false
-    let imageIndex = 0
-    for (const block of result.content) {
-      if (block.type === 'text') {
-        if (emittedText) continue
-        emittedText = true
-        content.push({ type: 'text', text: keptText })
-      } else if (block.type === 'image') {
-        content.push(locators[imageIndex] ?? block)
-        imageIndex += 1
-      } else {
-        content.push(block)
-      }
+    const keptText =
+      reference === undefined || plan.kind === 'keep' ? text : spilledText(plan, reference)
+    return {
+      ...result,
+      content: contentAfterSpill(text !== '', keptText, images, locators),
     }
-    return { ...result, content }
   })
 }

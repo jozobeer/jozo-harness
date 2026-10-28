@@ -8,7 +8,7 @@ import { DEEPSEEK_KEY_ENV, SEARCH_KEY_ENV } from './search-env.ts'
 /** Row keys the command reads from a row's config itself; no plugin declares them. */
 export const MODEL_KEY = 'model'
 export const EFFORT_KEY = 'effort'
-export const SPILL_BYTES_KEY = 'maxSpillBytes'
+export const SPILL_TOKENS_KEY = 'maxSpillTokens'
 export const PLAN_MODE_KEY = 'planMode'
 
 interface RowKeyNote {
@@ -29,9 +29,9 @@ export const ROW_KEYS: ReadonlyArray<RowKeyNote> = [
     summary: 'the reasoning effort to ask the provider for',
   },
   {
-    name: SPILL_BYTES_KEY,
+    name: SPILL_TOKENS_KEY,
     where: 'any row',
-    summary: 'tool output above this many bytes goes to a file',
+    summary: 'tool output above this many estimated tokens keeps only its ends',
   },
   {
     name: PLAN_MODE_KEY,

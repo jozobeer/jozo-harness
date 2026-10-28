@@ -133,8 +133,16 @@ describe('applySpill', () => {
         subject,
         {
           maxSpillTokens: 100,
-          spill: () => Effect.sync(() => { writes += 1; return 'x' }),
-          spillImage: () => Effect.sync(() => { writes += 1; return 'x' }),
+          spill: () =>
+            Effect.sync(() => {
+              writes += 1
+              return 'x'
+            }),
+          spillImage: () =>
+            Effect.sync(() => {
+              writes += 1
+              return 'x'
+            }),
         },
       ),
     )
@@ -145,10 +153,18 @@ describe('applySpill', () => {
   test('a read result is never spilled: the model rereads it instead', async () => {
     let writes = 0
     const kept = await Effect.runPromise(
-      applySpill(result('x'.repeat(100)), { callId: 'c1', tool: 'read' }, {
-        maxSpillTokens: 10,
-        spill: () => Effect.sync(() => { writes += 1; return 'x' }),
-      }),
+      applySpill(
+        result('x'.repeat(100)),
+        { callId: 'c1', tool: 'read' },
+        {
+          maxSpillTokens: 10,
+          spill: () =>
+            Effect.sync(() => {
+              writes += 1
+              return 'x'
+            }),
+        },
+      ),
     )
 
     expect(writes).toBe(0)
@@ -160,7 +176,11 @@ describe('applySpill', () => {
     const kept = await Effect.runPromise(
       applySpill(result('small'), subject, {
         maxSpillTokens: 100,
-        spill: () => Effect.sync(() => { writes += 1; return 'x' }),
+        spill: () =>
+          Effect.sync(() => {
+            writes += 1
+            return 'x'
+          }),
       }),
     )
 
