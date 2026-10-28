@@ -14,6 +14,8 @@ import {
   withSessions,
   withSettings,
   withTheme,
+  withTreeClosed,
+  withTreeFolder,
   withWorkspaces,
   type WebState,
 } from '../../src/ui/state.ts'
@@ -22,9 +24,23 @@ import type {
   SessionAction,
   SessionSummary,
   SettingsView,
+  WorkspaceEntry,
 } from '../../src/shared/rpc.ts'
+import { draftWithReference } from '../../src/ui/references.ts'
 import type { SessionStore } from '../store.ts'
 import { emptyWatched, watchedAfter, type Watched } from '../../src/ui/board.ts'
+
+/** The made-up workspace the preview's tree shows, by the folder the reader opens. */
+const PREVIEW_TREE: Readonly<Record<string, ReadonlyArray<WorkspaceEntry>>> = {
+  '': [
+    { name: 'src', kind: 'directory' },
+    { name: 'README.md', kind: 'file' },
+  ],
+  src: [
+    { name: 'main.ts', kind: 'file' },
+    { name: 'app.ts', kind: 'file' },
+  ],
+}
 import { fixtureSessions, type FixtureSession } from './fixture.ts'
 
 const SETTINGS: SettingsView = {
@@ -243,6 +259,15 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
     askCommands: () => undefined,
     askFiles: () => undefined,
     askWorkspaces: () => undefined,
+    // The preview has no disk: the tree opens on a made-up workspace, so the pane
+    // draws one and a click still reaches the composer's draft.
+    openFolder: (path) =>
+      setState((now) =>
+        withTreeFolder(now, { path, entries: PREVIEW_TREE[path] ?? [], truncated: false }),
+      ),
+    closeFolder: (path) => setState((now) => withTreeClosed(now, path)),
+    refreshTree: () => undefined,
+    referencePath: (path) => setState((now) => withDraft(now, draftWithReference(now.draft, path))),
     // The preview has no disk to read: the dialog opens on the made-up folder alone.
     browseDirectories: (path, reply) =>
       reply({

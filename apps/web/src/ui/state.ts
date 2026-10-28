@@ -8,6 +8,7 @@ import type {
   ScheduleView,
   SessionSummary,
   SettingsView,
+  WorkspaceEntry,
   WorkspaceView,
 } from '../shared/rpc.ts'
 import { DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, type FontFamily, type FontSize } from './font.ts'
@@ -29,6 +30,7 @@ const emptyInfo: SessionInfo = { cwd: '', model: '', turns: 0 }
 /** What the right pane shows: what the session runs toward, its settings, or its turns. */
 export type Pane =
   | { readonly kind: 'changes'; readonly path: string | undefined }
+  | { readonly kind: 'files' }
   | { readonly kind: 'inspect'; readonly turn: number; readonly callId: string }
   | { readonly kind: 'run' }
   | { readonly kind: 'settings' }
@@ -77,6 +79,8 @@ export interface WebState {
   readonly workspaces: Workspaces | undefined
   /** Which surface the right pane shows; undefined leaves the tab strip alone and the body empty. */
   readonly pane: Pane | undefined
+  /** The workspace tree the right pane shows; undefined before the pane has opened it. */
+  readonly tree: WorkspaceTree | undefined
   /** Every turn this session ran, oldest first, as the log recorded it. */
   readonly turns: ReadonlyArray<TurnView>
   /** What the session says it works toward; undefined until the page has asked. */
@@ -92,6 +96,30 @@ export interface Workspaces {
   readonly cwd: string
   readonly items: ReadonlyArray<WorkspaceView>
 }
+
+/** One folder the right pane's tree has read, with the entries the server answered. */
+export interface TreeFolder {
+  /** The folder relative to the workspace root; '' is the root itself. */
+  readonly path: string
+  readonly entries: ReadonlyArray<WorkspaceEntry>
+  /** True when the folder holds more entries than one listing carries. */
+  readonly truncated: boolean
+}
+
+/**
+ * What the file tree knows: the folders it has read, and the ones showing their
+ * children. Only opened folders are read, so a deep tree costs one listing per
+ * folder the reader opens.
+ */
+export interface WorkspaceTree {
+  readonly folders: ReadonlyArray<TreeFolder>
+  /** The folders showing children, by the name the tree asked for; '' is the root. */
+  readonly open: ReadonlyArray<string>
+  /** Why the last read failed; '' when nothing did. */
+  readonly problem: string
+}
+
+const noTree: WorkspaceTree = { folders: [], open: [], problem: '' }
 
 /** One answer to a reference query: the paths, and the session and word that asked. */
 export interface FileMatches {
@@ -123,6 +151,7 @@ export const initialState: WebState = {
   files: undefined,
   workspaces: undefined,
   pane: { kind: 'run' },
+  tree: undefined,
   turns: [],
   run: undefined,
   trace: [],
@@ -229,6 +258,48 @@ export const withPane = (state: WebState, pane: Pane | undefined): WebState => (
   pane,
 })
 
+/**
+ * Keeps one folder's answer, and shows it: the tree asks for a folder only when
+ * the reader opens it, so the answer and the opening are one step.
+ */
+export const withTreeFolder = (state: WebState, folder: TreeFolder): WebState => {
+  const tree = state.tree ?? noTree
+  const folders = [...tree.folders.filter((one) => one.path !== folder.path), folder]
+  const open = tree.open.includes(folder.path) ? tree.open : [...tree.open, folder.path]
+  return { ...state, tree: { ...tree, folders, open, problem: '' } }
+}
+
+/** Shows a folder's children, whether or not the page has read it yet. */
+export const withTreeOpen = (state: WebState, path: string): WebState => {
+  const tree = state.tree ?? noTree
+  return tree.open.includes(path)
+    ? state
+    : { ...state, tree: { ...tree, open: [...tree.open, path], problem: '' } }
+}
+
+/** Hides a folder's children, keeping what it read for the next time it opens. */
+export const withTreeClosed = (state: WebState, path: string): WebState => {
+  const tree = state.tree ?? noTree
+  return { ...state, tree: { ...tree, open: tree.open.filter((one) => one !== path) } }
+}
+
+/**
+ * Drops a folder the page could not read, and says why. A folder removed on disk
+ * takes its children with it, so what the tree held under it goes too.
+ */
+export const withTreeProblem = (state: WebState, path: string, problem: string): WebState => {
+  const tree = state.tree ?? noTree
+  const under = (one: string): boolean => one === path || one.startsWith(path + '/')
+  return {
+    ...state,
+    tree: {
+      folders: tree.folders.filter((one) => !under(one.path)),
+      open: tree.open.filter((one) => !under(one)),
+      problem,
+    },
+  }
+}
+
 /** Replaces the schedules of the run on screen, after a page created, stopped, or removed one. */
 export const withRunSchedules = (
   state: WebState,
@@ -261,6 +332,8 @@ export const withBlank = (state: WebState): WebState => ({
   // The lists belonged to the session left behind; the next one reads its own on demand.
   commands: undefined,
   files: undefined,
+  // The tree belonged to the workspace left behind; the next one reads its own.
+  tree: undefined,
   turns: [],
   trace: [],
 })
@@ -289,6 +362,7 @@ export const withSession = (state: WebState, summary: SessionSummary): WebState 
     run: undefined,
     commands: state.sessionId === summary.id ? state.commands : undefined,
     files: state.sessionId === summary.id ? state.files : undefined,
+    tree: state.sessionId === summary.id ? state.tree : undefined,
     turns: [],
     trace: [],
     deletedPages: [],

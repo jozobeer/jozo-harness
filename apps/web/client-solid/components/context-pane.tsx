@@ -18,6 +18,7 @@ import { useLocaleChoice, useTranslate } from '../i18n.ts'
 import { basenameOf, childSessionsOf, elapsedOf, pagesOf } from '../lib.ts'
 import { LOCALES, type MessageKey } from '../locale.ts'
 import type { ScheduleDraft, SessionStore } from '../store.ts'
+import { FileTree } from './file-tree.tsx'
 import { Review } from './review.tsx'
 import { Inspector } from './inspector.tsx'
 import { Button } from './ui/button.tsx'
@@ -1481,6 +1482,7 @@ const Job = (props: { store: SessionStore; pane: Extract<Pane, { kind: 'job' }> 
 
 const PANES = [
   { kind: 'changes', label: 'pane.changes', icon: 'changes' },
+  { kind: 'files', label: 'pane.files', icon: 'folder' },
   { kind: 'run', label: 'pane.run', icon: 'run' },
   { kind: 'settings', label: 'pane.settings', icon: 'settings' },
   { kind: 'trajectory', label: 'pane.turns', icon: 'turns' },
@@ -1589,6 +1591,9 @@ export const ContextPane = (props: { store: SessionStore }) => {
         <Switch>
           <Match when={ofKind(body(), 'changes')}>
             {(changes) => <Review store={props.store} path={changes().path} />}
+          </Match>
+          <Match when={body()?.kind === 'files'}>
+            <FileTree store={props.store} />
           </Match>
           <Match when={ofKind(body(), 'inspect')}>
             {(inspect) => (

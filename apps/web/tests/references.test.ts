@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'vitest'
-import { completedReference, referenceTokenAt, referencesFor } from '../src/ui/references.ts'
+import {
+  completedReference,
+  draftWithReference,
+  referenceTokenAt,
+  referencesFor,
+} from '../src/ui/references.ts'
 
 describe('the reference word under the caret', () => {
   test('an @ after a space or at the start of the text opens the word', () => {
@@ -63,6 +68,21 @@ describe('accepting one reference', () => {
       text: 'see @apps/web/composer.tsx  now',
       caret: 27,
     })
+  })
+})
+
+describe('a path the tree hands the composer', () => {
+  test('joins an empty draft as one @ reference, ready to write after', () => {
+    expect(draftWithReference('', 'apps/web/composer.tsx')).toBe('@apps/web/composer.tsx ')
+  })
+
+  test('starts a new word, so the sentence before it keeps its meaning', () => {
+    expect(draftWithReference('look at', 'README.md')).toBe('look at @README.md ')
+  })
+
+  test('takes the space already there instead of adding a second one', () => {
+    expect(draftWithReference('look at ', 'README.md')).toBe('look at @README.md ')
+    expect(draftWithReference('one\n', 'README.md')).toBe('one\n@README.md ')
   })
 })
 
