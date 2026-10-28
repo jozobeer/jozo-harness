@@ -439,4 +439,34 @@ describe('the workflow child path', () => {
     })
     expect(reasonOf(result)).toContain('no seatbelt today')
   })
+
+  test('fails at the spawn when the child turn ends in an error', async () => {
+    const childEvents = [
+      {
+        seq: 2,
+        time: 0,
+        type: 'turn/end',
+        data: {
+          turn: 1,
+          reason: {
+            kind: 'error',
+            failure: { _tag: 'LlmFailure', code: 'PROVIDER', message: 'provider fell over' },
+          },
+        },
+      },
+    ] as unknown as ReadonlyArray<SessionEvent>
+    const agents = fakeAgents({ 'first job': 'partial' }, [], { childEvents })
+
+    const result = await Effect.runPromise(
+      call(makeWorkflowTool({ agents, route: 'stub/model' }), {
+        script: "await workflow.spawn('first job')",
+      }),
+    )
+
+    expect(result?.value).toMatchObject({
+      ok: false,
+      stage: 'spawn 1',
+      reason: 'the child agent failed: provider fell over',
+    })
+  })
 })

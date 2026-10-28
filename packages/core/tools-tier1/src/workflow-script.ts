@@ -187,6 +187,51 @@ interface Failure {
   readonly reason: string
 }
 
+/** Why this spawn may not run, before any child is started; the first such refusal is the run's failure. */
+const spawnFailure = (
+  call: ScriptCall,
+  count: { children: number },
+  limit: number,
+  failure: { current: Failure | undefined },
+): Failure | undefined => {
+  const stage = stageOf(count.children + 1, call.args.label)
+  if (failure.current !== undefined) {
+    return {
+      stage,
+      reason: 'the workflow already failed at ' + failure.current.stage,
+    }
+  }
+  if (typeof call.args.task !== 'string' || call.args.task === '') {
+    failure.current = { stage, reason: 'spawn needs a non-empty task' }
+    return failure.current
+  }
+  if (count.children >= limit) {
+    failure.current = {
+      stage,
+      reason: 'the script asked for more than ' + String(limit) + ' children',
+    }
+    return failure.current
+  }
+  return undefined
+}
+
+/** The last turn the child closed, which says whether it answered or failed. */
+const lastTurnEnd = (events: ReadonlyArray<SessionEvent>) => {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type === 'turn/end') return event
+  }
+  return undefined
+}
+
+/** Why the child's turn failed, when it ended without an answer worth reading. */
+const childFailureOf = (events: ReadonlyArray<SessionEvent>): string | undefined => {
+  const reason = lastTurnEnd(events)?.data.reason
+  if (reason === undefined) return undefined
+  if (reason.kind === 'error') return reason.failure.message
+  return reason.kind === 'cancelled' || reason.kind === 'interrupted' ? reason.kind : undefined
+}
+
 /** Answers one spawn with the child's answer, or with the reason it could not run. */
 const answerSpawn = async (
   call: ScriptCall,
@@ -197,9 +242,6 @@ const answerSpawn = async (
   limit: number,
   failure: { current: Failure | undefined },
 ): Promise<void> => {
-  const label = call.args.label
-  const stage = stageOf(count.children + 1, label)
-  const task = call.args.task
   const reply = (ok: boolean, body: { value?: WorkflowSpawnValue; error?: string }): void => {
     try {
       child.stdin.write(JSON.stringify({ t: 'result', id: call.id, ...body, ok }) + '\n')
@@ -207,23 +249,13 @@ const answerSpawn = async (
       // The script process is gone; its outcome no longer has a reader.
     }
   }
-  if (failure.current !== undefined) {
-    reply(false, { error: 'the workflow already failed at ' + failure.current.stage })
+  const unstartable = spawnFailure(call, count, limit, failure)
+  if (unstartable !== undefined) {
+    reply(false, { error: unstartable.reason })
     return
   }
-  if (typeof task !== 'string' || task === '') {
-    failure.current = { stage, reason: 'spawn needs a non-empty task' }
-    reply(false, { error: failure.current.reason })
-    return
-  }
-  if (count.children >= limit) {
-    failure.current = {
-      stage,
-      reason: 'the script asked for more than ' + String(limit) + ' children',
-    }
-    reply(false, { error: failure.current.reason })
-    return
-  }
+  const stage = stageOf(count.children + 1, call.args.label)
+  const task = typeof call.args.task === 'string' ? call.args.task : ''
   count.children += 1
   const created = await Effect.runPromise(
     host.agents
@@ -250,11 +282,19 @@ const answerSpawn = async (
     return
   }
   await Effect.runPromise(created.whenIdle.pipe(Effect.orElseSucceed(() => undefined)))
+  const answered = created.session.events().slice(before)
+  const childFailure = childFailureOf(answered)
+  if (childFailure !== undefined) {
+    const reason = 'the child agent failed: ' + childFailure
+    failure.current = { stage, reason }
+    reply(false, { error: reason })
+    return
+  }
   reply(true, {
     value: {
       sessionId: created.id,
       text: childAnswerOf(created),
-      tools: toolCallsOf(created.session.events().slice(before)),
+      tools: toolCallsOf(answered),
     },
   })
 }

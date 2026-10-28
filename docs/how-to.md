@@ -520,7 +520,7 @@ return review.text
 - `spawn(task, { label, cwd })` は `{ sessionId, text, tools }` を返す。`tools` は子が使った tool の名前と結果の 1 行要約である。
 - 子は `subagent` と同じ経路で起こす。同じ route と同じ sandbox・承認を通る。
 - スクリプト自身は `run_code` と同じ sandbox の子プロセスで走る。fs や process には直接触れない。
-- 失敗は tool の失敗ではなく結果になる。例外は `stage: script`、子が起動できない・メッセージを取らない場合は `stage: spawn N`、deadline は `stage: timeout`、起動数が `maxChildren` を超えた場合は `stage: spawn N` として、`ok: false` と `reason` が返る。
+- 失敗は tool の失敗ではなく結果になる。例外は `stage: script`、子が起動できない・メッセージを取らない・turn が error で終わる場合は `stage: spawn N`、deadline は `stage: timeout`、起動数が `maxChildren` を超えた場合は `stage: spawn N` として、`ok: false` と `reason` が返る。
 - `maxChildren` の既定は 12。deadline は 10 分（`WORKFLOW_SCRIPT_TIMEOUT_MS`）。出力は 16,000 文字で切る。
 - 単純な同時実行は `tasks` のほうが短い。
 
