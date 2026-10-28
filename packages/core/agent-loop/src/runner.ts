@@ -28,7 +28,6 @@ import {
   clipQuotes,
   clipReferences,
   cwdOf,
-  deriveMessagesWithSeqs,
   IMAGE_REFERENCE_TOKENS,
   lastRequestHeader,
   lastRuntimeContext,
@@ -658,9 +657,10 @@ export const agentLoopEffect = (
       Effect.gen(function* () {
         // The log is what was sent: recorded compaction is part of the fold. A
         // fragment a tool added follows the tool results for this step alone.
+        // The session resumes the fold from its checkpoint when it has one.
         const events = agent.session.events()
         const messages = yield* hydrateAttachments(
-          deriveMessagesWithSeqs(events),
+          agent.session.deriveWithSeqs(),
           events,
           agent.options.attachmentDir,
         )

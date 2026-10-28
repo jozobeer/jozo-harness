@@ -1,6 +1,6 @@
 import { Effect, Semaphore } from 'effect'
 import type { RequestMessage } from '@jozo-harness/llm'
-import { deriveMessages, deriveMessagesWithSeqs } from './derive.ts'
+import { deriveMessagesWithSeqs, type DerivedMessage } from './derive.ts'
 import type { MessageProjection } from './projections.ts'
 import { makeProjectionKeeper } from './projection-keeper.ts'
 import { SessionError } from './errors.ts'
@@ -24,6 +24,8 @@ export interface Session {
     options?: AppendOptions,
   ): Effect.Effect<void, SessionError>
   flush(): Effect.Effect<void, SessionError>
+  /** The fold with the event each message came from, resumed from the checkpoint. */
+  deriveWithSeqs(projections?: ReadonlyArray<MessageProjection>): ReadonlyArray<DerivedMessage>
   derive(projections?: ReadonlyArray<MessageProjection>): ReadonlyArray<RequestMessage>
 }
 
@@ -105,6 +107,20 @@ export function makeSession(options: MakeSessionOptions): Effect.Effect<Session,
         )
       })
 
+    // The checkpoint holds the fold with the registered projections, so a caller
+    // that brings its own projections still folds the log from the start.
+    const deriveWithSeqs = (
+      projections?: ReadonlyArray<MessageProjection>,
+    ): ReadonlyArray<DerivedMessage> => {
+      const usesRegistered = projections === undefined || projections.length === 0
+      if (!usesRegistered) return deriveMessagesWithSeqs(log, projections)
+      const stored = keeper?.messages()
+      if (stored !== undefined) return stored
+      const derived = deriveMessagesWithSeqs(log)
+      keeper?.adopt(derived, highest)
+      return derived
+    }
+
     return {
       id: options.id,
       header: first.data,
@@ -117,15 +133,9 @@ export function makeSession(options: MakeSessionOptions): Effect.Effect<Session,
           // derive() ran during this process.
           if (keeper !== undefined) yield* keeper.save(log, highest)
         }),
-      derive: (projections?: ReadonlyArray<MessageProjection>) => {
-        const usesRegistered = projections === undefined || projections.length === 0
-        if (!usesRegistered) return deriveMessages(log, projections)
-        const stored = keeper?.messages()
-        if (stored !== undefined) return stored.map((entry) => entry.message)
-        const derived = deriveMessagesWithSeqs(log)
-        keeper?.adopt(derived, highest)
-        return derived.map((entry) => entry.message)
-      },
+      deriveWithSeqs,
+      derive: (projections?: ReadonlyArray<MessageProjection>) =>
+        deriveWithSeqs(projections).map((entry) => entry.message),
     }
   })
 }
