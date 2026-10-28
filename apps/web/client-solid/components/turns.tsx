@@ -402,7 +402,7 @@ const Feedback = (props: { turn: TraceTurn; store: SessionStore }) => {
 const quotedMarkdown = (quotes: ReadonlyArray<Quote>): string =>
   quotes
     .map((quote) =>
-      quote.text
+      maskSecrets(quote.text)
         .split('\n')
         .map((line) => '> ' + line)
         .join('\n'),

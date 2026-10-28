@@ -613,7 +613,9 @@ describe('the Solid page', () => {
       conversation: { ...emptyConversation, blocks: [{ kind: 'user', text: prompt }] },
       trace: traceOf([
         at(1, 'turn/start', { turn: 1 }),
-        at(2, 'agent/inbox/claimed', { message: { text: prompt, source: 'user' } }),
+        at(2, 'agent/inbox/claimed', {
+          message: { text: prompt, source: 'user', quotes: [{ text: 'from the answer: ' + key }] },
+        }),
       ]),
     })
 
@@ -628,6 +630,9 @@ describe('the Solid page', () => {
     expect(body.textContent).toBe('use sk-…0123')
     expect(container.textContent).not.toContain(key)
     expect(container.querySelector('.wf-turn-prompt')?.textContent).toBe('use sk-…0123')
+    expect(container.querySelector('.turn-ask .quoted blockquote')?.textContent).toBe(
+      'from the answer: sk-…0123',
+    )
     // The mask is a display rule: the trace keeps what the model was given.
     expect(store.state().trace[0]?.prompt).toBe(prompt)
   })
