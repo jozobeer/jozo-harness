@@ -1,8 +1,16 @@
 import { readFile } from 'node:fs/promises'
+import { matchesGlob } from 'node:path'
 import { Schema, Effect } from 'effect'
 import { ToolError, writeSpill, type ToolDefinition } from '@jozo-harness/tools'
 import { takePage } from './page.ts'
-import { isBinary, walkFiles } from './walk.ts'
+import {
+  defaultRipgrep,
+  fallbackNote,
+  findMatchesWithRipgrep,
+  type Ripgrep,
+  type RipgrepMatch,
+} from './ripgrep.ts'
+import { comparePaths, isBinary, walkFiles } from './walk.ts'
 import { resolveSearchStart } from './workspace.ts'
 
 /** A search stops collecting here; a broader pattern is reached by narrowing it. */
@@ -16,7 +24,7 @@ export const GREP_MAX_LINE_CHARS = 2000
 
 const Parameters = Schema.Struct({
   pattern: Schema.String.annotate({
-    description: 'A JavaScript regular expression to search for in each line.',
+    description: 'A regular expression to search for in each line.',
   }),
   path: Schema.optionalKey(
     Schema.String.annotate({
@@ -49,6 +57,8 @@ export interface GrepValue {
   readonly truncated: boolean
   /** Where the complete list was stored, when the page cannot show all of it. */
   readonly locator?: string
+  /** Why the built-in walker ran instead of ripgrep, when it did. */
+  readonly fallback?: string
 }
 
 /** One match a line, the shape the page, the stored file, and the byte budget all use. */
@@ -65,6 +75,9 @@ const recovery = (locator: string | undefined): string =>
     : 'the full result is stored at ' +
       locator +
       '; use the read tool with offset and limit to page through it'
+
+const noteOf = (fallback: string | undefined): string =>
+  fallback === undefined ? '' : '\n' + fallbackNote(fallback)
 
 /** A matched line of any length becomes a retained line of at most GREP_MAX_LINE_CHARS. */
 const cutLine = (text: string): string =>
@@ -115,13 +128,68 @@ const compile = (pattern: string): Effect.Effect<RegExp, ToolError> =>
     catch: () => new ToolError({ code: 'invalid-arguments', message: 'bad pattern: ' + pattern }),
   })
 
-/** Searches workspace files line by line with a regular expression. */
-export const grepTool: ToolDefinition<GrepArgs, GrepValue> = {
+/** Path order, then line order, so both backends report the same list. */
+const inPathOrder = (matches: ReadonlyArray<GrepMatch>): ReadonlyArray<GrepMatch> =>
+  [...matches].sort((left, right) => comparePaths(left.file, right.file) || left.line - right.line)
+
+const cutMatches = (matches: ReadonlyArray<RipgrepMatch>): ReadonlyArray<GrepMatch> =>
+  matches.map((match) => ({ ...match, text: cutLine(match.text) }))
+
+interface FoundMatches {
+  readonly found: ReadonlyArray<GrepMatch>
+  readonly fallback?: string
+}
+
+/** ripgrep when it answers, otherwise the walker the run had before ripgrep was optional. */
+const searchMatches = (
+  args: GrepArgs,
+  cwd: string,
+  start: string,
+  expression: RegExp,
+  ripgrep: Ripgrep,
+): Effect.Effect<FoundMatches> =>
+  Effect.gen(function* () {
+    const include = args.include
+    const direct = yield* Effect.promise(() =>
+      findMatchesWithRipgrep(
+        {
+          cwd,
+          start,
+          pattern: args.pattern,
+          limit: GREP_MAX_MATCHES + 1,
+          ...(include === undefined
+            ? {}
+            : { accept: (file: string) => matchesGlob(file, include) }),
+        },
+        ripgrep,
+      ),
+    )
+    if (direct.fallback === undefined) return { found: cutMatches(direct.matches) }
+    const files = yield* walkFiles({
+      cwd,
+      limit: GREP_MAX_FILES,
+      start,
+      ...(include === undefined ? {} : { pattern: include }),
+    })
+    const found = yield* Effect.promise(() =>
+      findMatches(files, cwd, expression, GREP_MAX_MATCHES + 1),
+    )
+    return { found, fallback: direct.fallback }
+  })
+
+/**
+ * Searches workspace files line by line with a regular expression. ripgrep
+ * answers when PATH has it, which keeps nested .gitignore rules and binary
+ * files out; a run without it says why it fell back to the walker.
+ */
+export const makeGrepTool = (
+  ripgrep: Ripgrep = defaultRipgrep,
+): ToolDefinition<GrepArgs, GrepValue> => ({
   name: 'grep',
   readOnly: true,
   presentCall: (args) => ({ summary: 'grep ' + args.pattern }),
   description:
-    'Searches workspace files for a regular expression and returns file, line, and text for each match. Use it instead of shelling out to grep or rg. Dot-entries such as .github are searched; only node_modules, .git, and binary files are skipped. A result too long to show is stored whole; read that file with offset and limit.',
+    'Searches workspace files for a regular expression and returns file, line, and text for each match. Use it instead of shelling out to grep or rg. Dot-entries such as .github are searched; only node_modules, .git, and binary files are skipped. ripgrep respects nested .gitignore files; without rg, the fallback reads only the workspace-root rules and says so. A result too long to show is stored whole; read that file with offset and limit.',
   parameters: Parameters,
   output: {
     schema: Schema.Struct({
@@ -131,9 +199,10 @@ export const grepTool: ToolDefinition<GrepArgs, GrepValue> = {
       seen: Schema.Int,
       truncated: Schema.Boolean,
       locator: Schema.optionalKey(Schema.String),
+      fallback: Schema.optionalKey(Schema.String),
     }),
     render: (_args, value) => {
-      const body = matchLines(value.matches)
+      const body = matchLines(value.matches) + noteOf(value.fallback)
       if (!value.truncated) return [{ type: 'text', text: body }]
       return [
         {
@@ -162,19 +231,18 @@ export const grepTool: ToolDefinition<GrepArgs, GrepValue> = {
         )
       }
       const start = yield* resolveSearchStart(context.cwd, args.path)
-      const files = yield* walkFiles({
-        cwd: context.cwd,
-        limit: GREP_MAX_FILES,
+      const { found, fallback } = yield* searchMatches(
+        args,
+        context.cwd,
         start,
-        ...(args.include === undefined ? {} : { pattern: args.include }),
-      })
-      const found = yield* Effect.promise(() =>
-        findMatches(files, context.cwd, expression, GREP_MAX_MATCHES + 1),
+        expression,
+        ripgrep,
       )
-      const complete = found.slice(0, GREP_MAX_MATCHES)
+      const complete = inPathOrder(found).slice(0, GREP_MAX_MATCHES)
       const shown = takePage(complete, page, matchLineOf)
+      const note = fallback === undefined ? {} : { fallback }
       if (found.length <= shown.length) {
-        return { matches: shown, seen: found.length, truncated: false }
+        return { matches: shown, seen: found.length, truncated: false, ...note }
       }
       const locator = yield* writeSpill(context, 'grep', matchLines(complete))
       return {
@@ -182,6 +250,9 @@ export const grepTool: ToolDefinition<GrepArgs, GrepValue> = {
         seen: found.length,
         truncated: true,
         ...(locator === undefined ? {} : { locator }),
+        ...note,
       }
     }),
-}
+})
+
+export const grepTool: ToolDefinition<GrepArgs, GrepValue> = makeGrepTool()

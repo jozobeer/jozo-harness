@@ -11,7 +11,15 @@ import { describe, expect, test } from 'vitest'
 import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { globTool, grepTool } from '../src/index.ts'
+import {
+  findRipgrep,
+  globTool,
+  grepTool,
+  makeGlobTool,
+  makeGrepTool,
+  ripgrepAt,
+  type Ripgrep,
+} from '../src/index.ts'
 /** Writes a file, making the directories above it, because the file may not be there yet. */
 const writeFileDeep = async (path: string, text: string | Uint8Array): Promise<void> => {
   await mkdir(dirname(path), { recursive: true })
@@ -47,6 +55,32 @@ const spillTo = (files: Map<string, string>) => (callId: string, text: string) =
 const textOf = (result: ToolExecutionResult | undefined): string =>
   (result?.content ?? []).flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('')
 
+interface FakeAnswer {
+  readonly stdout?: ReadonlyArray<string>
+  readonly exitCode?: number
+  readonly stderr?: string
+}
+
+/** A ripgrep seam that answers with canned lines, so no test needs a real rg. */
+const fakeRipgrep = (
+  executable: string | undefined,
+  answer: FakeAnswer = {},
+  calls: Array<ReadonlyArray<string>> = [],
+): Ripgrep => ({
+  executable,
+  run: async (argv, _cwd, onLine) => {
+    calls.push(argv)
+    for (const line of answer.stdout ?? []) {
+      if (!onLine(line)) return { exitCode: 0, stderr: '', stopped: true }
+    }
+    return {
+      exitCode: answer.exitCode ?? 0,
+      stderr: answer.stderr ?? '',
+      stopped: false,
+    }
+  },
+})
+
 const workspace = async () => {
   const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-search-'))
   await writeFileDeep(join(dir, 'a.ts'), 'const one = 1\n// needle\n')
@@ -61,7 +95,7 @@ describe('glob tool', () => {
 
     const result = await Effect.runPromise(call(globTool, { pattern: '**/*.ts' }, dir))
 
-    expect(result?.value).toEqual({ files: ['a.ts', 'sub/b.ts'], seen: 2, truncated: false })
+    expect(result?.value).toMatchObject({ files: ['a.ts', 'sub/b.ts'], seen: 2, truncated: false })
     await rm(dir, { recursive: true, force: true })
   })
 
@@ -102,7 +136,7 @@ describe('glob tool', () => {
 
     const result = await Effect.runPromise(call(globTool, { pattern: '**/*.ts' }, dir))
 
-    expect(result?.value).toEqual({ files: ['a.ts', 'sub/b.ts'], seen: 2, truncated: false })
+    expect(result?.value).toMatchObject({ files: ['a.ts', 'sub/b.ts'], seen: 2, truncated: false })
     await rm(dir, { recursive: true, force: true })
   })
 
@@ -112,7 +146,7 @@ describe('glob tool', () => {
 
     const result = await Effect.runPromise(call(globTool, { pattern: '.github/workflows/**' }, dir))
 
-    expect(result?.value).toEqual({
+    expect(result?.value).toMatchObject({
       files: ['.github/workflows/ci.yml'],
       seen: 1,
       truncated: false,
@@ -125,7 +159,7 @@ describe('glob tool', () => {
 
     const result = await Effect.runPromise(call(globTool, { pattern: '**/*.ts', path: 'sub' }, dir))
 
-    expect(result?.value).toEqual({ files: ['sub/b.ts'], seen: 1, truncated: false })
+    expect(result?.value).toMatchObject({ files: ['sub/b.ts'], seen: 1, truncated: false })
     await rm(dir, { recursive: true, force: true })
   })
 
@@ -160,7 +194,7 @@ describe('grep tool', () => {
       call(grepTool, { pattern: 'needle', include: '**/*.ts' }, dir),
     )
 
-    expect(result?.value).toEqual({
+    expect(result?.value).toMatchObject({
       matches: [{ file: 'a.ts', line: 2, text: '// needle' }],
       seen: 1,
       truncated: false,
@@ -215,7 +249,7 @@ describe('grep tool', () => {
 
     const result = await Effect.runPromise(call(grepTool, { pattern: 'const', path: 'sub' }, dir))
 
-    expect(result?.value).toEqual({
+    expect(result?.value).toMatchObject({
       matches: [{ file: 'sub/b.ts', line: 1, text: 'const two = 2' }],
       seen: 1,
       truncated: false,
@@ -229,7 +263,7 @@ describe('grep tool', () => {
 
     const result = await Effect.runPromise(call(grepTool, { pattern: 'permissions' }, dir))
 
-    expect(result?.value).toEqual({
+    expect(result?.value).toMatchObject({
       matches: [{ file: '.github/workflows/ci.yml', line: 1, text: 'permissions: read-all' }],
       seen: 1,
       truncated: false,
@@ -257,6 +291,175 @@ describe('grep tool', () => {
 
     expect(result?.value).toMatchObject({ truncated: true })
     expect(textOf(result)).toContain('narrow the pattern')
+    await rm(dir, { recursive: true, force: true })
+  })
+})
+describe('ripgrep search', () => {
+  test('nested .gitignore files keep ignored files out of glob and grep', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-ripgrep-'))
+    await writeFileDeep(join(dir, '.gitignore'), 'root-ignored.ts\n')
+    await writeFileDeep(join(dir, 'root-ignored.ts'), 'needle from the root\n')
+    await writeFileDeep(join(dir, 'sub', '.gitignore'), 'ignored.ts\n')
+    await writeFileDeep(join(dir, 'sub', 'ignored.ts'), 'needle from a nested ignore\n')
+    await writeFileDeep(join(dir, 'sub', 'kept.ts'), 'needle kept\n')
+    await writeFileDeep(
+      join(dir, 'blob.bin'),
+      new Uint8Array([0x6e, 0x65, 0x65, 0x64, 0x6c, 0x65, 0x00]),
+    )
+
+    if (findRipgrep() === undefined) {
+      // Without rg the walker cannot read nested ignore files; the result must say so.
+      const result = await Effect.runPromise(call(globTool, { pattern: '**/*.ts' }, dir))
+      expect(result?.value).toMatchObject({ fallback: 'is not on PATH' })
+      expect(textOf(result)).toContain('cannot honour nested ignore files')
+      await rm(dir, { recursive: true, force: true })
+      return
+    }
+
+    const listed = await Effect.runPromise(call(globTool, { pattern: '**/*.ts' }, dir))
+    expect(listed?.value).toMatchObject({ files: ['sub/kept.ts'] })
+    expect(listed?.value).not.toHaveProperty('fallback')
+
+    const found = await Effect.runPromise(call(grepTool, { pattern: 'needle' }, dir))
+    const value = found?.value as { readonly matches: ReadonlyArray<{ readonly file: string }> }
+    expect(value.matches.map((match) => match.file)).toEqual(['sub/kept.ts'])
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('a binary file ripgrep matched is dropped from its result', async () => {
+    const lines = [
+      JSON.stringify({ type: 'begin', data: { path: { text: 'blob.bin' } } }),
+      JSON.stringify({
+        type: 'match',
+        data: { path: { text: 'blob.bin' }, lines: { text: 'needle\n' }, line_number: 1 },
+      }),
+      JSON.stringify({
+        type: 'end',
+        data: { path: { text: 'blob.bin' }, binary_offset: 6 },
+      }),
+      JSON.stringify({ type: 'begin', data: { path: { text: 'a.ts' } } }),
+      JSON.stringify({
+        type: 'match',
+        data: { path: { text: 'a.ts' }, lines: { text: 'needle\n' }, line_number: 2 },
+      }),
+      JSON.stringify({ type: 'end', data: { path: { text: 'a.ts' }, binary_offset: null } }),
+    ]
+    const tool = makeGrepTool(fakeRipgrep('/fake/rg', { stdout: lines }))
+
+    const result = await Effect.runPromise(call(tool, { pattern: 'needle' }, tmpdir()))
+
+    expect(result?.value).toEqual({
+      matches: [{ file: 'a.ts', line: 2, text: 'needle' }],
+      seen: 1,
+      truncated: false,
+    })
+  })
+
+  test('a run without ripgrep falls back to the walker and says why', async () => {
+    const dir = await workspace()
+    const glob = makeGlobTool(fakeRipgrep(undefined))
+    const grep = makeGrepTool(fakeRipgrep(undefined))
+
+    const listed = await Effect.runPromise(call(glob, { pattern: '**/*.ts' }, dir))
+    expect(listed?.value).toMatchObject({
+      files: ['a.ts', 'sub/b.ts'],
+      seen: 2,
+      truncated: false,
+      fallback: 'is not on PATH',
+    })
+    expect(textOf(listed)).toContain('cannot honour nested ignore files')
+
+    const found = await Effect.runPromise(call(grep, { pattern: 'needle' }, dir))
+    const value = found?.value as {
+      readonly matches: ReadonlyArray<{ readonly file: string; readonly line: number }>
+    }
+    expect(value.matches).toEqual([
+      { file: 'a.ts', line: 2, text: '// needle' },
+      { file: 'c.md', line: 1, text: 'needle in markdown' },
+    ])
+    expect(textOf(found)).toContain('is not on PATH')
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('a failing ripgrep run falls back with its reason', async () => {
+    const dir = await workspace()
+    const tool = makeGrepTool(
+      fakeRipgrep('/fake/rg', { exitCode: 2, stderr: 'cannot read the tree' }),
+    )
+
+    const result = await Effect.runPromise(
+      call(tool, { pattern: 'needle', include: '**/*.ts' }, dir),
+    )
+
+    expect(result?.value).toMatchObject({ fallback: 'failed: cannot read the tree' })
+    expect(textOf(result)).toContain('failed: cannot read the tree')
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('asks ripgrep to honour ignore rules instead of disabling them', async () => {
+    const calls: Array<ReadonlyArray<string>> = []
+    const rg = fakeRipgrep('/fake/rg', { stdout: ['sub/kept.ts', ''] }, calls)
+    await Effect.runPromise(call(makeGlobTool(rg), { pattern: '**/*.ts', path: 'sub' }, tmpdir()))
+    await Effect.runPromise(
+      call(makeGrepTool(rg), { pattern: 'needle', include: '**/*.ts', path: 'sub' }, tmpdir()),
+    )
+
+    expect(calls).toHaveLength(2)
+    for (const argv of calls) {
+      expect(argv).toContain('--no-require-git')
+      expect(argv).toContain('--no-ignore-parent')
+      expect(argv).not.toContain('--no-ignore')
+    }
+    const globCall = calls[0] ?? []
+    const grepCall = calls[1] ?? []
+    expect(globCall.slice(-2)).toEqual(['--', 'sub'])
+    expect(grepCall).toContain('--json')
+    expect(grepCall).not.toContain('**/*.ts')
+    expect(grepCall.slice(-2)).toEqual(['--', 'sub'])
+  })
+
+  test('a search that found nothing does not fall back', async () => {
+    const tool = makeGrepTool(fakeRipgrep('/fake/rg', { exitCode: 1 }))
+
+    const result = await Effect.runPromise(call(tool, { pattern: 'needle' }, tmpdir()))
+
+    expect(result?.value).toEqual({ matches: [], seen: 0, truncated: false })
+  })
+
+  test('streams the lines of a program and stops it at the limit', async () => {
+    const rg = ripgrepAt(process.execPath)
+    const lines: Array<string> = []
+
+    const script = String.raw`process.stdout.write('one\ntwo\nthree\n')`
+
+    const run = await rg.run(['-e', script], tmpdir(), (line) => {
+      lines.push(line)
+      return lines.length < 2
+    })
+
+    expect(lines).toEqual(['one', 'two'])
+    expect(run.stopped).toBe(true)
+  })
+
+  test('the seam without a program answers without spawning', async () => {
+    const run = await ripgrepAt(undefined).run([], tmpdir(), () => true)
+
+    expect(run).toEqual({ exitCode: 127, stderr: 'rg is not on PATH', stopped: false })
+  })
+
+  test('a seam that throws falls back with its message', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-ripgrep-'))
+    await writeFileDeep(join(dir, 'a.txt'), 'needle\n')
+    const broken: Ripgrep = {
+      executable: '/fake/rg',
+      run: async () => {
+        throw new Error('boom')
+      },
+    }
+
+    const result = await Effect.runPromise(call(makeGrepTool(broken), { pattern: 'needle' }, dir))
+
+    expect(result?.value).toMatchObject({ fallback: 'failed: boom', seen: 1 })
     await rm(dir, { recursive: true, force: true })
   })
 })

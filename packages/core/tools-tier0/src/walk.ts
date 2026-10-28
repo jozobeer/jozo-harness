@@ -4,7 +4,7 @@ import { join, matchesGlob } from 'node:path'
 import { Effect } from 'effect'
 
 /** Path order, the tie-break of every ordering. */
-const comparePaths = (left: string, right: string): number =>
+export const comparePaths = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0
 
 /** Directories that hold other people's code; a search never walks into them. */
@@ -185,7 +185,7 @@ const withTimes = (
   )
 
 /** The collected paths in the requested order, with the path breaking every tie. */
-const inOrder = (
+export const orderPaths = (
   cwd: string,
   paths: ReadonlyArray<string>,
   order: WalkOrder,
@@ -216,5 +216,5 @@ export const walkFiles = (request: WalkRequest): Effect.Effect<ReadonlyArray<str
     }
     const start = request.start ?? ''
     yield* collectFrom(walk, start === '' ? request.cwd : join(request.cwd, start), start)
-    return yield* inOrder(request.cwd, walk.found, request.order ?? 'path')
+    return yield* orderPaths(request.cwd, walk.found, request.order ?? 'path')
   })
