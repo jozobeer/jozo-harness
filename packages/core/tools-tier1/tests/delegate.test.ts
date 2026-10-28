@@ -52,7 +52,10 @@ const delegate = (
   )
 
 /** Runs the tool through the real registry, where a failure must settle as a result. */
-const callThroughPipeline = (tool: ToolDefinition<any, any>) =>
+const callThroughPipeline = (
+  tool: ToolDefinition<any, any>,
+  args: { command: string; task: string } = { command: 'codex', task: 't' },
+) =>
   Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -61,7 +64,7 @@ const callThroughPipeline = (tool: ToolDefinition<any, any>) =>
         return yield* tools.call({
           callId: 'c1',
           tool: tool.name,
-          arguments: JSON.stringify({ command: 'codex', task: 't' }),
+          arguments: JSON.stringify(args),
           context: { sessionId: 's1', cwd: '/work', callId: 'c1' },
         })
       }),
@@ -233,6 +236,51 @@ describe('delegate tool', () => {
     expect(error?.message).toContain('exit 137')
     expect(error?.message).toContain('killed while working')
     expect(error?.message).toContain('half an answer')
+  })
+
+  test('a CLI that cannot start settles as one failed result that names the reason', async () => {
+    const host = hostOf(['codex'], async () => {
+      throw new Error('spawn EACCES')
+    })
+
+    const outcome = await callThroughPipeline(makeDelegateTool(allowed, noneSandbox, host))
+
+    expect(outcome.isError).toBe(true)
+    expect(outcome.error).toEqual({ name: 'ToolError', code: 'unavailable' })
+    expect(JSON.stringify(outcome.content)).toContain('spawn EACCES')
+  })
+
+  test('keeps the task in the call and both streams in the result the parent logs', async () => {
+    const seen: string[] = []
+    const host = hostOf(['codex'], async (command) => {
+      seen.push(command.argv[command.argv.length - 1] ?? '')
+      return { exitCode: 0, stdout: 'the answer', stderr: 'a warning' }
+    })
+    const tool = makeDelegateTool(allowed, noneSandbox, host)
+
+    const outcome = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const tools = makeTools(makeHooks())
+          yield* tools.register(tool)
+          const argumentsJson = JSON.stringify({ command: 'codex', task: 'fix the failing test' })
+          const callView = tools.presentCall('delegate', argumentsJson)
+          const result = yield* tools.call({
+            callId: 'c1',
+            tool: 'delegate',
+            arguments: argumentsJson,
+            context: { sessionId: 's1', cwd: '/work', callId: 'c1' },
+          })
+          return { argumentsJson, callView, result }
+        }),
+      ),
+    )
+
+    expect(seen).toEqual(['fix the failing test'])
+    expect(outcome.argumentsJson).toContain('fix the failing test')
+    expect(outcome.callView.summary).toContain('fix the failing test')
+    expect(JSON.stringify(outcome.result.content)).toContain('the answer')
+    expect(JSON.stringify(outcome.result.content)).toContain('a warning')
   })
 
   test('a stuck CLI times out as one failed call, not a failed turn', async () => {
