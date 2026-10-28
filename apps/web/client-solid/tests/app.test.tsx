@@ -5027,3 +5027,111 @@ describe('the plan a model proposed', () => {
     )
   })
 })
+
+describe('the workflow a call ran', () => {
+  const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+
+  const FAN_OUT = [
+    'a: one',
+    'b: (failed: the answer is not JSON)',
+    '',
+    'child sessions:',
+    'a: done [child session: child-1]',
+    'b: failed (the answer is not JSON) [child session: child-2]',
+  ].join('\n')
+
+  const runWith = (subagents: NonNullable<WebState['run']>['subagents']): WebState['run'] => ({
+    goal: null,
+    schedules: [],
+    jobs: [],
+    subagents,
+    todos: [],
+    todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+    skills: [],
+    promptSections: [],
+    queued: [],
+    steering: [],
+    model: 'stub/model',
+    effort: '',
+    efforts: [],
+  })
+
+  /** The conversation after one workflow call; '' leaves the call running. */
+  const withWorkflow = (output: string, run?: WebState['run']) =>
+    makeStore({
+      ...(run === undefined ? {} : { run }),
+      conversation: {
+        ...emptyConversation,
+        blocks: [{ kind: 'user', text: 'run a workflow' }],
+      },
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'agent/inbox/claimed', { message: { text: 'run a workflow', source: 'user' } }),
+        at(3, 'step/start', { step: 1 }),
+        at(4, 'tool/call', {
+          callId: 'w1',
+          name: 'workflow',
+          arguments: '{}',
+          summary: 'workflow',
+        }),
+        ...(output === ''
+          ? []
+          : [
+              at(5, 'tool/result', {
+                callId: 'w1',
+                isError: false,
+                summary: 'workflow',
+                content: [{ type: 'text', text: output }],
+              }),
+            ]),
+      ]),
+    })
+
+  test('draws the call as a node that names each child and how it ended', () => {
+    const { store } = withWorkflow(FAN_OUT)
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    expect(container.querySelector('.tool-card')).toBeNull()
+    const card = container.querySelector('.workflow-card')
+    expect(card?.querySelector('.workflow-count')?.textContent).toBe('2 children')
+    expect(card?.querySelector('.workflow-state')?.textContent).toBe('failed')
+    expect(
+      [...container.querySelectorAll('.workflow-child .workflow-name')].map(
+        (name) => name.textContent,
+      ),
+    ).toEqual(['a', 'b'])
+    expect(container.querySelector('.workflow-child.failed .workflow-reason')?.textContent).toBe(
+      'the answer is not JSON',
+    )
+  })
+
+  test('a child row says how long it ran and opens its own session', () => {
+    const { store, calls } = withWorkflow(
+      FAN_OUT,
+      runWith([
+        { id: 'child-1', status: 'idle', startedAt: 1_000, endedAt: 2_500 },
+        { id: 'child-2', status: 'idle', startedAt: 1_000, endedAt: 1_000 },
+      ]),
+    )
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    expect(container.querySelector('[data-child="a"] .workflow-took')?.textContent).toBe('1.5s')
+    expect(container.querySelector('[data-child="b"] .workflow-took')?.textContent).toBe('0.0s')
+
+    fireEvent.click(container.querySelector('[data-child="b"] .workflow-open') as Element)
+    expect(calls.find((call) => call.kind === 'moveTo')).toMatchObject({ id: 'child-2' })
+  })
+
+  test('a workflow still running says so and waits for its children', () => {
+    const { store } = withWorkflow('')
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    const card = container.querySelector('.workflow-card')
+    expect(card?.querySelector('.workflow-state')?.textContent).toBe('running')
+    expect(card?.querySelector('.workflow-took')?.textContent).toBe('…')
+    expect(container.querySelectorAll('.workflow-child')).toHaveLength(0)
+  })
+})

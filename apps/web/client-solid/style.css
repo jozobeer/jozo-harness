@@ -520,6 +520,103 @@
     font-size: var(--text-xs);
   }
 
+  .workflow-card {
+    margin: 3px 0;
+    font-family: var(--mono);
+    font-size: var(--text-xs);
+  }
+
+  .workflow-line {
+    display: grid;
+    grid-template-columns: 14px auto minmax(0, 1fr) auto 3.5em;
+    gap: var(--s2);
+    align-items: baseline;
+    padding: 2px 0;
+    color: var(--dim);
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .workflow-line::-webkit-details-marker {
+    display: none;
+  }
+
+  .workflow-line:hover {
+    color: var(--text);
+  }
+
+  .workflow-title,
+  .workflow-child .workflow-name {
+    color: var(--text);
+  }
+
+  .workflow-state.failed,
+  .workflow-child.failed .workflow-name,
+  .workflow-child.failed .workflow-child-status,
+  .workflow-child .workflow-reason {
+    color: var(--error);
+  }
+
+  .workflow-took {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .workflow-headline {
+    margin: 2px 0 4px 1.1em;
+    color: var(--error);
+  }
+
+  .workflow-children {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 2px 0 6px;
+    padding: 0 0 0 1.1em;
+    list-style: none;
+  }
+
+  .workflow-child {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr) auto auto auto;
+    gap: var(--s2);
+    align-items: baseline;
+    color: var(--dim);
+  }
+
+  .workflow-child .workflow-name,
+  .workflow-child .workflow-reason {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .workflow-open {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--dim);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  .workflow-open:hover {
+    color: var(--text);
+  }
+
+  .workflow-fold {
+    margin: 4px 0 2px 1.1em;
+    color: var(--dim);
+    cursor: pointer;
+  }
+
+  .workflow-output .tool-output {
+    max-height: 14rem;
+    margin: 2px 0 6px 1.1em;
+    font-size: var(--text-xs);
+  }
+
   .answer {
     font-size: var(--text-base);
     line-height: 1.7;

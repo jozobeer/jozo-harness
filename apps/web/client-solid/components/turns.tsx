@@ -9,9 +9,11 @@ import {
   type TraceTool,
   type TraceTurn,
 } from '../../src/ui/trace.ts'
+import { WORKFLOW_TOOL } from '../../src/ui/workflow.ts'
 import { Linkify } from './linkify.tsx'
 import { Markdown } from './markdown.tsx'
 import { PlanCard } from './plan-card.tsx'
+import { WorkflowCard } from './workflow-card.tsx'
 import { EndMark } from './ui/end-mark.tsx'
 import { Icon, toolIconOf } from './ui/icon.tsx'
 import { Mug } from './ui/mug.tsx'
@@ -174,9 +176,19 @@ const Skill = (props: { tool: TraceTool }) => {
   )
 }
 
-/** One call as the conversation draws it: a skill gets its own card, the rest a line each. */
+/**
+ * One call as the conversation draws it: a skill and a workflow each get a node
+ * of their own, and the rest a line each.
+ */
 const Call = (props: { tool: TraceTool; store: SessionStore }) => (
-  <Show when={props.tool.name === 'skill'} fallback={<Tool tool={props.tool} />}>
+  <Show
+    when={props.tool.name === 'skill'}
+    fallback={
+      <Show when={props.tool.name === WORKFLOW_TOOL} fallback={<Tool tool={props.tool} />}>
+        <WorkflowCard tool={props.tool} store={props.store} />
+      </Show>
+    }
+  >
     <Skill tool={props.tool} />
   </Show>
 )
