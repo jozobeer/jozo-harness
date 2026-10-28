@@ -218,6 +218,31 @@ describe('the trace', () => {
     ])
   })
 
+  test('a rating folds onto the answer it names, and the latest verdict wins', () => {
+    const [turn] = traceOf([
+      event('turn/start', { turn: 1 }, 10),
+      event('step/start', { step: 1 }, 11),
+      said(13, { type: 'text', text: 'Done.' }),
+      event('feedback/rated', { target: 13, rating: 'like', memo: 'clear' }, 14),
+      event('feedback/rated', { target: 13, rating: 'dislike' }, 15),
+    ])
+
+    expect(turn?.answer).toBe('Done.')
+    expect(turn?.answerSeq).toBe(13)
+    expect(turn?.feedback).toEqual({ rating: 'dislike', memo: '' })
+  })
+
+  test('a rating for an answer outside the turn changes nothing', () => {
+    const [turn] = traceOf([
+      event('turn/start', { turn: 1 }, 10),
+      event('step/start', { step: 1 }, 11),
+      said(13, { type: 'text', text: 'Done.' }),
+      event('feedback/rated', { target: 99, rating: 'like' }, 14),
+    ])
+
+    expect(turn?.feedback).toBeUndefined()
+  })
+
   test('only an edit or a write with a readable path names a file', () => {
     expect(writtenPath('edit', '{"path":"x.ts"}')).toBe('x.ts')
     expect(writtenPath('read', '{"path":"x.ts"}')).toBeUndefined()

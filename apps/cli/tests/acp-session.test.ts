@@ -38,6 +38,7 @@ const makeHost = (): FakeHost => {
     answerApproval: () => Effect.succeed(false),
     answerAsk: () => Effect.succeed(''),
     serveQuestions: () => Effect.succeed([]),
+    rate: () => Effect.void,
   }
   return {
     host,

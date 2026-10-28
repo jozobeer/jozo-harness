@@ -24,6 +24,8 @@ describe('ui protocol', () => {
       { kind: 'cancel' },
       { kind: 'effort', effort: 'high' },
       { kind: 'model', model: 'stub/other' },
+      { kind: 'feedback', target: 12, rating: 'like' },
+      { kind: 'feedback', target: 12, rating: 'dislike', memo: 'wrong turn' },
     ]
     for (const command of commands) {
       expect(await Effect.runPromise(decodeCommand(command))).toEqual(command)
@@ -74,6 +76,27 @@ describe('ui protocol', () => {
     await Effect.runPromise(sendCommand(host, { kind: 'effort', effort: 'high' }))
 
     expect(switched).toEqual(['high'])
+  })
+
+  test('the feedback command reaches the host with the answer it names', async () => {
+    const given: Array<{ target: number; rating: string; memo?: string }> = []
+    const host = {
+      events: Stream.empty,
+      rate: (target: number, rating: string, memo?: string) =>
+        Effect.sync(() => {
+          given.push(memo === undefined ? { target, rating } : { target, rating, memo })
+        }),
+    } as unknown as UiHost
+
+    await Effect.runPromise(sendCommand(host, { kind: 'feedback', target: 12, rating: 'like' }))
+    await Effect.runPromise(
+      sendCommand(host, { kind: 'feedback', target: 9, rating: 'dislike', memo: 'wrong' }),
+    )
+
+    expect(given).toEqual([
+      { target: 12, rating: 'like' },
+      { target: 9, rating: 'dislike', memo: 'wrong' },
+    ])
   })
 
   test('an unknown command is rejected', async () => {

@@ -30,6 +30,7 @@ const hostOf = (): UiHost => ({
   answerApproval: () => Effect.succeed(true),
   answerAsk: () => Effect.succeed(''),
   serveQuestions: () => Effect.succeed([]),
+  rate: () => Effect.void,
 })
 
 interface Fake {

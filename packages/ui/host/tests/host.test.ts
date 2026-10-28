@@ -204,6 +204,29 @@ const askedTimes = (input: FakeInput, count: number): Effect.Effect<void> =>
   })
 
 describe('ui host', () => {
+  test('a rating through the host reaches the log without waking a turn', async () => {
+    const input = makeInput()
+    await Effect.runPromise(
+      input.append('assistant/message', {
+        provider: 'stub',
+        model: 'stub',
+        content: [{ type: 'text', text: 'the answer' }],
+        stream: [],
+      }),
+    )
+    const target = input.session.events()[0]?.seq
+    if (target === undefined) throw new Error('the answer was not logged')
+
+    await withHost(input, (host) => host.rate(target, 'like', 'clear'))
+
+    expect(input.submitted).toEqual([])
+    expect(input.session.events().find((event) => event.type === 'feedback/rated')?.data).toEqual({
+      target,
+      rating: 'like',
+      memo: 'clear',
+    })
+  })
+
   test('a slash naming a skill loads it and sends its arguments as the turn', async () => {
     const input = makeInput()
     const root = await skillRoot('review', '# review\ncheck the diff')

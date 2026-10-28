@@ -114,6 +114,52 @@ describe('the built-in commands a session can switch with', () => {
     })
   })
 
+  test('/feedback rates an answer without starting a turn, and the log keeps it', async () => {
+    const { commands, session } = await Effect.runPromise(build())
+    await Effect.runPromise(seed(session))
+    const answer = session.events().findLast((event) => event.type === 'assistant/message')
+    const mark = session.events().length
+
+    const outcome = await Effect.runPromise(
+      commands.run('/feedback like #' + String(answer?.seq) + ' clear and short', session),
+    )
+
+    expect(outcome).toEqual({
+      ok: true,
+      text: 'rated #' + String(answer?.seq) + ' like: clear and short',
+    })
+    expect(
+      session
+        .events()
+        .slice(mark)
+        .map((event) => event.type),
+    ).toEqual(['command/run', 'feedback/rated', 'command/done'])
+    expect(session.events().some((event) => event.type === 'turn/start')).toBe(false)
+    expect(
+      session
+        .events()
+        .slice(mark)
+        .some((event) => event.type === 'user/message'),
+    ).toBe(false)
+  })
+
+  test('/feedback rejects a line without a verdict, and the answer still reaches the log', async () => {
+    const { commands, session } = await Effect.runPromise(build())
+    await Effect.runPromise(seed(session))
+    const mark = session.events().length
+
+    const outcome = await Effect.runPromise(commands.run('/feedback just words', session))
+
+    expect(outcome?.ok).toBe(false)
+    expect(outcome?.text).toContain('usage: /feedback')
+    expect(
+      session
+        .events()
+        .slice(mark)
+        .map((event) => event.type),
+    ).toEqual(['command/run', 'command/done'])
+  })
+
   test('/compact records the checkpoint the summary call earned', async () => {
     let calls = 0
     const compactNow = () => {

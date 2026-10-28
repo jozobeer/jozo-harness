@@ -512,6 +512,54 @@ describe('the Solid page', () => {
     expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'changes', path: 'a.ts' } })
   })
 
+  test('an answer takes a verdict and a note, and a reload draws the newest one', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const answered = [
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'agent/inbox/claimed', { message: { text: 'hello', source: 'user' } }),
+      at(3, 'step/start', { step: 1 }),
+      at(4, 'assistant/message', { content: [{ type: 'text', text: 'Done.' }] }),
+      at(5, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+    ]
+    const { store, calls } = makeStore({
+      conversation: { ...emptyConversation, blocks: [{ kind: 'user', text: 'hello' }] },
+      trace: traceOf(answered),
+    })
+    const first = render(() => <Conversation store={store} />)
+
+    fireEvent.click(first.container.querySelectorAll('.feedback-choice')[0] as Element)
+    expect(calls).toContainEqual({
+      kind: 'command',
+      command: { kind: 'feedback', target: 4, rating: 'like' },
+    })
+
+    fireEvent.click(first.container.querySelector('.feedback-note') as Element)
+    fireEvent.input(first.container.querySelector('.feedback-input') as Element, {
+      target: { value: 'clear' },
+    })
+    fireEvent.keyDown(first.container.querySelector('.feedback-input') as Element, {
+      key: 'Enter',
+    })
+    expect(calls).toContainEqual({
+      kind: 'command',
+      command: { kind: 'feedback', target: 4, rating: 'like', memo: 'clear' },
+    })
+
+    first.unmount()
+    // A reload folds the same log again: the newest verdict and its note are there.
+    const reloaded = makeStore({
+      conversation: { ...emptyConversation, blocks: [{ kind: 'user', text: 'hello' }] },
+      trace: traceOf([
+        ...answered,
+        at(6, 'feedback/rated', { target: 4, rating: 'dislike', memo: 'missed the point' }),
+      ]),
+    })
+    const second = render(() => <Conversation store={reloaded.store} />)
+
+    expect(second.container.querySelector('.feedback-choice.chosen')?.textContent).toBe('Bad')
+    expect(second.container.querySelector('.feedback-note')?.textContent).toBe('missed the point')
+  })
+
   test('a failed card names the code the log kept', () => {
     const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
     const { store } = makeStore({

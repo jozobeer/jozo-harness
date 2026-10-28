@@ -670,6 +670,7 @@ REPL・TUI・Web では、行頭が `/` の行はコマンドとしてその場�
 ```
 /help     使えるコマンドを並べる
 /status   このセッションの居場所（モデル、cwd、turn 数、token 統計、goal、schedule）
+/feedback 回答に like / dislike と短いメモを付ける
 ```
 
 `/status` の `stats` 行はセッションログから読める値だけを出す。tok/s は最後の turn の decode 区間、token は非キャッシュ入力・cache read / write・output・課金入力、cache は cache read ÷ 課金入力、context は runner が compaction に使うのと同じ budget に対する推定値の割合である。ログに無い値は `—` になり、0 と偽らない。
@@ -677,6 +678,23 @@ REPL・TUI・Web では、行頭が `/` の行はコマンドとしてその場�
 Web UI は同じ値を、Run ペインの Usage と composer の context の輪で見せる。Usage は context の棒（compaction の位置に印）、入力と出力、最後の turn の tok/s を 0〜500 の速度計で示す。500 を超えると輪は満ちきり、中央の数字がそのまま速さを示す。速度計の青い弧は、値が変わると 180ms で前の長さから次の長さへ伸び縮みする。compaction まで窓の 10% を切ると、棒と輪が金になる。輪を押すと Run ペインの Usage が開く。`prefers-reduced-motion: reduce` の環境では弧はその場で切り替わる。
 
 知らない名前は登録済みの一覧を返す。コマンドの答えは TUI と Web では会話の notice として出る。
+
+### 回答を評価する
+
+Web では、終わった回答の下に Good と Bad が出る。押すとその場で評価がログに残り、Add a note から 500 文字までのメモを付けて Save できる。再読込してもログの `feedback/rated` から評価とメモを復元する。
+
+コマンドでも同じ評価を付けられる。
+
+```
+/feedback like                 # 最新の回答を like
+/feedback dislike #42 説明不足   # seq 42 の回答を dislike、メモ付き
+/feedback like #42             # メモなし
+```
+
+- 1 語目は `like` か `dislike`。そのあとの `#<seq>` は assistant メッセージの seq で、省略するとその時点で最新の回答を選ぶ。
+- `#<seq>` の後ろはメモ。500 文字を超えるメモは拒否し、ログには書かない。
+- 同じ回答に付け直すと、画面は最新の評価とメモを出す。ログには付けた回のすべてが残る。
+- 評価は log-only のイベントで、モデルの次のリクエストの履歴には入らない。`/feedback` は turn を起こさず、`command/run` と `command/done` だけを残す。
 
 ## 過去のセッションを探して読む
 

@@ -3,12 +3,16 @@ import {
   commandHelp,
   cwdOf,
   DEFAULT_COMPACT_MAX_BYTES,
+  FEEDBACK_MEMO_LIMIT,
+  FEEDBACK_RATINGS,
   pruneFor,
+  rateFeedback,
   statsLineTextOf,
   statsViewOf,
   type CommandsShape,
   type CompactionCheckpoint,
   type CompactOptions,
+  type FeedbackRating,
   type Session,
   type SessionHeader,
   type TokenBudget,
@@ -96,6 +100,47 @@ export const goalRequest = (input: string): GoalArgs | undefined => {
   // Without new words there is nothing to edit, so the human gets the usage back.
   const objective = rest.join(' ').trim()
   return objective === '' ? undefined : { action: 'edit', objective }
+}
+
+/** The rating one /feedback line names, with the answer and memo it carries. */
+export interface FeedbackLine {
+  readonly rating: FeedbackRating
+  /** The answer's seq; absent names the newest answer. */
+  readonly target?: number
+  readonly memo?: string
+}
+
+/** The help a malformed /feedback line gets. */
+export const FEEDBACK_USAGE =
+  'usage: /feedback <like|dislike> [#<seq>] [<memo>]\n' +
+  '  #<seq> names an answer; without it the newest answer is rated.\n' +
+  '  The memo may be up to ' +
+  String(FEEDBACK_MEMO_LIMIT) +
+  ' characters.'
+
+const isRating = (word: string): word is FeedbackRating =>
+  FEEDBACK_RATINGS.some((rating) => rating === word)
+
+/**
+ * What a /feedback line names: a verdict, optionally the answer's seq written
+ * as #12, and the rest of the line as its memo.
+ */
+export const feedbackRequest = (input: string): FeedbackLine | undefined => {
+  const match = /^(\S+)(?:\s+([\s\S]*))?$/.exec(input.trim())
+  const word = match?.[1]
+  if (word === undefined || !isRating(word)) return undefined
+  let rest = (match?.[2] ?? '').trim()
+  let target: number | undefined
+  const targeted = /^#(\d+)(?:\s+([\s\S]*))?$/.exec(rest)
+  if (targeted !== null) {
+    target = Number(targeted[1])
+    rest = (targeted[2] ?? '').trim()
+  }
+  return {
+    rating: word,
+    ...(target === undefined ? {} : { target }),
+    ...(rest === '' ? {} : { memo: rest }),
+  }
 }
 
 /** The words that move an existing goal rather than name a new objective. */
@@ -221,6 +266,27 @@ export const installBuiltinCommands = (
               String(prune.shadowedBytes) +
               ' bytes freed',
           }
+        }),
+    })
+    yield* commands.register({
+      name: 'feedback',
+      summary: 'rate an answer like or dislike, with an optional short memo',
+      run: (input, context) =>
+        Effect.gen(function* () {
+          const request = feedbackRequest(input)
+          if (request === undefined) return { ok: false, text: FEEDBACK_USAGE }
+          return yield* rateFeedback(context.session, request).pipe(
+            Effect.map((rated) => ({
+              ok: true,
+              text:
+                'rated #' +
+                String(rated.target) +
+                ' ' +
+                rated.rating +
+                (rated.memo === undefined ? '' : ': ' + rated.memo),
+            })),
+            Effect.catch((error) => Effect.succeed({ ok: false, text: error.message })),
+          )
         }),
     })
     yield* commands.register({
