@@ -611,7 +611,9 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
               ),
               Effect.catch(() => Effect.succeed({ kind: 'unavailable' as const })),
             ),
-          ),
+            // A defect would otherwise leave the caller without an answer; the
+            // sender reads a 502 and may retry the delivery.
+          ).catch(() => ({ kind: 'unavailable' as const })),
       }
       const connections = new Map<WebSocket, Connection>()
       // One token per run, kept out of the ready URL: that URL carries a code
