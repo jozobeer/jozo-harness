@@ -1,6 +1,6 @@
 import type { Agent, AgentsShape } from '@jozo-harness/agent'
 import { HooksLive } from '@jozo-harness/kernel'
-import type { SandboxShape } from '@jozo-harness/safety'
+import { SandboxError, type SandboxShape } from '@jozo-harness/safety'
 import type { SessionEvent } from '@jozo-harness/session'
 import {
   Tools,
@@ -11,7 +11,7 @@ import {
 } from '@jozo-harness/tools'
 import { Context, Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
-import { makeWorkflowTool, type WorkflowTask } from '../src/index.ts'
+import { makeSubagentTool, makeWorkflowTool, type WorkflowTask } from '../src/index.ts'
 
 /** What one child is told to answer, by the task it was given. */
 type Answers = Readonly<Record<string, string>>
@@ -22,12 +22,21 @@ interface FakeAgentsOptions {
   readonly failCreate?: boolean
   readonly refuseFollowup?: boolean
   readonly idle?: Effect.Effect<void>
+  readonly childEvents?: ReadonlyArray<SessionEvent>
   readonly created?: Array<{
     readonly cwd: string
     readonly options: { readonly route: string }
     readonly parent: string
   }>
 }
+
+const answerEvent = (text: string): SessionEvent =>
+  ({
+    seq: 1,
+    time: 0,
+    type: 'assistant/message',
+    data: { content: [{ type: 'text', text }] },
+  }) as unknown as SessionEvent
 
 const fakeAgents = (
   answers: Answers,
@@ -43,18 +52,10 @@ const fakeAgents = (
             options.created?.push(args)
             counter += 1
             let answer = ''
+            let events: Array<SessionEvent> = [answerEvent(answer)]
             const agent = {
               id: 'child-' + String(counter),
-              session: {
-                events: () => [
-                  {
-                    seq: 1,
-                    time: 0,
-                    type: 'assistant/message',
-                    data: { content: [{ type: 'text', text: answer }] },
-                  },
-                ],
-              },
+              session: { events: () => events },
               // The child answers whatever it is told, once it is told.
               followup: (message: { text: string }) =>
                 options.refuseFollowup === true
@@ -62,6 +63,7 @@ const fakeAgents = (
                   : Effect.sync(() => {
                       started.push(message.text)
                       answer = answers[message.text] ?? ''
+                      events = [answerEvent(answer), ...(options.childEvents ?? [])]
                     }),
               whenIdle: options.idle ?? Effect.sleep('2 millis'),
             } as unknown as Agent
@@ -256,8 +258,9 @@ describe('the workflow script', () => {
           try {
             await workflow.spawn('two')
           } catch (error) {
-            return 'caught'
+            await workflow.spawn('three')
           }
+          return 'caught'
         `,
       }),
     )
@@ -323,5 +326,117 @@ describe('the workflow script', () => {
     expect(result?.isError).toBe(true)
     expect(textOf(result)).toContain('either tasks or script')
     expect(started).toEqual([])
+  })
+})
+
+describe('the workflow child path', () => {
+  test('starts a script child with the same arguments subagent uses', async () => {
+    const created: Array<{
+      readonly cwd: string
+      readonly options: { readonly route: string }
+      readonly parent: string
+    }> = []
+    const agents = fakeAgents({ 'first job': 'answer' }, [], { created })
+
+    await Effect.runPromise(
+      call(makeSubagentTool({ agents, route: 'stub/model' }), { task: 'first job' }),
+    )
+    const result = await Effect.runPromise(
+      call(makeWorkflowTool({ agents, route: 'stub/model' }), {
+        script: "return (await workflow.spawn('first job')).text",
+      }),
+    )
+
+    expect(result?.value).toMatchObject({ ok: true, value: 'answer' })
+    expect(created).toHaveLength(2)
+    expect(created[1]).toEqual(created[0])
+  })
+
+  test('returns the child tool summaries to the script', async () => {
+    const childEvents: ReadonlyArray<SessionEvent> = [
+      {
+        seq: 2,
+        time: 0,
+        type: 'tool/call',
+        data: { callId: 't1', name: 'bash', arguments: '{}' },
+      },
+      {
+        seq: 3,
+        time: 0,
+        type: 'tool/result',
+        data: {
+          callId: 't1',
+          isError: false,
+          content: [{ type: 'text', text: 'ok' }],
+          summary: 'ok',
+        },
+      },
+    ]
+    const agents = fakeAgents({ 'first job': 'answer' }, [], { childEvents })
+
+    const result = await Effect.runPromise(
+      call(makeWorkflowTool({ agents, route: 'stub/model' }), {
+        script: "return (await workflow.spawn('first job')).tools",
+      }),
+    )
+
+    expect(result?.value).toMatchObject({ ok: true, value: [{ name: 'bash', summary: 'ok' }] })
+  })
+
+  test('fails at the spawn when the child refuses the message', async () => {
+    const agents = fakeAgents({}, [], { refuseFollowup: true })
+
+    const result = await Effect.runPromise(
+      call(makeWorkflowTool({ agents, route: 'stub/model' }), {
+        script: "await workflow.spawn('first job')",
+      }),
+    )
+
+    expect(result?.value).toMatchObject({
+      ok: false,
+      stage: 'spawn 1',
+      reason: 'the child agent took no message',
+    })
+  })
+
+  test('fails at the spawn when the task is empty', async () => {
+    const agents = fakeAgents({}, [])
+
+    const result = await Effect.runPromise(
+      call(makeWorkflowTool({ agents, route: 'stub/model' }), {
+        script: "await workflow.spawn('')",
+      }),
+    )
+
+    expect(result?.value).toMatchObject({
+      ok: false,
+      stage: 'spawn 1',
+      reason: 'spawn needs a non-empty task',
+      children: 0,
+    })
+  })
+
+  test('fails before the script runs when the sandbox cannot wrap it', async () => {
+    const sandbox: SandboxShape = {
+      name: 'test',
+      confines: true,
+      mode: 'workspace-write',
+      wrap: () => Effect.fail(new SandboxError({ message: 'no seatbelt today' })),
+    }
+    const agents = fakeAgents({}, [])
+
+    const result = await Effect.runPromise(
+      call(makeWorkflowTool({ agents, route: 'stub/model', sandbox }), {
+        script: 'return 1',
+      }),
+    )
+
+    expect(result?.isError).toBe(false)
+    expect(result?.value).toMatchObject({
+      ok: false,
+      stage: 'sandbox',
+      children: 0,
+    })
+    expect(reasonOf(result)).toContain('no seatbelt today')
   })
 })
