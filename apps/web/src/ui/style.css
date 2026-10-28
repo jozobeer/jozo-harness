@@ -365,6 +365,130 @@ body {
   overflow-y: auto;
 }
 
+/* The reader's own browser takes the body whole, so the frame can fill it. */
+.context-body:has(> .browser) {
+  display: flex;
+  flex: 1;
+  padding: 0;
+  overflow: hidden;
+}
+
+.browser {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--s2);
+  min-height: 0;
+  padding: var(--s3);
+}
+
+.browser-bar {
+  display: flex;
+  flex: none;
+  gap: var(--s2);
+}
+
+.browser-address {
+  flex: 1;
+  min-width: 0;
+}
+
+.browser-open,
+.browser-detach {
+  flex: none;
+  align-self: center;
+  white-space: nowrap;
+}
+
+.browser-detach {
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.browser-detach:hover {
+  color: var(--text);
+}
+
+.browser-problem {
+  color: var(--error);
+  font-size: var(--text-xs);
+}
+
+.browser-tabs {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  overflow-x: auto;
+}
+
+.browser-tab {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+}
+
+.browser-tab.active {
+  border-color: var(--select);
+  background: var(--bg-raise);
+}
+
+.browser-tab-name {
+  max-width: 140px;
+  overflow: hidden;
+  padding: 3px 8px;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.browser-tab.active .browser-tab-name {
+  color: var(--text);
+}
+
+.browser-tab-close {
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  cursor: pointer;
+}
+
+.browser-tab-close:hover {
+  color: var(--error);
+}
+
+.browser-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.browser-empty {
+  flex: 1;
+  padding: var(--s4) 0;
+  color: var(--dim);
+  font-size: var(--text-sm);
+}
+
+.browser-refused {
+  flex: none;
+  margin: 0;
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
 .pane-title {
   margin: 0 0 var(--s3);
   font-size: var(--text-md);
