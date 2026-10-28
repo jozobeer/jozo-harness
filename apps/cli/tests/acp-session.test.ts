@@ -1,6 +1,7 @@
 import { Effect, Fiber, Queue, Stream } from 'effect'
 import { describe, expect, test } from 'vitest'
-import type { UiEvent, UiHost } from '@jozo-harness/ui-host'
+import type { UiEvent } from '@jozo-harness/ui-protocol'
+import type { UiHost } from '@jozo-harness/ui-host'
 import { AcpTimeout, type AcpClient } from '@jozo-harness/acp'
 import { acpSessionPortOf, approvedOf, type AcpSessionSource } from '../src/acp.ts'
 
@@ -12,7 +13,7 @@ interface FakeHost {
   readonly cancels: () => number
 }
 
-const makeHost = (id: string): FakeHost => {
+const makeHost = (): FakeHost => {
   const queue = Effect.runSync(Queue.unbounded<UiEvent>())
   const submitted: Array<string> = []
   const approvals: Array<{ readonly callId: string; readonly approved: boolean }> = []
@@ -87,7 +88,7 @@ const scoped = <A, E>(effect: Effect.Effect<A, E, import('effect').Scope.Scope>)
 
 describe('acpSessionPortOf', () => {
   test('streams the assistant text of the prompted turn and ends with end-turn', async () => {
-    const fake = makeHost('s-1')
+    const fake = makeHost()
     const { client, calls } = clientOf(() =>
       Effect.fail(new AcpTimeout({ method: 'x', timeoutMs: 1 })),
     )
@@ -134,7 +135,7 @@ describe('acpSessionPortOf', () => {
   })
 
   test('asks the editor for permission and allows the call when it answers allow-once', async () => {
-    const fake = makeHost('s-1')
+    const fake = makeHost()
     const { client, calls } = clientOf(() =>
       Effect.succeed({ outcome: { outcome: 'selected', optionId: 'allow-once' } }),
     )
@@ -170,7 +171,7 @@ describe('acpSessionPortOf', () => {
   })
 
   test('refuses the call when the editor never answers', async () => {
-    const fake = makeHost('s-1')
+    const fake = makeHost()
     const { client } = clientOf(() =>
       Effect.fail(new AcpTimeout({ method: 'session/request_permission', timeoutMs: 5 })),
     )
@@ -190,7 +191,7 @@ describe('acpSessionPortOf', () => {
   })
 
   test('refuses the call when the editor answers with a rejection', async () => {
-    const fake = makeHost('s-1')
+    const fake = makeHost()
     const { client } = clientOf(() =>
       Effect.succeed({ outcome: { outcome: 'selected', optionId: 'reject-once' } }),
     )
@@ -210,7 +211,7 @@ describe('acpSessionPortOf', () => {
   })
 
   test('cancels the running turn and answers the prompt as cancelled', async () => {
-    const fake = makeHost('s-1')
+    const fake = makeHost()
     const { client } = clientOf(() => Effect.fail(new AcpTimeout({ method: 'x', timeoutMs: 1 })))
     const port = acpSessionPortOf(sourceOf(fake.host))
 
@@ -233,7 +234,7 @@ describe('acpSessionPortOf', () => {
   })
 
   test('ignores the end of a turn that ran before this prompt', async () => {
-    const fake = makeHost('s-1')
+    const fake = makeHost()
     const { client } = clientOf(() => Effect.fail(new AcpTimeout({ method: 'x', timeoutMs: 1 })))
     const port = acpSessionPortOf(sourceOf(fake.host))
 

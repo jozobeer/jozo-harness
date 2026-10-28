@@ -30,6 +30,7 @@
   },
   "devDependencies": {
     "@jozo-harness/process": "workspace:*",
-    "@jozo-harness/test-support-stub": "workspace:*"
+    "@jozo-harness/test-support-stub": "workspace:*",
+    "@jozo-harness/ui-protocol": "workspace:*"
   }
 }

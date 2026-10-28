@@ -254,6 +254,9 @@ importers:
       '@jozo-harness/test-support-stub':
         specifier: workspace:*
         version: link:../../packages/test-support/stub
+      '@jozo-harness/ui-protocol':
+        specifier: workspace:*
+        version: link:../../packages/ui/protocol
 
   apps/tui:
     dependencies:

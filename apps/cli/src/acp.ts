@@ -1,6 +1,7 @@
 import { Deferred, Effect, Stream } from 'effect'
 import type { Scope } from 'effect'
 import type { UiHost } from '@jozo-harness/ui-host'
+import type { UiEvent } from '@jozo-harness/ui-protocol'
 import {
   DEFAULT_PERMISSION_TIMEOUT_MS,
   type AcpSessionHost,
@@ -106,49 +107,54 @@ export const acpSessionPortOf = (
           yield* session.host.approve(callId, approvedOf(answer))
         })
 
-      const onEvent = (event: {
-        readonly kind: 'session' | 'stream'
-        readonly event?: unknown
-      }): Effect.Effect<void> =>
+      /** Whether the prompt that is waiting also owns the turn being reported. */
+      const ownsTurn = (): boolean => turn !== undefined && turnStarted
+
+      const forwardAssistantText = (data: unknown): Effect.Effect<void> =>
         Effect.gen(function* () {
-          if (event.kind !== 'session' || !isRecord(event.event)) return
-          const sessionEvent = event.event
-          const type = sessionEvent['type']
-          if (type === 'turn/start') {
-            if (turn !== undefined) turnStarted = true
-            return
-          }
-          if (type === 'turn/end') {
-            if (turn === undefined || !turnStarted) return
-            yield* settle({ stopReason: cancelled ? 'cancelled' : 'end-turn' })
-            return
-          }
-          if (type === 'assistant/message') {
-            if (turn === undefined || !turnStarted) return
-            const text = textOf(sessionEvent['data'])
-            if (text === undefined) return
-            yield* client.notify('session/update', {
-              sessionId: session.id,
-              update: {
-                sessionUpdate: 'agent_message_chunk',
-                content: { type: 'text', text },
-              },
-            })
-            return
-          }
-          if (type === 'safety/approval/requested' && isRecord(sessionEvent['data'])) {
-            const data = sessionEvent['data']
-            const callId = data['callId']
-            const tool = data['tool']
-            const reason = data['reason']
-            if (typeof callId !== 'string' || typeof tool !== 'string') return
-            yield* askPermission(callId, tool, typeof reason === 'string' ? reason : '')
-          }
+          if (!ownsTurn()) return
+          const text = textOf(data)
+          if (text === undefined) return
+          yield* client.notify('session/update', {
+            sessionId: session.id,
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              content: { type: 'text', text },
+            },
+          })
         })
 
-      yield* Stream.runForEach(session.host.events, (event) =>
-        onEvent(event as { readonly kind: 'session' | 'stream'; readonly event?: unknown }),
-      ).pipe(Effect.forkScoped)
+      const askForApproval = (data: unknown): Effect.Effect<void> => {
+        if (!isRecord(data)) return Effect.void
+        const callId = data['callId']
+        const tool = data['tool']
+        const reason = data['reason']
+        if (typeof callId !== 'string' || typeof tool !== 'string') return Effect.void
+        return askPermission(callId, tool, typeof reason === 'string' ? reason : '')
+      }
+
+      const onTurnEvent = (type: string, data: unknown): Effect.Effect<void> => {
+        switch (type) {
+          case 'turn/start':
+            if (turn !== undefined) turnStarted = true
+            return Effect.void
+          case 'turn/end':
+            return ownsTurn()
+              ? settle({ stopReason: cancelled ? 'cancelled' : 'end-turn' })
+              : Effect.void
+          case 'assistant/message':
+            return forwardAssistantText(data)
+          case 'safety/approval/requested':
+            return askForApproval(data)
+          default:
+            return Effect.void
+        }
+      }
+
+      const onEvent = (event: UiEvent): Effect.Effect<void> =>
+        event.kind === 'session' ? onTurnEvent(event.event.type, event.event.data) : Effect.void
+
+      yield* Stream.runForEach(session.host.events, onEvent).pipe(Effect.forkScoped)
 
       const host: AcpSessionHost = {
         id: session.id,

@@ -109,7 +109,7 @@ export interface AcpHandlerRegistration {
   /** Decoded before the handler runs, so a bad argument answers -32602 rather than reaching it. */
   readonly params?: Schema.ConstraintDecoder<unknown>
   /** A handler may wait: a turn answers when the loop is done with it. */
-  readonly handle: (params: unknown) => unknown | Promise<unknown>
+  readonly handle: (params: unknown) => unknown
 }
 
 /**
