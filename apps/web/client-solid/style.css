@@ -520,6 +520,36 @@
     font-size: var(--text-xs);
   }
 
+  .tool-card[data-density='compact'] .tool-line {
+    grid-template-columns: 14px minmax(0, 1fr) 3.5em;
+  }
+
+  .skill-card[data-density='compact'] .tool-line {
+    grid-template-columns: 14px 3.5em minmax(0, 1fr) 3.5em;
+  }
+
+  .tool-card .tool-args,
+  .tool-card .tool-peek {
+    color: var(--dim);
+    font-style: italic;
+  }
+
+  .tool-card .tool-result-body,
+  .skill-card .skill-description-body {
+    margin: 4px 0 4px 4.1em;
+    color: var(--dim);
+    font-size: var(--text-xs);
+  }
+
+  .tool-card .tool-args-full {
+    max-height: 8rem;
+    margin: 4px 0 4px 4.1em;
+    color: var(--dim);
+    font-size: var(--text-xs);
+    overflow: auto;
+    white-space: pre-wrap;
+  }
+
   .workflow-card {
     margin: 3px 0;
     font-family: var(--mono);
@@ -1601,8 +1631,29 @@
   .column-head {
     flex: none;
     display: flex;
+    align-items: center;
+    gap: var(--s2);
     padding: var(--s2) var(--s4);
     border-bottom: 1px solid var(--line);
+  }
+
+  .density {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: var(--s2);
+    margin-left: auto;
+    color: var(--dim);
+    font-size: var(--text-xs);
+  }
+
+  .density-select {
+    padding: 1px 4px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text);
+    font: inherit;
   }
 
   .lens {

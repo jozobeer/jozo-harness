@@ -6,6 +6,7 @@ import { ContextPane } from './components/context-pane.tsx'
 import { Conversation } from './components/conversation.tsx'
 import { LensSwitch } from './components/lens-switch.tsx'
 import { Status } from './components/status.tsx'
+import { ToolDensitySwitch } from './components/tool-density-switch.tsx'
 import { ShortcutsContext, ShortcutsDialog, createShortcuts } from './components/shortcuts.tsx'
 import { Waterfall } from './components/waterfall.tsx'
 import { LENS_KEY, lensFrom, type Lens } from './lens.ts'
@@ -33,6 +34,8 @@ import {
 import { boundChord, chordLabel, matches, shortcutOf, type ShortcutId } from './shortcuts.ts'
 import { createSessionStore, type SessionStore } from './store.ts'
 import { SeenContext, createSeen } from './seen.ts'
+import { ToolDensityContext } from './tool-density-choice.ts'
+import { TOOL_DENSITY_KEY, toolDensityFrom, type ToolDensity } from './tool-density.ts'
 
 /** How far the arrow keys move the boundary between the rail and the page. */
 const KEY_STEP = 8
@@ -70,6 +73,9 @@ export const App = (props: { store?: SessionStore; lens?: Lens }) => {
   }
   const t = (key: MessageKey): string => message(locale(), key)
   const [lens, setLens] = createSignal(props.lens ?? lensFrom(localStorage.getItem(LENS_KEY)))
+  const [density, setDensity] = createSignal(
+    toolDensityFrom(localStorage.getItem(TOOL_DENSITY_KEY)),
+  )
   const [busyEnter, setBusyEnter] = createSignal(keptBusyEnter())
   const [railWidth, setRailWidth] = createSignal(railWidthFrom(localStorage.getItem(RAIL_KEY)))
   const [folded, setFolded] = createSignal(
@@ -87,6 +93,11 @@ export const App = (props: { store?: SessionStore; lens?: Lens }) => {
   const choose = (next: Lens): void => {
     setLens(next)
     localStorage.setItem(LENS_KEY, next)
+  }
+  /** The tool line's density outlives the page, as the lens and the theme do. */
+  const chooseDensity = (next: ToolDensity): void => {
+    setDensity(next)
+    localStorage.setItem(TOOL_DENSITY_KEY, next)
   }
   /** The busy-Enter choice outlives the page, as the lens and the theme do. */
   const chooseBusyEnter = (mode: SubmitMode): void => {
@@ -173,87 +184,92 @@ export const App = (props: { store?: SessionStore; lens?: Lens }) => {
   const seen = createSeen(() => store.state().sessionId)
   return (
     <LocaleContext.Provider value={{ locale, choose: chooseLocale }}>
-      <ShortcutsContext.Provider value={shortcuts}>
-        <SeenContext.Provider value={seen}>
-          <header id="status" aria-live="polite" style={stripRoom(stripWidth())}>
-            <button
-              id="rail-fold"
-              class="rail-fold"
-              type="button"
-              aria-controls="sidebar"
-              aria-expanded={railOpen()}
-              aria-label={t(railState() === 'open' ? 'rail.hide' : 'rail.show')}
-              title={t(railState() === 'open' ? 'rail.hide' : 'rail.show') + hintOf('rail.toggle')}
-              onClick={toggleRail}
-            >
-              {folded() ? '»' : '«'}
-            </button>
-            <button
-              id="shortcuts-open"
-              class="shortcuts-open"
-              type="button"
-              aria-label={t('shortcuts.title')}
-              title={t('shortcuts.openHint') + hintOf('shortcuts.open')}
-              onClick={() => setPanel(true)}
-            >
-              {keyOf('shortcuts.open')}
-            </button>
-            <Status
-              store={store}
-              drawer={drawer()}
-              onDrawer={() => {
-                setDrawer(!drawer())
-              }}
-            />
-          </header>
-          <div
-            id="shell"
-            data-rail={railState()}
-            data-drawer={drawerAttr(drawer())}
-            style={'--rail-w: ' + String(railWidth()) + 'px'}
-          >
-            <aside id="sidebar">
-              <Board store={store} />
-            </aside>
+      <ToolDensityContext.Provider value={{ density, choose: chooseDensity }}>
+        <ShortcutsContext.Provider value={shortcuts}>
+          <SeenContext.Provider value={seen}>
+            <header id="status" aria-live="polite" style={stripRoom(stripWidth())}>
+              <button
+                id="rail-fold"
+                class="rail-fold"
+                type="button"
+                aria-controls="sidebar"
+                aria-expanded={railOpen()}
+                aria-label={t(railState() === 'open' ? 'rail.hide' : 'rail.show')}
+                title={
+                  t(railState() === 'open' ? 'rail.hide' : 'rail.show') + hintOf('rail.toggle')
+                }
+                onClick={toggleRail}
+              >
+                {folded() ? '»' : '«'}
+              </button>
+              <button
+                id="shortcuts-open"
+                class="shortcuts-open"
+                type="button"
+                aria-label={t('shortcuts.title')}
+                title={t('shortcuts.openHint') + hintOf('shortcuts.open')}
+                onClick={() => setPanel(true)}
+              >
+                {keyOf('shortcuts.open')}
+              </button>
+              <Status
+                store={store}
+                drawer={drawer()}
+                onDrawer={() => {
+                  setDrawer(!drawer())
+                }}
+              />
+            </header>
             <div
-              id="rail-resize"
-              role="separator"
-              aria-orientation="vertical"
-              aria-label={t('rail.resize')}
-              aria-valuemin={RAIL_MIN}
-              aria-valuemax={RAIL_MAX}
-              aria-valuenow={railWidth()}
-              tabIndex={0}
-              onPointerDown={drag}
-              onKeyDown={resizeKeys}
-            />
-            <div id="main" data-lens={lens()}>
-              <div class="column-head">
-                <LensSwitch lens={lens()} onChoose={choose} />
-              </div>
-              <Conversation store={store} />
-              <Waterfall store={store} live={lens() === 'timeline'} />
-              <Composer store={store} busyEnter={busyEnter()} onBusyEnter={chooseBusyEnter} />
-            </div>
-            <aside
-              id="context"
-              aria-label={t('context.title')}
-              ref={(element) => {
-                context = element
-              }}
+              id="shell"
+              data-rail={railState()}
+              data-drawer={drawerAttr(drawer())}
+              style={'--rail-w: ' + String(railWidth()) + 'px'}
             >
-              <ContextPane store={store} />
-            </aside>
-          </div>
-        </SeenContext.Provider>
-        <Show when={panel()}>
-          <ShortcutsDialog
-            onClose={() => {
-              setPanel(false)
-            }}
-          />
-        </Show>
-      </ShortcutsContext.Provider>
+              <aside id="sidebar">
+                <Board store={store} />
+              </aside>
+              <div
+                id="rail-resize"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label={t('rail.resize')}
+                aria-valuemin={RAIL_MIN}
+                aria-valuemax={RAIL_MAX}
+                aria-valuenow={railWidth()}
+                tabIndex={0}
+                onPointerDown={drag}
+                onKeyDown={resizeKeys}
+              />
+              <div id="main" data-lens={lens()}>
+                <div class="column-head">
+                  <LensSwitch lens={lens()} onChoose={choose} />
+                  <ToolDensitySwitch density={density()} onChoose={chooseDensity} />
+                </div>
+                <Conversation store={store} />
+                <Waterfall store={store} live={lens() === 'timeline'} />
+                <Composer store={store} busyEnter={busyEnter()} onBusyEnter={chooseBusyEnter} />
+              </div>
+              <aside
+                id="context"
+                aria-label={t('context.title')}
+                ref={(element) => {
+                  context = element
+                }}
+              >
+                <ContextPane store={store} />
+              </aside>
+            </div>
+          </SeenContext.Provider>
+          <Show when={panel()}>
+            <ShortcutsDialog
+              onClose={() => {
+                setPanel(false)
+              }}
+            />
+          </Show>
+        </ShortcutsContext.Provider>
+      </ToolDensityContext.Provider>
     </LocaleContext.Provider>
   )
 }

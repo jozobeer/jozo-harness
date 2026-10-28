@@ -19,6 +19,7 @@ import { EndMark } from './ui/end-mark.tsx'
 import { Icon, toolIconOf } from './ui/icon.tsx'
 import { Mug } from './ui/mug.tsx'
 import { useTranslate } from '../i18n.ts'
+import { useToolDensity } from '../tool-density-choice.ts'
 import { pagesIn, spanOf } from '../lib.ts'
 import { useSeen } from '../seen.ts'
 import type { SessionStore } from '../store.ts'
@@ -101,33 +102,109 @@ const errorLineOf = (code: string): string => {
   }
 }
 
-const Tool = (props: { tool: TraceTool }) => (
-  <details class={'tool-card ' + props.tool.status} open={props.tool.status === 'error'}>
-    <summary class="tool-line">
-      <Icon name={toolIconOf(props.tool.name)} class="tool-icon" />
-      <span class="tool-name">{props.tool.name}</span>
-      <span class="tool-summary">
-        <Linkify text={summaryBodyOf(props.tool.name, props.tool.summary)} stop />
-      </span>
-      <span class="tool-result">
-        <Linkify text={props.tool.result} stop />
-      </span>
-      <span class="tool-took">
-        {props.tool.endedAt === undefined ? '…' : spanOf(props.tool.endedAt - props.tool.startedAt)}
-      </span>
-    </summary>
-    <Show when={props.tool.errorCode !== ''}>
-      <p class="tool-error">{errorLineOf(props.tool.errorCode)}</p>
-    </Show>
-    <Show when={props.tool.output !== ''}>
-      <pre class="tool-output">
-        <Linkify text={plainText(props.tool.output)} />
-      </pre>
-    </Show>
-    <For each={pagesIn(props.tool)}>{(page) => <ToolPage page={page} />}</For>
-    <For each={props.tool.images}>{(image) => <ToolImage image={image} />}</For>
-  </details>
-)
+/** The width a folded line cuts an argument or output preview at, so it stays one row. */
+const PREVIEW_MAX = 96
+
+/** One preview on a folded line: whitespace folded, cut when it would not fit. */
+const previewOf = (text: string): string => {
+  const line = text.replace(/\s+/g, ' ').trim()
+  return line.length > PREVIEW_MAX ? line.slice(0, PREVIEW_MAX) + '…' : line
+}
+
+/** The arguments as the model wrote them, read as a few key/value pairs. */
+const argumentPreviewOf = (args: string): string => {
+  try {
+    const parsed: unknown = JSON.parse(args)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return previewOf(args)
+    }
+    return previewOf(
+      Object.entries(parsed)
+        .map(
+          ([key, value]) => key + ' ' + (typeof value === 'string' ? value : JSON.stringify(value)),
+        )
+        .join('  '),
+    )
+  } catch {
+    return previewOf(args)
+  }
+}
+
+/** The first line a result begins with, for the line that shows where a call left off. */
+const resultPreviewOf = (output: string): string =>
+  previewOf(
+    plainText(output)
+      .split('\n')
+      .find((line) => line.trim() !== '') ?? '',
+  )
+
+/**
+ * One call as the conversation draws it. The density changes what the folded
+ * line shows and whether it starts open, never the call the log recorded: a
+ * compact line keeps the name, and the result waits one fold away.
+ */
+const Tool = (props: { tool: TraceTool }) => {
+  const { density } = useToolDensity()
+  const compact = (): boolean => density() === 'compact'
+  const richer = (): boolean => density() === 'detailed' || density() === 'verbose'
+  return (
+    <details
+      class={'tool-card ' + props.tool.status}
+      data-density={density()}
+      open={props.tool.status === 'error' || density() === 'verbose'}
+    >
+      <summary class="tool-line">
+        <Icon name={toolIconOf(props.tool.name)} class="tool-icon" />
+        <span class="tool-name">{props.tool.name}</span>
+        <Show when={!compact()}>
+          <span class="tool-summary">
+            <Show
+              when={richer()}
+              fallback={<Linkify text={summaryBodyOf(props.tool.name, props.tool.summary)} stop />}
+            >
+              <span class="tool-args">
+                {argumentPreviewOf(props.tool.args) ||
+                  summaryBodyOf(props.tool.name, props.tool.summary)}
+              </span>
+            </Show>
+          </span>
+          <span class="tool-result">
+            <Show when={richer()} fallback={<Linkify text={props.tool.result} stop />}>
+              <span class="tool-peek">
+                {resultPreviewOf(props.tool.output) || props.tool.result}
+              </span>
+            </Show>
+          </span>
+        </Show>
+        <span class="tool-took">
+          {props.tool.endedAt === undefined
+            ? '…'
+            : spanOf(props.tool.endedAt - props.tool.startedAt)}
+        </span>
+      </summary>
+      <Show when={compact() && props.tool.result !== ''}>
+        <p class="tool-result-body">
+          <Linkify text={props.tool.result} stop />
+        </p>
+      </Show>
+      <Show when={props.tool.errorCode !== ''}>
+        <p class="tool-error">{errorLineOf(props.tool.errorCode)}</p>
+      </Show>
+      <Show when={density() === 'verbose' && props.tool.args !== ''}>
+        <pre class="tool-args-full">
+          <Linkify text={plainText(props.tool.args)} />
+        </pre>
+      </Show>
+      <Show when={props.tool.output !== ''}>
+        <pre class="tool-output">
+          <Linkify text={plainText(props.tool.output)} />
+        </pre>
+      </Show>
+      <For each={pagesIn(props.tool)}>{(page) => <ToolPage page={page} />}</For>
+      <For each={props.tool.images}>{(image) => <ToolImage image={image} />}</For>
+    </details>
+  )
+}
 
 /** The skill a call loaded, from the arguments the forced load wrote. */
 const skillNameOf = (args: string): string => {
@@ -145,29 +222,41 @@ const skillNameOf = (args: string): string => {
  */
 const Skill = (props: { tool: TraceTool }) => {
   const t = useTranslate()
+  const { density } = useToolDensity()
+  const compact = (): boolean => density() === 'compact'
   return (
     <details
       class={'tool-card skill-card ' + props.tool.status}
-      open={props.tool.status === 'error'}
+      data-density={density()}
+      open={props.tool.status === 'error' || density() === 'verbose'}
     >
       <summary class="tool-line">
         <Icon name="skill" class="tool-icon" />
         <span class="skill-label">{t('turn.skill')}</span>
         <span class="skill-what">
           <span class="skill-name">{skillNameOf(props.tool.args)}</span>
-          <span class="skill-source">
-            <Linkify text={props.tool.summary} stop />
+          <Show when={!compact()}>
+            <span class="skill-source">
+              <Linkify text={props.tool.summary} stop />
+            </span>
+          </Show>
+        </span>
+        <Show when={!compact()}>
+          <span class="skill-description">
+            <Linkify text={props.tool.result} stop />
           </span>
-        </span>
-        <span class="skill-description">
-          <Linkify text={props.tool.result} stop />
-        </span>
+        </Show>
         <span class="tool-took">
           {props.tool.endedAt === undefined
             ? '…'
             : spanOf(props.tool.endedAt - props.tool.startedAt)}
         </span>
       </summary>
+      <Show when={compact() && props.tool.result !== ''}>
+        <p class="skill-description-body">
+          <Linkify text={props.tool.result} stop />
+        </p>
+      </Show>
       <Show when={props.tool.output !== ''}>
         <pre class="tool-output">
           <Linkify text={plainText(props.tool.output)} />
