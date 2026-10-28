@@ -222,7 +222,7 @@ plugins:
 | `DEEPSEEK_API_KEY` | `search: deepseek` のとき `web_search` が DeepSeek Search API を呼ぶ。無い場合は tool error が `jzh auth add deepseek` を案内する |
 | `EXA_API_KEY` | `search: exa` のとき `web_search` が Exa の `/search` を呼ぶ。無い場合は tool error が `jzh auth set EXA_API_KEY` を案内する |
 | `PERPLEXITY_API_KEY` | `search: perplexity` のとき `web_search` が Perplexity の chat completions を呼ぶ。無い場合は tool error が `jzh auth set PERPLEXITY_API_KEY` を案内する |
-| `XDG_CONFIG_HOME` | `config.yaml` と `secrets.env` を置くディレクトリ |
+| `XDG_CONFIG_HOME` | `config.yaml`、`secrets.env`、`credentials.json` を置くディレクトリ |
 | `HTTP_PROXY` / `http_proxy` | http の外向き通信をこの forward proxy に送る |
 | `HTTPS_PROXY` / `https_proxy` | https の外向き通信（モデルへの接続を含む）をこの proxy に送る |
 | `NO_PROXY` / `no_proxy` | ここに挙げたホストは proxy を通らず直接つなぐ |

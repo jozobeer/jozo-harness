@@ -52,7 +52,7 @@ jzh --effort <level>           the reasoning effort to ask the provider for
 jzh --dump-config
 jzh config [set K V|init]       settings: show them, write one key, start a file
 jzh models                      list the models the provider offers
-jzh auth [add|set|list|remove]  keep the keys a provider needs
+jzh auth [add|set|ref|list|remove]  keep the keys a provider needs
 jzh web [--port N] [--public-url <https origin>]
                                 browser UI over a local server
 jzh acp                         ACP over stdio, for an editor
