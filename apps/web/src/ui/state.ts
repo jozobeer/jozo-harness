@@ -4,6 +4,7 @@ import type {
   CommandView,
   JobDetailView,
   RunStateView,
+  ScheduleView,
   SessionSummary,
   SettingsView,
   WorkspaceView,
@@ -164,6 +165,12 @@ export const withPane = (state: WebState, pane: Pane | undefined): WebState => (
   ...state,
   pane,
 })
+
+/** Replaces the schedules of the run on screen, after a page created, stopped, or removed one. */
+export const withRunSchedules = (
+  state: WebState,
+  schedules: ReadonlyArray<ScheduleView>,
+): WebState => (state.run === undefined ? state : { ...state, run: { ...state.run, schedules } })
 
 export const withRun = (state: WebState, run: RunStateView): WebState => ({ ...state, run })
 

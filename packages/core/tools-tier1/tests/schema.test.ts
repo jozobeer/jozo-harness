@@ -50,7 +50,8 @@ describe('tier 1 tool schemas', () => {
       makeStructuredOutputTool(makeStructuredOutputs()),
       ...agentTools(agents),
       makeScheduleTool({
-        events: () => [],
+        sessionId: 's1',
+        list: () => [],
         write: () => Effect.void,
         nextId: () => 'sched-1',
         now: () => 0,

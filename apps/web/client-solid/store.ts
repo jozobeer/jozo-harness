@@ -26,6 +26,7 @@ import {
   withPane,
   withProblem,
   withRun,
+  withRunSchedules,
   withSession,
   withSessions,
   withSettings,
@@ -195,7 +196,32 @@ type PanelAsk =
   | { readonly kind: 'job'; readonly id: string }
   | { readonly kind: 'stopJob'; readonly id: string }
   | { readonly kind: 'stopSubagent'; readonly id: string }
+  | {
+      readonly kind: 'scheduleCreate'
+      readonly sessionId: string
+      readonly draft: ScheduleDraft
+    }
+  | {
+      readonly kind: 'schedulePause'
+      readonly sessionId: string
+      readonly id: string
+      readonly paused: boolean
+    }
+  | { readonly kind: 'scheduleDelete'; readonly sessionId: string; readonly id: string }
   | { readonly kind: 'sessionAction'; readonly sessionId: string; readonly action: SessionAction }
+
+/** One schedule a page builds: the model's schedule tool takes the same fields. */
+export interface ScheduleDraft {
+  readonly prompt: string
+  readonly title?: string
+  readonly every?: number
+  readonly daily?: string
+  readonly weekly?: { readonly weekdays: ReadonlyArray<number>; readonly time: string }
+  readonly cron?: string
+  readonly timeZone?: string
+  readonly at?: string
+  readonly after?: number
+}
 
 /** Everything the components may ask of the session. */
 export interface SessionStore {
@@ -226,6 +252,12 @@ export interface SessionStore {
   readonly stopJob: (id: string) => void
   /** Stops one child agent the session on screen started. */
   readonly stopSubagent: (id: string) => void
+  /** Creates a schedule in the host store, the same one the model's tool writes. */
+  readonly createSchedule: (draft: ScheduleDraft) => void
+  /** Stops or restarts one schedule of the session on screen. */
+  readonly pauseSchedule: (id: string, paused: boolean) => void
+  /** Removes one schedule of the session on screen. */
+  readonly deleteSchedule: (id: string) => void
   readonly askModels: () => void
   /** Reads what the session on screen can be told, the first time the composer offers it. */
   readonly askCommands: () => void
@@ -781,6 +813,43 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
               yield* relist()
               return
             }
+            if (asked.kind === 'scheduleCreate') {
+              const schedules = yield* client.scheduleCreate({
+                sessionId: asked.sessionId,
+                ...asked.draft,
+              })
+              yield* Effect.sync(() =>
+                update((now) =>
+                  now.sessionId === asked.sessionId ? withRunSchedules(now, schedules) : now,
+                ),
+              )
+              return
+            }
+            if (asked.kind === 'schedulePause') {
+              const schedules = yield* client.schedulePause({
+                sessionId: asked.sessionId,
+                id: asked.id,
+                paused: asked.paused,
+              })
+              yield* Effect.sync(() =>
+                update((now) =>
+                  now.sessionId === asked.sessionId ? withRunSchedules(now, schedules) : now,
+                ),
+              )
+              return
+            }
+            if (asked.kind === 'scheduleDelete') {
+              const schedules = yield* client.scheduleDelete({
+                sessionId: asked.sessionId,
+                id: asked.id,
+              })
+              yield* Effect.sync(() =>
+                update((now) =>
+                  now.sessionId === asked.sessionId ? withRunSchedules(now, schedules) : now,
+                ),
+              )
+              return
+            }
             // Only the sheet asks for the settings file to keep the pick; the seat's
             // pick is the choice of this run alone.
             yield* client.setModel({
@@ -958,6 +1027,17 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     },
     stopJob: (id) => Queue.offerUnsafe(panelAsks, { kind: 'stopJob', id }),
     stopSubagent: (id) => Queue.offerUnsafe(panelAsks, { kind: 'stopSubagent', id }),
+    createSchedule: (draft) =>
+      Queue.offerUnsafe(panelAsks, { kind: 'scheduleCreate', sessionId: state().sessionId, draft }),
+    pauseSchedule: (id, paused) =>
+      Queue.offerUnsafe(panelAsks, {
+        kind: 'schedulePause',
+        sessionId: state().sessionId,
+        id,
+        paused,
+      }),
+    deleteSchedule: (id) =>
+      Queue.offerUnsafe(panelAsks, { kind: 'scheduleDelete', sessionId: state().sessionId, id }),
     askModels: () => Queue.offerUnsafe(panelAsks, { kind: 'models' }),
     askCommands: () =>
       Queue.offerUnsafe(panelAsks, { kind: 'commands', sessionId: state().sessionId }),

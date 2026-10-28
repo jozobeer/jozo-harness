@@ -24,8 +24,6 @@ export type ScheduleRule =
 /** The days a four-year search looks through before it gives a rule up for dead. */
 const MAX_DAYS = 1462
 
-const MINUTES_PER_DAY = 1440
-
 /** Which minutes, hours, month days, months, and weekdays a cron rule accepts. */
 export interface CronFields {
   readonly minutes: ReadonlySet<number>
@@ -145,18 +143,15 @@ const formatterOf = (zone: string): Intl.DateTimeFormat => {
 
 /** How one instant reads on the zone's own wall clock. */
 const wallAt = (instant: number, zone: string): Wall => {
-  const fields = new Map<string, number>()
-  for (const part of formatterOf(zone).formatToParts(new Date(instant))) {
-    if (part.type === 'literal') continue
-    fields.set(part.type, Number(part.value))
-  }
+  const parts = formatterOf(zone).formatToParts(new Date(instant))
+  const of = (type: string): number => Number(parts.find((part) => part.type === type)?.value ?? 0)
   return {
-    year: fields.get('year') ?? 1970,
-    month: fields.get('month') ?? 1,
-    day: fields.get('day') ?? 1,
-    hour: (fields.get('hour') ?? 0) % 24,
-    minute: fields.get('minute') ?? 0,
-    second: fields.get('second') ?? 0,
+    year: of('year'),
+    month: of('month'),
+    day: of('day'),
+    hour: of('hour') % 24,
+    minute: of('minute'),
+    second: of('second'),
   }
 }
 
@@ -196,11 +191,6 @@ const instantOfWall = (wall: Wall, zone: string): number | undefined => {
 const calendarDate = (year: number, month: number, day: number): Date =>
   new Date(Date.UTC(year, month - 1, day))
 
-const calendarOf = (instant: number, zone: string): Date => {
-  const wall = wallAt(instant, zone)
-  return calendarDate(wall.year, wall.month, wall.day)
-}
-
 const dayMatches = (
   fields: CronFields,
   day: Date,
@@ -232,6 +222,32 @@ const minutesOf = (fields: CronFields): ReadonlyArray<number> => {
  * after `base`. A reading the zone skips is passed over, and a rule whose fields
  * can never meet (30 February) has no answer.
  */
+/** The first instant on one wall-clock day at or after `fromMinute` and after `base`. */
+const minuteInstantsOn = (
+  fields: CronFields,
+  day: Date,
+  fromMinute: number,
+  zone: string,
+  base: number,
+): number | undefined => {
+  for (const minute of minutesOf(fields)) {
+    if (minute < fromMinute) continue
+    const instant = instantOfWall(
+      {
+        year: day.getUTCFullYear(),
+        month: day.getUTCMonth() + 1,
+        day: day.getUTCDate(),
+        hour: Math.floor(minute / 60),
+        minute: minute % 60,
+        second: 0,
+      },
+      zone,
+    )
+    if (instant !== undefined && instant > base) return instant
+  }
+  return undefined
+}
+
 const nextMatchingMinute = (
   fields: CronFields,
   base: number,
@@ -239,8 +255,7 @@ const nextMatchingMinute = (
   domRestricted: boolean,
   dowRestricted: boolean,
 ): number | undefined => {
-  const minutes = minutesOf(fields)
-  if (minutes.length === 0) return undefined
+  if (minutesOf(fields).length === 0) return undefined
   const start = wallAt(base, zone)
   const firstDay = calendarDate(start.year, start.month, start.day)
   const startMinute = start.hour * 60 + start.minute
@@ -250,17 +265,8 @@ const nextMatchingMinute = (
       Date.UTC(firstDay.getUTCFullYear(), firstDay.getUTCMonth(), firstDay.getUTCDate() + offset),
     )
     if (!dayMatches(fields, day, domRestricted, dowRestricted)) continue
-    const year = day.getUTCFullYear()
-    const month = day.getUTCMonth() + 1
-    const date = day.getUTCDate()
-    for (const minute of minutes) {
-      if (offset === 0 && minute < startMinute) continue
-      const instant = instantOfWall(
-        { year, month, day: date, hour: Math.floor(minute / 60), minute: minute % 60, second: 0 },
-        zone,
-      )
-      if (instant !== undefined && instant > base) return instant
-    }
+    const found = minuteInstantsOn(fields, day, offset === 0 ? startMinute : 0, zone, base)
+    if (found !== undefined) return found
   }
   return undefined
 }
@@ -317,6 +323,33 @@ export const zoneOf = (rule: ScheduleRule): string => {
  * The instant a rule comes around next. A rule that never comes around, or a
  * one-time rule whose instant has already gone, has no answer.
  */
+/** The next wall-clock reading of a rule that repeats. */
+const recurringDue = (
+  rule:
+    | { readonly kind: 'daily'; readonly time: string; readonly timeZone?: string }
+    | {
+        readonly kind: 'weekly'
+        readonly weekdays: ReadonlyArray<number>
+        readonly time: string
+        readonly timeZone?: string
+      }
+    | { readonly kind: 'cron'; readonly expression: string; readonly timeZone?: string },
+  base: number,
+): number | undefined => {
+  const zone = zoneOf(rule)
+  if (rule.kind === 'daily') {
+    return nextMatchingMinute(dailyFields(clockMinutes(rule.time)), base, zone, false, false)
+  }
+  if (rule.kind === 'weekly') {
+    return nextMatchingMinute(weeklyFields(rule), base, zone, false, true)
+  }
+  return nextCron(rule.expression, base, zone)
+}
+
+/**
+ * The instant a rule comes around next. A rule that never comes around, or a
+ * one-time rule whose instant has already gone, has no answer.
+ */
 export const nextDue = (
   rule: ScheduleRule,
   from: number,
@@ -326,20 +359,7 @@ export const nextDue = (
   if (rule.kind === 'every') return base + Math.max(rule.seconds, 1) * 1000
   if (rule.kind === 'at') return rule.at > from ? rule.at : undefined
   if (rule.kind === 'after') {
-    if (lastFired !== undefined) return undefined
-    return from + Math.max(rule.seconds, 1) * 1000
+    return lastFired === undefined ? from + Math.max(rule.seconds, 1) * 1000 : undefined
   }
-  if (rule.kind === 'daily') {
-    return nextMatchingMinute(
-      dailyFields(clockMinutes(rule.time)),
-      base,
-      zoneOf(rule),
-      false,
-      false,
-    )
-  }
-  if (rule.kind === 'weekly') {
-    return nextMatchingMinute(weeklyFields(rule), base, zoneOf(rule), false, true)
-  }
-  return nextCron(rule.expression, base, zoneOf(rule))
+  return recurringDue(rule, base)
 }

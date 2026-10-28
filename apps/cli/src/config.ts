@@ -7,6 +7,8 @@ export interface ConfigPaths {
   readonly directory: string
   readonly config: string
   readonly secrets: string
+  /** The host's schedules, which every session of every run shares. */
+  readonly schedules: string
 }
 
 /** The variable that moves the settings and secrets out of `~/.config`. */
@@ -23,6 +25,7 @@ export const configPaths = (
     directory,
     config: join(directory, 'config.yaml'),
     secrets: join(directory, 'secrets.env'),
+    schedules: join(directory, 'schedules.json'),
   }
 }
 

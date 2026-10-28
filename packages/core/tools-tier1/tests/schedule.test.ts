@@ -13,31 +13,39 @@ import {
   currentSchedules,
   makeScheduleTool,
   type Schedule,
-  type ScheduleLog,
+  type ScheduleHost,
   type ScheduleWrite,
 } from '../src/index.ts'
 
-/** A log the tool can write to, standing in for the session. */
-const fakeLog = (initial: ReadonlyArray<SessionEvent> = []) => {
-  const events: Array<SessionEvent> = [...initial]
-  let seq = events.length
+/** A host store the tool can write to, standing in for the shared file. */
+const fakeHost = (initial: ReadonlyArray<Schedule> = []) => {
+  let standing = [...initial]
   let counter = 0
-  const log: ScheduleLog = {
-    events: () => events,
+  const writes: Array<ScheduleWrite> = []
+  const host: ScheduleHost = {
+    sessionId: 's1',
+    list: () => standing,
     write: (write: ScheduleWrite) =>
       Effect.sync(() => {
-        seq += 1
-        const type = 'schedule/' + write.kind
-        const data = write.kind === 'deleted' ? { id: write.id } : { schedule: write.schedule }
-        events.push({ seq, time: seq, type, data } as unknown as SessionEvent)
+        writes.push(write)
+        if (write.kind === 'deleted') {
+          standing = standing.filter((schedule) => schedule.id !== write.id)
+          return
+        }
+        const exists = standing.some((schedule) => schedule.id === write.schedule.id)
+        standing = exists
+          ? standing.map((schedule) =>
+              schedule.id === write.schedule.id ? write.schedule : schedule,
+            )
+          : [...standing, write.schedule]
       }),
     nextId: () => {
       counter += 1
       return 'sched-' + String(counter)
     },
-    now: () => 1_000_000,
+    now: () => Date.parse('2026-10-14T09:00:00Z'),
   }
-  return { log, events }
+  return { host, writes, standing: () => standing }
 }
 
 const call = (
@@ -63,14 +71,14 @@ const textOf = (result: ToolExecutionResult | undefined): string =>
 
 describe('the schedule tool', () => {
   test('create records a rule and the prompt it delivers', async () => {
-    const { log, events } = fakeLog()
+    const { host, writes } = fakeHost()
 
     const result = await Effect.runPromise(
-      call(makeScheduleTool(log), { action: 'create', every: 60, prompt: 'check the build' }),
+      call(makeScheduleTool(host), { action: 'create', every: 60, prompt: 'check the build' }),
     )
 
-    expect(events).toHaveLength(1)
-    expect(events[0]?.type).toBe('schedule/created')
+    expect(writes).toHaveLength(1)
+    expect(writes[0]?.kind).toBe('created')
     expect(result?.value).toMatchObject({
       action: 'create',
       schedules: [
@@ -81,30 +89,30 @@ describe('the schedule tool', () => {
   })
 
   test('create needs one rule and a prompt', async () => {
-    const { log } = fakeLog()
+    const { host } = fakeHost()
 
     const noRule = await Effect.runPromise(
-      call(makeScheduleTool(log), { action: 'create', prompt: 'x' }),
+      call(makeScheduleTool(host), { action: 'create', prompt: 'x' }),
     )
     const twoRules = await Effect.runPromise(
-      call(makeScheduleTool(log), { action: 'create', every: 60, daily: '08:00', prompt: 'x' }),
+      call(makeScheduleTool(host), { action: 'create', every: 60, daily: '08:00', prompt: 'x' }),
     )
     const noPrompt = await Effect.runPromise(
-      call(makeScheduleTool(log), { action: 'create', every: 60 }),
+      call(makeScheduleTool(host), { action: 'create', every: 60 }),
     )
 
     expect(noRule?.isError).toBe(true)
-    expect(textOf(noRule)).toContain('every, daily, weekly, or cron')
+    expect(textOf(noRule)).toContain('every, daily, weekly, cron, at, or after')
     expect(twoRules?.isError).toBe(true)
     expect(noPrompt?.isError).toBe(true)
     expect(textOf(noPrompt)).toContain('prompt')
   })
 
   test('a rule that never comes around is refused where the model can change it', async () => {
-    const { log, events } = fakeLog()
+    const { host, writes } = fakeHost()
 
     const result = await Effect.runPromise(
-      call(makeScheduleTool(log), {
+      call(makeScheduleTool(host), {
         action: 'create',
         cron: '0 0 30 2 *',
         prompt: 'never',
@@ -113,46 +121,95 @@ describe('the schedule tool', () => {
 
     expect(result?.isError).toBe(true)
     expect(textOf(result)).toContain('never comes around')
-    expect(events).toHaveLength(0)
+    expect(writes).toHaveLength(0)
   })
 
   test('list shows what stands, and says so when nothing does', async () => {
-    const { log } = fakeLog()
+    const { host } = fakeHost()
 
-    const empty = await Effect.runPromise(call(makeScheduleTool(log), { action: 'list' }))
+    const empty = await Effect.runPromise(call(makeScheduleTool(host), { action: 'list' }))
     await Effect.runPromise(
-      call(makeScheduleTool(log), { action: 'create', daily: '08:30', prompt: 'stand up' }),
+      call(makeScheduleTool(host), { action: 'create', daily: '08:30', prompt: 'stand up' }),
     )
-    const listed = await Effect.runPromise(call(makeScheduleTool(log), { action: 'list' }))
+    const listed = await Effect.runPromise(call(makeScheduleTool(host), { action: 'list' }))
 
     expect(textOf(empty)).toBe('(no schedules)')
     expect(textOf(listed)).toBe('sched-1 daily at 08:30 -> stand up')
   })
 
   test('create records a short title, and the list shows the title', async () => {
-    const { log, events } = fakeLog()
+    const { host, writes } = fakeHost()
 
     const created = await Effect.runPromise(
-      call(makeScheduleTool(log), {
+      call(makeScheduleTool(host), {
         action: 'create',
         every: 60,
         prompt: 'run pnpm run check and report the failing jobs',
         title: 'check the build',
       }),
     )
-    const listed = await Effect.runPromise(call(makeScheduleTool(log), { action: 'list' }))
+    const listed = await Effect.runPromise(call(makeScheduleTool(host), { action: 'list' }))
 
-    expect(events[0]?.type).toBe('schedule/created')
+    expect(writes[0]?.kind).toBe('created')
     expect(created?.value).toMatchObject({ schedules: [{ title: 'check the build' }] })
     expect(textOf(created)).toBe('scheduled sched-1 every 60s -> check the build')
     expect(textOf(listed)).toBe('sched-1 every 60s -> check the build')
   })
 
+  test('create names a zone, an instant, or a delay, and refuses a past instant', async () => {
+    const { host } = fakeHost()
+    const tool = makeScheduleTool(host)
+
+    const zoned = await Effect.runPromise(
+      call(tool, {
+        action: 'create',
+        daily: '08:30',
+        timeZone: 'Asia/Tokyo',
+        prompt: 'good morning',
+      }),
+    )
+    const at = await Effect.runPromise(
+      call(tool, { action: 'create', at: '2026-10-14T18:30:00Z', prompt: 'once' }),
+    )
+    const after = await Effect.runPromise(
+      call(tool, { action: 'create', after: 90, prompt: 'soon' }),
+    )
+    const past = await Effect.runPromise(
+      call(tool, { action: 'create', at: '2020-01-01T00:00:00Z', prompt: 'gone' }),
+    )
+    const badZone = await Effect.runPromise(
+      call(tool, { action: 'create', daily: '08:30', timeZone: 'Mars/Base', prompt: 'x' }),
+    )
+
+    expect(zoned?.value).toMatchObject({ schedules: [{ rule: { timeZone: 'Asia/Tokyo' } }] })
+    expect(textOf(zoned)).toContain('(Asia/Tokyo)')
+    expect(at?.value).toMatchObject({ schedules: [{ rule: { kind: 'at' } }] })
+    expect(after?.value).toMatchObject({ schedules: [{ rule: { kind: 'after' } }] })
+    expect(past?.isError).toBe(true)
+    expect(textOf(past)).toContain('already in the past')
+    expect(badZone?.isError).toBe(true)
+    expect(textOf(badZone)).toContain('IANA')
+  })
+
+  test('pause keeps the schedule and resume brings it back', async () => {
+    const { host } = fakeHost()
+    const tool = makeScheduleTool(host)
+    await Effect.runPromise(call(tool, { action: 'create', every: 60, prompt: 'x' }))
+
+    const paused = await Effect.runPromise(call(tool, { action: 'pause', id: 'sched-1' }))
+    const listed = await Effect.runPromise(call(tool, { action: 'list' }))
+    const resumed = await Effect.runPromise(call(tool, { action: 'resume', id: 'sched-1' }))
+
+    expect(paused?.value).toMatchObject({ schedules: [{ paused: true }] })
+    expect(textOf(listed)).toBe('sched-1 every 60s -> x (paused)')
+    expect(resumed?.value).toMatchObject({ schedules: [{ paused: false }] })
+  })
+
   test('a title longer than 120 characters is refused', async () => {
-    const { log, events } = fakeLog()
+    const { host, writes } = fakeHost()
 
     const result = await Effect.runPromise(
-      call(makeScheduleTool(log), {
+      call(makeScheduleTool(host), {
         action: 'create',
         every: 60,
         prompt: 'x',
@@ -162,13 +219,13 @@ describe('the schedule tool', () => {
 
     expect(result?.isError).toBe(true)
     expect(textOf(result)).toContain('120')
-    expect(events).toHaveLength(0)
+    expect(writes).toHaveLength(0)
   })
 
   test('update changes the title', async () => {
-    const { log } = fakeLog()
+    const { host } = fakeHost()
     await Effect.runPromise(
-      call(makeScheduleTool(log), {
+      call(makeScheduleTool(host), {
         action: 'create',
         every: 600,
         prompt: 'old words',
@@ -177,49 +234,43 @@ describe('the schedule tool', () => {
     )
 
     const updated = await Effect.runPromise(
-      call(makeScheduleTool(log), { action: 'update', id: 'sched-1', title: 'new title' }),
+      call(makeScheduleTool(host), { action: 'update', id: 'sched-1', title: 'new title' }),
     )
-    const listed = await Effect.runPromise(call(makeScheduleTool(log), { action: 'list' }))
+    const listed = await Effect.runPromise(call(makeScheduleTool(host), { action: 'list' }))
 
     expect(updated?.value).toMatchObject({ schedules: [{ title: 'new title' }] })
     expect(textOf(listed)).toBe('sched-1 every 600s -> new title')
   })
 
   test('an older schedule without a title shows the first line of its prompt', async () => {
-    const legacy = {
-      seq: 1,
-      time: 1,
-      type: 'schedule/created',
-      data: {
-        schedule: {
-          id: 'old',
-          rule: { kind: 'every', seconds: 60 },
-          prompt: 'first line\nsecond line',
-          createdAt: 1,
-        },
+    const { host } = fakeHost([
+      {
+        id: 'old',
+        rule: { kind: 'every', seconds: 60 },
+        prompt: 'first line\nsecond line',
+        createdAt: 1,
       },
-    } as unknown as SessionEvent
-    const { log } = fakeLog([legacy])
+    ])
 
-    const listed = await Effect.runPromise(call(makeScheduleTool(log), { action: 'list' }))
+    const listed = await Effect.runPromise(call(makeScheduleTool(host), { action: 'list' }))
 
     expect(textOf(listed)).toBe('old every 60s -> first line')
   })
 
   test('update changes the rule or the words, delete removes it', async () => {
-    const { log, events } = fakeLog()
+    const { host } = fakeHost()
     await Effect.runPromise(
-      call(makeScheduleTool(log), { action: 'create', every: 600, prompt: 'old words' }),
+      call(makeScheduleTool(host), { action: 'create', every: 600, prompt: 'old words' }),
     )
 
     const updated = await Effect.runPromise(
-      call(makeScheduleTool(log), { action: 'update', id: 'sched-1', cron: '0 9 * * 1-5' }),
+      call(makeScheduleTool(host), { action: 'update', id: 'sched-1', cron: '0 9 * * 1-5' }),
     )
     const deleted = await Effect.runPromise(
-      call(makeScheduleTool(log), { action: 'delete', id: 'sched-1' }),
+      call(makeScheduleTool(host), { action: 'delete', id: 'sched-1' }),
     )
     const missing = await Effect.runPromise(
-      call(makeScheduleTool(log), { action: 'delete', id: 'sched-9' }),
+      call(makeScheduleTool(host), { action: 'delete', id: 'sched-9' }),
     )
 
     expect(updated?.value).toMatchObject({
@@ -227,32 +278,29 @@ describe('the schedule tool', () => {
     })
     expect(deleted?.isError).toBe(false)
     expect(missing?.isError).toBe(true)
-    expect(currentSchedules(events)).toEqual([])
+    expect(host.list()).toEqual([])
   })
 })
 
 describe('the schedules a log holds', () => {
   test('are the created and updated ones minus the deleted', () => {
-    const { log, events } = fakeLog()
-    const writeEvent = (each: ScheduleWrite) => log.write(each)
     const schedule = (id: string, prompt: string): Schedule => ({
       id,
       rule: { kind: 'every', seconds: 60 },
       prompt,
       createdAt: 1,
     })
+    const event = (seq: number, type: string, data: unknown): SessionEvent =>
+      ({ seq, time: seq, type, data }) as unknown as SessionEvent
+    const events = [
+      event(1, 'schedule/created', { schedule: schedule('a', 'first') }),
+      event(2, 'schedule/created', { schedule: schedule('b', 'second') }),
+      event(3, 'schedule/updated', { schedule: schedule('a', 'changed') }),
+      event(4, 'schedule/deleted', { id: 'b' }),
+    ]
 
-    return Effect.runPromise(
-      Effect.gen(function* () {
-        yield* writeEvent({ kind: 'created', schedule: schedule('a', 'first') })
-        yield* writeEvent({ kind: 'created', schedule: schedule('b', 'second') })
-        yield* writeEvent({ kind: 'updated', schedule: schedule('a', 'changed') })
-        yield* writeEvent({ kind: 'deleted', id: 'b' })
-
-        expect(currentSchedules(events).map((each) => [each.id, each.prompt])).toEqual([
-          ['a', 'changed'],
-        ])
-      }),
-    )
+    expect(currentSchedules(events).map((each) => [each.id, each.prompt])).toEqual([
+      ['a', 'changed'],
+    ])
   })
 })

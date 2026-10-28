@@ -75,11 +75,14 @@ import { installBuiltinCommands } from './commands.ts'
 import { listModels, modelEndpointOf } from './models.ts'
 import {
   currentGoal,
-  currentSchedules,
   goalRounds,
-  lastFiredAt,
+  installHostScheduleRuns,
+  makeScheduleStore,
   ruleText,
   scheduleTitle,
+  type Schedule,
+  type ScheduleHost,
+  type ScheduleStore,
 } from '@jozo-harness/tools-tier1'
 import { runConfig } from './config-command.ts'
 import { runContextOf } from './run-state.ts'
@@ -123,12 +126,12 @@ import {
   teamIdentityLine,
   teamIdentityOf,
   makeScheduleTool,
+  fireSchedule,
   makeWorkflowTool,
   makePluginTool,
   makeTeamTool,
   type PluginHost,
   type PluginUnmount,
-  installScheduleRuns,
   installRepeatReminders,
   startGoalRound,
   discoverSkills,
@@ -250,6 +253,10 @@ export interface CommandOptions {
   readonly allowPresetChange?: boolean
   /** Lets the model run tasks in child agents. */
   readonly subagents?: boolean
+  /** The host's schedule file; tests pass one under their own root. */
+  readonly schedulesPath?: string
+  /** The host store this run opened; filled once in `runCommand`. */
+  readonly schedules?: ScheduleStore
   /** A search provider; without one the web_search tool is not registered. */
   readonly search?: SearchHost
   readonly resume?: SessionId
@@ -506,6 +513,43 @@ const installTier1 = (
 const workflowToolFor = (agents: AgentsShape, route: string, sandbox: SandboxShape | undefined) =>
   makeWorkflowTool({ agents, route, ...(sandbox === undefined ? {} : { sandbox }) })
 
+/** The run's host store; a build without one is a wiring mistake, not a user error. */
+const scheduleStoreOf = (options: CommandOptions): ScheduleStore => {
+  const store = options.schedules
+  if (store === undefined) throw new Error('the run opened no schedule store')
+  return store
+}
+
+/** The schedules this session wrote, with any an older log recorded adopted first. */
+const schedulesOf = (agent: Agent, store: ScheduleStore): ReadonlyArray<Schedule> => {
+  store.adoptLegacy(agent.session.id, agent.session.events())
+  return store.list(agent.session.id)
+}
+
+/** One session's face on the host store: writes also keep the session log's record. */
+const scheduleHostOf = (agent: Agent, store: ScheduleStore): ScheduleHost => ({
+  sessionId: agent.session.id,
+  list: () => schedulesOf(agent, store),
+  nextId: () => store.nextId(),
+  now: () => store.now(),
+  write: (write) =>
+    Effect.gen(function* () {
+      if (write.kind === 'deleted') {
+        yield* agent.session.append('schedule/deleted', { id: write.id })
+      } else {
+        yield* agent.session.append(
+          write.kind === 'created' ? 'schedule/created' : 'schedule/updated',
+          { schedule: write.schedule },
+        )
+      }
+      yield* Effect.sync(() => store.write(write))
+    }).pipe(
+      Effect.mapError(
+        () => new ToolError({ code: 'execution', message: 'cannot record the schedule' }),
+      ),
+    ),
+})
+
 const tier1ToolList = (
   ask: AskShape,
   options: CommandOptions,
@@ -526,30 +570,7 @@ const tier1ToolList = (
   list.push(makePluginTool(pluginHost))
   if (options.search !== undefined) list.push(makeWebSearchTool(options.search))
   for (const tool of jobTools(jobs)) list.push(tool)
-  list.push(
-    makeScheduleTool({
-      events: () => agent.session.events(),
-      // One id per created schedule, counted from the log so a resume never reuses one.
-      nextId: () =>
-        'sched-' +
-        String(
-          agent.session.events().filter((event) => event.type === 'schedule/created').length + 1,
-        ),
-      now: () => Date.now(),
-      write: (each) =>
-        (each.kind === 'deleted'
-          ? agent.session.append('schedule/deleted', { id: each.id })
-          : agent.session.append(
-              each.kind === 'created' ? 'schedule/created' : 'schedule/updated',
-              { schedule: each.schedule },
-            )
-        ).pipe(
-          Effect.mapError(
-            () => new ToolError({ code: 'execution', message: 'cannot record the schedule' }),
-          ),
-        ),
-    }),
-  )
+  list.push(makeScheduleTool(scheduleHostOf(agent, scheduleStoreOf(options))))
   list.push(
     makeGoalTool({
       events: () => agent.session.events(),
@@ -1304,9 +1325,6 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
       yield* wiring.hooks.on('agent/turn-stopping', (ending: Agent) =>
         ending === wiring.agent ? startGoalRound(ending, agents) : Effect.void,
       )
-      // Standing schedules keep their own clock; one that came due while the
-      // session was away fires as soon as this run starts.
-      yield* installScheduleRuns(wiring.agent, wiring.hooks)
       // A call the model repeats with the same arguments answers the same way every
       // time; the third, fifth, and eighth each get a word in their own result.
       yield* installRepeatReminders(wiring.agent, wiring.hooks)
@@ -1457,6 +1475,7 @@ const sessionFactoryOf = (
         id,
         // A page that named no workspace gets the one this run was started in.
         cwd ?? options.cwd,
+        false,
         plugins,
       )
       if (built.kind === 'refused') {
@@ -1479,11 +1498,16 @@ const sessionFactoryOf = (
             built.runtime.efforts,
             built.runtime.agents.childrenOf(agent.id),
             built.runtime.budget,
+            scheduleStoreOf(options),
           ),
         jobOutput: (jobId: string) => jobDetailOf(built.runtime.jobs, jobId),
         stopJob: (jobId: string) => stopJobOf(built.runtime.jobs, jobId),
         stopSubagent: (childId: string) => stopSubagentOf(built.runtime.agents, agent.id, childId),
         busy: () => busyOf(agent, built.runtime.jobs, built.runtime.agents.childrenOf(agent.id)),
+        deliver: (schedule: Schedule) =>
+          fireSchedule(agent, schedule, () => scheduleStoreOf(options).now()).pipe(Effect.as(true)),
+        adoptSchedules: () =>
+          scheduleStoreOf(options).adoptLegacy(agent.session.id, agent.session.events()),
       }
     }).pipe(
       Effect.mapError((error) =>
@@ -1668,6 +1692,7 @@ const serveWebUi = (
             wiring,
           ),
           settings: settingsPortOf(options, { rows, efforts: reading.efforts }, choice),
+          schedules: scheduleStoreOf(options),
           workspaces: workspacesPortOf(options, reading.listSessions),
           commands: () => defaultCommands,
           plugins,
@@ -1691,18 +1716,25 @@ const serveWebUi = (
   })
 
 /** One built session as the page sees it; undefined when it was built without a UI. */
-const openSessionOf = (runtime: SessionRuntime): OpenSession | undefined => {
+const openSessionOf = (
+  runtime: SessionRuntime,
+  schedules: ScheduleStore,
+): OpenSession | undefined => {
   const { agent, ui, jobs, efforts, agents, budget } = runtime
   if (ui === undefined) return undefined
   return {
     summary: summaryOf(agent),
     host: ui,
     commands: () => commandViewsOf(runtime.commands, runtime.skillCatalog()),
-    runState: () => runStateOf(agent, jobs, efforts, agents.childrenOf(agent.id), budget),
+    runState: () =>
+      runStateOf(agent, jobs, efforts, agents.childrenOf(agent.id), budget, schedules),
     jobOutput: (jobId: string) => jobDetailOf(jobs, jobId),
     stopJob: (jobId: string) => stopJobOf(jobs, jobId),
     stopSubagent: (childId: string) => stopSubagentOf(agents, agent.id, childId),
     busy: () => busyOf(agent, jobs, agents.childrenOf(agent.id)),
+    deliver: (schedule) =>
+      fireSchedule(agent, schedule, () => schedules.now()).pipe(Effect.as(true)),
+    adoptSchedules: () => schedules.adoptLegacy(agent.session.id, agent.session.events()),
   }
 }
 
@@ -1805,6 +1837,8 @@ const runStateOf = (
   children: ReadonlyArray<Agent>,
   /** The line the loop compacts on; the page reports the same estimate. */
   budget: TokenBudget,
+  /** The host's schedules, which outlive this session's process. */
+  schedules: ScheduleStore,
 ): RunStateView => {
   const events = agent.session.events()
   const goal = currentGoal(events)
@@ -1837,12 +1871,13 @@ const runStateOf = (
             rounds: goalRounds(events),
             maxRounds: goal.maxGoalRounds,
           },
-    schedules: currentSchedules(events).map((schedule) => ({
+    schedules: schedulesOf(agent, schedules).map((schedule) => ({
       id: schedule.id,
       when: ruleText(schedule.rule),
       title: scheduleTitle(schedule),
       prompt: schedule.prompt,
-      lastFiredAt: lastFiredAt(events, schedule.id) ?? 0,
+      lastFiredAt: schedule.lastFiredAt ?? 0,
+      paused: schedule.paused === true,
     })),
   }
 }
@@ -1876,6 +1911,8 @@ const buildSession = (
   resume: SessionId | undefined,
   /** Where a new session starts; a resumed one keeps the workspace its header has. */
   cwd: string,
+  /** Whether this session owns the clock. A web server runs one for every session. */
+  hostClock: boolean,
   /** The run's failed wirings, when a page can report and retry them. */
   plugins?: PluginWiringState,
 ) =>
@@ -2000,6 +2037,21 @@ const buildSession = (
     // history are not something a later run may swap out without being told to.
     const problem = yield* applyPreset(agent, composition, options.allowPresetChange === true)
     if (problem !== undefined) return { kind: 'refused', message: problem } satisfies BuiltSession
+    // A run that is its own host keeps the clock, so a schedule that came due
+    // while the session was away fires as soon as this run starts. The web
+    // server owns one clock for every session instead, so switching pages never
+    // moves it and closing this agent does not stop it.
+    if (hostClock && hasEnabledRow(rows, '@jozo-harness/tools-tier1')) {
+      const store = scheduleStoreOf(options)
+      yield* installHostScheduleRuns({
+        store,
+        deliver: (schedule) =>
+          schedule.sessionId === agent.session.id
+            ? fireSchedule(agent, schedule, () => store.now()).pipe(Effect.as(true))
+            : Effect.succeed(false),
+        now: () => store.now(),
+      })
+    }
     return {
       kind: 'ready',
       runtime: {
@@ -2055,6 +2107,7 @@ const serveWebWork = (
               true,
               options.resume,
               options.cwd,
+              false,
               wiring,
             ).pipe(
               Effect.provideService(Scope.Scope, scope),
@@ -2072,7 +2125,7 @@ const serveWebWork = (
     }
     let initial: InitialSession | undefined
     if (resumed !== undefined && resumed.built.kind === 'ready') {
-      const session = openSessionOf(resumed.built.runtime)
+      const session = openSessionOf(resumed.built.runtime, scheduleStoreOf(options))
       if (session !== undefined) {
         const scope = resumed.scope
         initial = { session, close: () => Scope.close(scope, Exit.void) }
@@ -2112,6 +2165,7 @@ const serveAcpWork = (
             true,
             undefined,
             cwd,
+            false,
           ).pipe(Effect.provideService(Scope.Scope, scope))
           if (built.kind === 'refused') {
             return yield* Effect.fail(new Error(built.message))
@@ -2143,14 +2197,19 @@ const runSession = (
   work: Work,
 ) =>
   Effect.gen(function* () {
+    // One host store per run: every session this process opens writes the same
+    // file, so a schedule a page creates is the one the model lists.
+    const store =
+      options.schedules ?? makeScheduleStore(options.schedulesPath ?? configPaths().schedules)
+    const runOptions: CommandOptions = { ...options, schedules: store }
     if (work.kind === 'web') {
-      return yield* serveWebWork(options, rows, route, effort, spillBytes, layer, work)
+      return yield* serveWebWork(runOptions, rows, route, effort, spillBytes, layer, work)
     }
     if (work.kind === 'acp') {
-      return yield* serveAcpWork(options, rows, route, effort, spillBytes, layer)
+      return yield* serveAcpWork(runOptions, rows, route, effort, spillBytes, layer)
     }
     const built = yield* buildSession(
-      options,
+      runOptions,
       rows,
       route,
       effort,
@@ -2159,6 +2218,7 @@ const runSession = (
       ownsTheScreen(work),
       options.resume,
       options.cwd,
+      true,
     )
     if (built.kind === 'refused') {
       options.stderr('jzh: ' + built.message + '\n')

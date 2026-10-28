@@ -189,6 +189,7 @@ route は `opencode/<model>`、wire に送る model は `<model>` そのもの�
 | 設定 | `~/.config/jzh/config.yaml` | `--config`、`XDG_CONFIG_HOME` |
 | 秘密 | `~/.config/jzh/secrets.env`（モード 600） | `jzh auth add` / `set` / `remove` / `list` |
 | セッションログ | `~/.jzh/sessions/<id>/session.v1.jsonl` | `@jozo-harness/session-jsonl` 行の `root` |
+| 予定 | `~/.config/jzh/schedules.json` | `XDG_CONFIG_HOME`。キーは無い |
 | 公開ページ | session root の隣の `artifacts/<sessionId>/<name>.html`（既定は `~/.jzh/artifacts/...`） | `@jozo-harness/artifact` 行を足す（キーは無い）。`session-jsonl` 行の `root` を変えると一緒に移る |
 | Web UI | `127.0.0.1`。Tailscale を検出したときは tailnet IPv4 でも同じポートを listen する（`0.0.0.0` / `::` では受けない） | `--port`、設定ファイルの `port`。公開は `--public-url` |
 

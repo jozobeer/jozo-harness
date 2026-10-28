@@ -116,6 +116,7 @@ const run = (
       route: 'stub/model',
       stdout: () => undefined,
       stderr: () => undefined,
+      schedulesPath: join(root, 'schedules.json'),
       ...options,
     }),
   )

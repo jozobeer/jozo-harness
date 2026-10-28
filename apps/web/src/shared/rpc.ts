@@ -209,6 +209,58 @@ export const ScheduleViewSchema = Schema.Struct({
   prompt: Schema.String,
   /** When it last fired; 0 while it never has. */
   lastFiredAt: Schema.Number,
+  /** True while the human stopped it; absent reads as no. */
+  paused: Schema.optionalKey(Schema.Boolean),
+})
+
+export type ScheduleView = typeof ScheduleViewSchema.Type
+
+/**
+ * What a page may ask a new schedule to do. The model's schedule tool takes the
+ * same fields and is refused by the same checks, so either side creates what the
+ * other lists.
+ */
+export const ScheduleCreateSchema = Schema.Struct({
+  sessionId: Schema.String,
+  prompt: Schema.String,
+  title: Schema.optionalKey(Schema.String),
+  every: Schema.optionalKey(Schema.Int),
+  daily: Schema.optionalKey(Schema.String),
+  weekly: Schema.optionalKey(
+    Schema.Struct({ weekdays: Schema.Array(Schema.Int), time: Schema.String }),
+  ),
+  cron: Schema.optionalKey(Schema.String),
+  /** The IANA zone a daily, weekly, or cron wall clock reads. */
+  timeZone: Schema.optionalKey(Schema.String),
+  /** One absolute instant as ISO 8601 with an offset. */
+  at: Schema.optionalKey(Schema.String),
+  /** One run this many seconds from now. */
+  after: Schema.optionalKey(Schema.Int),
+})
+
+/** Creates one schedule in the host store and answers with the session's standing ones. */
+export const ScheduleCreateRpc = Rpc.make('scheduleCreate', {
+  payload: ScheduleCreateSchema,
+  success: Schema.Array(ScheduleViewSchema),
+  error: Schema.String,
+})
+
+/** Stops or restarts one schedule without forgetting it. */
+export const SchedulePauseRpc = Rpc.make('schedulePause', {
+  payload: Schema.Struct({
+    sessionId: Schema.String,
+    id: Schema.String,
+    paused: Schema.Boolean,
+  }),
+  success: Schema.Array(ScheduleViewSchema),
+  error: Schema.String,
+})
+
+/** Removes one schedule from the host store. */
+export const ScheduleDeleteRpc = Rpc.make('scheduleDelete', {
+  payload: Schema.Struct({ sessionId: Schema.String, id: Schema.String }),
+  success: Schema.Array(ScheduleViewSchema),
+  error: Schema.String,
 })
 
 /** One background command the session started. */
@@ -414,6 +466,9 @@ export const UiRpcs = RpcGroup.make(
   CommandsRpc,
   FilesRpc,
   StateRpc,
+  ScheduleCreateRpc,
+  SchedulePauseRpc,
+  ScheduleDeleteRpc,
   JobDetailRpc,
   JobStopRpc,
   SubagentStopRpc,

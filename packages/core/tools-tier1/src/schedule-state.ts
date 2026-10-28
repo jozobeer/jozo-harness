@@ -63,7 +63,8 @@ export const RuleSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literals(['after']), seconds: Schema.Int }),
 ])
 
-const ScheduleSchema = Schema.Struct({
+/** One schedule as the host file, a session event, and the tool result all spell it. */
+export const ScheduleSchema = Schema.Struct({
   id: Schema.String,
   sessionId: Schema.optionalKey(Schema.String),
   rule: RuleSchema,
@@ -136,6 +137,26 @@ export const scheduleTitle = (schedule: Schedule): string => {
   const [first = ''] = schedule.prompt.split('\n')
   return first
 }
+
+/** The fields a page and the model read back about one schedule, the same in both places. */
+export interface ScheduleView {
+  readonly id: string
+  readonly when: string
+  readonly title: string
+  readonly prompt: string
+  readonly lastFiredAt: number
+  readonly paused: boolean
+}
+
+/** One schedule as the run pane and the model's list both show it. */
+export const scheduleViewOf = (schedule: Schedule): ScheduleView => ({
+  id: schedule.id,
+  when: ruleText(schedule.rule),
+  title: scheduleTitle(schedule),
+  prompt: schedule.prompt,
+  lastFiredAt: schedule.lastFiredAt ?? 0,
+  paused: schedule.paused === true,
+})
 
 /** How a schedule reads in a list. */
 export const scheduleLine = (schedule: Schedule): string =>

@@ -598,6 +598,24 @@ jzh --resume <sessionId> "続き"                          # 同じ構成なら�
 jzh --resume <sessionId> --allow-preset-change "続き"     # 減った tool や profile の変更を受け入れる（新しい構成を記録する）
 ```
 
+## 予定を残す（schedule）
+
+モデルには `schedule` ツールを渡してある。時刻が来たら元のセッションに指示を届ける予定を、モデルが作り・一覧し・止め・消す。
+
+```
+schedule action=create prompt="pnpm run check を回して失敗を報告する" daily="08:30" timeZone="Asia/Tokyo"
+schedule action=create prompt="ビルドを確認する" after=600
+schedule action=create prompt="リリースを切る" at="2026-10-30T09:00:00+09:00"
+schedule action=list
+schedule action=pause id=sched-1
+schedule action=delete id=sched-1
+```
+
+- 規則は `every`（秒）、`daily` / `weekly` / `cron`（IANA の `timeZone` つき、省略時はこのホストの帯）、`at`（オフセット付きの絶対時刻）、`after`（今から N 秒）のどれか 1 つ。daily などの壁時計はその帯で読み、夏時間の切り替えを跨いでも同じ時刻に来る。無い帯、過去の `at`、2 月 30 日のような来ない cron は作成時に拒否する。
+- 予定はセッションログではなくホストの `schedules.json` に置き、元のセッション id を持つ。`jzh web` を開いている間は Web サーバが時計を持ち、別のセッションを見ていても元のセッションに届く。届け先のセッションが閉じていれば、その予定は期限のまま残り、次に開いたときに届く。
+- 古いセッションログに `schedule/created` として残っている予定は、そのセッションを開いたとき、またはツールが一覧したときにホストの保存域へ引き継ぐ。ログはそのまま読める記録として残る。
+- Web の Run ペインの Schedules からも同じ保存域に作れる。New で規則を選び、Stop / Resume で止め、Delete で消す。モデルのツールと同じ検査を通るので、片方で作った予定がもう片方の一覧に出る。
+
 ## セッションに話しかけずに尋ねる（コマンド）
 
 REPL・TUI・Web では、行頭が `/` の行はコマンドとしてその場で答える。モデルの turn は消費せず、`command/run` と `command/done` としてログに残る。
