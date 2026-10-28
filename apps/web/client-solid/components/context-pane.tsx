@@ -595,34 +595,50 @@ const Schedules = (props: { store: SessionStore; schedules: RunStateView['schedu
   const [weekdays, setWeekdays] = createSignal('1')
   const [zone, setZone] = createSignal('')
 
+  /** The prompt and title every draft carries; only a wall-clock kind keeps the zone. */
+  const draftBase = (zoned: boolean): ScheduleDraft => ({
+    prompt: prompt(),
+    ...(title().trim() === '' ? {} : { title: title().trim() }),
+    ...(zoned && zone().trim() !== '' ? { timeZone: zone().trim() } : {}),
+  })
+
+  /** A blank seconds field still opens the form; only a number becomes the rule. */
+  const afterDraft = (draft: ScheduleDraft, when: string): ScheduleDraft => {
+    const seconds = Number(when)
+    return Number.isFinite(seconds) ? { ...draft, after: seconds } : draft
+  }
+
+  const weeklyDraft = (draft: ScheduleDraft, days: string, time: string): ScheduleDraft => ({
+    ...draft,
+    weekly: {
+      weekdays: days
+        .split(',')
+        .map((day) => Number(day.trim()))
+        .filter((day) => Number.isInteger(day)),
+      time,
+    },
+  })
+
+  /** A time the page cannot read becomes no draft, rather than a rule the host must refuse. */
+  const atDraft = (draft: ScheduleDraft, when: string): ScheduleDraft | undefined => {
+    const at = new Date(when)
+    return Number.isNaN(at.getTime()) ? undefined : { ...draft, at: at.toISOString() }
+  }
+
   const draftOf = (): ScheduleDraft | undefined => {
     if (prompt().trim() === '') return undefined
-    const named = title().trim() === '' ? {} : { title: title().trim() }
-    const zoned = zone().trim() === '' ? {} : { timeZone: zone().trim() }
-    if (kind() === 'after') {
-      const seconds = Number(when())
-      return { prompt: prompt(), ...named, ...(Number.isFinite(seconds) ? { after: seconds } : {}) }
+    switch (kind()) {
+      case 'after':
+        return afterDraft(draftBase(false), when())
+      case 'daily':
+        return { ...draftBase(true), daily: when().trim() }
+      case 'weekly':
+        return weeklyDraft(draftBase(true), weekdays(), when().trim())
+      case 'cron':
+        return { ...draftBase(true), cron: when().trim() }
+      case 'at':
+        return atDraft(draftBase(false), when())
     }
-    if (kind() === 'daily') return { prompt: prompt(), ...named, ...zoned, daily: when().trim() }
-    if (kind() === 'weekly') {
-      return {
-        prompt: prompt(),
-        ...named,
-        ...zoned,
-        weekly: {
-          weekdays: weekdays()
-            .split(',')
-            .map((day) => Number(day.trim()))
-            .filter((day) => Number.isInteger(day)),
-          time: when().trim(),
-        },
-      }
-    }
-    if (kind() === 'cron') return { prompt: prompt(), ...named, ...zoned, cron: when().trim() }
-    const at = new Date(when())
-    return Number.isNaN(at.getTime())
-      ? undefined
-      : { prompt: prompt(), ...named, at: at.toISOString() }
   }
 
   const create = () => {

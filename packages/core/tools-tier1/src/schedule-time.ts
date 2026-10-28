@@ -248,6 +248,25 @@ const minuteInstantsOn = (
   return undefined
 }
 
+/** Whether a cron day field constrains the scan; both restricted means either may match. */
+interface DayRestrictions {
+  readonly dom: boolean
+  readonly dow: boolean
+}
+
+/** The first matching instant on one day, or nothing when the day itself is out. */
+const matchOnDay = (
+  fields: CronFields,
+  day: Date,
+  fromMinute: number,
+  zone: string,
+  base: number,
+  restricted: DayRestrictions,
+): number | undefined => {
+  if (!dayMatches(fields, day, restricted.dom, restricted.dow)) return undefined
+  return minuteInstantsOn(fields, day, fromMinute, zone, base)
+}
+
 const nextMatchingMinute = (
   fields: CronFields,
   base: number,
@@ -259,13 +278,17 @@ const nextMatchingMinute = (
   const start = wallAt(base, zone)
   const firstDay = calendarDate(start.year, start.month, start.day)
   const startMinute = start.hour * 60 + start.minute
+  const restricted: DayRestrictions = { dom: domRestricted, dow: dowRestricted }
 
   for (let offset = 0; offset < MAX_DAYS; offset += 1) {
-    const day = new Date(
-      Date.UTC(firstDay.getUTCFullYear(), firstDay.getUTCMonth(), firstDay.getUTCDate() + offset),
+    const day = calendarDate(
+      firstDay.getUTCFullYear(),
+      firstDay.getUTCMonth() + 1,
+      firstDay.getUTCDate() + offset,
     )
-    if (!dayMatches(fields, day, domRestricted, dowRestricted)) continue
-    const found = minuteInstantsOn(fields, day, offset === 0 ? startMinute : 0, zone, base)
+    // Only the first day starts partway through, at the minute the base instant reads.
+    const fromMinute = offset === 0 ? startMinute : 0
+    const found = matchOnDay(fields, day, fromMinute, zone, base, restricted)
     if (found !== undefined) return found
   }
   return undefined

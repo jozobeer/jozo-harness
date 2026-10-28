@@ -109,56 +109,66 @@ export interface ScheduleRuleArgs {
   readonly after?: number
 }
 
-/** The one rule the arguments describe, or a refusal when they describe none or several. */
-const ruleOf = (args: ScheduleRuleArgs): ScheduleRule => {
-  if (args.timeZone !== undefined && args.timeZone.trim() === '') {
-    throw refuse('timeZone is empty')
-  }
-  if (args.timeZone !== undefined && !isValidTimeZone(args.timeZone)) {
-    throw refuse('timeZone is not an IANA zone: ' + args.timeZone)
-  }
+/** The zone the call names, checked where a wall-clock rule can still be changed. */
+const zoneOfArgs = (args: ScheduleRuleArgs): string | undefined => {
   const zone = args.timeZone
-  if (zone !== undefined && !recurring(args)) {
+  if (zone === undefined) return undefined
+  if (zone.trim() === '') throw refuse('timeZone is empty')
+  if (!isValidTimeZone(zone)) throw refuse('timeZone is not an IANA zone: ' + zone)
+  // A zone only means something to a rule that reads a wall clock, so pairing it
+  // with every, at, or after would be silently ignored rather than honoured.
+  if (!recurring(args)) {
     throw refuse('timeZone goes with daily, weekly, or cron, not with every, at, or after')
   }
+  return zone
+}
+
+/** One wall-clock rule, carrying the zone only when the call named one. */
+const inZone = (
+  rule:
+    | { readonly kind: 'daily'; readonly time: string }
+    | { readonly kind: 'weekly'; readonly weekdays: ReadonlyArray<number>; readonly time: string }
+    | { readonly kind: 'cron'; readonly expression: string },
+  zone: string | undefined,
+): ScheduleRule => (zone === undefined ? rule : { ...rule, timeZone: zone })
+
+/** One absolute instant; an offset is required because a bare date names no moment. */
+const atRule = (at: string): ScheduleRule => {
+  const instant = Date.parse(at)
+  if (Number.isNaN(instant)) throw refuse('at is not a date with an offset: ' + at)
+  if (!/(?:Z|[+-]\d{2}:\d{2})$/.test(at.trim())) {
+    throw refuse('at needs an offset, like 2026-10-30T09:00:00+09:00')
+  }
+  return { kind: 'at', at: instant }
+}
+
+/** Every rule the call names, in field order, so the refusal can count them. */
+const namedRules = (
+  args: ScheduleRuleArgs,
+  zone: string | undefined,
+): Array<readonly [string, ScheduleRule]> => {
   const named: Array<readonly [string, ScheduleRule]> = []
   if (args.every !== undefined) named.push(['every', { kind: 'every', seconds: args.every }])
   if (args.daily !== undefined) {
-    named.push([
-      'daily',
-      { kind: 'daily', time: args.daily, ...(zone === undefined ? {} : { timeZone: zone }) },
-    ])
+    named.push(['daily', inZone({ kind: 'daily', time: args.daily }, zone)])
   }
   if (args.weekly !== undefined) {
     named.push([
       'weekly',
-      {
-        kind: 'weekly',
-        weekdays: args.weekly.weekdays,
-        time: args.weekly.time,
-        ...(zone === undefined ? {} : { timeZone: zone }),
-      },
+      inZone({ kind: 'weekly', weekdays: args.weekly.weekdays, time: args.weekly.time }, zone),
     ])
   }
   if (args.cron !== undefined) {
-    named.push([
-      'cron',
-      {
-        kind: 'cron',
-        expression: args.cron,
-        ...(zone === undefined ? {} : { timeZone: zone }),
-      },
-    ])
+    named.push(['cron', inZone({ kind: 'cron', expression: args.cron }, zone)])
   }
-  if (args.at !== undefined) {
-    const instant = Date.parse(args.at)
-    if (Number.isNaN(instant)) throw refuse('at is not a date with an offset: ' + args.at)
-    if (!/(?:Z|[+-]\d{2}:\d{2})$/.test(args.at.trim())) {
-      throw refuse('at needs an offset, like 2026-10-30T09:00:00+09:00')
-    }
-    named.push(['at', { kind: 'at', at: instant }])
-  }
+  if (args.at !== undefined) named.push(['at', atRule(args.at)])
   if (args.after !== undefined) named.push(['after', { kind: 'after', seconds: args.after }])
+  return named
+}
+
+/** The one rule the arguments describe, or a refusal when they describe none or several. */
+const ruleOf = (args: ScheduleRuleArgs): ScheduleRule => {
+  const named = namedRules(args, zoneOfArgs(args))
   const [first] = named
   if (first === undefined) {
     throw refuse(
@@ -224,28 +234,36 @@ const createSchedule = (args: ScheduleArgs, host: ScheduleHost) => {
   }
 }
 
+/** The fields that say when a schedule comes around; naming one replaces the rule. */
+const RULE_FIELDS = ['every', 'daily', 'weekly', 'cron', 'at', 'after'] as const
+
+const namesRule = (args: ScheduleArgs): boolean =>
+  RULE_FIELDS.some((field) => args[field] !== undefined)
+
+/** The standing schedule a call names, or nothing when the host holds no such id. */
+const findSchedule = (args: ScheduleArgs, host: ScheduleHost): Schedule | undefined =>
+  host.list().find((schedule) => schedule.id === args.id)
+
+/** What an update turns a schedule into: the fields the call omits stay as they were. */
+const changedSchedule = (args: ScheduleArgs, host: ScheduleHost, current: Schedule): Schedule => {
+  const rule = namesRule(args) ? scheduleRuleOf(args, host.now()) : current.rule
+  const title = scheduleTitleOf(args.title)
+  return {
+    ...current,
+    rule,
+    ...(args.prompt === undefined ? {} : { prompt: args.prompt }),
+    ...(title === undefined ? {} : { title }),
+    ...(args.paused === undefined ? {} : { paused: args.paused }),
+  }
+}
+
 const updateSchedule = (args: ScheduleArgs, host: ScheduleHost) => {
-  const current = host.list().find((schedule) => schedule.id === args.id)
+  const current = findSchedule(args, host)
   if (current === undefined) {
     return Effect.fail(refuse('no schedule with that id: ' + String(args.id)))
   }
-  const namesRule =
-    args.every !== undefined ||
-    args.daily !== undefined ||
-    args.weekly !== undefined ||
-    args.cron !== undefined ||
-    args.at !== undefined ||
-    args.after !== undefined
   try {
-    const rule = namesRule ? scheduleRuleOf(args, host.now()) : current.rule
-    const title = scheduleTitleOf(args.title)
-    const schedule: Schedule = {
-      ...current,
-      rule,
-      ...(args.prompt === undefined ? {} : { prompt: args.prompt }),
-      ...(title === undefined ? {} : { title }),
-      ...(args.paused === undefined ? {} : { paused: args.paused }),
-    }
+    const schedule = changedSchedule(args, host, current)
     return host
       .write({ kind: 'updated', schedule })
       .pipe(Effect.map(() => ({ action: 'update', schedules: [schedule] })))
@@ -255,7 +273,7 @@ const updateSchedule = (args: ScheduleArgs, host: ScheduleHost) => {
 }
 
 const setPaused = (args: ScheduleArgs, host: ScheduleHost, paused: boolean) => {
-  const current = host.list().find((schedule) => schedule.id === args.id)
+  const current = findSchedule(args, host)
   if (current === undefined) {
     return Effect.fail(refuse('no schedule with that id: ' + String(args.id)))
   }
@@ -266,7 +284,7 @@ const setPaused = (args: ScheduleArgs, host: ScheduleHost, paused: boolean) => {
 }
 
 const deleteSchedule = (args: ScheduleArgs, host: ScheduleHost) => {
-  const current = host.list().find((schedule) => schedule.id === args.id)
+  const current = findSchedule(args, host)
   if (current === undefined) {
     return Effect.fail(refuse('no schedule with that id: ' + String(args.id)))
   }
@@ -291,6 +309,27 @@ const renderValue = (value: ScheduleValue, host: ScheduleHost): string => {
   return 'scheduled ' + scheduleLine(schedule)
 }
 
+/** One action of the tool, routed to the function that carries it out. */
+const runAction = (
+  args: ScheduleArgs,
+  host: ScheduleHost,
+): Effect.Effect<ScheduleValue, ToolError> => {
+  switch (args.action) {
+    case 'create':
+      return createSchedule(args, host)
+    case 'list':
+      return Effect.succeed({ action: 'list', schedules: [] })
+    case 'pause':
+      return setPaused(args, host, true)
+    case 'resume':
+      return setPaused(args, host, false)
+    case 'update':
+      return updateSchedule(args, host)
+    case 'delete':
+      return deleteSchedule(args, host)
+  }
+}
+
 /**
  * Records a standing instruction whose time brings the model back. The host
  * store is what runs, so the model and the web page see and change one set.
@@ -311,12 +350,7 @@ export const makeScheduleTool = (
   },
   execute: (args) => {
     try {
-      if (args.action === 'create') return createSchedule(args, host)
-      if (args.action === 'list') return Effect.succeed({ action: 'list', schedules: [] })
-      if (args.action === 'pause') return setPaused(args, host, true)
-      if (args.action === 'resume') return setPaused(args, host, false)
-      if (args.action === 'update') return updateSchedule(args, host)
-      return deleteSchedule(args, host)
+      return runAction(args, host)
     } catch (error) {
       return Effect.fail(error instanceof ToolError ? error : refuse(String(error)))
     }

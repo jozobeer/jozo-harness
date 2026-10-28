@@ -1899,6 +1899,46 @@ const providerOfRoute = (route: string): string => {
   return index < 0 ? route : route.slice(0, index)
 }
 
+/** Streams the run's text only when no UI owns the screen. */
+const installRunOutput = (wantsUi: boolean, hooks: HookRegistry, options: CommandOptions) =>
+  wantsUi ? Effect.void : installOutput(hooks, options)
+
+/**
+ * MCP servers are opt-in. The services are read only after the row check,
+ * because a profile without the row has no MCP services in its context.
+ */
+const installMcpIfEnabled = <A, E, R>(
+  rows: ReadonlyArray<PluginRow>,
+  install: () => Effect.Effect<A, E, R>,
+): Effect.Effect<A | void, E, R> =>
+  hasEnabledRow(rows, '@jozo-harness/mcp') ? install() : Effect.void
+
+/** Who answers an escalation: the UI, the caller's hook, or a refusal that records itself. */
+const answererFor = (ui: UiHost | undefined, options: CommandOptions): ApprovalAnswerer =>
+  answerersOf(ui, options).approve ?? refuseApproval
+
+/**
+ * A run that is its own host fires what came due while it was away; the web
+ * server owns one clock for every session, so its runs leave this off.
+ */
+const installHostClock = (
+  options: CommandOptions,
+  rows: ReadonlyArray<PluginRow>,
+  agent: Agent,
+  hostClock: boolean,
+) => {
+  if (!hostClock || !hasEnabledRow(rows, '@jozo-harness/tools-tier1')) return Effect.void
+  const store = scheduleStoreOf(options)
+  return installHostScheduleRuns({
+    store,
+    deliver: (schedule) =>
+      schedule.sessionId === agent.session.id
+        ? fireSchedule(agent, schedule, () => store.now()).pipe(Effect.as(true))
+        : Effect.succeed(false),
+    now: () => store.now(),
+  })
+}
+
 /** The scoped body that builds one session: its layer, agent, tools, and UI host. */
 const buildSession = (
   options: CommandOptions,
@@ -1920,11 +1960,10 @@ const buildSession = (
     const context = yield* Layer.build(Layer.mergeAll(layer, approvalServiceLayer, askServiceLayer))
     const hooks = Context.get(context, Hooks)
     // A UI owns the screen; only the non-interactive paths stream text out.
-    if (!wantsUi) yield* installOutput(hooks, options)
-
-    if (hasEnabledRow(rows, '@jozo-harness/mcp')) {
-      yield* installMcpServers(Context.get(context, Tools), Context.get(context, McpServers))
-    }
+    yield* installRunOutput(wantsUi, hooks, options)
+    yield* installMcpIfEnabled(rows, () =>
+      installMcpServers(Context.get(context, Tools), Context.get(context, McpServers)),
+    )
 
     const agents = Context.get(context, Agents)
     const agent = yield* createAgent(agents, options, route, spillBytes, effort, resume, cwd)
@@ -1992,7 +2031,7 @@ const buildSession = (
     // An escalation asks whoever answers for this run: a UI, a caller's hook, or
     // nobody — and nobody leaves the call denied, recorded as such.
     yield* Context.get(context, Approval).serve(
-      recordingAnswerer(agent.session, answerersOf(ui, options).approve ?? refuseApproval),
+      recordingAnswerer(agent.session, answererFor(ui, options)),
     )
 
     yield* installNestedAgentsMd({
@@ -2037,21 +2076,7 @@ const buildSession = (
     // history are not something a later run may swap out without being told to.
     const problem = yield* applyPreset(agent, composition, options.allowPresetChange === true)
     if (problem !== undefined) return { kind: 'refused', message: problem } satisfies BuiltSession
-    // A run that is its own host keeps the clock, so a schedule that came due
-    // while the session was away fires as soon as this run starts. The web
-    // server owns one clock for every session instead, so switching pages never
-    // moves it and closing this agent does not stop it.
-    if (hostClock && hasEnabledRow(rows, '@jozo-harness/tools-tier1')) {
-      const store = scheduleStoreOf(options)
-      yield* installHostScheduleRuns({
-        store,
-        deliver: (schedule) =>
-          schedule.sessionId === agent.session.id
-            ? fireSchedule(agent, schedule, () => store.now()).pipe(Effect.as(true))
-            : Effect.succeed(false),
-        now: () => store.now(),
-      })
-    }
+    yield* installHostClock(options, rows, agent, hostClock)
     return {
       kind: 'ready',
       runtime: {

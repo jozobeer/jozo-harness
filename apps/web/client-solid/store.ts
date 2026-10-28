@@ -122,6 +122,13 @@ const workRunning = (
 const runIfSame = (now: WebState, sessionId: string, run: RunStateView): WebState =>
   now.sessionId === sessionId ? withRun(now, run) : now
 
+/** The host's schedules land only on the session whose page asked for them. */
+const schedulesIfSame = (
+  now: WebState,
+  sessionId: string,
+  schedules: RunStateView['schedules'],
+): WebState => (now.sessionId === sessionId ? withRunSchedules(now, schedules) : now)
+
 /** A job's output lands only on its own pane in the session it was read for. */
 const detailIfOpen = (
   now: WebState,
@@ -209,6 +216,31 @@ type PanelAsk =
     }
   | { readonly kind: 'scheduleDelete'; readonly sessionId: string; readonly id: string }
   | { readonly kind: 'sessionAction'; readonly sessionId: string; readonly action: SessionAction }
+
+/** The panel asks that read or write what the page may offer to the next turn. */
+type SettingsAsk = Extract<
+  PanelAsk,
+  { kind: 'models' | 'commands' | 'files' | 'chooseModel' | 'setModel' }
+>
+
+/** The panel asks about one running job or child agent. */
+type RunAsk = Extract<PanelAsk, { kind: 'job' | 'stopJob' | 'stopSubagent' }>
+
+/** The panel asks that write the host's schedule store. */
+type ScheduleAsk = Extract<
+  PanelAsk,
+  { kind: 'scheduleCreate' | 'schedulePause' | 'scheduleDelete' }
+>
+
+const isSettingsAsk = (asked: PanelAsk): asked is SettingsAsk =>
+  asked.kind === 'models' ||
+  asked.kind === 'commands' ||
+  asked.kind === 'files' ||
+  asked.kind === 'chooseModel' ||
+  asked.kind === 'setModel'
+
+const isRunAsk = (asked: PanelAsk): asked is RunAsk =>
+  asked.kind === 'job' || asked.kind === 'stopJob' || asked.kind === 'stopSubagent'
 
 /** One schedule a page builds: the model's schedule tool takes the same fields. */
 export interface ScheduleDraft {
@@ -761,105 +793,111 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
         ),
       )
 
+    /** The models the seat and the sheet offer, read once for both. */
+    const answerModels = () =>
+      Effect.gen(function* () {
+        const models = yield* client.models()
+        yield* Effect.sync(() => update((now) => withModels(now, models)))
+      })
+
+    /** The commands the composer offers; the answer belongs to the page that asked. */
+    const answerCommands = (asked: { readonly sessionId: string }) =>
+      Effect.gen(function* () {
+        const commands = yield* client.commands({ sessionId: asked.sessionId })
+        // A session switched while the list was on its way keeps its own list.
+        yield* Effect.sync(() =>
+          update((now) => (now.sessionId === asked.sessionId ? withCommands(now, commands) : now)),
+        )
+      })
+
+    /** The paths an @word names; a late answer never lands as another session's. */
+    const answerFiles = (asked: { readonly sessionId: string; readonly query: string }) =>
+      Effect.gen(function* () {
+        const paths = yield* client.files({ sessionId: asked.sessionId, query: asked.query })
+        yield* Effect.sync(() =>
+          update((now) =>
+            withFiles(now, { sessionId: asked.sessionId, query: asked.query, paths }),
+          ),
+        )
+      })
+
+    /** The host's schedules after a create, landing on the page whose session asked. */
+    const answerScheduleCreate = (asked: {
+      readonly sessionId: string
+      readonly draft: ScheduleDraft
+    }) =>
+      Effect.gen(function* () {
+        const schedules = yield* client.scheduleCreate({
+          sessionId: asked.sessionId,
+          ...asked.draft,
+        })
+        yield* Effect.sync(() => update((now) => schedulesIfSame(now, asked.sessionId, schedules)))
+      })
+
+    const answerSchedulePause = (asked: {
+      readonly sessionId: string
+      readonly id: string
+      readonly paused: boolean
+    }) =>
+      Effect.gen(function* () {
+        const schedules = yield* client.schedulePause({
+          sessionId: asked.sessionId,
+          id: asked.id,
+          paused: asked.paused,
+        })
+        yield* Effect.sync(() => update((now) => schedulesIfSame(now, asked.sessionId, schedules)))
+      })
+
+    const answerScheduleDelete = (asked: { readonly sessionId: string; readonly id: string }) =>
+      Effect.gen(function* () {
+        const schedules = yield* client.scheduleDelete({ sessionId: asked.sessionId, id: asked.id })
+        yield* Effect.sync(() => update((now) => schedulesIfSame(now, asked.sessionId, schedules)))
+      })
+
+    /** The settings asks, including the pick the sheet keeps across runs. */
+    const answerSettingsAsk = (asked: SettingsAsk) => {
+      if (asked.kind === 'models') return answerModels()
+      if (asked.kind === 'commands') return answerCommands(asked)
+      if (asked.kind === 'files') return answerFiles(asked)
+      return Effect.gen(function* () {
+        // Only the sheet asks for the settings file to keep the pick; the seat's
+        // pick is the choice of this run alone.
+        yield* client.setModel({ model: asked.model, remember: asked.kind === 'setModel' })
+        yield* readRunChoice()
+      })
+    }
+
+    /** The run asks: one job's output, or stopping a job or a child agent. */
+    const answerRunAsk = (asked: RunAsk) => {
+      switch (asked.kind) {
+        case 'job':
+          return showJob(asked.id)
+        case 'stopJob':
+          return stopJobAndShow(asked.id)
+        case 'stopSubagent':
+          return Effect.gen(function* () {
+            yield* client.stopSubagent({ sessionId: state().sessionId, id: asked.id })
+            yield* relist()
+          })
+      }
+    }
+
+    const answerScheduleAsk = (asked: ScheduleAsk) => {
+      if (asked.kind === 'scheduleCreate') return answerScheduleCreate(asked)
+      if (asked.kind === 'schedulePause') return answerSchedulePause(asked)
+      return answerScheduleDelete(asked)
+    }
+
+    /** Answers one panel ask; every answer is addressed to the session that asked. */
+    const answerPanelAsk = (asked: PanelAsk) => {
+      if (isSettingsAsk(asked)) return answerSettingsAsk(asked)
+      if (asked.kind === 'sessionAction') return applySessionAction(asked)
+      if (isRunAsk(asked)) return answerRunAsk(asked)
+      return answerScheduleAsk(asked)
+    }
+
     yield* Effect.forkScoped(
-      Stream.runForEach(Stream.fromQueue(panelAsks), (ask) =>
-        reported(
-          Effect.gen(function* () {
-            const asked = ask
-            if (asked.kind === 'models') {
-              const models = yield* client.models()
-              yield* Effect.sync(() => update((now) => withModels(now, models)))
-              return
-            }
-            if (asked.kind === 'commands') {
-              const commands = yield* client.commands({ sessionId: asked.sessionId })
-              // A session switched while the list was on its way keeps its own list:
-              // the answer belongs to the page that asked.
-              yield* Effect.sync(() =>
-                update((now) =>
-                  now.sessionId === asked.sessionId ? withCommands(now, commands) : now,
-                ),
-              )
-              return
-            }
-            if (asked.kind === 'files') {
-              const paths = yield* client.files({ sessionId: asked.sessionId, query: asked.query })
-              // The answer says who asked, so a late one never lands as another session's.
-              yield* Effect.sync(() =>
-                update((now) =>
-                  withFiles(now, {
-                    sessionId: asked.sessionId,
-                    query: asked.query,
-                    paths,
-                  }),
-                ),
-              )
-              return
-            }
-            if (asked.kind === 'sessionAction') {
-              yield* applySessionAction(asked)
-              return
-            }
-            if (asked.kind === 'job') {
-              yield* showJob(asked.id)
-              return
-            }
-            if (asked.kind === 'stopJob') {
-              yield* stopJobAndShow(asked.id)
-              return
-            }
-            if (asked.kind === 'stopSubagent') {
-              yield* client.stopSubagent({ sessionId: state().sessionId, id: asked.id })
-              yield* relist()
-              return
-            }
-            if (asked.kind === 'scheduleCreate') {
-              const schedules = yield* client.scheduleCreate({
-                sessionId: asked.sessionId,
-                ...asked.draft,
-              })
-              yield* Effect.sync(() =>
-                update((now) =>
-                  now.sessionId === asked.sessionId ? withRunSchedules(now, schedules) : now,
-                ),
-              )
-              return
-            }
-            if (asked.kind === 'schedulePause') {
-              const schedules = yield* client.schedulePause({
-                sessionId: asked.sessionId,
-                id: asked.id,
-                paused: asked.paused,
-              })
-              yield* Effect.sync(() =>
-                update((now) =>
-                  now.sessionId === asked.sessionId ? withRunSchedules(now, schedules) : now,
-                ),
-              )
-              return
-            }
-            if (asked.kind === 'scheduleDelete') {
-              const schedules = yield* client.scheduleDelete({
-                sessionId: asked.sessionId,
-                id: asked.id,
-              })
-              yield* Effect.sync(() =>
-                update((now) =>
-                  now.sessionId === asked.sessionId ? withRunSchedules(now, schedules) : now,
-                ),
-              )
-              return
-            }
-            // Only the sheet asks for the settings file to keep the pick; the seat's
-            // pick is the choice of this run alone.
-            yield* client.setModel({
-              model: asked.model,
-              remember: asked.kind === 'setModel',
-            })
-            yield* readRunChoice()
-          }),
-        ),
-      ),
+      Stream.runForEach(Stream.fromQueue(panelAsks), (ask) => reported(answerPanelAsk(ask))),
     )
 
     // A blank page's effort pick has no session to address, so it is its own ask:
