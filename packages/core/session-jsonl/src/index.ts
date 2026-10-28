@@ -21,6 +21,7 @@ import { readTitle, readZstdTitle } from './title.ts'
 import { expandHome, newSessionLog, resolveSessionLog, type SessionLogFile } from './paths.ts'
 import { encodeZstdFrame, splitZstdLog } from './zstd-frames.ts'
 import { replaceFile } from './replace-file.ts'
+import { acquireLock } from './lock.ts'
 import { join } from 'node:path'
 
 export interface JsonlSessionsOptions {
@@ -236,8 +237,9 @@ export function jsonlSessions(options: JsonlSessionsOptions): SessionPersistence
         type: 'session/header',
         data: header,
       }
+      const lock = yield* acquireLock(file.path, id)
       const sink = sinkFor(file, id)
-      yield* sink.append(first)
+      yield* sink.append(first).pipe(Effect.onError(() => lock.release))
       return { id, events: [first], sink }
     })
 
@@ -270,9 +272,9 @@ export function jsonlSessions(options: JsonlSessionsOptions): SessionPersistence
       }
     })
 
-  const open = (id: SessionId): Effect.Effect<OpenedSession, SessionError> =>
+  /** Reads and decodes a log. The caller holds the write lock unless it only reads. */
+  const load = (id: SessionId, file: SessionLogFile): Effect.Effect<OpenedSession, SessionError> =>
     Effect.gen(function* () {
-      const file = yield* logFileOf(id)
       const { mtimeMs } = yield* infoOf(file, id)
       const read = yield* readLog(id, file)
       if (read.text === '' && read.tornBytes > 0) {
@@ -285,6 +287,28 @@ export function jsonlSessions(options: JsonlSessionsOptions): SessionPersistence
         return { id, events: decoded.events, sink: sinkFor(file, id) }
       }
       return yield* openRepaired(id, file, read, decoded.events)
+    })
+
+  const open = (id: SessionId): Effect.Effect<OpenedSession, SessionError> =>
+    Effect.gen(function* () {
+      const file = yield* logFileOf(id)
+      const lock = yield* acquireLock(file.path, id)
+      // The lock is held until the process ends; a failed open hands it back so a
+      // later attempt is not refused by a session that never started.
+      return yield* load(id, file).pipe(Effect.onError(() => lock.release))
+    })
+
+  /**
+   * Reads a log without taking the write lock. A reader may look at a session
+   * another process is writing, so a torn tail is skipped rather than repaired:
+   * the repair belongs to the writer that holds the lock.
+   */
+  const read = (id: SessionId): Effect.Effect<ReadonlyArray<SessionEvent>, SessionError> =>
+    Effect.gen(function* () {
+      const file = yield* logFileOf(id)
+      const { mtimeMs } = yield* infoOf(file, id)
+      const log = yield* readLog(id, file)
+      return (yield* decodeEvents(id, log.text, mtimeMs, options.schemas)).events
     })
 
   const readHeader = (file: SessionLogFile): Effect.Effect<HeaderRead, SessionError> =>
@@ -346,7 +370,7 @@ export function jsonlSessions(options: JsonlSessionsOptions): SessionPersistence
       return summaries
     })
 
-  return { create, open, stat, list }
+  return { create, open, read, stat, list }
 }
 export * from './plugin.ts'
 export * from './upgrade.ts'
@@ -358,3 +382,4 @@ export * from './paths.ts'
 export * from './query.ts'
 export * from './zstd-frames.ts'
 export * from './zstd-log.ts'
+export * from './lock.ts'

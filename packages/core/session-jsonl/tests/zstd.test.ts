@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import {
   encodeZstdFrame,
   jsonlSessions,
+  LOCK_SUFFIX,
   makeSessionQuery,
   readFirstLine,
   readTitle,
@@ -244,8 +245,11 @@ describe('a log written before this build', () => {
     const text = await readFile(file, 'utf8')
     expect(text.startsWith(original)).toBe(true)
     expect(text.trim().split('\n')).toHaveLength(3)
-    // The format was not switched under the session.
-    expect(await readdir(join(root, id))).toEqual([SESSION_FILE_NAME])
+    // The format was not switched under the session, and the lock the writer
+    // holds sits beside the log rather than inside it.
+    expect((await readdir(join(root, id))).sort()).toEqual(
+      [SESSION_FILE_NAME, SESSION_FILE_NAME + LOCK_SUFFIX].sort(),
+    )
   })
 
   test('wins over a zstd log when both files exist', async () => {
