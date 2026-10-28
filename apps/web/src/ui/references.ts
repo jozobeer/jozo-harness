@@ -46,6 +46,15 @@ export const completedReference = (
 }
 
 /**
+ * The draft with one workspace path at its end, as an @ reference. The path
+ * starts a new word, so a sentence the reader already typed keeps its meaning.
+ */
+export const draftWithReference = (draft: string, path: string): string => {
+  const reference = '@' + path + ' '
+  return draft === '' || /\s$/.test(draft) ? draft + reference : draft + ' ' + reference
+}
+
+/**
  * The paths a page may show for one word: the answer belongs to the session
  * and the word that asked for it, so a late answer never lands on another one.
  */

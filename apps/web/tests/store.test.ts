@@ -617,6 +617,90 @@ describe('the page store', () => {
     )
   }, 15_000)
 
+  test('the Files pane reads one folder at a time, and a file path lands in the draft', async () => {
+    stubTheBrowser()
+    const root = await mkdtemp(join(tmpdir(), 'jzh-store-tree-'))
+    await mkdir(join(root, 'components'), { recursive: true })
+    await writeFile(join(root, 'components', 'composer.tsx'), 'export {}')
+    await writeFile(join(root, 'README.md'), '#')
+    const host = makeHost('a', root)
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          store.openFolder('')
+          yield* until(
+            () => (store.state().tree?.folders.length ?? 0) === 1,
+            'read the workspace root',
+          )
+          expect(store.state().tree?.folders[0]?.entries).toEqual([
+            { name: 'components', kind: 'directory' },
+            { name: 'README.md', kind: 'file' },
+          ])
+          // One level at a time: the root listing says nothing about what 'components' holds.
+          store.openFolder('components')
+          yield* until(
+            () => (store.state().tree?.folders.length ?? 0) === 2,
+            'read the folder the reader opened',
+          )
+          expect(store.state().tree?.folders[1]?.entries).toEqual([
+            { name: 'composer.tsx', kind: 'file' },
+          ])
+          store.referencePath('components/composer.tsx')
+          expect(store.state().draft).toBe('@components/composer.tsx ')
+          store.closeFolder('components')
+          expect(store.state().tree?.open).toEqual([''])
+        }),
+      ).pipe(Effect.ensuring(Effect.promise(() => rm(root, { recursive: true, force: true })))),
+    )
+  }, 15_000)
+
+  test('the tree reads its open folders again, so what changed on disk shows', async () => {
+    stubTheBrowser()
+    const root = await mkdtemp(join(tmpdir(), 'jzh-store-tree-'))
+    await writeFile(join(root, 'kept.ts'), 'export {}')
+    const host = makeHost('a', root)
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          store.openFolder('')
+          yield* until(() => (store.state().tree?.folders.length ?? 0) === 1, 'read the root')
+          expect(store.state().tree?.folders[0]?.entries.map((one) => one.name)).toEqual([
+            'kept.ts',
+          ])
+          yield* Effect.promise(() => writeFile(join(root, 'added.ts'), 'export {}'))
+          yield* Effect.promise(() => rm(join(root, 'kept.ts')))
+          store.refreshTree()
+          yield* until(
+            () =>
+              store
+                .state()
+                .tree?.folders[0]?.entries.map((one) => one.name)
+                .join() === 'added.ts',
+            'read the folder again',
+          )
+        }),
+      ).pipe(Effect.ensuring(Effect.promise(() => rm(root, { recursive: true, force: true })))),
+    )
+  }, 15_000)
+
+  test('a folder that can no longer be read leaves the tree and says why', async () => {
+    stubTheBrowser()
+    const root = await mkdtemp(join(tmpdir(), 'jzh-store-tree-'))
+    const host = makeHost('a', root)
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          store.openFolder('')
+          yield* until(() => (store.state().tree?.folders.length ?? 0) === 1, 'read the root')
+          store.openFolder('gone')
+          yield* until(() => (store.state().tree?.problem ?? '') !== '', 'hear the refusal')
+          expect(store.state().tree?.problem).toContain('no such folder')
+          expect(store.state().tree?.open).toEqual([''])
+        }),
+      ).pipe(Effect.ensuring(Effect.promise(() => rm(root, { recursive: true, force: true })))),
+    )
+  }, 15_000)
+
   test('the Add workspace dialog reads a folder and hears why it cannot', async () => {
     stubTheBrowser()
     const host = makeHost('a')

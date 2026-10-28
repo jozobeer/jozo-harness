@@ -47,6 +47,10 @@ import {
   withSettings,
   withSettingsProblem,
   withTheme,
+  withTreeClosed,
+  withTreeFolder,
+  withTreeOpen,
+  withTreeProblem,
   withWorkspaces,
   type Pane,
   type WebState,
@@ -54,6 +58,7 @@ import {
 import type { FontFamily, FontSize } from '../src/ui/font.ts'
 import type { Theme } from '../src/ui/theme.ts'
 import { draftOnMove, drafted } from '../src/ui/draft.ts'
+import { draftWithReference } from '../src/ui/references.ts'
 import { readDraft, writeDraft } from './drafts.ts'
 import {
   addressSession,
@@ -280,6 +285,9 @@ export type AttachAnswer =
   | { readonly kind: 'stored'; readonly attachment: Attachment }
   | { readonly kind: 'refused'; readonly message: string }
 
+/** What the file tree asked the server: one folder to read, or every open one again. */
+type TreeAsk = { readonly kind: 'read'; readonly path: string } | { readonly kind: 'refresh' }
+
 /** The panel asks about one running job or child agent. */
 type RunAsk = Extract<PanelAsk, { kind: 'job' | 'stopJob' | 'stopSubagent' }>
 
@@ -370,6 +378,17 @@ export interface SessionStore {
   readonly askFiles: (query: string) => void
   /** Reads the folders a new session may start in. */
   readonly askWorkspaces: () => void
+  /**
+   * Opens one folder of the workspace tree. A folder the page has not read is
+   * read now; one it already read is read again, so what changed on disk shows.
+   */
+  readonly openFolder: (path: string) => void
+  /** Closes one folder, keeping what it read for the next time it opens. */
+  readonly closeFolder: (path: string) => void
+  /** Reads every folder the tree has open again, so files added or removed on disk show. */
+  readonly refreshTree: () => void
+  /** Puts one workspace path into the composer as an @ reference. */
+  readonly referencePath: (path: string) => void
   /**
    * Reads one folder for the Add workspace dialog; the folders inside it, or
    * why they could not be read, go to `reply`. A blank path starts at the run's
@@ -544,6 +563,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
   /** Blank-page effort picks, which have no session to address yet. */
   const effortAsks = Effect.runSync(Queue.unbounded<string>())
   const workspaceAsks = Effect.runSync(Queue.unbounded<WorkspaceAsk>())
+  const treeAsks = Effect.runSync(Queue.unbounded<TreeAsk>())
   let following: Fiber.Fiber<void, unknown> | undefined
   const bridge = makeBridge((message) => update((current) => withProblem(current, message)))
 
@@ -1069,6 +1089,39 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       ),
     )
 
+    /**
+     * The workspace tree's folders: one listing per folder the reader opens, and
+     * one more for each open folder when the reader asks what changed. A folder
+     * that can no longer be read leaves the tree, so a folder or file removed on
+     * disk takes its row with it.
+     */
+    const readTreeFolder = (path: string) =>
+      client.workspaceDirectory({ sessionId: state().sessionId, path }).pipe(
+        Effect.tap((view) =>
+          Effect.sync(() =>
+            update((now) =>
+              withTreeFolder(now, {
+                path: view.path,
+                entries: view.entries,
+                truncated: view.truncated,
+              }),
+            ),
+          ),
+        ),
+        Effect.asVoid,
+        Effect.catchCause((cause) =>
+          Effect.sync(() => update((now) => withTreeProblem(now, path, causeText(cause)))),
+        ),
+      )
+
+    yield* Effect.forkScoped(
+      Stream.runForEach(Stream.fromQueue(treeAsks), (asked) =>
+        asked.kind === 'read'
+          ? readTreeFolder(asked.path)
+          : Effect.forEach(state().tree?.open ?? [], readTreeFolder, { concurrency: 1 }),
+      ),
+    )
+
     const settings = yield* client.settings()
     yield* Effect.sync(() => update((now) => withSettings(now, settings)))
     const editable = yield* client.runSettings()
@@ -1303,6 +1356,13 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     browseDirectories: (path, reply) =>
       Queue.offerUnsafe(workspaceAsks, { kind: 'browse', path, reply }),
     addWorkspace: (cwd) => Queue.offerUnsafe(workspaceAsks, { kind: 'add', cwd }),
+    openFolder: (path) => {
+      update((now) => withTreeOpen(now, path))
+      Queue.offerUnsafe(treeAsks, { kind: 'read', path })
+    },
+    closeFolder: (path) => update((now) => withTreeClosed(now, path)),
+    refreshTree: () => Queue.offerUnsafe(treeAsks, { kind: 'refresh' }),
+    referencePath: (path) => update((now) => withDraft(now, draftWithReference(now.draft, path))),
     chooseModel: (model) => {
       const current = state()
       // The session on screen switches with the command; the choice is the run's, so

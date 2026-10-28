@@ -12,8 +12,10 @@ import {
   withQuotes,
   withSelection,
   withTheme,
+  withTreeOpen,
   type Pane,
   type WebState,
+  type WorkspaceTree,
 } from '../../src/ui/state.ts'
 import { App } from '../app.tsx'
 import { Composer } from '../components/composer.tsx'
@@ -95,6 +97,10 @@ type Call =
   | { readonly kind: 'stopSubagent'; readonly id: string }
   | { readonly kind: 'openJob'; readonly id: string }
   | { readonly kind: 'stopJob'; readonly id: string }
+  | { readonly kind: 'openFolder'; readonly path: string }
+  | { readonly kind: 'closeFolder'; readonly path: string }
+  | { readonly kind: 'refreshTree' }
+  | { readonly kind: 'referencePath'; readonly path: string }
 
 /** What the Add workspace dialog heard about one folder. */
 type BrowseAnswer =
@@ -172,6 +178,10 @@ const makeStore = (
     chooseEffort: (effort) => calls.push({ kind: 'chooseEffort', effort }),
     act: (sessionId, action) => calls.push({ kind: 'act', sessionId, action }),
     askWorkspaces: () => calls.push({ kind: 'askWorkspaces' }),
+    openFolder: (path) => calls.push({ kind: 'openFolder', path }),
+    closeFolder: (path) => calls.push({ kind: 'closeFolder', path }),
+    refreshTree: () => calls.push({ kind: 'refreshTree' }),
+    referencePath: (path) => calls.push({ kind: 'referencePath', path }),
     addWorkspace: (cwd) => calls.push({ kind: 'addWorkspace', cwd }),
     browseDirectories: (path, reply) => {
       calls.push({ kind: 'browseDirectories', path })
@@ -4482,5 +4492,120 @@ describe('the shortcut list', () => {
 
     expect(keyOfRow('Show or hide sessions')).toBe('Ctrl+B')
     expect(localStorage.getItem(SHORTCUTS_KEY)).toBe('{}')
+  })
+})
+
+describe('the workspace file tree', () => {
+  const root = {
+    path: '',
+    entries: [
+      { name: 'apps', kind: 'directory' as const },
+      { name: 'README.md', kind: 'file' as const },
+    ],
+    truncated: false,
+  }
+  const treeOf = (overrides: Partial<WorkspaceTree> = {}): WorkspaceTree => ({
+    folders: [root],
+    open: [''],
+    problem: '',
+    ...overrides,
+  })
+
+  test('the files tab opens the workspace root and draws what it holds', () => {
+    const { store, calls } = makeStore({ pane: { kind: 'files' }, tree: treeOf() })
+    const { container } = render(() => <ContextPane store={store} />)
+
+    // The pane asks for the root itself, not for each child in turn.
+    expect(calls).toContainEqual({ kind: 'openFolder', path: '' })
+    const rows = Array.from(container.querySelectorAll('.tree-row'))
+    expect(rows.map((row) => row.textContent)).toEqual(['apps', 'README.md'])
+    expect(rows[0]?.getAttribute('aria-expanded')).toBe('false')
+    // A file has nothing to expand, so the attribute is absent rather than false.
+    expect(rows[1]?.getAttribute('aria-expanded')).toBeNull()
+  })
+
+  test('an opened folder puts its entries one level deeper', () => {
+    const { store } = makeStore({
+      pane: { kind: 'files' },
+      tree: treeOf({
+        folders: [
+          root,
+          { path: 'apps', entries: [{ name: 'main.ts', kind: 'file' }], truncated: false },
+        ],
+        open: ['', 'apps'],
+      }),
+    })
+    const { container } = render(() => <ContextPane store={store} />)
+
+    const rows = Array.from(container.querySelectorAll('.tree-row'))
+    expect(rows.map((row) => row.textContent)).toEqual(['apps', 'main.ts', 'README.md'])
+    expect(rows[1]?.getAttribute('aria-level')).toBe('2')
+    expect(rows[0]?.getAttribute('aria-expanded')).toBe('true')
+  })
+
+  test('a click on a folder opens it, and a click on an open folder closes it', () => {
+    const { store, calls, setState } = makeStore({ pane: { kind: 'files' }, tree: treeOf() })
+    const { container } = render(() => <ContextPane store={store} />)
+
+    fireEvent.click(container.querySelectorAll('.tree-name')[0] as Element)
+    expect(calls).toContainEqual({ kind: 'openFolder', path: 'apps' })
+
+    setState((now) => withTreeOpen(now, 'apps'))
+    fireEvent.click(container.querySelectorAll('.tree-name')[0] as Element)
+    expect(calls).toContainEqual({ kind: 'closeFolder', path: 'apps' })
+  })
+
+  test('a click on a file puts its path in the composer as an @ reference', () => {
+    const { store, calls } = makeStore({ pane: { kind: 'files' }, tree: treeOf() })
+    const { container } = render(() => <ContextPane store={store} />)
+
+    fireEvent.click(container.querySelectorAll('.tree-name')[1] as Element)
+    expect(calls).toContainEqual({ kind: 'referencePath', path: 'README.md' })
+  })
+
+  test('the tree reads what changed when the reader asks it to', () => {
+    const { store, calls } = makeStore({ pane: { kind: 'files' }, tree: treeOf() })
+    const { container } = render(() => <ContextPane store={store} />)
+
+    fireEvent.click(container.querySelector('#tree-refresh') as Element)
+    expect(calls).toContainEqual({ kind: 'refreshTree' })
+  })
+
+  test('the tree says why a read failed, and when a folder holds more than it lists', () => {
+    const { store } = makeStore({
+      pane: { kind: 'files' },
+      tree: treeOf({
+        folders: [{ ...root, truncated: true }],
+        problem: 'the folder is outside the workspace',
+      }),
+    })
+    const { container } = render(() => <ContextPane store={store} />)
+
+    expect(container.querySelector('.tree-problem')?.textContent).toBe(
+      'the folder is outside the workspace',
+    )
+    expect(container.textContent).toContain('more entries than the tree shows')
+  })
+
+  test('a tree that has not answered yet says it is reading, and one with nothing says so', () => {
+    const reading = makeStore({ pane: { kind: 'files' } })
+    const first = render(() => <ContextPane store={reading.store} />)
+    expect(first.container.textContent).toContain('reading the workspace')
+    cleanup()
+
+    const { store } = makeStore({
+      pane: { kind: 'files' },
+      tree: treeOf({ folders: [{ path: '', entries: [], truncated: false }] }),
+    })
+    const { container } = render(() => <ContextPane store={store} />)
+    expect(container.textContent).toContain('nothing in this folder')
+  })
+
+  test('the tab strip offers the files tab', () => {
+    const { store, calls } = makeStore({ pane: { kind: 'run' } })
+    const { container } = render(() => <ContextPane store={store} />)
+
+    fireEvent.click(container.querySelector('#files') as Element)
+    expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'files' } })
   })
 })

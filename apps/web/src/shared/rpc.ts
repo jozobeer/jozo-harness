@@ -496,6 +496,8 @@ export const WorkspaceEntrySchema = Schema.Struct({
  * One folder of the workspace tree. The page asks for one folder at a time and
  * keeps what it opened, so a deep tree costs one listing per opened folder.
  */
+export type WorkspaceEntry = typeof WorkspaceEntrySchema.Type
+
 export const WorkspaceDirectorySchema = Schema.Struct({
   /** The folder relative to the workspace root; '' is the root itself. */
   path: Schema.String,

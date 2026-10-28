@@ -371,6 +371,68 @@ body {
   font-weight: 600;
 }
 
+.tree-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--s2);
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.tree-rows {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tree-name {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  padding: 3px var(--s2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tree-name:hover {
+  background: var(--bg-hover);
+}
+
+.tree-name .icon {
+  flex: none;
+  color: var(--dim);
+}
+
+.tree-name.directory .tree-label {
+  font-weight: 600;
+}
+
+.tree-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-hint {
+  margin: var(--s2) 0 0;
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.tree-problem {
+  color: var(--danger, #c0392b);
+}
+
 .pane-label {
   display: block;
   margin: var(--s5) 0 var(--s2);
