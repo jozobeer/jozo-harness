@@ -204,6 +204,7 @@ import {
   WebError,
   detectTailnet,
   listDirectories,
+  makeOpenInApp,
   pageIsThere,
   serveWeb,
   tailnetExec,
@@ -1918,6 +1919,7 @@ const serveWebUi = (
           settings: settingsPortOf(options, facts, choice, live),
           schedules: scheduleStoreOf(options),
           workspaces: workspacesPortOf(options, reading.listSessions),
+          openInApp: makeOpenInApp(),
           readSessionEvents: reading.readSessionEvents,
           ...(options.settings?.webhooks === undefined
             ? {}

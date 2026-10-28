@@ -4,6 +4,7 @@ import type {
   CommandView,
   EditableSettingsView,
   JobDetailView,
+  OpenAppsView,
   RunStateView,
   ScheduleView,
   SessionSummary,
@@ -81,6 +82,8 @@ export interface WebState {
   readonly files: FileMatches | undefined
   /** The folders a new session may start in; undefined until the page asked. */
   readonly workspaces: Workspaces | undefined
+  /** The apps this machine can open the workspace with; undefined until the page asked. */
+  readonly openApps: OpenAppsView | undefined
   /** Which surface the right pane shows; undefined leaves the tab strip alone and the body empty. */
   readonly pane: Pane | undefined
   /** The workspace tree the right pane shows; undefined before the pane has opened it. */
@@ -166,6 +169,7 @@ export const initialState: WebState = {
   commands: undefined,
   files: undefined,
   workspaces: undefined,
+  openApps: undefined,
   pane: { kind: 'run' },
   tree: undefined,
   preview: undefined,
@@ -262,6 +266,12 @@ export const withCommands = (state: WebState, commands: ReadonlyArray<CommandVie
 export const withWorkspaces = (state: WebState, workspaces: Workspaces): WebState => ({
   ...state,
   workspaces,
+})
+
+/** The apps this machine can open the workspace with, as the server last detected them. */
+export const withOpenApps = (state: WebState, openApps: OpenAppsView): WebState => ({
+  ...state,
+  openApps,
 })
 
 /** The paths one reference word named; a late answer is tagged, so the page can tell whose it is. */

@@ -53,6 +53,7 @@ import {
   type SessionDigestSource,
 } from './references.ts'
 import { branchOf } from './git-branch.ts'
+import { noOpenInApp, type OpenInAppPort } from './open-in-app.ts'
 import type { SettingsPort } from './settings.ts'
 import { staticResponse } from './static.ts'
 import { makeStoreEvents, type StoreEvents } from './store-events.ts'
@@ -80,6 +81,11 @@ export interface ServeWebOptions {
   readonly settings: SettingsPort
   /** The folders a page may start a session in. */
   readonly workspaces: WorkspacesPort
+  /**
+   * What the page may open the session's workspace with. Absent keeps the route
+   * answering that this run has no app, so a test or an embedder starts nothing.
+   */
+  readonly openInApp?: OpenInAppPort
   /**
    * Rules an external event may start a session with. Absent refuses every
    * /hooks/ path, so the route is off until the settings file names a rule.
@@ -123,6 +129,7 @@ const handlersOf = (
   registry: SessionRegistry,
   settings: SettingsPort,
   workspaces: WorkspacesPort,
+  openInApp: OpenInAppPort,
   readSessionEvents: (id: string) => Effect.Effect<ReadonlyArray<SessionEvent>, SessionError>,
   commands: () => ReadonlyArray<CommandView>,
   store: StoreEvents,
@@ -307,6 +314,18 @@ const handlersOf = (
             : registry.sessionOf(sessionId)?.summary.cwd
         if (cwd === undefined) return yield* Effect.fail('the session is not open')
         return yield* listWorkspaceDirectory(cwd, path)
+      }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
+    openApps: () => Effect.succeed(openInApp.apps()),
+    openInApp: ({ sessionId, app, path }) =>
+      Effect.gen(function* () {
+        // The session names its own directory; the blank page opens the run's own.
+        const cwd =
+          sessionId === ''
+            ? (yield* settings.read()).cwd
+            : registry.sessionOf(sessionId)?.summary.cwd
+        if (cwd === undefined) return yield* Effect.fail('the session is not open')
+        yield* openInApp.open({ app, root: cwd, path })
+        return true
       }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
     workspaceFile: ({ sessionId, path }) =>
       Effect.gen(function* () {
@@ -845,6 +864,7 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
             registry,
             options.settings,
             options.workspaces,
+            options.openInApp ?? noOpenInApp,
             options.readSessionEvents,
             options.commands,
             store,

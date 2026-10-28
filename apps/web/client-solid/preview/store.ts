@@ -311,6 +311,8 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
           items: [...(now.workspaces?.items ?? []), { cwd, lastUsedAt: 0 }],
         }),
       ),
+    // The preview has no machine to open: the status strip says so from its state.
+    openWorkspace: () => undefined,
     // The preview has one session at a time, so the pick is both the switch and
     // the choice the ones opened after it would start from.
     chooseModel: (picked) => {

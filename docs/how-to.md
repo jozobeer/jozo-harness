@@ -415,6 +415,14 @@ The user's own message follows:
 
 docx / pptx / xlsx は、PATH に LibreOffice（`soffice`）がある環境では PDF に変換して同じペインに出す。変換できない環境や変換に失敗したときは理由を出し、元のファイルはそのまま残る。木は `node_modules` と `.git` を出さず、ワークスペースの `.gitignore` / `.ignore` に従う。
 
+### ワークスペースを外部アプリで開く
+
+ステータスバーのパスの右にあるアプリの選択と「開く」で、いまのセッションの作業ディレクトリを、サーバを動かしている機械の Finder / Visual Studio Code / Terminal（Linux は Files / Visual Studio Code / Cursor）で開ける。開くのはこの操作だけで、モデルの turn は始まらない。
+
+選択肢はサーバが起動時に検出したものだけで、ページからコマンド名や引数を指定することはできない。macOS は `/Applications` と `~/Applications` の bundle と、Terminal の標準の場所を見る。Linux は `xdg-open` / `code` / `cursor` が PATH にあるかを見る。どれも無ければ理由を出し、押しても何も起きないボタンは置かない。
+
+サーバは渡されたパスをワークスペースの根に解決し、`realpath` で symlink を解いた後も根の内側にあることを確かめる。絶対パス・制御文字・shell のメタ文字（`;` `&` `|` `$` など）・外へ出る symlink は起動前に断る。起動は `spawn` に argv 配列を渡し、shell を介さない。
+
 ### 提出された計画を会話のカードで読む
 
 `exit_plan_mode` に渡した計画は、会話の中にカードとして残る。カードは verdict（回答待ち・承認済み・差し戻し）と計画の本文を持ち、承認と差し戻しの選択肢は composer の質問と同じ `ask` の経路で答える。回答はログに残るので、ページを開き直しても、`--resume` で再開しても同じカードが読める。差し戻しの言葉はそのままモデルへ届く。

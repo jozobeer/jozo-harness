@@ -616,6 +616,43 @@ export const SaveRunSettingsRpc = Rpc.make('saveRunSettings', {
   error: Schema.String,
 })
 
+/** One app a session's workspace can be handed to on the machine running the server. */
+export const OpenAppSchema = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+})
+
+export type OpenAppView = typeof OpenAppSchema.Type
+
+/** The detected apps, or the reason the machine has none. */
+export const OpenAppsViewSchema = Schema.Struct({
+  apps: Schema.Array(OpenAppSchema),
+  reason: Schema.optionalKey(Schema.String),
+})
+
+export type OpenAppsView = typeof OpenAppsViewSchema.Type
+
+/** Reads the apps this machine can open a workspace with. No app is an answer, not a failure. */
+export const OpenAppsRpc = Rpc.make('openApps', {
+  success: OpenAppsViewSchema,
+  error: Schema.String,
+})
+
+/**
+ * Opens one path inside the session's workspace with one detected app. The path
+ * is relative to the workspace; '' is the workspace itself. This is the reader's
+ * own action on their machine, so it starts no turn.
+ */
+export const OpenInAppRpc = Rpc.make('openInApp', {
+  payload: Schema.Struct({
+    sessionId: Schema.String,
+    app: Schema.String,
+    path: Schema.String,
+  }),
+  success: Schema.Boolean,
+  error: Schema.String,
+})
+
 export const UiRpcs = RpcGroup.make(
   SessionsRpc,
   OpenRpc,
@@ -631,6 +668,8 @@ export const UiRpcs = RpcGroup.make(
   FilesRpc,
   WorkspaceDirectoryRpc,
   WorkspaceFileRpc,
+  OpenAppsRpc,
+  OpenInAppRpc,
   AttachRpc,
   StateRpc,
   ScheduleCreateRpc,

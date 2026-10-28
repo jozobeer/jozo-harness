@@ -211,6 +211,46 @@ body {
   white-space: nowrap;
 }
 
+/* The app picker and its button stay one compact control beside the path. */
+#status .open-app {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+#status .open-app select {
+  max-width: 16ch;
+  padding: 1px 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--foam);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+
+#status .open-app button {
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+#status .open-app button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+#status .open-app.none {
+  color: var(--dim);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
 #status .model {
   overflow: hidden;
   color: var(--select);

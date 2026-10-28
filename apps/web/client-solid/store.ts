@@ -36,6 +36,7 @@ import {
   withFontFamily,
   withFontSize,
   withModels,
+  withOpenApps,
   withOpened,
   withPane,
   withPreviewProblem,
@@ -410,6 +411,11 @@ export interface SessionStore {
   /** Registers one more folder a new session may start in, and reads the list again. */
   readonly addWorkspace: (cwd: string) => void
   /**
+   * Opens the session's workspace in one detected app. It is the reader's own
+   * action on their machine, so the server runs it without starting a turn.
+   */
+  readonly openWorkspace: (app: string) => void
+  /**
    * Picks the route for this session and for the sessions opened from now on.
    * Nothing is written down, so the runs after this one keep their own choice.
    */
@@ -575,6 +581,10 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
   /** Blank-page effort picks, which have no session to address yet. */
   const effortAsks = Effect.runSync(Queue.unbounded<string>())
   const workspaceAsks = Effect.runSync(Queue.unbounded<WorkspaceAsk>())
+  /** Open requests, tagged with the session the reader was looking at. */
+  const openAsks = Effect.runSync(
+    Queue.unbounded<{ readonly sessionId: string; readonly app: string }>(),
+  )
   const treeAsks = Effect.runSync(Queue.unbounded<TreeAsk>())
   const previewAsks = Effect.runSync(Queue.unbounded<PreviewAsk>())
   let following: Fiber.Fiber<void, unknown> | undefined
@@ -1093,6 +1103,12 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
             client.addWorkspace({ cwd: asked.cwd }).pipe(Effect.andThen(readWorkspaces()))
 
     yield* Effect.forkScoped(
+      Stream.runForEach(Stream.fromQueue(openAsks), (asked) =>
+        reported(client.openInApp({ sessionId: asked.sessionId, app: asked.app, path: '' })),
+      ),
+    )
+
+    yield* Effect.forkScoped(
       Stream.runForEach(Stream.fromQueue(workspaceAsks), (asked) =>
         answerWorkspaceAsk(asked).pipe(
           Effect.catchCause((cause) =>
@@ -1158,6 +1174,8 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
 
     const settings = yield* client.settings()
     yield* Effect.sync(() => update((now) => withSettings(now, settings)))
+    const openApps = yield* client.openApps()
+    yield* Effect.sync(() => update((now) => withOpenApps(now, openApps)))
     const editable = yield* client.runSettings()
     yield* Effect.sync(() => update((now) => withEditable(now, editable)))
 
@@ -1390,6 +1408,7 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     browseDirectories: (path, reply) =>
       Queue.offerUnsafe(workspaceAsks, { kind: 'browse', path, reply }),
     addWorkspace: (cwd) => Queue.offerUnsafe(workspaceAsks, { kind: 'add', cwd }),
+    openWorkspace: (app) => Queue.offerUnsafe(openAsks, { sessionId: state().sessionId, app }),
     openFolder: (path) => {
       update((now) => withTreeOpen(now, path))
       Queue.offerUnsafe(treeAsks, { kind: 'read', path })
