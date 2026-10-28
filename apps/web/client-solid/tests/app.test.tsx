@@ -4926,6 +4926,8 @@ describe('the plan a model proposed', () => {
     )
     expect(container.querySelector('.plan-card .markdown h1')?.textContent).toBe('Plan')
     expect(container.querySelector('.tool-card')).toBeNull()
+    // The plan is the turn's answer, not part of the work: folding the steps does not hide it.
+    expect(container.querySelector('.process .plan-card')).toBeNull()
   })
 
   test('the card answers the question over the same ask path as the composer', () => {

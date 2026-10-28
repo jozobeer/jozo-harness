@@ -174,18 +174,25 @@ const Skill = (props: { tool: TraceTool }) => {
   )
 }
 
-/** One call as the conversation draws it: a plan keeps its own card, a skill its own. */
+/** One call as the conversation draws it: a skill gets its own card, the rest a line each. */
 const Call = (props: { tool: TraceTool; store: SessionStore }) => (
-  <Show
-    when={props.tool.name === PLAN_TOOL && planOf(props.tool) !== undefined}
-    fallback={
-      <Show when={props.tool.name === 'skill'} fallback={<Tool tool={props.tool} />}>
-        <Skill tool={props.tool} />
-      </Show>
-    }
-  >
-    <PlanCard tool={props.tool} store={props.store} />
+  <Show when={props.tool.name === 'skill'} fallback={<Tool tool={props.tool} />}>
+    <Skill tool={props.tool} />
   </Show>
+)
+
+/**
+ * The plans a turn proposed. They stay outside the folded process: a plan is
+ * the turn's answer, and a reader should not have to open the work to see it.
+ */
+const Plans = (props: { turn: TraceTurn; store: SessionStore }) => (
+  <Index
+    each={toolsOf(props.turn).filter(
+      (tool) => tool.name === PLAN_TOOL && planOf(tool) !== undefined,
+    )}
+  >
+    {(tool) => <PlanCard tool={tool()} store={props.store} />}
+  </Index>
 )
 
 /** A call the log wrote outside any turn: its card stands alone because no turn holds it. */
@@ -206,7 +213,13 @@ const Step = (props: { step: TraceStep; last: boolean; store: SessionStore }) =>
     <Show when={props.step.text !== '' && !props.last}>
       <Markdown text={props.step.text} class="step-said" />
     </Show>
-    <Index each={props.step.tools}>{(tool) => <Call tool={tool()} store={props.store} />}</Index>
+    <Index each={props.step.tools}>
+      {(tool) => (
+        <Show when={tool().name !== PLAN_TOOL}>
+          <Call tool={tool()} store={props.store} />
+        </Show>
+      )}
+    </Index>
   </li>
 )
 
@@ -441,6 +454,7 @@ const Turn = (props: { turn: TraceTurn; live: string; now: number; store: Sessio
   return (
     <article class={'block turn' + (running() ? ' running' : '')}>
       <Ask turn={props.turn} />
+      <Plans turn={props.turn} store={props.store} />
       <Show when={props.turn.steps.length > 0 || running()}>
         <details class="process">
           <ProcessLine
