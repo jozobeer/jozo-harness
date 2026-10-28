@@ -4,8 +4,14 @@ import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Effect } from 'effect'
 import { PREVIEW_LIMIT, TEXT_HEAD, readWorkspaceFile } from '../src/server/preview.ts'
+import { officeToPdfWith, type OfficeConverter } from '../src/server/office.ts'
 
-const read = async (root: string, path: string) => Effect.runPromise(readWorkspaceFile(root, path))
+/** A host with no converter, so every test but the conversion one is deterministic. */
+const noConverter: OfficeConverter = (_bytes, extension) =>
+  Effect.fail(new Error('this host cannot convert ' + extension.slice(1) + ' to PDF: no converter'))
+
+const read = async (root: string, path: string, convert: OfficeConverter = noConverter) =>
+  Effect.runPromise(readWorkspaceFile(root, path, convert))
 
 const refused = async (root: string, path: string): Promise<string> => {
   try {
@@ -162,7 +168,7 @@ describe('the workspace file preview', () => {
     }
   })
 
-  test('Office files say why they have no preview and keep their bytes', async () => {
+  test('an Office file without a converter says why and keeps its bytes', async () => {
     const root = await workspace()
     try {
       const bytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00])
@@ -175,6 +181,39 @@ describe('the workspace file preview', () => {
     } finally {
       await rm(root, { recursive: true, force: true })
     }
+  })
+
+  test('an Office file is shown as the PDF a converter makes and is not changed', async () => {
+    const root = await workspace()
+    try {
+      const source = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00])
+      const pdf = Buffer.from('%PDF-1.4\nconverted')
+      const converter: OfficeConverter = () => Effect.succeed(pdf)
+      await writeFileDeep(join(root, 'deck.pptx'), source)
+
+      const view = await read(root, 'deck.pptx', converter)
+
+      expect(view).toMatchObject({ kind: 'pdf', mediaType: 'application/pdf', size: pdf.length })
+      expect(view.data).toBe(pdf.toString('base64'))
+      expect(await readFile(join(root, 'deck.pptx'))).toEqual(source)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('the converter writes the source to a scratch folder and reads the PDF back', async () => {
+    const converter = officeToPdfWith((_source, directory) =>
+      writeFile(join(directory, 'input.pdf'), '%PDF-1.4\n'),
+    )
+    const pdf = await Effect.runPromise(converter(Buffer.from('source'), '.docx'))
+    expect(pdf?.toString()).toBe('%PDF-1.4\n')
+  })
+
+  test('the converter names the failure that stopped it', async () => {
+    const converter = officeToPdfWith(() => Promise.reject(new Error('spawn soffice ENOENT')))
+    await expect(Effect.runPromise(converter(Buffer.from('source'), '.xlsx'))).rejects.toThrow(
+      'this host cannot convert xlsx to PDF: spawn soffice ENOENT',
+    )
   })
 
   test('a binary that is not UTF-8 is refused with a reason', async () => {

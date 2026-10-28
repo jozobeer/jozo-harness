@@ -1,9 +1,10 @@
 import { isUtf8 } from 'node:buffer'
 import { readFile, stat } from 'node:fs/promises'
 import { extname, relative, resolve } from 'node:path'
-import { Effect } from 'effect'
+import { Effect, Result } from 'effect'
 import type { WorkspacePreview } from '../shared/rpc.ts'
 import { realOf, within } from './inside.ts'
+import { officeToPdf, type OfficeConverter } from './office.ts'
 
 /** The most bytes a text preview hands the page; the rest stays on disk. */
 export const TEXT_HEAD = 256 * 1024
@@ -140,17 +141,6 @@ const binaryOf = (
       truncated: false,
     }
   }
-  const officeType = OFFICE_TYPES[extension]
-  if (officeType !== undefined) {
-    return unsupported(
-      path,
-      officeType,
-      size,
-      'this host cannot convert ' +
-        extension.slice(1) +
-        ' to PDF, so the file keeps its bytes and opens elsewhere',
-    )
-  }
   if (BINARY_TYPES.has(extension)) {
     return unsupported(
       path,
@@ -185,6 +175,43 @@ const textOf = (path: string, size: number, bytes: Buffer, extension: string): W
   return { path, kind, mediaType, size, text: head.text, truncated: head.truncated }
 }
 
+/**
+ * One Office file as PDF when a converter can make one. A host without a
+ * converter, or one that refuses this file, answers with the reason instead;
+ * the workspace file is only read either way.
+ */
+const officePreview = (
+  path: string,
+  size: number,
+  bytes: Buffer,
+  extension: string,
+  convert: OfficeConverter,
+): Effect.Effect<WorkspacePreview, Error> =>
+  Effect.gen(function* () {
+    const converted = yield* Effect.result(convert(bytes, extension))
+    const mediaType = OFFICE_TYPES[extension] ?? 'application/octet-stream'
+    if (Result.isFailure(converted)) {
+      return unsupported(path, mediaType, size, converted.failure.message)
+    }
+    const pdf = converted.success
+    if (pdf === undefined) {
+      return unsupported(
+        path,
+        mediaType,
+        size,
+        'this host has no converter for ' + extension.slice(1),
+      )
+    }
+    return {
+      path,
+      kind: 'pdf',
+      mediaType: 'application/pdf',
+      size: pdf.length,
+      data: pdf.toString('base64'),
+      truncated: false,
+    }
+  })
+
 /** The real path the workspace may read: both the typed name and its target land inside. */
 const realInside = (root: string, typed: string): Effect.Effect<string, Error> =>
   Effect.gen(function* () {
@@ -218,6 +245,7 @@ const fileSize = (real: string): Effect.Effect<number, Error> =>
 export const readWorkspaceFile = (
   cwd: string,
   typed: string,
+  convert: OfficeConverter = officeToPdf,
 ): Effect.Effect<WorkspacePreview, Error> =>
   Effect.gen(function* () {
     const root = (yield* realOf(cwd)) ?? resolve(cwd)
@@ -227,5 +255,8 @@ export const readWorkspaceFile = (
     if (bytes.length > PREVIEW_LIMIT) return yield* Effect.fail(tooLarge(bytes.length))
     const path = relative(root, real).split(/[\\/]/u).join('/')
     const extension = extname(real).toLowerCase()
+    if (OFFICE_TYPES[extension] !== undefined) {
+      return yield* officePreview(path, size, bytes, extension, convert)
+    }
     return binaryOf(path, size, bytes, extension) ?? textOf(path, size, bytes, extension)
   })
