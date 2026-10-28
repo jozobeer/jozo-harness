@@ -205,6 +205,9 @@ importers:
       '@jozo-harness/llm':
         specifier: workspace:*
         version: link:../../packages/llm/llm
+      '@jozo-harness/llm-deepseek':
+        specifier: workspace:*
+        version: link:../../packages/llm/llm-deepseek
       '@jozo-harness/llm-openai':
         specifier: workspace:*
         version: link:../../packages/llm/llm-openai
@@ -568,6 +571,18 @@ importers:
 
   packages/llm/llm:
     dependencies:
+      effect:
+        specifier: 4.0.3
+        version: 4.0.3
+
+  packages/llm/llm-deepseek:
+    dependencies:
+      '@jozo-harness/kernel':
+        specifier: workspace:*
+        version: link:../../kernel/kernel
+      '@jozo-harness/llm':
+        specifier: workspace:*
+        version: link:../llm
       effect:
         specifier: 4.0.3
         version: 4.0.3
