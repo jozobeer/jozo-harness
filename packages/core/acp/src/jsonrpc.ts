@@ -55,6 +55,22 @@ export const JsonRpcResponseSchema = Schema.Union([
 ])
 
 export type JsonRpcId = Schema.Schema.Type<typeof JsonRpcIdSchema>
+
+/**
+ * An answer a handler chooses: JSON-RPC reserves the -32600 range for the
+ * protocol itself, and an application error such as an unknown session uses it
+ * with its own code. A thrown value of this class reaches the peer as written
+ * instead of becoming a generic internal error.
+ */
+export class JsonRpcFault extends Error {
+  readonly code: number
+
+  constructor(code: number, message: string) {
+    super(message)
+    this.name = 'JsonRpcFault'
+    this.code = code
+  }
+}
 export type JsonRpcError = Schema.Schema.Type<typeof JsonRpcErrorSchema>
 export type JsonRpcRequest = Schema.Schema.Type<typeof JsonRpcRequestSchema>
 export type JsonRpcNotification = Schema.Schema.Type<typeof JsonRpcNotificationSchema>

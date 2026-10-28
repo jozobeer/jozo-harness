@@ -187,6 +187,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@jozo-harness/acp':
+        specifier: workspace:*
+        version: link:../../packages/core/acp
       '@jozo-harness/agent':
         specifier: workspace:*
         version: link:../../packages/core/agent
@@ -251,6 +254,9 @@ importers:
       '@jozo-harness/test-support-stub':
         specifier: workspace:*
         version: link:../../packages/test-support/stub
+      '@jozo-harness/ui-protocol':
+        specifier: workspace:*
+        version: link:../../packages/ui/protocol
 
   apps/tui:
     dependencies:

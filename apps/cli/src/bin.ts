@@ -54,6 +54,7 @@ jzh models                      list the models the provider offers
 jzh auth [add|set|list|remove]  keep the keys a provider needs
 jzh web [--port N] [--public-url <https origin>]
                                 browser UI over a local server
+jzh acp                         ACP over stdio, for an editor
 jzh --resume <sessionId> [task]
 jzh sessions                    list the sessions on disk
 jzh sessions <sessionId>        read one session back
@@ -259,6 +260,7 @@ const commandOptions = (parsed: ParsedArgs, io: MainIo, inputs: CommandInputs): 
   surface: inputs.surface,
   ...(parsed.dumpConfig ? { dumpConfig: true } : {}),
   ...(parsed.json ? { json: true } : {}),
+  ...(parsed.acp ? { acp: true } : {}),
   ...optional('interrupt', io.interrupt),
 })
 
@@ -309,3 +311,10 @@ export function main(argv: ReadonlyArray<string>, io: MainIo): Effect.Effect<num
     ),
   )
 }
+
+/**
+ * `jzh acp` is the same entry point as any other command. The terminal path
+ * must not pre-read stdin, so the process entry calls this alias directly
+ * instead of the batch wrapper.
+ */
+export const mainAcp = main

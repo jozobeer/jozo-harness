@@ -252,6 +252,23 @@ turn が走っている間に composer から送った行は、既定では**次
 
 積まれた行は composer の上に出る。`queued` は次の turn、`steering` は走っている turn の next step。steer は turn を止めない。止めたいときは `Stop` を使う。
 
+## エディタから ACP で駆動する
+
+`jzh acp` は stdin/stdout で ACP（JSON-RPC 2.0）を話す。stdout に載るのは応答と通知だけで、ログや診断は stderr に出る。モデル・effort・プロファイルは通常の run と同じフラグ（`--model` / `--effort` / `--profile` / `--patch` / `--config`）で決める。
+
+エディタは次の順に話す。
+
+1. `initialize`（`protocolVersion`）→ サーバは `protocolVersion: 1` と `agentName` を返す。
+2. `session/new`（`cwd`）→ `sessionId` を返す。セッションはその場で作られ、以降の turn はその cwd で走る。
+3. `session/prompt`（`sessionId` と `prompt: ["..."]`）→ 1 turn 走る。assistant のテキストは `session/update` の `agent_message_chunk` として届き、最後に `{stopReason: "end-turn"}` を返す。
+4. 途中で止めるときは `session/cancel` を notification として送る。
+
+承認が要る呼び出しは、サーバから `session/request_permission` の要求として届く。`options` は `allow-once` と `reject-once` の2つで、`{"outcome": {"outcome": "selected", "optionId": "allow-once"}}` を返したときだけツールが走る。既定では120秒答えがないと拒否として扱い、ツールは走らない。答えはその1回の呼び出しだけに効く。
+
+セッションは既存の JSONL に書く。`jzh sessions` で一覧と読み戻しができ、`jzh web` のセッション一覧も同じ保存域を見る。
+
+壊れた JSON は `-32700`、未知のメソッドは `-32601`、未知の `sessionId` は `-32602` で返り、プロセスは落ちない。
+
 ## 設定ファイルを雛形から始める
 
 ```sh
