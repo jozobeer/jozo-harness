@@ -4462,6 +4462,12 @@ describe('the shortcut list', () => {
 
     fireEvent.click(document.querySelector('.shortcut-close') as Element)
     expect(document.querySelector('.shortcuts-dialog')).toBeNull()
+
+    // The key that opens the list closes it again, and the page keeps the key.
+    fireEvent.keyDown(document, { key: '/', metaKey: true })
+    expect(document.querySelector('.shortcuts-dialog')).not.toBeNull()
+    fireEvent.keyDown(document, { key: '/', metaKey: true })
+    expect(document.querySelector('.shortcuts-dialog')).toBeNull()
   })
 
   test('Reset puts every action back on the key it ships with', () => {

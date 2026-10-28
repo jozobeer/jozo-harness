@@ -17,6 +17,7 @@ import {
   chordLabel,
   chordOf,
   isChord,
+  matches,
   rebind,
   saveBindings,
   shortcutsFrom,
@@ -86,19 +87,12 @@ export const ShortcutsDialog = (props: { onClose: () => void }) => {
     setListening(id)
   }
 
-  /**
-   * The first press after Change becomes the key, unless another action owns it.
-   * The listener sits in the capture phase because the page's own handlers
-   * answer on the document, and a modal must not let the key through to them.
-   */
-  const capture = (event: KeyboardEvent): void => {
-    const id = listening()
-    event.stopImmediatePropagation()
-    if (id === undefined) {
-      if (event.key === 'Escape') props.onClose()
-      return
-    }
-    event.preventDefault()
+  /** Escape and the list's own key give the page back. */
+  const closes = (event: KeyboardEvent): boolean =>
+    event.key === 'Escape' || matches(shortcuts.bindings(), 'shortcuts.open', event)
+
+  /** The first press after Change becomes the key, unless another action owns it. */
+  const accept = (id: ShortcutId, event: KeyboardEvent): void => {
     if (event.key === 'Escape') {
       setListening(undefined)
       setProblem('')
@@ -113,6 +107,21 @@ export const ShortcutsDialog = (props: { onClose: () => void }) => {
     }
     setListening(undefined)
     setProblem('')
+  }
+
+  /**
+   * The listener sits in the capture phase because the page's own handlers
+   * answer on the document, and a modal must not let the key through to them.
+   */
+  const capture = (event: KeyboardEvent): void => {
+    const id = listening()
+    event.stopImmediatePropagation()
+    if (id === undefined) {
+      if (closes(event)) props.onClose()
+      return
+    }
+    event.preventDefault()
+    accept(id, event)
   }
 
   const keyOf = (id: ShortcutId): string | undefined =>
