@@ -1,5 +1,6 @@
 import { For, Show } from 'solid-js'
 import type { RunStateView } from '../../src/shared/rpc.ts'
+import { useTranslate, type Translate } from '../i18n.ts'
 import type { SessionStore } from '../store.ts'
 
 type UsageView = NonNullable<RunStateView['usage']>
@@ -59,6 +60,7 @@ const sizeOf = (text: string): string => {
  * the ring empty and the reading a dash.
  */
 export const SpeedDial = (props: { speed: UsageView['speed'] }) => {
+  const t = useTranslate()
   const value = (): number => props.speed?.value ?? 0
   const text = (): string => props.speed?.text ?? '—'
   return (
@@ -66,7 +68,7 @@ export const SpeedDial = (props: { speed: UsageView['speed'] }) => {
       class="dial"
       viewBox={'0 0 100 ' + String(FOOT + 1)}
       role="img"
-      aria-label={'speed of the last turn: ' + text() + ' tokens per second'}
+      aria-label={t('usage.speed') + text() + t('usage.perSecond')}
     >
       <path class="dial-face" d={FACE} />
       <path class="dial-track" d={ARC} />
@@ -100,54 +102,61 @@ export const SpeedDial = (props: { speed: UsageView['speed'] }) => {
 const nearOf = (context: ContextView): boolean => context.fire - context.share <= NEAR
 
 /** How full the window is, as a bar with the line compaction runs at. */
-const ContextBar = (props: { context: ContextView }) => (
-  <div class={'usage-context' + (nearOf(props.context) ? ' near' : '')}>
-    <div class="usage-context-head">
-      <span>Context</span>
-      <span class="usage-context-of">{props.context.used + ' / ' + props.context.window}</span>
+const ContextBar = (props: { context: ContextView }) => {
+  const t = useTranslate()
+  return (
+    <div class={'usage-context' + (nearOf(props.context) ? ' near' : '')}>
+      <div class="usage-context-head">
+        <span>{t('usage.context')}</span>
+        <span class="usage-context-of">{props.context.used + ' / ' + props.context.window}</span>
+      </div>
+      <div class="usage-bar">
+        <i style={{ width: String(props.context.share * 100) + '%' }} />
+        <span class="usage-fire" style={{ left: String(props.context.fire * 100) + '%' }} />
+      </div>
+      <span class="usage-left">{t('usage.compacts') + props.context.left}</span>
     </div>
-    <div class="usage-bar">
-      <i style={{ width: String(props.context.share * 100) + '%' }} />
-      <span class="usage-fire" style={{ left: String(props.context.fire * 100) + '%' }} />
-    </div>
-    <span class="usage-left">{'Compacts in ' + props.context.left}</span>
-  </div>
-)
+  )
+}
 
-const turnsOf = (turns: number): string => String(turns) + (turns === 1 ? ' turn' : ' turns')
+const turnsOf = (turns: number, t: Translate): string =>
+  String(turns) + ' ' + (turns === 1 ? t('usage.turn') : t('usage.turnMany'))
 
 /**
  * The session's usage in the Run pane: the context on top, then what went in,
  * how fast the newest turn wrote, and what came out.
  */
-export const Usage = (props: { usage: UsageView | undefined }) => (
-  <Show when={props.usage}>
-    {(usage) => (
-      <section id="run-usage" class="run-usage">
-        <div class="run-section">
-          <span class="run-section-title">usage</span>
-          <span class="usage-total">{usage().total + ' tokens'}</span>
-        </div>
-        <Show when={usage().context}>{(context) => <ContextBar context={context()} />}</Show>
-        <div class="usage-trio">
-          <div class="usage-side">
-            <span class="usage-key">In</span>
-            <span class="usage-value">{usage().input}</span>
-            <Show when={usage().cache}>
-              {(cache) => <span class="usage-note">{'Cache ' + cache()}</span>}
-            </Show>
+export const Usage = (props: { usage: UsageView | undefined }) => {
+  const t = useTranslate()
+  return (
+    <Show when={props.usage}>
+      {(usage) => (
+        <section id="run-usage" class="run-usage">
+          <div class="run-section">
+            <span class="run-section-title">{t('usage.title')}</span>
+            <span class="usage-total">{usage().total + t('usage.tokens')}</span>
           </div>
-          <SpeedDial speed={usage().speed} />
-          <div class="usage-side out">
-            <span class="usage-key">Out</span>
-            <span class="usage-value">{usage().output}</span>
-            <span class="usage-note">{turnsOf(usage().turns)}</span>
+          <Show when={usage().context}>{(context) => <ContextBar context={context()} />}</Show>
+          <div class="usage-trio">
+            <div class="usage-side">
+              <span class="usage-key">{t('usage.in')}</span>
+              <span class="usage-value">{usage().input}</span>
+              <Show when={usage().cache}>
+                {(cache) => <span class="usage-note">{t('usage.cache') + cache()}</span>}
+              </Show>
+            </div>
+            <SpeedDial speed={usage().speed} />
+            <div class="usage-side out">
+              <span class="usage-key">{t('usage.out')}</span>
+              <span class="usage-value">{usage().output}</span>
+              <span class="usage-note">{turnsOf(usage().turns, t)}</span>
+            </div>
           </div>
-        </div>
-      </section>
-    )}
-  </Show>
-)
+        </section>
+      )}
+    </Show>
+  )
+}
 
 const RING = 2 * Math.PI * 6
 
@@ -185,26 +194,31 @@ const openUsage = (store: SessionStore): void => {
  * The context beside the composer: the number to glance at before sending more.
  * It stays in the row when the seat folds behind +.
  */
-export const ContextRing = (props: { store: SessionStore }) => (
-  <Show when={props.store.state().run?.usage?.context}>
-    {(context) => (
-      <button
-        id="context-ring"
-        class={'context-ring' + (nearOf(context()) ? ' near' : '')}
-        type="button"
-        title={
-          'Context ' +
-          context().used +
-          ' / ' +
-          context().window +
-          ' · Compacts in ' +
-          context().left
-        }
-        onClick={() => openUsage(props.store)}
-      >
-        <Ring context={context()} />
-        <span>{String(Math.floor(context().share * 100)) + '%'}</span>
-      </button>
-    )}
-  </Show>
-)
+export const ContextRing = (props: { store: SessionStore }) => {
+  const t = useTranslate()
+  return (
+    <Show when={props.store.state().run?.usage?.context}>
+      {(context) => (
+        <button
+          id="context-ring"
+          class={'context-ring' + (nearOf(context()) ? ' near' : '')}
+          type="button"
+          title={
+            t('usage.context') +
+            ' ' +
+            context().used +
+            ' / ' +
+            context().window +
+            ' · ' +
+            t('usage.compacts') +
+            context().left
+          }
+          onClick={() => openUsage(props.store)}
+        >
+          <Ring context={context()} />
+          <span>{String(Math.floor(context().share * 100)) + '%'}</span>
+        </button>
+      )}
+    </Show>
+  )
+}

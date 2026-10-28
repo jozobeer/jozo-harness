@@ -7,6 +7,7 @@ import {
   type TraceTool,
   type TraceTurn,
 } from '../../src/ui/trace.ts'
+import { useTranslate, type Translate } from '../i18n.ts'
 import type { SessionStore } from '../store.ts'
 import { Icon, toolIconOf } from './ui/icon.tsx'
 
@@ -64,11 +65,12 @@ const ModelRow = (props: {
   axisEnd: number
   liveEnd: number
 }) => {
+  const t = useTranslate()
   const to = () => thinkingEnd(props.step, props.liveEnd)
   return (
     <div class="wf-row model">
       <Icon name="model" class="wf-icon" />
-      <span class="wf-name">model</span>
+      <span class="wf-name">{t('wf.model')}</span>
       <span class="wf-summary">{props.step.reasoning.split('\n')[0] ?? ''}</span>
       <span class="wf-track">
         <span class="wf-bar" style={barOf(props.turn, props.step.startedAt, to(), props.axisEnd)} />
@@ -110,16 +112,17 @@ const ToolRow = (props: {
 }
 
 /** Where the turn's time went: the model's share and the tools' share. */
-const shareOf = (turn: TraceTurn, end: number): string => {
+const shareOf = (turn: TraceTurn, end: number, t: Translate): string => {
   const tools = toolsOf(turn).reduce(
     (sum, tool) => sum + ((tool.endedAt ?? end) - tool.startedAt),
     0,
   )
   const total = Math.max(1, end - turn.startedAt)
-  return 'tools ' + String(Math.round((tools / total) * 100)) + '%'
+  return t('wf.tools') + String(Math.round((tools / total) * 100)) + '%'
 }
 
 const TurnLane = (props: { turn: TraceTurn; now: number; filter: Filter; store: SessionStore }) => {
+  const t = useTranslate()
   // The axis stops at the last event; the live end only grows the bar that runs.
   const axisEnd = () => axisEndOf(props.turn)
   const liveEnd = () => props.turn.endedAt ?? props.now
@@ -127,19 +130,23 @@ const TurnLane = (props: { turn: TraceTurn; now: number; filter: Filter; store: 
   return (
     <section class={'wf-turn' + (props.turn.endedAt === undefined ? ' running' : '')}>
       <header class="wf-head">
-        <span class="wf-turn-number">{'turn ' + String(props.turn.turn)}</span>
+        <span class="wf-turn-number">{t('wf.turn') + String(props.turn.turn)}</span>
         <span class="wf-turn-prompt">{props.turn.prompt}</span>
         <span class="wf-turn-facts">
           {spanOf(liveEnd() - props.turn.startedAt) +
             ' · ' +
             String(props.turn.steps.length) +
-            ' steps · ' +
+            ' ' +
+            t('wf.steps') +
+            ' · ' +
             String(toolsOf(props.turn).length) +
-            ' calls · ' +
-            shareOf(props.turn, liveEnd())}
+            ' ' +
+            t('wf.calls') +
+            ' · ' +
+            shareOf(props.turn, liveEnd(), t)}
         </span>
         <Show when={failed() > 0}>
-          <span class="wf-turn-failed">{String(failed()) + ' failed'}</span>
+          <span class="wf-turn-failed">{String(failed()) + ' ' + t('wf.failed')}</span>
         </Show>
       </header>
       <Index each={props.turn.steps}>
@@ -172,6 +179,7 @@ const TurnLane = (props: { turn: TraceTurn; now: number; filter: Filter; store: 
  * it broke; a row opens in the inspector.
  */
 export const Waterfall = (props: { store: SessionStore; live?: boolean }) => {
+  const t = useTranslate()
   // A forced skill load happens outside a turn; the trace sheet is turns alone.
   const turns = createMemo(() => props.store.state().trace.filter((turn) => !turn.standalone))
   const now = createNow(() => props.live !== false)
@@ -179,12 +187,12 @@ export const Waterfall = (props: { store: SessionStore; live?: boolean }) => {
   const [failedOnly, setFailedOnly] = createSignal(false)
   const filter = (): Filter => ({ text: text().trim().toLowerCase(), failedOnly: failedOnly() })
   return (
-    <section id="waterfall" aria-label="Trace">
+    <section id="waterfall" aria-label={t('wf.trace')}>
       <div class="wf-tools">
         <input
           class="wf-filter"
           type="search"
-          placeholder="Filter calls by tool or summary"
+          placeholder={t('wf.filter')}
           value={text()}
           onInput={(event) => setText(event.currentTarget.value)}
         />
@@ -194,12 +202,12 @@ export const Waterfall = (props: { store: SessionStore; live?: boolean }) => {
             checked={failedOnly()}
             onChange={(event) => setFailedOnly(event.currentTarget.checked)}
           />
-          failed only
+          {t('wf.failedOnly')}
         </label>
       </div>
       <Show
         when={turns().length > 0}
-        fallback={<div class="run-empty wf-empty">the trace fills in as the session runs</div>}
+        fallback={<div class="run-empty wf-empty">{t('wf.empty')}</div>}
       >
         <For each={[...turns()].reverse()}>
           {(turn) => <TurnLane turn={turn} now={now()} filter={filter()} store={props.store} />}

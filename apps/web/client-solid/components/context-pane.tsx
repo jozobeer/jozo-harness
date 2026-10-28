@@ -863,11 +863,12 @@ const Permission = (props: { store: SessionStore; current: PermissionChoice }) =
 }
 
 const Run = (props: { store: SessionStore }) => {
+  const t = useTranslate()
   const run = () => props.store.state().run
   return (
     <>
-      <h2 class="pane-title">Run</h2>
-      <Show when={run()} fallback={<div class="run-empty">reading…</div>}>
+      <h2 class="pane-title">{t('run.title')}</h2>
+      <Show when={run()} fallback={<div class="run-empty">{t('run.reading')}</div>}>
         {(state) => (
           <>
             <Goal goal={state().goal} />
@@ -1202,41 +1203,44 @@ const Trajectory = (props: { turns: ReadonlyArray<TurnView> }) => (
   </>
 )
 
-const Job = (props: { store: SessionStore; pane: Extract<Pane, { kind: 'job' }> }) => (
-  <>
-    <h2 class="pane-title">{'Job ' + props.pane.id.slice(0, 8)}</h2>
-    <Show when={props.pane.detail} fallback={<div class="card-hint">reading the job…</div>}>
-      {(detail) => (
-        <>
-          <div class="panel-rows">
-            {row('command', detail().command)}
-            {row('state', detail().running ? 'running' : 'done')}
-          </div>
-          <pre class="job-output">
-            {detail().output === '' ? '(no output yet)' : detail().output}
-          </pre>
-          <div class="panel-actions">
-            <Show when={detail().running}>
-              <Button
-                id="stop-job"
-                type="button"
-                onClick={() => props.store.stopJob(props.pane.id)}
-              >
-                Stop
-              </Button>
-            </Show>
-          </div>
-        </>
-      )}
-    </Show>
-  </>
-)
+const Job = (props: { store: SessionStore; pane: Extract<Pane, { kind: 'job' }> }) => {
+  const t = useTranslate()
+  return (
+    <>
+      <h2 class="pane-title">{t('run.jobTitle') + props.pane.id.slice(0, 8)}</h2>
+      <Show when={props.pane.detail} fallback={<div class="card-hint">{t('job.reading')}</div>}>
+        {(detail) => (
+          <>
+            <div class="panel-rows">
+              {row(t('job.command'), detail().command)}
+              {row(t('job.state'), t(detail().running ? 'job.running' : 'job.done'))}
+            </div>
+            <pre class="job-output">
+              {detail().output === '' ? t('job.noOutput') : detail().output}
+            </pre>
+            <div class="panel-actions">
+              <Show when={detail().running}>
+                <Button
+                  id="stop-job"
+                  type="button"
+                  onClick={() => props.store.stopJob(props.pane.id)}
+                >
+                  {t('job.stop')}
+                </Button>
+              </Show>
+            </div>
+          </>
+        )}
+      </Show>
+    </>
+  )
+}
 
 const PANES = [
-  { kind: 'changes', label: 'changes', icon: 'changes' },
-  { kind: 'run', label: 'run', icon: 'run' },
-  { kind: 'settings', label: 'settings', icon: 'settings' },
-  { kind: 'trajectory', label: 'turns', icon: 'turns' },
+  { kind: 'changes', label: 'pane.changes', icon: 'changes' },
+  { kind: 'run', label: 'pane.run', icon: 'run' },
+  { kind: 'settings', label: 'pane.settings', icon: 'settings' },
+  { kind: 'trajectory', label: 'pane.turns', icon: 'turns' },
 ] as const
 
 type Tab = (typeof PANES)[number]['kind']
@@ -1253,6 +1257,7 @@ const paneFor = (kind: Tab): Pane => (kind === 'changes' ? { kind, path: undefin
 
 /** The right column: what the session runs toward, is set to, did, or one job. */
 export const ContextPane = (props: { store: SessionStore }) => {
+  const t = useTranslate()
   const pane = () => props.store.state().pane
   let strip: HTMLElement | undefined
   /** What the body shows while the sheet slides out; undefined once it has. */
@@ -1296,7 +1301,7 @@ export const ContextPane = (props: { store: SessionStore }) => {
   return (
     <>
       <header class="context-head">
-        <nav class="tabs" aria-label="What the pane shows" ref={(element) => (strip = element)}>
+        <nav class="tabs" aria-label={t('pane.tabs')} ref={(element) => (strip = element)}>
           <For each={PANES}>
             {(entry) => (
               <button
@@ -1306,19 +1311,19 @@ export const ContextPane = (props: { store: SessionStore }) => {
                 onClick={() => toggle(entry.kind)}
               >
                 <Icon name={entry.icon} />
-                {entry.label}
+                {t(entry.label)}
               </button>
             )}
           </For>
           <Show when={ofKind(pane(), 'inspect')}>
             <button class="tab active" type="button">
-              inspect
+              {t('pane.inspect')}
             </button>
           </Show>
           <Show when={ofKind(pane(), 'job')}>
             {(job) => (
               <button class="tab active" type="button">
-                {'job ' + job().id.slice(0, 8)}
+                {t('pane.job') + job().id.slice(0, 8)}
               </button>
             )}
           </Show>
@@ -1327,7 +1332,7 @@ export const ContextPane = (props: { store: SessionStore }) => {
           id="panel-close"
           class="pane-close"
           type="button"
-          aria-label="hide the pane"
+          aria-label={t('pane.close')}
           onClick={() => props.store.showPane(undefined)}
         >
           <Icon name="close" />
