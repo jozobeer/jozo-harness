@@ -115,6 +115,19 @@ describe('the workspace tree', () => {
     }
   })
 
+  test('a folder named with a trailing slash is the same folder', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-tree-'))
+    try {
+      await writeFileDeep(join(root, 'apps/web/index.html'), '<!doctype html>')
+      const view = await listed(root, 'apps/')
+      expect(view.path).toBe('apps')
+      expect(view.entries).toEqual([{ name: 'web', kind: 'directory' }])
+      expect((await listed(root, './')).path).toBe('')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('gitignore holds and node_modules stays out, while dot entries stay visible', async () => {
     const root = await workspace()
     try {

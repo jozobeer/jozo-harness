@@ -130,6 +130,12 @@ const kindOf = (
     return info === undefined ? undefined : kindOfInfo(info)
   })
 
+/** The name one folder is known by: the typed name without a trailing slash; '' is the root. */
+const nameOf = (path: string): string => {
+  const trimmed = path.replace(/\/+$/u, '')
+  return trimmed === '.' ? '' : trimmed
+}
+
 /** The name the tree says one entry by: the workspace root is the empty prefix. */
 const relativeOf = (path: string, name: string): string => (path === '' ? name : path + '/' + name)
 
@@ -166,10 +172,13 @@ const orderOf = (left: WorkspaceEntry, right: WorkspaceEntry): number =>
  */
 export const listWorkspaceDirectory = (
   cwd: string,
-  path: string,
+  typed: string,
 ): Effect.Effect<WorkspaceDirectory, Error> =>
   Effect.gen(function* () {
     const root = (yield* realOf(cwd)) ?? resolve(cwd)
+    // A name written with a trailing slash is the same folder, and the children
+    // are named from the folder without it, so the page keeps one key per folder.
+    const path = nameOf(typed)
     const folder = yield* folderInside(root, path)
     const dirents = yield* Effect.tryPromise({
       try: () => readdir(folder, { withFileTypes: true }),
