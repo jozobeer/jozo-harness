@@ -7,6 +7,13 @@ export const systemPromptConfigSchema = Schema.Struct({
   includeHarnessIdentity: Schema.optionalKey(Schema.Boolean),
   /** Tool usage lines, shown only for the tools the model can call. */
   includeToolGuidance: Schema.optionalKey(Schema.Boolean),
+  /** Deployment prose around the identity; a blank part renders no section. */
+  persona: Schema.optionalKey(
+    Schema.Struct({
+      before: Schema.optionalKey(Schema.String),
+      after: Schema.optionalKey(Schema.String),
+    }),
+  ),
 })
 
 export type SystemPromptConfig = Schema.Schema.Type<typeof systemPromptConfigSchema>
