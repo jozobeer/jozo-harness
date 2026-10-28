@@ -141,12 +141,20 @@ const runWith = async (
   const decoder = new TextDecoder()
   let rest = ''
   let stopped = false
-  while (!stopped) {
-    const chunk = await reader.read()
-    if (chunk.done) break
-    const fed = feedLines(rest, decoder.decode(chunk.value, { stream: true }), onLine)
-    rest = fed.rest
-    stopped = fed.stopped
+  try {
+    while (!stopped) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      const fed = feedLines(rest, decoder.decode(chunk.value, { stream: true }), onLine)
+      rest = fed.rest
+      stopped = fed.stopped
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined)
+    child.kill()
+    await child.exited.catch(() => undefined)
+    await stderr.catch(() => '')
+    throw error
   }
   if (stopped) {
     await reader.cancel().catch(() => undefined)
@@ -183,7 +191,7 @@ const listArguments = (request: ListRequest): ReadonlyArray<string> => [
   '!.git',
   '--glob',
   '!node_modules',
-  ...(request.start === '' ? [] : [request.start]),
+  ...(request.start === '' ? [] : ['--', request.start]),
 ]
 
 /** Lists files with ripgrep, or says why the caller must walk the tree itself. */
@@ -218,7 +226,7 @@ const grepArguments = (request: MatchRequest): ReadonlyArray<string> => [
   '!node_modules',
   '--regexp',
   request.pattern,
-  ...(request.start === '' ? [] : [request.start]),
+  ...(request.start === '' ? [] : ['--', request.start]),
 ]
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -333,7 +341,8 @@ export const findMatchesWithRipgrep = async (
     const run = await ripgrep.run(grepArguments(request), request.cwd, (line) =>
       collector.accept(line),
     )
-    if (!run.stopped && run.exitCode !== 0) {
+    // ripgrep exits 1 when it found nothing; only 2 and above are failures.
+    if (!run.stopped && run.exitCode !== 0 && run.exitCode !== 1) {
       return { matches: [], fallback: 'failed: ' + reasonOf(run.stderr) }
     }
     return { matches: collector.found.slice(0, request.limit) }

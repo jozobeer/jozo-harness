@@ -398,9 +398,9 @@ describe('ripgrep search', () => {
   test('asks ripgrep to honour ignore rules instead of disabling them', async () => {
     const calls: Array<ReadonlyArray<string>> = []
     const rg = fakeRipgrep('/fake/rg', { stdout: [] }, calls)
-    await Effect.runPromise(call(makeGlobTool(rg), { pattern: '**/*.ts' }, tmpdir()))
+    await Effect.runPromise(call(makeGlobTool(rg), { pattern: '**/*.ts', path: 'sub' }, tmpdir()))
     await Effect.runPromise(
-      call(makeGrepTool(rg), { pattern: 'needle', include: '**/*.ts' }, tmpdir()),
+      call(makeGrepTool(rg), { pattern: 'needle', include: '**/*.ts', path: 'sub' }, tmpdir()),
     )
 
     expect(calls).toHaveLength(2)
@@ -408,8 +408,19 @@ describe('ripgrep search', () => {
       expect(argv).toContain('--no-require-git')
       expect(argv).not.toContain('--no-ignore')
     }
+    const globCall = calls[0] ?? []
     const grepCall = calls[1] ?? []
+    expect(globCall.slice(-2)).toEqual(['--', 'sub'])
     expect(grepCall).toContain('--json')
     expect(grepCall).not.toContain('**/*.ts')
+    expect(grepCall.slice(-2)).toEqual(['--', 'sub'])
+  })
+
+  test('a search that found nothing does not fall back', async () => {
+    const tool = makeGrepTool(fakeRipgrep('/fake/rg', { exitCode: 1 }))
+
+    const result = await Effect.runPromise(call(tool, { pattern: 'needle' }, tmpdir()))
+
+    expect(result?.value).toEqual({ matches: [], seen: 0, truncated: false })
   })
 })
