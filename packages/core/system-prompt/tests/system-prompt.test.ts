@@ -5,6 +5,7 @@ import { Effect, Schema } from 'effect'
 import {
   PromptError,
   SystemPrompt,
+  builtinSections,
   makeSystemPrompt,
   systemPromptLayer,
   type AssembleContext,
@@ -156,6 +157,37 @@ describe('build', () => {
 
     expect(built.system).toBe('system text')
     expect(built.tools.map((tool) => tool.name)).toEqual(['echo'])
+  })
+
+  test('shows the argument and result types of the tools this request can call', async () => {
+    const built = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const prompt = makeSystemPrompt()
+          for (const section of builtinSections({
+            includeHarnessIdentity: false,
+            includeToolGuidance: false,
+          })) {
+            yield* prompt.section(section)
+          }
+          const tools = yield* Tools
+          yield* tools.register({
+            name: 'echo',
+            description: 'Echo',
+            parameters: Schema.Struct({ text: Schema.String }),
+            output: {
+              schema: Schema.Struct({ text: Schema.String }),
+              render: (_args, value) => [{ type: 'text' as const, text: value.text }],
+            },
+            execute: (args) => Effect.succeed({ text: args.text }),
+          })
+          return yield* prompt.build(context)
+        }),
+      ).pipe(Effect.provide(toolsLayer), Effect.provide(HooksLive)),
+    )
+
+    expect(built.system).toContain('Tools visible in this request')
+    expect(built.system).toContain('echo(text: string) -> { text: string }')
   })
 })
 

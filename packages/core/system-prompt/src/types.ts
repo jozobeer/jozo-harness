@@ -1,4 +1,5 @@
 import type { ToolSchema } from '@jozo-harness/llm'
+import type { ToolSignature } from '@jozo-harness/tools'
 import { Data, type Effect } from 'effect'
 
 export type PromptErrorCode =
@@ -18,6 +19,8 @@ export interface AssembleContext {
   readonly variables: Readonly<Record<string, string>>
   /** The model-facing tools of this assembly; absent when only the text renders. */
   readonly tools?: ReadonlyArray<ToolSchema>
+  /** The same tools with their argument and result schemas, for the signature section. */
+  readonly signatures?: ReadonlyArray<ToolSignature>
 }
 
 /** What a runtime context provider may read when the loop renders a snapshot. */

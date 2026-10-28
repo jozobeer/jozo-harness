@@ -52,6 +52,16 @@ describe('spawn', () => {
     expect(await child.exited).toBe(0)
   })
 
+  test('a write after the child exited does not escape as a stream error', async () => {
+    const child = spawn(['bash', '-lc', 'exit 0'], { stdin: 'pipe' })
+    expect(await child.exited).toBe(0)
+
+    expect(() => child.stdin.write('late\n')).not.toThrow()
+    child.stdin.end()
+    // The stream error, if any, arrives on a later tick than the write.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  })
+
   test('a given environment replaces the inherited one', async () => {
     const child = spawn(['bash', '-lc', 'printf %s "$PROBE"'], {
       env: { PROBE: 'set' },

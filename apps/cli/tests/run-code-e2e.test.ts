@@ -21,13 +21,13 @@ const textTurn = (text: string): ReadonlyArray<StreamChunk> => [
   { type: 'finish', kind: 'stop' },
 ]
 
-const runCodeTurn = (code: string): ReadonlyArray<StreamChunk> => [
+const runCodeTurn = (code: string, id = 'c1'): ReadonlyArray<StreamChunk> => [
   {
     type: 'block-end',
     index: 0,
     block: {
       type: 'tool-call',
-      id: 'c1',
+      id,
       name: 'run_code',
       arguments: JSON.stringify({ code }),
     },
@@ -144,6 +144,113 @@ describe('run_code through the command', () => {
     expect(settled).toHaveLength(1)
     expect(settled[0]).toMatchObject({ callId: callId + '.1', name: 'todo_write', isError: false })
     expect(settled[0]?.summary).toContain('[x] nested')
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('the second call reads what the first program left on globalThis', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-run-code-memory-'))
+
+    const outcome = await Effect.runPromise(
+      runCommand({
+        profiles: [profile(root)],
+        plugins: [
+          kernelPlugin,
+          sessionJsonlPlugin,
+          sessionPlugin,
+          toolsPlugin,
+          systemPromptPlugin,
+          safetyPlugin,
+          askPlugin,
+          tier1Plugin,
+          stub([
+            runCodeTurn('globalThis.total = 41', 'c1'),
+            runCodeTurn('return globalThis.total + 1', 'c2'),
+            textTurn('all done'),
+          ]),
+          agentPlugin,
+          agentLoopPlugin,
+        ] as ReadonlyArray<Plugin<any, any, any>>,
+        cwd: root,
+        route: 'stub/model',
+        task: 'keep a value between programs',
+        stdout: () => undefined,
+        stderr: () => undefined,
+      }),
+    )
+    expect(outcome).toBe(0)
+
+    const sessions = await Effect.runPromise(jsonlSessions({ root }).list())
+    const opened = await Effect.runPromise(jsonlSessions({ root }).open(sessions[0]?.id ?? ''))
+    const results = opened.events.flatMap((event) =>
+      event.type === 'tool/result' ? [event.data] : [],
+    )
+    const second = results[1]
+    const text = (second?.content ?? [])
+      .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+      .join('\n')
+
+    expect(results).toHaveLength(2)
+    expect(second?.isError).toBe(false)
+    expect(text).toContain('return: 42')
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('a resumed run does not see what the closed run put on globalThis', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-run-code-closed-'))
+    const run = (
+      task: string,
+      scripts: ReadonlyArray<ReadonlyArray<StreamChunk>>,
+      resume?: string,
+    ) =>
+      Effect.runPromise(
+        runCommand({
+          profiles: [profile(root)],
+          plugins: [
+            kernelPlugin,
+            sessionJsonlPlugin,
+            sessionPlugin,
+            toolsPlugin,
+            systemPromptPlugin,
+            safetyPlugin,
+            askPlugin,
+            tier1Plugin,
+            stub(scripts),
+            agentPlugin,
+            agentLoopPlugin,
+          ] as ReadonlyArray<Plugin<any, any, any>>,
+          cwd: root,
+          route: 'stub/model',
+          task,
+          stdout: () => undefined,
+          stderr: () => undefined,
+          ...(resume === undefined ? {} : { resume }),
+        }),
+      )
+
+    expect(
+      await run('keep a value', [runCodeTurn('globalThis.total = 41'), textTurn('done')]),
+    ).toBe(0)
+    const sessions = await Effect.runPromise(jsonlSessions({ root }).list())
+    const id = sessions[0]?.id ?? ''
+    expect(
+      await run(
+        'read it again',
+        [runCodeTurn('return typeof globalThis.total'), textTurn('done')],
+        id,
+      ),
+    ).toBe(0)
+
+    const opened = await Effect.runPromise(jsonlSessions({ root }).open(id))
+    const results = opened.events.flatMap((event) =>
+      event.type === 'tool/result' ? [event.data] : [],
+    )
+    const second = results[1]
+    const text = (second?.content ?? [])
+      .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+      .join('\n')
+
+    expect(results).toHaveLength(2)
+    expect(text).toContain('return: "undefined"')
     await rm(root, { recursive: true, force: true })
   })
 })
