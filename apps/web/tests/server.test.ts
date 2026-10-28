@@ -2745,19 +2745,6 @@ describe('sharing a run with another browser', () => {
           const joinedCookie = exchanged.setCookie?.split(';')[0]
           if (joinedCookie === undefined) throw new Error('joining set no cookie')
 
-          const useJoined = Effect.gen(function* () {
-            const client = yield* RpcClient.make(UiRpcs)
-            const listed = yield* client.sessions()
-            const accepted = yield* client.command({
-              sessionId: 'a',
-              command: { kind: 'submit', text: 'hello from Alice', mode: 'steer' },
-            })
-            return { listed, accepted }
-          })
-          const joined = yield* useJoined.pipe(
-            clientLayers('ws://' + new URL(started.origin).host + '/ui?join=' + join),
-          )
-
           const useOwner = Effect.gen(function* () {
             const client = yield* RpcClient.make(UiRpcs)
             return yield* client.command({
@@ -2765,7 +2752,33 @@ describe('sharing a run with another browser', () => {
               command: { kind: 'submit', text: 'hello from the owner', mode: 'steer' },
             })
           })
-          const ownerAccepted = yield* useOwner.pipe(clientLayers(started.wsUrl))
+          const useJoined = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const listed = yield* client.sessions()
+            const accepted = yield* client.command({
+              sessionId: 'a',
+              command: { kind: 'submit', text: 'hello from Alice', mode: 'steer' },
+            })
+            // The joined page follows the same log the owner's page does: the
+            // owner's next line arrives here as the event the host wrote.
+            const listening = yield* Effect.forkScoped(
+              client.events({ sessionId: 'a' }).pipe(Stream.take(1), Stream.runCollect),
+            )
+            yield* Effect.sleep(50)
+            const ownerAccepted = yield* useOwner.pipe(clientLayers(started.wsUrl))
+            const seen = yield* Fiber.join(listening)
+            return {
+              listed,
+              accepted,
+              ownerAccepted,
+              seen: Array.from(seen)
+                .map((event) => JSON.stringify(event))
+                .join('\n'),
+            }
+          })
+          const joined = yield* useJoined.pipe(
+            clientLayers('ws://' + new URL(started.origin).host + '/ui?join=' + join),
+          )
 
           // An invitation types in the session but cannot hand the run on.
           const refusedShare = yield* Effect.promise(() =>
@@ -2780,7 +2793,6 @@ describe('sharing a run with another browser', () => {
             shared,
             exchangedStatus: exchanged.status,
             joined,
-            ownerAccepted,
             refusedShare: refusedShare.status,
             anonymous: anonymous.status,
           }
@@ -2794,7 +2806,8 @@ describe('sharing a run with another browser', () => {
     expect(observed.joined.listed.initial).toBe('a')
     expect(observed.joined.listed.opened).toEqual(['a'])
     expect(observed.joined.accepted).toBe(true)
-    expect(observed.ownerAccepted).toBe(true)
+    expect(observed.joined.ownerAccepted).toBe(true)
+    expect(observed.joined.seen).toContain('hello from the owner')
     expect(observed.refusedShare).toBe(403)
     expect(observed.anonymous).toBe(401)
     // Both people's lines landed on the one host the session owns, so the log
