@@ -125,6 +125,28 @@ plugins:
 
 画面収録の許可が無い、撮影プログラムが無い、sandbox が子プロセスを拒否した、といった場合は撮らずに `unavailable` と理由を返す。既定の profile に入れないのは、全セッションの tool 一覧を太らせないためである。
 
+### モデルに画面を操作させる
+
+`computer_click` / `computer_type` / `computer_key` も opt-in である。使う run だけ、設定ファイルか `--patch` の `plugins:` に次の行を足す。
+
+```yaml
+plugins:
+  - id: computer-use
+    name: '@jozo-harness/computer-use'
+```
+
+行を足した run では、モデルに画面を見て操作する仕事を頼める。
+
+```
+このフォームに名前を入れて送信して。
+```
+
+モデルは `screen_capture` で座標を確かめてから、`computer_click` に `x` / `y`、`computer_type` に `text`、`computer_key` に `key`（`return` や `cmd+s` のような名前）を渡す。操作は macOS の `osascript` から System Events に渡す。クリックは `click at {x, y}`、文字入力は `keystroke`、キーは名前を key code に直して送る。Linux と Windows には操作の backend が無いため、`unavailable` と理由を返す。`osascript` が PATH に無いときも同じである。
+
+各呼び出しは、実行の前に必ず人間の承認を `ask` で取る。拒否された呼び出しは子プロセスを起動せず、`denied` を返す。承認の質問にはクリックの座標、打つ文字数、キーの名前が入る。文字列そのものは質問に載せない。結果の値には action、対象（座標・キー・打った文字列と文字数）、終了コード、stderr の短い要約が入り、そのままセッションログに残る。打った文字列は 2,000 文字を超えた分だけ値を切り、文字数は全体を数える。
+
+macOS では、jzh を動かしている端末の「システム設定 > プライバシーとセキュリティ > アクセシビリティ」で、jzh を起動したターミナル（または jzh 自身）に許可を与える。許可が無いと `osascript` は終了コード 1 とエラーを返し、その理由が結果の `stderr` に残る。画面の座標を決めるために `screen_capture` も使うなら、画面収録の許可も要る。既定の profile に入れないのは、全セッションの tool 一覧を太らせないためである。
+
 ### モデルにページを開かせる
 
 `browser` tool も opt-in である。使う run だけ、設定ファイルか `--patch` の `plugins:` に次の行を足す。
