@@ -1,4 +1,14 @@
 import type { SubmitMode } from '@jozo-harness/ui-protocol'
+import {
+  FONT_FAMILY_KEY,
+  FONT_SIZE_KEY,
+  familyStack,
+  fontFamilyFrom,
+  fontSizeFrom,
+  fontSizeScale,
+  type FontFamily,
+  type FontSize,
+} from '../src/ui/font.ts'
 import { THEME_KEY, themeAttribute, themeFrom, type Theme } from '../src/ui/theme.ts'
 import { BUSY_ENTER_KEY, busyEnterFrom } from './submission.ts'
 
@@ -16,7 +26,10 @@ declare const window: {
   }
 }
 declare const document: {
-  readonly documentElement: { readonly dataset: Record<string, string | undefined> }
+  readonly documentElement: {
+    readonly dataset: Record<string, string | undefined>
+    readonly style: { setProperty: (property: string, value: string) => void }
+  }
 }
 declare const history: {
   replaceState: (data: unknown, unused: string, url?: string) => void
@@ -106,6 +119,33 @@ export const keptTheme = (): Theme => themeFrom(localStorage.getItem(THEME_KEY))
 /** Keeps the reader's choice for the next visit. */
 export const keepTheme = (theme: Theme): void => {
   localStorage.setItem(THEME_KEY, theme)
+}
+
+/** Writes the reader's face where the stylesheet reads it. */
+export const showFontFamily = (family: FontFamily): void => {
+  document.documentElement.style.setProperty('--font-family', familyStack(family))
+}
+
+/** The face the reader chose on an earlier visit, or the sheet's own. */
+export const keptFontFamily = (): FontFamily =>
+  fontFamilyFrom(localStorage.getItem(FONT_FAMILY_KEY))
+
+/** Keeps the reader's face for the next visit. */
+export const keepFontFamily = (family: FontFamily): void => {
+  localStorage.setItem(FONT_FAMILY_KEY, family)
+}
+
+/** Writes the reader's base size where the type scale reads it. */
+export const showFontSize = (size: FontSize): void => {
+  document.documentElement.style.setProperty('--font-scale', fontSizeScale(size))
+}
+
+/** The size the reader chose on an earlier visit, or the sheet's own. */
+export const keptFontSize = (): FontSize => fontSizeFrom(localStorage.getItem(FONT_SIZE_KEY))
+
+/** Keeps the reader's size for the next visit. */
+export const keepFontSize = (size: FontSize): void => {
+  localStorage.setItem(FONT_SIZE_KEY, String(size))
 }
 
 /** The busy-Enter mode the reader chose on an earlier visit; none means queue. */
