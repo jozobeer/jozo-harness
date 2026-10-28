@@ -144,6 +144,18 @@ export interface ToolGuard {
   readonly check: (exec: ToolExecution) => Effect.Effect<GuardDecision>
 }
 
+/**
+ * A tool as the system prompt shows it: the argument and result schemas of the
+ * tools this request may call. The provider receives only the schema of the
+ * call, so the result type would otherwise never reach the model.
+ */
+export interface ToolSignature {
+  readonly name: string
+  readonly description: string
+  readonly parameters: Readonly<Record<string, unknown>>
+  readonly output: Readonly<Record<string, unknown>>
+}
+
 /** Filters the tools one scope may see. Plan mode and subagents register their own. */
 export interface ToolRestriction {
   readonly name: string

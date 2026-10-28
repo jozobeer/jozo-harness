@@ -42,8 +42,13 @@ describe('builtinSections', () => {
   test('the guidance section sits after the identity and before user sections', () => {
     const sections = builtinSections()
 
-    expect(sections.map((section) => section.name)).toEqual(['jzh:identity', 'jzh:tool-guidance'])
+    expect(sections.map((section) => section.name)).toEqual([
+      'jzh:identity',
+      'jzh:tool-guidance',
+      'jzh:tool-signatures',
+    ])
     expect(sections[0]?.order).toBeLessThan(sections[1]?.order ?? 0)
+    expect(sections[1]?.order).toBeLessThan(sections[2]?.order ?? 0)
   })
 
   test('either built-in can be turned off', async () => {

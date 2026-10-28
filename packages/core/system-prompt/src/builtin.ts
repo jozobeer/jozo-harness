@@ -1,5 +1,6 @@
 import type { ToolSchema } from '@jozo-harness/llm'
 import { Effect } from 'effect'
+import { toolSignatureText } from './tool-signatures.ts'
 import type {
   AssembleContext,
   PromptSection,
@@ -10,6 +11,7 @@ import type {
 /** Built-in sections sort before user sections; the AGENTS.md sections sit at 900. */
 export const IDENTITY_ORDER = 0
 export const TOOL_GUIDANCE_ORDER = 100
+export const TOOL_SIGNATURE_ORDER = 110
 
 /** The facts the harness owns itself, between the plugin ones. */
 export const CWD_CONTEXT_ORDER = 10
@@ -24,6 +26,7 @@ export const timeLine = (now: number): string =>
 
 export const IDENTITY_SECTION = 'jzh:identity'
 export const TOOL_GUIDANCE_SECTION = 'jzh:tool-guidance'
+export const TOOL_SIGNATURE_SECTION = 'jzh:tool-signatures'
 
 /** The harness introduces itself in one opener, as dsh does. */
 export const IDENTITY_TEXT = [
@@ -117,6 +120,8 @@ export interface BuiltinOptions {
   readonly includeHarnessIdentity?: boolean
   /** Tool usage lines, shown only for tools this assembly can call. */
   readonly includeToolGuidance?: boolean
+  /** The argument and result type of every tool this assembly can call. */
+  readonly includeToolSignatures?: boolean
   /** The workspace and the clock, always present in a runtime snapshot. */
   readonly includeRuntimeContext?: boolean
 }
@@ -154,6 +159,13 @@ export function builtinSections(options: BuiltinOptions = {}): ReadonlyArray<Pro
   }
   if (options.includeToolGuidance ?? true) {
     sections.push({ name: TOOL_GUIDANCE_SECTION, order: TOOL_GUIDANCE_ORDER, text: toolGuidance })
+  }
+  if (options.includeToolSignatures ?? true) {
+    sections.push({
+      name: TOOL_SIGNATURE_SECTION,
+      order: TOOL_SIGNATURE_ORDER,
+      text: (context: AssembleContext) => toolSignatureText(context.signatures ?? []),
+    })
   }
   return sections
 }

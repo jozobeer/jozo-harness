@@ -167,7 +167,11 @@ export function makeSystemPrompt(): SystemPromptShape {
       Effect.gen(function* () {
         const tools = yield* Tools
         const schemas = tools.schemas()
-        const built = yield* assemble({ ...context, tools: schemas })
+        const built = yield* assemble({
+          ...context,
+          tools: schemas,
+          signatures: tools.signatures(),
+        })
         return { system: built.text, sections: built.sections, tools: schemas }
       }),
   }

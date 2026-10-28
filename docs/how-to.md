@@ -524,6 +524,10 @@ return review.text
 - `maxChildren` の既定は 12。deadline は 10 分（`WORKFLOW_SCRIPT_TIMEOUT_MS`）。出力は 16,000 文字で切る。
 - 単純な同時実行は `tasks` のほうが短い。
 
+## ツールの引数と戻り値の型を system prompt で見せる
+
+system prompt には、その step で見える tool の署名が 1 行ずつ出る。引数は必須と任意（`?`）を区別し、戻り値は tool の `output` schema から描く。plan mode や子 agent の制限で見えない tool は出ない。schema を型として読めない部分は `unknown` になる。
+
 ## モデルにプログラムを書かせて tool を束ねる（run_code）
 
 tier1 行がある run では、モデルに `run_code` が渡る。モデルは既定で async 関数の本体を書き、`await tools.name(args)` で可視の tool を呼べる。`runtime: 'python'` を渡すと python3 のスクリプトとして走り、同じ tool を `tools.name(...)` で呼べる。大量の read / grep を 1 step に畳むときに使う。

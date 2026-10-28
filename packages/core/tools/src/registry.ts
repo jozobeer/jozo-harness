@@ -13,6 +13,7 @@ import {
   type ToolGuard,
   type ToolRestriction,
   type ToolResultView,
+  type ToolSignature,
 } from './types.ts'
 
 type AnyTool = ToolDefinition<any, any>
@@ -32,21 +33,26 @@ export interface ToolRegistry {
   restrict(restriction: ToolRestriction): Effect.Effect<void, never, Scope.Scope>
   /** Model-facing declarations after every active restriction. */
   schemas(): ReadonlyArray<ToolSchema>
+  /** The same visible tools with both their argument and result schemas. */
+  signatures(): ReadonlyArray<ToolSignature>
   isConcurrencySafe(tool: string, argumentsJson: string): boolean
   call(request: ToolCallRequest): Effect.Effect<ToolCallOutcome>
   presentCall(tool: string, argumentsJson: string): ToolCallView
   presentResult(tool: string, argumentsJson: string, result: ToolResultView): ToolResultView
 }
 
-/** What the model sees of one tool: name, description, and the JSON Schema of its arguments. */
-export const toolDeclaration = (tool: AnyTool): ToolSchema => {
-  const document = Schema.toJsonSchemaDocument(tool.parameters)
-  return {
-    name: tool.name,
-    description: tool.description,
-    parameters: { ...document.schema, $defs: document.definitions },
-  }
+/** The JSON Schema a provider reads, with the definitions its refs point at. */
+const jsonSchemaOf = (schema: Schema.Schema<any>): Readonly<Record<string, unknown>> => {
+  const document = Schema.toJsonSchemaDocument(schema)
+  return { ...document.schema, $defs: document.definitions }
 }
+
+/** What the model sees of one tool: name, description, and the JSON Schema of its arguments. */
+export const toolDeclaration = (tool: AnyTool): ToolSchema => ({
+  name: tool.name,
+  description: tool.description,
+  parameters: jsonSchemaOf(tool.parameters),
+})
 
 /** Builds a tool registry over one hook registry. */
 export function makeTools(hooks: HookRegistry): ToolRegistry {
@@ -106,6 +112,16 @@ export function makeTools(hooks: HookRegistry): ToolRegistry {
       [...registered.values()]
         .filter((tool) => allowed(tool.name))
         .map((tool) => toolDeclaration(tool)),
+
+    signatures: () =>
+      [...registered.values()]
+        .filter((tool) => allowed(tool.name))
+        .map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          parameters: jsonSchemaOf(tool.parameters),
+          output: jsonSchemaOf(tool.output.schema),
+        })),
 
     isConcurrencySafe: (tool, argumentsJson) => {
       const definition = toolNamed(tool)

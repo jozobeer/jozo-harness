@@ -57,6 +57,23 @@ describe('registration', () => {
     expect(schemas[0]?.parameters).toMatchObject({ type: 'object' })
   })
 
+  test('signatures pairs each visible argument schema with its result schema', async () => {
+    const tools = makeTools(makeHooks())
+
+    const signatures = await scoped(tools, () => Effect.succeed(tools.signatures()))
+
+    expect(signatures).toHaveLength(1)
+    expect(signatures[0]?.name).toBe('echo')
+    expect(signatures[0]?.parameters).toMatchObject({
+      type: 'object',
+      properties: { text: { type: 'string' } },
+    })
+    expect(signatures[0]?.output).toMatchObject({
+      type: 'object',
+      properties: { text: { type: 'string' } },
+    })
+  })
+
   test('a registration disappears when its scope closes', async () => {
     const tools = makeTools(makeHooks())
     await Effect.runPromise(Effect.scoped(tools.register(echo)))
