@@ -1,0 +1,10 @@
+{
+  "name": "@jozo-harness/sdk",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@jozo-harness/acp": "workspace:*",
+    "effect": "4.0.3"
+  }
+}
