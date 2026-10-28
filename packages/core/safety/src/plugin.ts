@@ -13,9 +13,10 @@ import { Ask } from './ask.ts'
 import { askServiceLayer } from './ask.ts'
 import { Policy, type PolicyShape } from './policy-service.ts'
 import { modeOf } from './policy.ts'
+import { AutoReview, autoReviewServiceLayer } from './auto-review.ts'
 
 export const safetyConfigSchema = Schema.Struct({
-  preset: Schema.Literals(['read-only', 'workspace-write', 'full']),
+  preset: Schema.Literals(['read-only', 'workspace-write', 'auto', 'full']),
   sandbox: Schema.optionalKey(Schema.Literals(['none', 'seatbelt', 'bwrap', 'auto'])),
   /** Roots the sandboxed process may write; empty means deny all writes. */
   writableRoots: Schema.optionalKey(Schema.Array(Schema.String)),
@@ -224,11 +225,15 @@ const policyLayerWithContexts = (
     }).pipe(Effect.orDie),
   )
 
-/** Loader definition for the permission preset and the sandbox provider. */
-export const safetyPlugin: Plugin<SafetyConfig, Policy | Sandbox, SystemPrompt> = {
+/**
+ * Loader definition for the permission preset, the sandbox provider, and the
+ * review seam. The seam is provided for every preset because the preset decides
+ * who asks it; the auto preset installs the guard that does.
+ */
+export const safetyPlugin: Plugin<SafetyConfig, Policy | Sandbox | AutoReview, SystemPrompt> = {
   name: '@jozo-harness/safety',
   config: safetyConfigSchema,
-  provides: [Policy, Sandbox],
+  provides: [Policy, Sandbox, AutoReview],
   requires: [SystemPrompt],
   layer: (config) => {
     const decision = decideSandbox(config, process.platform, probeBwrap)
@@ -237,6 +242,7 @@ export const safetyPlugin: Plugin<SafetyConfig, Policy | Sandbox, SystemPrompt> 
     return Layer.mergeAll(
       policyLayerWithContexts(config, decision, probe),
       layerForDecision(config, decision),
+      autoReviewServiceLayer,
     )
   },
 }

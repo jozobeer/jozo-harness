@@ -72,6 +72,12 @@ export interface ToolRunContext {
    */
   readonly concludeTurn?: () => void
   /**
+   * The call came from a tool rather than from the model, as a `run_code` program
+   * makes them. The outer call already carried the decision to run the program,
+   * so a policy that asks once per step skips these.
+   */
+  readonly nested?: true
+  /**
    * Adds a fragment the next request should see as a user message. The pipeline
    * collects the fragments on this call's result, so text a tool found reaches
    * the model after the tool result rather than inside it. Absent when nothing
@@ -178,6 +184,11 @@ export interface ToolDefinition<A, V> {
     readonly render: (args: A, value: V) => ReadonlyArray<ContentBlock>
   }
   readonly execute: (args: A, exec: ToolRunContext) => Effect.Effect<V, ToolError>
+  /**
+   * The call reads but changes nothing outside its own result. The auto preset
+   * leaves such a call unreviewed, the same way the other presets never review.
+   */
+  readonly readOnly?: boolean
   readonly isConcurrencySafe?: (args: A) => boolean
   readonly timeoutMs?: number
   readonly finalizeContent?: (

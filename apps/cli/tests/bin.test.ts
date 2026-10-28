@@ -135,7 +135,7 @@ describe('main', () => {
     expect(text).toContain('profile: headless — default')
     expect(text).toContain('OLLAMA_API_KEY:')
     expect(text).toContain(
-      '@jozo-harness/safety: preset (required, one of read-only|workspace-write|full), sandbox (optional, one of none|seatbelt|bwrap|auto), writableRoots (optional, string[])',
+      '@jozo-harness/safety: preset (required, one of read-only|workspace-write|auto|full), sandbox (optional, one of none|seatbelt|bwrap|auto), writableRoots (optional, string[])',
     )
     expect(text).toContain('@jozo-harness/kernel: none')
     expect(text).toContain(

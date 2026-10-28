@@ -31,6 +31,8 @@ export interface ToolRegistry {
   guard(guard: ToolGuard): Effect.Effect<void, never, Scope.Scope>
   /** Registers a tool filter until the surrounding scope closes. */
   restrict(restriction: ToolRestriction): Effect.Effect<void, never, Scope.Scope>
+  /** Whether one registered tool declares that it changes nothing outside its result. */
+  isReadOnly(tool: string): boolean
   /** Model-facing declarations after every active restriction. */
   schemas(): ReadonlyArray<ToolSchema>
   /** The same visible tools with both their argument and result schemas. */
@@ -107,6 +109,8 @@ export function makeTools(hooks: HookRegistry): ToolRegistry {
         restrictions.add(restriction)
         yield* Effect.addFinalizer(() => Effect.sync(() => restrictions.delete(restriction)))
       }),
+
+    isReadOnly: (tool) => toolNamed(tool)?.readOnly === true,
 
     schemas: () =>
       [...registered.values()]
