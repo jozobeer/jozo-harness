@@ -1,4 +1,4 @@
-import type { Quote, UiEvent, UiSessionEvent } from '@jozo-harness/ui-protocol'
+import type { Attachment, Quote, UiEvent, UiSessionEvent } from '@jozo-harness/ui-protocol'
 import { applyEvent, emptyConversation, type Conversation } from '@jozo-harness/ui-view'
 import type {
   CommandView,
@@ -40,6 +40,8 @@ export interface WebState {
   readonly draft: string
   /** Passages selected from earlier turns, to travel with the next message. */
   readonly quotes: ReadonlyArray<Quote>
+  /** Files uploaded for the next message, in the order the composer shows them. */
+  readonly attachments: ReadonlyArray<Attachment>
   /** The conversation text the reader has selected, waiting to become a quote. */
   readonly selection: string
   readonly info: SessionInfo
@@ -93,6 +95,7 @@ export const initialState: WebState = {
   connected: false,
   draft: '',
   quotes: [],
+  attachments: [],
   selection: '',
   info: emptyInfo,
   sessions: [],
@@ -124,6 +127,12 @@ export const withQuotes = (state: WebState, quotes: ReadonlyArray<Quote>): WebSt
   ...state,
   quotes,
 })
+
+/** Keeps the files the next message carries, newest last. */
+export const withAttachments = (
+  state: WebState,
+  attachments: ReadonlyArray<Attachment>,
+): WebState => ({ ...state, attachments })
 
 /** Remembers the conversation text the reader holds selected, so a button can quote it. */
 export const withSelection = (state: WebState, selection: string): WebState => ({
@@ -210,6 +219,7 @@ export const withBlank = (state: WebState): WebState => ({
   info: emptyInfo,
   problem: '',
   quotes: [],
+  attachments: [],
   selection: '',
   run: undefined,
   // The lists belonged to the session left behind; the next one reads its own on demand.
@@ -235,8 +245,10 @@ export const withSession = (state: WebState, summary: SessionSummary): WebState 
     // already shows again is no move: the line about what just went wrong stays,
     // which is what a page that reopens a refused session has to say for itself.
     problem: state.sessionId === summary.id ? state.problem : '',
-    // A passage selected in another session names nothing here.
+    // A passage selected in another session names nothing here, and neither
+    // does a file uploaded for the message it was composing.
     quotes: [],
+    attachments: [],
     selection: '',
     run: undefined,
     commands: state.sessionId === summary.id ? state.commands : undefined,

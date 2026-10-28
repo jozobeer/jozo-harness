@@ -103,6 +103,8 @@ const makeStore = (
     },
     submit: (mode) =>
       calls.push(mode === undefined ? { kind: 'submit' } : { kind: 'submit', mode }),
+    attach: () => undefined,
+    removeAttachment: () => undefined,
     addQuote: (text) => {
       calls.push({ kind: 'addQuote', text })
       update((current) => withQuotes(withSelection(current, ''), [...current.quotes, { text }]))

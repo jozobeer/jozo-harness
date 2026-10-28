@@ -14,6 +14,8 @@ export interface AgentOptions {
   readonly maxSpillBytes?: number
   /** Where spilled text is kept; unset keeps the loop's managed default. */
   readonly spillDir?: string
+  /** Where content-addressed attachments live; unset leaves them unresolvable. */
+  readonly attachmentDir?: string
   /** `provider/model` route. */
   readonly route: string
   /** The named agent preset this session runs under; unset keeps the profile's own. */

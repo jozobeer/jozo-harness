@@ -893,6 +893,14 @@ export const Composer = (props: {
   /** Whether the open session has a turn to stop; idle makes Stop a disabled square. */
   const running = (): boolean => props.store.state().conversation.running
 
+  /** Uploads every file dropped or picked; the store keeps what the server accepted. */
+  const attachFiles = (files: FileList | null): void => {
+    for (const file of files ?? []) props.store.attach(file)
+  }
+
+  let picker: HTMLInputElement | undefined
+  const attachments = () => props.store.state().attachments
+
   return (
     <footer data-takeover={takeover() ? 'true' : 'false'}>
       <GoalBar store={props.store} onEdit={editGoal} />
@@ -907,6 +915,11 @@ export const Composer = (props: {
         onSubmit={(event) => {
           event.preventDefault()
           send()
+        }}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => {
+          event.preventDefault()
+          attachFiles(event.dataTransfer?.files ?? null)
         }}
       >
         <Show when={token()}>
@@ -953,6 +966,29 @@ export const Composer = (props: {
                 Quote selection
               </button>
             </Show>
+          </div>
+        </Show>
+        <Show when={attachments().length > 0}>
+          <div id="attachments" aria-label="files the next message attaches">
+            <Index each={attachments()}>
+              {(attachment, index) => (
+                <span class="attachment-chip">
+                  <span class="attachment-kind">
+                    {attachment().mediaType.startsWith('image/') ? 'image' : 'file'}
+                  </span>
+                  <span class="attachment-name">{attachment().name}</span>
+                  <button
+                    type="button"
+                    class="attachment-remove"
+                    aria-label={'Remove attached file ' + attachment().name}
+                    title="remove this attachment"
+                    onClick={() => props.store.removeAttachment(index)}
+                  >
+                    ×
+                  </button>
+                </span>
+              )}
+            </Index>
           </div>
         </Show>
         <Show when={reference()}>
@@ -1008,6 +1044,28 @@ export const Composer = (props: {
           }}
         >
           <Plus store={props.store} onStart={start} seat={compact() ? seat : undefined} />
+          <input
+            ref={(node) => {
+              picker = node
+            }}
+            type="file"
+            multiple
+            hidden
+            onChange={(event) => {
+              attachFiles(event.currentTarget.files)
+              event.currentTarget.value = ''
+            }}
+          />
+          <Button
+            id="attach"
+            size="icon"
+            type="button"
+            aria-label="Attach files"
+            title="Attach images or text files (or drop them here)"
+            onClick={() => picker?.click()}
+          >
+            <Icon name="paperclip" />
+          </Button>
           <Show when={!compact()}>{seat()}</Show>
           <ContextRing store={props.store} />
           {/* While something waits on the reader, the card's button is the one in amber. */}

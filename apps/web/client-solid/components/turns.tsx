@@ -1,6 +1,6 @@
 import { For, Index, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import { plainText, summaryBodyOf } from '@jozo-harness/ui-view'
-import type { Quote } from '@jozo-harness/ui-protocol'
+import type { Attachment, Quote } from '@jozo-harness/ui-protocol'
 import { renderMarkdown } from '../../src/ui/markdown.ts'
 import {
   toolsOf,
@@ -377,10 +377,42 @@ const quotedMarkdown = (quotes: ReadonlyArray<Quote>): string =>
     )
     .join('\n\n')
 
-/** What the turn asked: the passages it quoted, then the human's own words. */
+/** A file size as the composer and the card show it. */
+const sizeOf = (bytes: number): string =>
+  bytes < 1024
+    ? String(bytes) + ' B'
+    : bytes < 1024 * 1024
+      ? (bytes / 1024).toFixed(1) + ' KB'
+      : (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+
+/** The files the message carried, as cards the reader can recognise after a reload. */
+const Attached = (props: { attachments: ReadonlyArray<Attachment> }) => (
+  <div class="attachments" aria-label="files the message attached">
+    <Index each={props.attachments}>
+      {(attachment) => (
+        <span class="attachment-card">
+          <span class="attachment-kind">
+            {attachment().mediaType.startsWith('image/') ? 'image' : 'file'}
+          </span>
+          <span class="attachment-name">{attachment().name}</span>
+          <span class="attachment-size">{sizeOf(attachment().bytes)}</span>
+        </span>
+      )}
+    </Index>
+  </div>
+)
+
+/** What the turn asked: the files it attached, the passages it quoted, then the human's own words. */
 const Ask = (props: { turn: TraceTurn }) => (
-  <Show when={props.turn.prompt !== '' || props.turn.quotes.length > 0}>
+  <Show
+    when={
+      props.turn.prompt !== '' || props.turn.quotes.length > 0 || props.turn.attachments.length > 0
+    }
+  >
     <div class="block user turn-ask">
+      <Show when={props.turn.attachments.length > 0}>
+        <Attached attachments={props.turn.attachments} />
+      </Show>
       <Show when={props.turn.quotes.length > 0}>
         <Markdown text={quotedMarkdown(props.turn.quotes)} class="quoted" />
       </Show>

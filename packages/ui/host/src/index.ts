@@ -2,10 +2,12 @@ import type { Agent } from '@jozo-harness/agent'
 import { repairInterruptedRun } from '@jozo-harness/agent-loop'
 import type { HookRegistry } from '@jozo-harness/kernel'
 import {
+  clipAttachments,
   clipQuotes,
   clipReferences,
   parseCommand,
   rateFeedback,
+  type Attachment,
   type CommandsShape,
   type Quote,
   type Reference,
@@ -204,6 +206,7 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
         readonly source: 'user'
         readonly quotes?: ReadonlyArray<Quote>
         readonly references?: ReadonlyArray<Reference>
+        readonly attachments?: ReadonlyArray<Attachment>
       },
       mode: SubmitMode,
     ): Effect.Effect<void, SessionError> =>
@@ -257,17 +260,43 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
       text: string,
       quotes: ReadonlyArray<Quote>,
       references: ReadonlyArray<Reference>,
+      attachments: ReadonlyArray<Attachment>,
     ): {
       readonly text: string
       readonly source: 'user'
       readonly quotes?: ReadonlyArray<Quote>
       readonly references?: ReadonlyArray<Reference>
+      readonly attachments?: ReadonlyArray<Attachment>
     } => ({
       text,
       source: 'user',
       ...(quotes.length === 0 ? {} : { quotes }),
       ...(references.length === 0 ? {} : { references }),
+      ...(attachments.length === 0 ? {} : { attachments }),
     })
+
+    /** True when the body, quotations, references, and files together say nothing. */
+    const emptyLine = (
+      text: string,
+      quotes: ReadonlyArray<Quote>,
+      references: ReadonlyArray<Reference>,
+      attachments: ReadonlyArray<Attachment>,
+    ): boolean =>
+      text.trim() === '' &&
+      quotes.length === 0 &&
+      references.length === 0 &&
+      attachments.length === 0
+
+    /** Runs a line the registry may answer as a command; undefined keeps it a message. */
+    const commandOutcome = (text: string) =>
+      options.commands === undefined
+        ? Effect.succeed(undefined)
+        : options.commands.run(text, options.session, {
+            route: () => options.agent.options.route,
+            effort: () => options.agent.options.reasoningEffort ?? '',
+            setModel: (model) => options.agent.setRoute(model),
+            setEffort: (effort) => options.agent.setEffort(effort),
+          })
 
     /**
      * A line from the page becomes a forced skill, a command, or the agent's
@@ -280,13 +309,15 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
       mode: SubmitMode,
       quotes?: ReadonlyArray<Quote>,
       references?: ReadonlyArray<Reference>,
+      attachments?: ReadonlyArray<Attachment>,
     ): Effect.Effect<void, SessionError> =>
       Effect.gen(function* () {
         // Quotations and attachments travel with the body, and all empty is nothing
         // to send.
         const selected = clipQuotes(quotes ?? [])
         const attached = clipReferences(references ?? [])
-        if (text.trim() === '' && selected.length === 0 && attached.length === 0) return
+        const files = clipAttachments(attachments ?? [])
+        if (emptyLine(text, selected, attached, files)) return
         // A slash the registry does not answer may still name a skill; the loaded
         // skill becomes the turn's input, and its arguments become the message.
         const loaded = yield* forcedSkillOf(text)
@@ -294,17 +325,8 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
           yield* recordSkillLoad(loaded, mode)
           return
         }
-        const outcome =
-          options.commands === undefined
-            ? undefined
-            : yield* options.commands.run(text, options.session, {
-                route: () => options.agent.options.route,
-                effort: () => options.agent.options.reasoningEffort ?? '',
-                setModel: (model) => options.agent.setRoute(model),
-                setEffort: (effort) => options.agent.setEffort(effort),
-              })
-        if (outcome !== undefined) return
-        yield* deliver(quotedMessage(text, selected, attached), mode)
+        if ((yield* commandOutcome(text)) !== undefined) return
+        yield* deliver(quotedMessage(text, selected, attached, files), mode)
       })
 
     return {
@@ -328,8 +350,8 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
       ),
       // A command is answered without consuming a turn; its answer reaches the UI
       // through the session events, so a reconnecting client sees it too.
-      submit: (text, mode = 'queue', quotes, references) =>
-        submitLine(text, mode, quotes, references),
+      submit: (text, mode = 'queue', quotes, references, attachments) =>
+        submitLine(text, mode, quotes, references, attachments),
       approve: (callId, approved) => Effect.asVoid(settle(approvals, callId, approved)),
       /**
        * A question only lives in the run that asked it: a session reopened from

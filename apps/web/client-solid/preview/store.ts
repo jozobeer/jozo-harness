@@ -187,6 +187,12 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
     stop: () => undefined,
     setDraft: (text) => setState((now) => withDraft(now, text)),
     submit: () => setState((now) => withQuotes(withDraft(now, ''), [])),
+    attach: () => undefined,
+    removeAttachment: (index) =>
+      setState((now) => ({
+        ...now,
+        attachments: now.attachments.filter((_attachment, at) => at !== index),
+      })),
     addQuote: (text) =>
       setState((now) => withQuotes(withSelection(now, ''), [...now.quotes, { text }])),
     removeQuote: (index) =>

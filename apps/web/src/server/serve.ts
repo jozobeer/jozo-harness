@@ -13,6 +13,7 @@ import {
   type ScheduleStore,
 } from '@jozo-harness/tools-tier1'
 import { sendCommand, type SessionError, type SessionEvent } from '@jozo-harness/ui-protocol'
+import { attachmentRootOf, saveAttachment } from '@jozo-harness/session'
 import { UiRpcs, type CommandView } from '../shared/rpc.ts'
 import {
   authCookie,
@@ -283,6 +284,16 @@ const handlersOf = (
         const sessions = yield* sessionCandidateTargets(cwd, query, digests)
         return [...paths, ...sessions]
       }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
+    attach: ({ name, mediaType, data }) =>
+      Effect.gen(function* () {
+        const view = yield* settings.read()
+        const bytes = Buffer.from(data, 'base64')
+        return yield* saveAttachment(attachmentRootOf(view.sessionRoot), {
+          name,
+          mediaType,
+          data: bytes,
+        })
+      }).pipe(Effect.mapError((error) => (error instanceof Error ? error.message : String(error)))),
     jobDetail: ({ sessionId, id }) => {
       const session = registry.sessionOf(sessionId)
       return session === undefined

@@ -27,7 +27,7 @@ import {
   clipQuotes,
   clipReferences,
   cwdOf,
-  deriveMessages,
+  deriveMessagesWithSeqs,
   IMAGE_REFERENCE_TOKENS,
   lastRequestHeader,
   lastRuntimeContext,
@@ -54,6 +54,7 @@ import { Context, Duration, Effect, Exit, Layer, Queue, Schema, Stream } from 'e
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { hydrateAttachments } from './attachments.ts'
 import { groupCalls, type CallBatch } from './batch.ts'
 import type { AgentRequest } from './hooks.ts'
 import { retryConfigSchema } from './retry.ts'
@@ -649,16 +650,22 @@ export const agentLoopEffect = (
       agent: Agent,
       build: PromptBuild,
       context: ReadonlyArray<string>,
-    ): AgentRequest => {
-      // The log is what was sent: recorded compaction is part of the fold. A
-      // fragment a tool added follows the tool results for this step alone.
-      const messages = deriveMessages(agent.session.events())
-      const fragment = contextMessageOf(context)
-      return {
-        ...envelopeOf(agent, build),
-        messages: fragment === undefined ? messages : [...messages, fragment],
-      }
-    }
+    ): Effect.Effect<AgentRequest> =>
+      Effect.gen(function* () {
+        // The log is what was sent: recorded compaction is part of the fold. A
+        // fragment a tool added follows the tool results for this step alone.
+        const events = agent.session.events()
+        const messages = yield* hydrateAttachments(
+          deriveMessagesWithSeqs(events),
+          events,
+          agent.options.attachmentDir,
+        )
+        const fragment = contextMessageOf(context)
+        return {
+          ...envelopeOf(agent, build),
+          messages: fragment === undefined ? messages : [...messages, fragment],
+        }
+      })
 
     /**
      * The request after a fold that made the surface smaller, and nothing when the
@@ -789,7 +796,7 @@ export const agentLoopEffect = (
         yield* recordCompaction(agent, envelope)
         const rebuild = (): Effect.Effect<AgentRequest> =>
           Effect.gen(function* () {
-            const base = requestOf(agent, build, context)
+            const base = yield* requestOf(agent, build, context)
             const rebuilt = (yield* hooks.waterfall('agent/request', base)) ?? base
             yield* recordRequestHeader(agent, rebuilt)
             return rebuilt
