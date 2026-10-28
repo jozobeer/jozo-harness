@@ -21,6 +21,11 @@ interface FakeInput {
   readonly otherSession: Session
   readonly otherAgent: Agent
   readonly submitted: Array<string>
+  /** Every message the host handed the agent, quotes included. */
+  readonly delivered: Array<{
+    readonly text: string
+    readonly quotes?: ReadonlyArray<{ readonly text: string }>
+  }>
   /** Every line the host put on the running turn's step queue. */
   readonly steered: Array<string>
   readonly cancelled: Array<string>
@@ -34,6 +39,10 @@ interface FakeInput {
 const makeInput = (): FakeInput => {
   const hooks = makeHooks()
   const submitted: Array<string> = []
+  const delivered: Array<{
+    readonly text: string
+    readonly quotes?: ReadonlyArray<{ readonly text: string }>
+  }> = []
   const steered: Array<string> = []
   const cancelled: Array<string> = []
   const efforts: Array<string> = []
@@ -72,9 +81,10 @@ const makeInput = (): FakeInput => {
   otherHolder.session = otherSession
   const agent = {
     session,
-    followup: (message: { text: string }) =>
+    followup: (message: { text: string; quotes?: ReadonlyArray<{ text: string }> }) =>
       Effect.sync(() => {
         submitted.push(message.text)
+        delivered.push(message)
       }),
     steer: (message: { text: string }) =>
       Effect.sync(() => {
@@ -101,6 +111,7 @@ const makeInput = (): FakeInput => {
     otherSession,
     otherAgent,
     submitted,
+    delivered,
     steered,
     cancelled,
     efforts,
@@ -341,6 +352,37 @@ describe('ui host', () => {
         yield* host.submit('after this')
         expect(input.steered).toEqual(['join now'])
         expect(input.submitted).toEqual(['after this'])
+      }),
+    )
+  })
+
+  test('a quoted passage reaches the agent beside the human text', async () => {
+    const input = makeInput()
+    await withHost(input, (host) =>
+      Effect.gen(function* () {
+        yield* host.submit('does this hold?', undefined, [
+          { text: 'a passage from the answer', sourceSeq: 7 },
+        ])
+        expect(input.delivered).toEqual([
+          {
+            text: 'does this hold?',
+            source: 'user',
+            quotes: [{ text: 'a passage from the answer', sourceSeq: 7 }],
+          },
+        ])
+      }),
+    )
+  })
+
+  test('a message of quotations alone is sent, while one with neither is not', async () => {
+    const input = makeInput()
+    await withHost(input, (host) =>
+      Effect.gen(function* () {
+        yield* host.submit('   ', undefined, [{ text: 'only the passage' }])
+        yield* host.submit('   ')
+        expect(input.delivered).toEqual([
+          { text: '   ', source: 'user', quotes: [{ text: 'only the passage' }] },
+        ])
       }),
     )
   })

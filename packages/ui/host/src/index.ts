@@ -2,9 +2,11 @@ import type { Agent } from '@jozo-harness/agent'
 import { repairInterruptedRun } from '@jozo-harness/agent-loop'
 import type { HookRegistry } from '@jozo-harness/kernel'
 import {
+  clipQuotes,
   parseCommand,
   rateFeedback,
   type CommandsShape,
+  type Quote,
   type Session,
   type SessionError,
   type SessionEvent,
@@ -195,7 +197,11 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
      * turn a followup would have started, so the fallback needs no check here.
      */
     const deliver = (
-      message: { readonly text: string; readonly source: 'user' },
+      message: {
+        readonly text: string
+        readonly source: 'user'
+        readonly quotes?: ReadonlyArray<Quote>
+      },
       mode: SubmitMode,
     ): Effect.Effect<void, SessionError> =>
       mode === 'steer' ? options.agent.steer(message) : options.agent.followup(message)
@@ -240,6 +246,51 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
         if (loaded.input !== '') yield* deliver({ text: loaded.input, source: 'user' }, mode)
       })
 
+    /** The message the agent receives: the human's words, and the passages they quoted. */
+    const quotedMessage = (
+      text: string,
+      quotes: ReadonlyArray<Quote>,
+    ): {
+      readonly text: string
+      readonly source: 'user'
+      readonly quotes?: ReadonlyArray<Quote>
+    } => (quotes.length === 0 ? { text, source: 'user' } : { text, source: 'user', quotes })
+
+    /**
+     * A line from the page becomes a forced skill, a command, or the agent's
+     * input, in that order. The mode reaches only a message: a command or a skill
+     * load answers now either way, so steering it would wait for a step it does
+     * not need.
+     */
+    const submitLine = (
+      text: string,
+      mode: SubmitMode,
+      quotes?: ReadonlyArray<Quote>,
+    ): Effect.Effect<void, SessionError> =>
+      Effect.gen(function* () {
+        // Quotations travel with the body, and both empty is nothing to send.
+        const selected = clipQuotes(quotes ?? [])
+        if (text.trim() === '' && selected.length === 0) return
+        // A slash the registry does not answer may still name a skill; the loaded
+        // skill becomes the turn's input, and its arguments become the message.
+        const loaded = yield* forcedSkillOf(text)
+        if (loaded !== undefined) {
+          yield* recordSkillLoad(loaded, mode)
+          return
+        }
+        const outcome =
+          options.commands === undefined
+            ? undefined
+            : yield* options.commands.run(text, options.session, {
+                route: () => options.agent.options.route,
+                effort: () => options.agent.options.reasoningEffort ?? '',
+                setModel: (model) => options.agent.setRoute(model),
+                setEffort: (effort) => options.agent.setEffort(effort),
+              })
+        if (outcome !== undefined) return
+        yield* deliver(quotedMessage(text, selected), mode)
+      })
+
     return {
       events: Stream.scoped(
         Stream.unwrap(
@@ -260,29 +311,8 @@ export const makeUiHost = (options: MakeUiHostOptions): Effect.Effect<UiHost, ne
         ),
       ),
       // A command is answered without consuming a turn; its answer reaches the UI
-      // through the session events, so a reconnecting client sees it too. That is
-      // why the mode only reaches a message: a command or a skill load answers or
-      // writes now either way, and steering it would wait for a step it does not need.
-      submit: (text, mode = 'queue') =>
-        Effect.gen(function* () {
-          // A slash the registry does not answer may still name a skill; the loaded
-          // skill becomes the turn's input, and its arguments become the message.
-          const loaded = yield* forcedSkillOf(text)
-          if (loaded !== undefined) {
-            yield* recordSkillLoad(loaded, mode)
-            return
-          }
-          if (options.commands !== undefined) {
-            const outcome = yield* options.commands.run(text, options.session, {
-              route: () => options.agent.options.route,
-              effort: () => options.agent.options.reasoningEffort ?? '',
-              setModel: (model) => options.agent.setRoute(model),
-              setEffort: (effort) => options.agent.setEffort(effort),
-            })
-            if (outcome !== undefined) return
-          }
-          yield* deliver({ text, source: 'user' }, mode)
-        }),
+      // through the session events, so a reconnecting client sees it too.
+      submit: (text, mode = 'queue', quotes) => submitLine(text, mode, quotes),
       approve: (callId, approved) => Effect.asVoid(settle(approvals, callId, approved)),
       /**
        * A question only lives in the run that asked it: a session reopened from

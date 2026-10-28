@@ -1,4 +1,4 @@
-import { Show, createEffect, createSignal } from 'solid-js'
+import { Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js'
 import type { Conversation as ConversationState } from '@jozo-harness/ui-view'
 import { followsBottom } from '../../src/ui/scroll.ts'
 import type { SessionStore } from '../store.ts'
@@ -36,6 +36,22 @@ export const Conversation = (props: { store: SessionStore }) => {
   /** The conversation this column last followed to the bottom. */
   let followed: ConversationState | undefined
   const [atBottom, setAtBottom] = createSignal(true)
+
+  onMount(() => {
+    // A selection inside the conversation is what the composer may quote; one
+    // elsewhere on the page belongs to another pane and names no turn.
+    const report = (): void => {
+      const picked = window.getSelection()
+      const anchor = picked?.anchorNode ?? null
+      const inside = element !== undefined && anchor !== null && element.contains(anchor)
+      props.store.setSelection(inside ? (picked?.toString() ?? '') : '')
+    }
+    document.addEventListener('selectionchange', report)
+    onCleanup(() => {
+      document.removeEventListener('selectionchange', report)
+      props.store.setSelection('')
+    })
+  })
 
   createEffect(() => {
     // Reading the conversation is what subscribes this effect to every event.

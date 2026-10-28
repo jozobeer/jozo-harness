@@ -3,6 +3,7 @@ import {
   Match,
   Show,
   Switch,
+  Index,
   createEffect,
   createSignal,
   on,
@@ -36,6 +37,12 @@ import { Fizz } from './ui/fizz.tsx'
 import { GoalMark, roundsOf } from './ui/goal-mark.tsx'
 import { Icon } from './ui/icon.tsx'
 import { ContextRing } from './usage.tsx'
+
+/** The one line a quote chip shows, however long the passage the reader selected. */
+const quotePreview = (text: string): string => {
+  const line = text.split('\n').find((part) => part.trim() !== '') ?? ''
+  return line.length > 80 ? line.slice(0, 80) + '…' : line
+}
 
 /** How long the composer waits after the last key before it asks for files. */
 const REFERENCE_ASK_DELAY = 150
@@ -909,6 +916,41 @@ export const Composer = (props: {
               onAccept={accept}
             />
           )}
+        </Show>
+        <Show
+          when={
+            props.store.state().quotes.length > 0 || props.store.state().selection.trim() !== ''
+          }
+        >
+          <div id="quotes" aria-label="passages the next message quotes">
+            <Index each={props.store.state().quotes}>
+              {(quote, index) => (
+                <span class="quote-chip">
+                  <span class="quote-text">{quotePreview(quote().text)}</span>
+                  <button
+                    type="button"
+                    class="quote-remove"
+                    aria-label={'Remove quoted passage ' + String(index + 1)}
+                    title="remove this quotation"
+                    onClick={() => props.store.removeQuote(index)}
+                  >
+                    ×
+                  </button>
+                </span>
+              )}
+            </Index>
+            <Show when={props.store.state().selection.trim() !== ''}>
+              <button
+                type="button"
+                id="quote-selection"
+                title="quote the selected text in the next message"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => props.store.addQuote(props.store.state().selection)}
+              >
+                Quote selection
+              </button>
+            </Show>
+          </div>
         </Show>
         <Show when={reference()}>
           {(_found) => (

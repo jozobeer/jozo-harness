@@ -1,4 +1,4 @@
-import type { UiEvent, UiSessionEvent } from '@jozo-harness/ui-protocol'
+import type { Quote, UiEvent, UiSessionEvent } from '@jozo-harness/ui-protocol'
 import { applyEvent, emptyConversation, type Conversation } from '@jozo-harness/ui-view'
 import type {
   CommandView,
@@ -38,6 +38,10 @@ export interface WebState {
   readonly conversation: Conversation
   readonly connected: boolean
   readonly draft: string
+  /** Passages selected from earlier turns, to travel with the next message. */
+  readonly quotes: ReadonlyArray<Quote>
+  /** The conversation text the reader has selected, waiting to become a quote. */
+  readonly selection: string
   readonly info: SessionInfo
   /** Every session the store holds, newest first, as the sidebar lists them. */
   readonly sessions: ReadonlyArray<SessionSummary>
@@ -88,6 +92,8 @@ export const initialState: WebState = {
   conversation: emptyConversation,
   connected: false,
   draft: '',
+  quotes: [],
+  selection: '',
   info: emptyInfo,
   sessions: [],
   sessionId: '',
@@ -112,6 +118,18 @@ export const withConnection = (state: WebState, connected: boolean): WebState =>
 })
 
 export const withDraft = (state: WebState, draft: string): WebState => ({ ...state, draft })
+
+/** Keeps the passages the next message will quote, newest last. */
+export const withQuotes = (state: WebState, quotes: ReadonlyArray<Quote>): WebState => ({
+  ...state,
+  quotes,
+})
+
+/** Remembers the conversation text the reader holds selected, so a button can quote it. */
+export const withSelection = (state: WebState, selection: string): WebState => ({
+  ...state,
+  selection,
+})
 
 export const withSessions = (state: WebState, items: ReadonlyArray<SessionSummary>): WebState => ({
   ...state,
@@ -191,6 +209,8 @@ export const withBlank = (state: WebState): WebState => ({
   conversation: emptyConversation,
   info: emptyInfo,
   problem: '',
+  quotes: [],
+  selection: '',
   run: undefined,
   // The lists belonged to the session left behind; the next one reads its own on demand.
   commands: undefined,
@@ -215,6 +235,9 @@ export const withSession = (state: WebState, summary: SessionSummary): WebState 
     // already shows again is no move: the line about what just went wrong stays,
     // which is what a page that reopens a refused session has to say for itself.
     problem: state.sessionId === summary.id ? state.problem : '',
+    // A passage selected in another session names nothing here.
+    quotes: [],
+    selection: '',
     run: undefined,
     commands: state.sessionId === summary.id ? state.commands : undefined,
     files: state.sessionId === summary.id ? state.files : undefined,

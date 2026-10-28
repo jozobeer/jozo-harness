@@ -1,4 +1,4 @@
-import type { UiSessionEvent } from '@jozo-harness/ui-protocol'
+import type { Quote, UiSessionEvent } from '@jozo-harness/ui-protocol'
 
 export type TraceToolStatus = 'running' | 'done' | 'error'
 
@@ -69,6 +69,8 @@ export interface TraceTurn {
   readonly turn: number
   /** What the human typed for this turn; '' when the log holds none. */
   readonly prompt: string
+  /** Passages the human quoted from earlier turns, in the order they were selected. */
+  readonly quotes: ReadonlyArray<Quote>
   readonly startedAt: number
   readonly endedAt: number | undefined
   /** How the turn ended ('completed', 'cancelled', …); '' while it runs. */
@@ -180,6 +182,7 @@ const startTurn = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => [
   {
     turn: numberOf(event.data, 'turn'),
     prompt: '',
+    quotes: [],
     startedAt: event.time,
     endedAt: undefined,
     outcome: '',
@@ -199,12 +202,28 @@ const endTurn = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) =>
     outcome: textOf(fieldOf(event.data, 'reason'), 'kind'),
   }))
 
+/** Reads the passages a message carried, dropping any entry the page cannot read. */
+const quotesOf = (data: unknown): ReadonlyArray<Quote> => {
+  const value = fieldOf(data, 'quotes')
+  if (!Array.isArray(value)) return []
+  const quotes: Array<Quote> = []
+  for (const item of value) {
+    const text = textOf(item, 'text')
+    if (text === '') continue
+    const sourceSeq = fieldOf(item, 'sourceSeq')
+    quotes.push(typeof sourceSeq === 'number' ? { text, sourceSeq } : { text })
+  }
+  return quotes
+}
+
 /** The human's words reach the turn as an inbox claim; other sources are the harness's own. */
 const claimPrompt = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => {
   const message = fieldOf(event.data, 'message')
   if (textOf(message, 'source') !== 'user') return turns
   return inLastTurn(turns, (turn) =>
-    turn.prompt === '' ? { ...turn, prompt: textOf(message, 'text') } : turn,
+    turn.prompt === ''
+      ? { ...turn, prompt: textOf(message, 'text'), quotes: quotesOf(message) }
+      : turn,
   )
 }
 
@@ -294,6 +313,7 @@ const standaloneTurn = (
   {
     turn: 0,
     prompt: '',
+    quotes: [],
     startedAt: event.time,
     endedAt: undefined,
     outcome: '',

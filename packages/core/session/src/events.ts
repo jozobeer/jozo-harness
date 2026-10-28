@@ -8,6 +8,7 @@ import type {
   LlmUsage,
   ToolSchema,
 } from '@jozo-harness/llm'
+import type { Quote } from './quote.ts'
 import type { Session } from './session.ts'
 
 export type SessionSeq = number
@@ -127,7 +128,12 @@ export interface SessionEventMap {
   'request/header': RequestHeaderData
   /** The settled system prompt; sections names the parts that rendered into it. */
   'system/message': { readonly text: string; readonly sections?: ReadonlyArray<string> }
-  'user/message': { readonly text: string; readonly source: UserMessageSource }
+  'user/message': {
+    readonly text: string
+    readonly source: UserMessageSource
+    /** Passages the human selected from earlier turns, kept apart from `text`. */
+    readonly quotes?: ReadonlyArray<Quote>
+  }
   'assistant/message': AssistantMessageData
   'assistant/attempt': AssistantAttemptData
   'llm/retry': LlmRetryData

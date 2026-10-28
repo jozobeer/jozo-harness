@@ -8,6 +8,7 @@ import {
 import { FileDiffSchema, ToolErrorInfoSchema } from '@jozo-harness/tools'
 import { Schema } from 'effect'
 import { USER_MESSAGE_SOURCES, type TurnEndReason } from './events.ts'
+import { QuoteSchema } from './quote.ts'
 import { registerLogOnlySessionEvents } from './projections.ts'
 
 /** Event schemas a decoder accepts, keyed by event type. Plugins add their own. */
@@ -103,6 +104,7 @@ const catalog = new Map<string, Schema.Schema<unknown>>([
     Schema.Struct({
       text: Schema.String,
       source: Schema.Literals(USER_MESSAGE_SOURCES),
+      quotes: Schema.optionalKey(Schema.Array(QuoteSchema)),
     }),
   ],
   [

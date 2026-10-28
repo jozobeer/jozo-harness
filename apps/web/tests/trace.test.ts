@@ -9,13 +9,44 @@ const event = (type: string, data: unknown, time: number): UiSessionEvent => ({
   data,
 })
 
-const claim = (text: string, source: string, time: number): UiSessionEvent =>
-  event('agent/inbox/claimed', { target: 'next-turn', message: { text, source } }, time)
+const claim = (
+  text: string,
+  source: string,
+  time: number,
+  quotes?: ReadonlyArray<{ text: string; sourceSeq?: number }>,
+): UiSessionEvent =>
+  event(
+    'agent/inbox/claimed',
+    {
+      target: 'next-turn',
+      message: quotes === undefined ? { text, source } : { text, source, quotes },
+    },
+    time,
+  )
 
 const said = (time: number, ...content: ReadonlyArray<unknown>): UiSessionEvent =>
   event('assistant/message', { content }, time)
 
 describe('the trace', () => {
+  test('a passage quoted with the message stays on the turn as a quotation', () => {
+    const [turn] = traceOf([
+      event('turn/start', { turn: 1 }, 10),
+      claim('does this hold?', 'user', 11, [{ text: 'a claim from the answer', sourceSeq: 4 }]),
+    ])
+
+    expect(turn?.quotes).toEqual([{ text: 'a claim from the answer', sourceSeq: 4 }])
+  })
+
+  test('a message made only of quotations still opens a turn with its quotations', () => {
+    const [turn] = traceOf([
+      event('turn/start', { turn: 1 }, 10),
+      claim('', 'user', 11, [{ text: 'only quoted' }]),
+    ])
+
+    expect(turn?.prompt).toBe('')
+    expect(turn?.quotes).toEqual([{ text: 'only quoted' }])
+  })
+
   test('a turn holds the prompt, its steps and tools, the answer, and the files it wrote', () => {
     const [turn] = traceOf([
       event('turn/start', { turn: 1 }, 10),
@@ -69,6 +100,7 @@ describe('the trace', () => {
       event('turn/end', { turn: 1, reason: { kind: 'completed' } }, 22),
     ])
     expect(turn?.prompt).toBe('fix the ledger')
+    expect(turn?.quotes).toEqual([])
     expect(turn?.answer).toBe('Done.')
     expect(turn?.outcome).toBe('completed')
     expect(turn?.endedAt).toBe(22)

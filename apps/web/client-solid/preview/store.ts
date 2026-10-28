@@ -6,6 +6,8 @@ import {
   withBlank,
   withDeletedPage,
   withDraft,
+  withQuotes,
+  withSelection,
   withSession,
   withSessions,
   withSettings,
@@ -184,7 +186,17 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
     start: () => undefined,
     stop: () => undefined,
     setDraft: (text) => setState((now) => withDraft(now, text)),
-    submit: () => setState((now) => withDraft(now, '')),
+    submit: () => setState((now) => withQuotes(withDraft(now, ''), [])),
+    addQuote: (text) =>
+      setState((now) => withQuotes(withSelection(now, ''), [...now.quotes, { text }])),
+    removeQuote: (index) =>
+      setState((now) =>
+        withQuotes(
+          now,
+          now.quotes.filter((_quote, at) => at !== index),
+        ),
+      ),
+    setSelection: (text) => setState((now) => withSelection(now, text)),
     send: (command) => sendTo(state().sessionId, command),
     sendTo,
     moveTo: (id) => setState((now) => (id === undefined ? withBlank(now) : open(id, now))),

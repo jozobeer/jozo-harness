@@ -1,7 +1,9 @@
 import {
+  QuoteSchema,
   USER_MESSAGE_SOURCES,
   registerLogOnlySessionEvents,
   registerSessionEventSchemas,
+  type Quote,
   type SessionEventSchemaMap,
   type UserMessageSource,
 } from '@jozo-harness/session'
@@ -14,6 +16,8 @@ export type InboxTarget = 'next-turn' | 'next-step'
 export interface UserMessage {
   readonly text: string
   readonly source: UserMessageSource
+  /** Passages the human quoted; they travel with the message to the log. */
+  readonly quotes?: ReadonlyArray<Quote>
 }
 
 declare module '@jozo-harness/session/events' {
@@ -28,6 +32,7 @@ const UserMessageSchema = Schema.Struct({
   text: Schema.String,
   // One list of sources, so a new one cannot be accepted here but refused by the log.
   source: Schema.Literals(USER_MESSAGE_SOURCES),
+  quotes: Schema.optionalKey(Schema.Array(QuoteSchema)),
 })
 
 const InboxEventDataSchema = Schema.Struct({
