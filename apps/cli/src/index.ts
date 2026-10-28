@@ -21,6 +21,7 @@ import {
   type PluginRow,
 } from '@jozo-harness/kernel'
 import {
+  SessionPersistenceService,
   Sessions,
   cwdOf,
   rootOf,
@@ -30,7 +31,7 @@ import {
   type SessionId,
   type SessionSummary,
 } from '@jozo-harness/session'
-import { expandHome } from '@jozo-harness/session-jsonl'
+import { expandHome, makeSessionQuery } from '@jozo-harness/session-jsonl'
 import {
   SystemPrompt,
   additionalInstructionsText,
@@ -125,7 +126,9 @@ import {
   renderSkillCatalog,
   skillRoots,
   tier1Tools,
+  SessionSearchTools,
   type RunCodeHost,
+  type SessionSearchHost,
   type SkillSummary,
 } from '@jozo-harness/tools-tier1'
 import {
@@ -926,6 +929,43 @@ const installArtifact = (tools: ToolRegistry, wiring: ProfileWiring) =>
   })
 
 /**
+ * Past sessions are searchable only when the profile names the row. A hit is
+ * useful only where its session ran, so the header's cwd decides what counts as
+ * this workspace; the run's own cwd is what the model is searching from.
+ */
+const installSessionSearch = (
+  tools: ToolRegistry,
+  wiring: ProfileWiring,
+): Effect.Effect<void, ToolError, Scope.Scope> =>
+  Effect.gen(function* () {
+    if (!hasEnabledRow(wiring.rows, '@jozo-harness/session-search')) return
+    const sessions = Context.get(wiring.context, SessionPersistenceService)
+    const summaries = yield* sessions
+      .list()
+      .pipe(
+        Effect.mapError(
+          () => new ToolError({ code: 'execution', message: 'cannot list past sessions' }),
+        ),
+      )
+    // The header cwd, not the newest change: a session that moved to a worktree
+    // still belongs to the workspace it was started from.
+    const cwdById = new Map(summaries.map((summary) => [summary.id, summary.cwd] as const))
+    // The index stays open for as long as the session it was built for.
+    const query = yield* Effect.acquireRelease(
+      Effect.sync(() => makeSessionQuery({ root: sessionRootOf(wiring.rows), sessions })),
+      (held) => Effect.sync(() => held.close()),
+    )
+    const host: SessionSearchHost = {
+      cwd: wiring.options.cwd,
+      cwdOf: (sessionId) => cwdById.get(sessionId),
+      search: (text, limit) => query.search(text, limit),
+    }
+    for (const tool of Context.get(wiring.context, SessionSearchTools)(host)) {
+      yield* tools.register(tool)
+    }
+  })
+
+/**
  * Installs what the profile's rows ask for and reports the composition the session
  * runs with: the profiles it was launched from and every tool it was given. The
  * snapshot is taken before any restriction narrows the registry, because plan mode
@@ -989,6 +1029,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
     }
     yield* installLsp(tools, wiring)
     yield* installArtifact(tools, wiring)
+    yield* installSessionSearch(tools, wiring)
     // A failed provider attempt is retried for the codes the loop row lists; the
     // loop only decides what to do when a listener answers, so this is the wiring
     // that makes the retry path part of a run.

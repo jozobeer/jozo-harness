@@ -1,4 +1,5 @@
-import { Schema, Effect } from 'effect'
+import { Context, Effect, Layer, Schema } from 'effect'
+import type { Plugin } from '@jozo-harness/kernel'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
 
 const DEFAULT_LIMIT = 10
@@ -89,3 +90,18 @@ export const makeSessionSearchTool = (
       return { hits }
     }),
 })
+
+/** The tools the session-search row hands the model, built over the run's session store. */
+export class SessionSearchTools extends Context.Service<
+  SessionSearchTools,
+  (host: SessionSearchHost) => ReadonlyArray<ToolDefinition<any, any>>
+>()('jozo-harness/SessionSearchTools') {}
+
+/** Loader definition for search over past sessions; only a profile naming the row opts in. */
+export const sessionSearchPlugin: Plugin<{}, SessionSearchTools, never> = {
+  name: '@jozo-harness/session-search',
+  config: Schema.Struct({}),
+  provides: [SessionSearchTools],
+  requires: [],
+  layer: () => Layer.succeed(SessionSearchTools, (host) => [makeSessionSearchTool(host)]),
+}

@@ -71,6 +71,8 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 
 `@jozo-harness/lsp` もキーを持たない。行を足すと `lsp` tool が渡り、モデルは `action`（`definition` / `references` / `implementation` / `hover`）と 1 始まりの `line` / `column` でファイルの位置を聞ける。この版はまだ言語サーバを起動しないため、どの拡張子でも呼び出しは `unavailable` と「その拡張子の言語サーバがこの run に無い」を返す。既定で入れていないのは、`artifact` と同じく全セッションの tool 一覧を太らせないためである。
 
+`@jozo-harness/session-search` もキーを持たない。行を足すと `session_search` tool が渡り、モデルは `query`（と任意の `limit`、既定 10・最大 50）で過去セッションのログを全文検索し、セッション id と一致した抜粋を得る。検索は `jzh sessions --search` と同じ index を使う。ヒットはセッションの header が記録した cwd がこの run の cwd と一致するものだけに絞るので、別のワークスペースで走ったログは返らない。既定の tool を増やさないため、同梱 profile には入れていない。
+
 同梱の `base` profile は `root` に `~/.jzh/sessions`、`preset` に `workspace-write`、`baseUrl` に `https://ollama.com/v1`、`localBaseUrl` に `http://127.0.0.1:11434/v1`、`apiKeyEnv` に `OLLAMA_API_KEY` を置いている。`localBaseUrl` があるので送信は常に local daemon へ行き、`baseUrl` は `jzh models` の一覧取得に使う。`agent-loop` 行は既定ルート `deepseek-v4.1-flash` の窓を 1048576、出力予約を 393216 とし、発火点を 589824 にする。`models` のキーは route の model 名であり、local daemon へ送るときだけ付く `:cloud` は含めない。route に local daemon の名前（`deepseek-v4.1-flash:cloud`）を明示した場合のために、同じ値を持つキーも置いている。
 
 発火点は `min(窓 × thresholdRatio, 窓 − maxTokens − headroomTokens)` である。既定ルートでは 1M の窓から 589824 になり、60k 程度のセッションは compaction しない。`--model` で別のモデルに変えたときは `models` のそのモデルの値を使い、名前が無ければ単一の `contextWindow` と `maxTokens` に落ちる。窓が分からないモデルでは 128000 を使う。
