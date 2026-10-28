@@ -65,6 +65,9 @@ export const spawn = (command: ReadonlyArray<string>, options: SpawnOptions = {}
     // The child leads its own group, so the kill below can take the whole tree.
     detached: groupsChildren,
   })
+  // A writer may lose the race with the child's exit. The exit code reports that
+  // outcome; an unhandled stream error would instead take the whole run down.
+  child.stdin?.on('error', () => undefined)
   return {
     exited: new Promise<number>((resolve, reject) => {
       child.once('error', reject)
