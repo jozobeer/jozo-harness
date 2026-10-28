@@ -9,7 +9,17 @@ import {
 } from '@jozo-harness/tools'
 import { Context, Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { makeEditTool, makeObservedFiles, makeReadTool, makeWriteTool } from '../src/index.ts'
@@ -258,6 +268,27 @@ describe('write tool', () => {
     expect(JSON.stringify(result?.content)).toContain('changed')
     expect(await readFile(path, 'utf8')).toBe('tampered\n')
     expect((await readdir(dir)).filter((name) => name.startsWith('.tmp-'))).toEqual([])
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('leaves the file and no temporary file when staging fails', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-write-'))
+    const path = join(dir, 'notes.txt')
+    await writeFileDeep(path, 'the original\n')
+    const call = makeSession(dir)
+    await Effect.runPromise(call('read', { path: 'notes.txt' }))
+
+    await chmod(dir, 0o500)
+    try {
+      const result = await Effect.runPromise(
+        call('write', { path: 'notes.txt', content: 'next\n' }),
+      )
+      expect(result?.isError).toBe(true)
+      expect(await readFile(path, 'utf8')).toBe('the original\n')
+      expect((await readdir(dir)).filter((name) => name.startsWith('.tmp-'))).toEqual([])
+    } finally {
+      await chmod(dir, 0o700)
+    }
     await rm(dir, { recursive: true, force: true })
   })
 
