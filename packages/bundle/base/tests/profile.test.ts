@@ -19,6 +19,7 @@ describe('base profile', () => {
       'tools',
       'system-prompt',
       'safety',
+      'hooks-json',
       'tier0',
       'ask',
       'tier1',
