@@ -8,15 +8,31 @@ import type {
 } from '@jozo-harness/safety'
 import {
   QuoteSchema,
+  ReferenceSchema,
   type FeedbackError,
   type FeedbackRating,
   type Quote,
+  type Reference,
   type SessionError,
   type SessionEvent,
 } from '@jozo-harness/session'
 
 /** The passage shape a page sends with a message; the session owns it. */
 export { QuoteSchema, type Quote }
+
+/**
+ * The attached file or session shape, its budget, and its cut. The page and the
+ * server read them from here, so neither needs the session package's whole face.
+ */
+export {
+  REFERENCE_LIMITS,
+  ReferenceSchema,
+  clipReferences,
+  type Reference,
+  type SessionError,
+  type SessionEvent,
+  type SessionSummary,
+} from '@jozo-harness/session'
 import { Effect, Schema, Stream } from 'effect'
 
 /**
@@ -35,6 +51,8 @@ export const UiCommandSchema = Schema.Union([
     mode: Schema.optionalKey(SubmitModeSchema),
     /** Passages the human selected from earlier turns; they ride with the text. */
     quotes: Schema.optionalKey(Schema.Array(QuoteSchema)),
+    /** Files and sessions the human pointed at with @; they ride with the text. */
+    references: Schema.optionalKey(Schema.Array(ReferenceSchema)),
   }),
   Schema.Struct({
     kind: Schema.Literal('approve'),
@@ -119,6 +137,7 @@ export interface UiHost {
     text: string,
     mode?: SubmitMode,
     quotes?: ReadonlyArray<Quote>,
+    references?: ReadonlyArray<Reference>,
   ) => Effect.Effect<void, SessionError>
   /** Answers one approval request. */
   readonly approve: (callId: string, approved: boolean) => Effect.Effect<void>
@@ -161,7 +180,7 @@ export const sendCommand = (
 ): Effect.Effect<void, SessionError | FeedbackError> => {
   switch (command.kind) {
     case 'submit':
-      return host.submit(command.text, command.mode, command.quotes)
+      return host.submit(command.text, command.mode, command.quotes, command.references)
     case 'approve':
       return host.approve(command.callId, command.approved)
     case 'answer':

@@ -9,6 +9,7 @@ import type {
   ToolSchema,
 } from '@jozo-harness/llm'
 import type { Quote } from './quote.ts'
+import type { Reference } from './reference.ts'
 import type { Session } from './session.ts'
 
 export type SessionSeq = number
@@ -133,6 +134,8 @@ export interface SessionEventMap {
     readonly source: UserMessageSource
     /** Passages the human selected from earlier turns, kept apart from `text`. */
     readonly quotes?: ReadonlyArray<Quote>
+    /** Files and sessions the human pointed at with @, kept apart from `text`. */
+    readonly references?: ReadonlyArray<Reference>
   }
   'assistant/message': AssistantMessageData
   'assistant/attempt': AssistantAttemptData

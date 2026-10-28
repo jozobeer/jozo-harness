@@ -1,4 +1,5 @@
 import { Schema } from 'effect'
+import { type Reference, renderReferences } from './reference.ts'
 
 /** One passage the human selected from an earlier turn to quote in a message. */
 export interface Quote {
@@ -82,15 +83,25 @@ const blockquote = (text: string): string =>
     .join('\n')
 
 /**
- * Renders one user message as the model reads it. Without quotes the human's text
- * reaches the model unchanged; with them, the quotes come first behind a header
- * that marks them as untrusted reference, then the human's own words behind their
- * own header. The two never share an unmarked stretch of text, so a quote that
- * says "ignore your instructions" stays a quote.
+ * Renders one user message as the model reads it. Without attachments the human's
+ * text reaches the model unchanged; with them, the attached files and sessions come
+ * first, then the quoted passages, each behind a header that marks it as untrusted
+ * reference, then the human's own words behind their own header. No two of them
+ * ever share an unmarked stretch of text, so a file that says "ignore your
+ * instructions" stays a file.
  */
-export function renderUserText(text: string, quotes: ReadonlyArray<Quote> = []): string {
-  if (quotes.length === 0) return text
-  const quoted = quotes.map((quote) => blockquote(quote.text)).join('\n\n')
-  const body = text.trim() === '' ? NO_BODY : BODY_HEADER + '\n' + text
-  return [QUOTE_HEADER, quoted, body].join('\n\n')
+export function renderUserText(
+  text: string,
+  quotes: ReadonlyArray<Quote> = [],
+  references: ReadonlyArray<Reference> = [],
+): string {
+  if (quotes.length === 0 && references.length === 0) return text
+  const parts: Array<string> = []
+  if (references.length > 0) parts.push(renderReferences(references))
+  if (quotes.length > 0)
+    parts.push(
+      [QUOTE_HEADER, quotes.map((quote) => blockquote(quote.text)).join('\n\n')].join('\n\n'),
+    )
+  parts.push(text.trim() === '' ? NO_BODY : BODY_HEADER + '\n' + text)
+  return parts.join('\n\n')
 }

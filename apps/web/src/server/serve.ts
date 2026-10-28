@@ -12,7 +12,7 @@ import {
   scheduleViewOf,
   type ScheduleStore,
 } from '@jozo-harness/tools-tier1'
-import { sendCommand } from '@jozo-harness/ui-protocol'
+import { sendCommand, type SessionError, type SessionEvent } from '@jozo-harness/ui-protocol'
 import { UiRpcs, type CommandView } from '../shared/rpc.ts'
 import {
   authCookie,
@@ -38,6 +38,11 @@ import {
 import { answerArtifact } from './artifacts.ts'
 import { answerPlugins, type PluginsPort } from './plugins.ts'
 import { searchWorkspaceFiles } from './files.ts'
+import {
+  resolveReferences,
+  sessionCandidateTargets,
+  type SessionDigestSource,
+} from './references.ts'
 import { branchOf } from './git-branch.ts'
 import type { SettingsPort } from './settings.ts'
 import { staticResponse } from './static.ts'
@@ -66,6 +71,13 @@ export interface ServeWebOptions {
   readonly settings: SettingsPort
   /** The folders a page may start a session in. */
   readonly workspaces: WorkspacesPort
+  /**
+   * One session's log, as an @ reference may quote it. The resolver decides which
+   * sessions a message can reach; this only reads the one it names.
+   */
+  readonly readSessionEvents: (
+    id: string,
+  ) => Effect.Effect<ReadonlyArray<SessionEvent>, SessionError>
   /** What the run can be told before any session exists: the blank page's own list. */
   readonly commands: () => ReadonlyArray<CommandView>
   /**
@@ -97,11 +109,14 @@ const handlersOf = (
   registry: SessionRegistry,
   settings: SettingsPort,
   workspaces: WorkspacesPort,
+  readSessionEvents: (id: string) => Effect.Effect<ReadonlyArray<SessionEvent>, SessionError>,
   commands: () => ReadonlyArray<CommandView>,
   store: StoreEvents,
   schedules: ScheduleStore,
-) =>
-  UiRpcs.toLayer({
+) => {
+  /** The sessions an @ reference may name: the store's list, and one log at a time. */
+  const digests: SessionDigestSource = { list: () => registry.list(), events: readSessionEvents }
+  return UiRpcs.toLayer({
     sessions: () =>
       Effect.gen(function* () {
         const view = yield* settings.read()
@@ -156,12 +171,23 @@ const handlersOf = (
       }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
     command: ({ sessionId, command }) => {
       const host = registry.hostOf(sessionId)
-      return host === undefined
-        ? Effect.succeed(false)
-        : sendCommand(host, command).pipe(
-            Effect.as(true),
-            Effect.catchCause(() => Effect.succeed(false)),
-          )
+      if (host === undefined) return Effect.succeed(false)
+      // A submitted line's @words are read here, at the one boundary that holds
+      // the workspace and the store, so every transport sends the same structure.
+      const cwd = registry.sessionOf(sessionId)?.summary.cwd
+      const prepared =
+        command.kind !== 'submit' || cwd === undefined
+          ? Effect.succeed(command)
+          : resolveReferences(cwd, command.text, digests).pipe(
+              Effect.map((references) =>
+                references.length === 0 ? command : { ...command, references },
+              ),
+            )
+      return prepared.pipe(
+        Effect.flatMap((one) => sendCommand(host, one)),
+        Effect.as(true),
+        Effect.catchCause(() => Effect.succeed(false)),
+      )
     },
     events: ({ sessionId }) => {
       const host = registry.hostOf(sessionId)
@@ -251,7 +277,11 @@ const handlersOf = (
             ? (yield* settings.read()).cwd
             : registry.sessionOf(sessionId)?.summary.cwd
         if (cwd === undefined) return yield* Effect.fail('the session is not open')
-        return yield* searchWorkspaceFiles(cwd, query)
+        const paths = yield* searchWorkspaceFiles(cwd, query)
+        // Only the sessions this workspace may read are offered, so a candidate
+        // is always one a message can actually attach.
+        const sessions = yield* sessionCandidateTargets(cwd, query, digests)
+        return [...paths, ...sessions]
       }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
     jobDetail: ({ sessionId, id }) => {
       const session = registry.sessionOf(sessionId)
@@ -298,6 +328,7 @@ const handlersOf = (
         Effect.mapError((error) => error.message),
       ),
   })
+}
 
 /** One frame from the socket, in the two shapes the protocol decodes. */
 const payloadOf = (data: RawData): Uint8Array | string => {
@@ -625,6 +656,7 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
             registry,
             options.settings,
             options.workspaces,
+            options.readSessionEvents,
             options.commands,
             store,
             options.schedules,

@@ -25,6 +25,7 @@ import {
   DEFAULT_COMPACT_MAX_BYTES,
   checkpointOf,
   clipQuotes,
+  clipReferences,
   cwdOf,
   deriveMessages,
   IMAGE_REFERENCE_TOKENS,
@@ -472,15 +473,19 @@ export const agentLoopEffect = (
       })
 
     /**
-     * The user message as the log keeps it. Quotes over the limit are cut here,
-     * the one boundary every sender passes, so a long selection reaches neither
-     * the log nor the next request.
+     * The user message as the log keeps it. Quotes and references over the limits
+     * are cut here, the one boundary every sender passes, so a long selection or a
+     * large file reaches neither the log nor the next request.
      */
     const loggedMessage = (message: UserMessage): SessionEventMap['user/message'] => {
       const quotes = message.quotes === undefined ? [] : clipQuotes(message.quotes)
-      return quotes.length === 0
-        ? { text: message.text, source: message.source }
-        : { text: message.text, source: message.source, quotes }
+      const references = message.references === undefined ? [] : clipReferences(message.references)
+      return {
+        text: message.text,
+        source: message.source,
+        ...(quotes.length === 0 ? {} : { quotes }),
+        ...(references.length === 0 ? {} : { references }),
+      }
     }
 
     /**

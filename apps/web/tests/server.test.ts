@@ -200,8 +200,14 @@ const makeHost = (id: string, cwd = '/work', working = true): FakeHost => {
     publish,
     host: {
       events,
-      submit: (text, mode) =>
-        record(mode === undefined ? { kind: 'submit', text } : { kind: 'submit', text, mode }),
+      submit: (text, mode, quotes, references) =>
+        record({
+          kind: 'submit',
+          text,
+          ...(mode === undefined ? {} : { mode }),
+          ...(quotes === undefined ? {} : { quotes }),
+          ...(references === undefined ? {} : { references }),
+        }),
       approve: (callId, approved) => record({ kind: 'approve', callId, approved }),
       answer: (id2, answer) => record({ kind: 'answer', id: id2, answer }),
       cancel: () => record({ kind: 'cancel' }),
@@ -432,6 +438,7 @@ const start = (
         initial: { session: web.initial, close: web.initialClose },
         factory: web.factory,
         settings: settings.port,
+        readSessionEvents: () => Effect.succeed([]),
         schedules: makeScheduleStore(
           join(
             tmpdir(),
@@ -567,6 +574,39 @@ describe('the web transport', () => {
     expect(observed.traversalStatus).toBe(404)
     await rm(root, { recursive: true, force: true })
     await rm(outside, { recursive: true, force: true })
+  })
+
+  test('a submitted line carries the body of the @file it names', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-root-'))
+    const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-web-workspace-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    await writeFileDeep(join(workspace, 'src/notes.md'), 'the file body')
+    const web = makeWeb('a', workspace)
+
+    const commands = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, makeSettings())
+          const ask = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            yield* client.command({
+              sessionId: 'a',
+              command: { kind: 'submit', text: 'read @src/notes.md' },
+            })
+          }).pipe(clientLayers(started.wsUrl))
+          yield* withoutServices(ask)
+          yield* Deferred.succeed(started.stop, undefined)
+          return web.hosts.get('a')?.commands ?? []
+        }),
+      ),
+    )
+
+    const submitted = commands.find((command) => command.kind === 'submit')
+    expect(submitted?.kind === 'submit' ? submitted.references : undefined).toEqual([
+      { kind: 'file', path: 'src/notes.md', text: 'the file body' },
+    ])
+    await rm(root, { recursive: true, force: true })
+    await rm(workspace, { recursive: true, force: true })
   })
 
   test('a page creates, stops, and removes a schedule in the host store', async () => {
