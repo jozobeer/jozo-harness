@@ -12,8 +12,15 @@ import { bwrapSandbox, bwrapUnavailableMessage, probeBwrap } from './linux.ts'
 import { Ask } from './ask.ts'
 import { askServiceLayer } from './ask.ts'
 import { Policy, type PolicyShape } from './policy-service.ts'
-import { modeOf } from './policy.ts'
+import { modeOf, type SandboxMode } from './policy.ts'
 import { AutoReview, autoReviewServiceLayer } from './auto-review.ts'
+import {
+  Permission,
+  makePermission,
+  policyOf,
+  sandboxWithPermission,
+  type PermissionShape,
+} from './permission.ts'
 
 export const safetyConfigSchema = Schema.Struct({
   preset: Schema.Literals(['read-only', 'workspace-write', 'auto', 'full']),
@@ -128,8 +135,8 @@ export const sandboxContextText = (
   config: SafetyConfig,
   decision: SandboxDecision,
   probe: SeatbeltProbeResult | undefined,
+  mode: SandboxMode = modeOf(config.preset),
 ): string => {
-  const mode = modeOf(config.preset)
   const confined = decision._tag === 'available' && decision.name !== 'none'
   const backend = decision._tag === 'available' ? decision.name : 'none'
   const enforcement = decision._tag === 'available' ? (decision.enforcement ?? 'full') : 'full'
@@ -155,21 +162,26 @@ export const sandboxContextText = (
 const sandboxOf = (
   config: SafetyConfig,
   decision: Extract<SandboxDecision, { _tag: 'available' }>,
+  permission: PermissionShape,
 ): SandboxShape => {
-  const mode = modeOf(config.preset)
   const writableRoots = config.writableRoots ?? []
+  // A run without a backend is unconfined whatever the preset says, so its mode
+  // stays full access; there is no boundary for a switch to widen or narrow.
   if (decision.name === 'none') return noneSandbox
-  return decision.name === 'seatbelt'
-    ? seatbeltSandbox({ mode, writableRoots })
-    : bwrapSandbox({ mode, writableRoots })
+  const provider =
+    decision.name === 'seatbelt'
+      ? seatbeltSandbox({ mode: permission.mode(), writableRoots })
+      : bwrapSandbox({ mode: permission.mode(), writableRoots })
+  return sandboxWithPermission(provider, permission)
 }
 
 const layerForDecision = (
   config: SafetyConfig,
   decision: SandboxDecision,
+  permission: PermissionShape,
 ): Layer.Layer<Sandbox, PluginError> =>
   decision._tag === 'available'
-    ? Layer.succeed(Sandbox, sandboxOf(config, decision))
+    ? Layer.succeed(Sandbox, sandboxOf(config, decision, permission))
     : Layer.effect(
         Sandbox,
         Effect.fail(new PluginError({ code: 'unavailable', message: decision.message })),
@@ -187,7 +199,11 @@ export const sandboxLayerFor = (
   platform: string,
   bwrapUsable: () => boolean = probeBwrap,
 ): Layer.Layer<Sandbox, PluginError> =>
-  layerForDecision(config, decideSandbox(config, platform, bwrapUsable))
+  layerForDecision(
+    config,
+    decideSandbox(config, platform, bwrapUsable),
+    makePermission(config.preset),
+  )
 
 /**
  * Policy with the runtime facts that name this profile's permissions. The model
@@ -198,19 +214,19 @@ const policyLayerWithContexts = (
   config: SafetyConfig,
   decision: SandboxDecision,
   probe: SeatbeltProbeResult | undefined,
+  permission: PermissionShape,
 ): Layer.Layer<Policy, never, SystemPrompt> =>
   Layer.effect(
     Policy,
     Effect.gen(function* () {
       const prompt = yield* SystemPrompt
-      const mode = modeOf(config.preset)
       yield* prompt.context({
         name: 'approval',
         order: APPROVAL_CONTEXT_ORDER,
         text: () =>
           Effect.succeed(
             'approval: ' +
-              config.preset +
+              permission.current() +
               ' (a call this preset refuses is denied; retry it once with sandbox_permissions,' +
               ' which asks the user and is refused at once when nobody can answer)',
           ),
@@ -218,9 +234,9 @@ const policyLayerWithContexts = (
       yield* prompt.context({
         name: 'sandbox',
         order: SANDBOX_CONTEXT_ORDER,
-        text: () => Effect.succeed(sandboxContextText(config, decision, probe)),
+        text: () => Effect.succeed(sandboxContextText(config, decision, probe, permission.mode())),
       })
-      const shape: PolicyShape = { preset: config.preset, mode }
+      const shape: PolicyShape = policyOf(permission)
       return shape
     }).pipe(Effect.orDie),
   )
@@ -239,9 +255,13 @@ export const safetyPlugin: Plugin<SafetyConfig, Policy | Sandbox | AutoReview, S
     const decision = decideSandbox(config, process.platform, probeBwrap)
     // One probe per build: every runtime context and every wrapped command share it.
     const probe = underSeatbelt(config, decision) ? probeSeatbelt() : undefined
+    // One holder per session build: a switch reaches the policy, the prompt, and
+    // every provider that session's tools captured.
+    const permission = makePermission(config.preset)
     return Layer.mergeAll(
-      policyLayerWithContexts(config, decision, probe),
-      layerForDecision(config, decision),
+      policyLayerWithContexts(config, decision, probe, permission),
+      layerForDecision(config, decision, permission),
+      Layer.succeed(Permission, permission),
       autoReviewServiceLayer,
     )
   },
