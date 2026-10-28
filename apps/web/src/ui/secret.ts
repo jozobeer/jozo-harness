@@ -12,9 +12,12 @@
 /** A secret keeps the shape that named it and its last four characters, so a reader can tell one from another. */
 const hidden = (shape: string, value: string): string => shape + '…' + value.slice(-4)
 
-/** An assignment such as `GITHUB_TOKEN=…` or `API_KEY: …` keeps the name and hides the value. */
+/**
+ * An assignment such as `GITHUB_TOKEN=…` or `API_KEY: …`. The name must end in
+ * the word that makes it a secret, so `MAX_KEY_LENGTH=100` stays as written.
+ */
 const ASSIGNED =
-  /\b([A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)[A-Z0-9_]*\s*[:=]\s*)(\S{4,})/g
+  /\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)\s*[:=]\s*)(["']?)([^\s"']{4,})\2/g
 
 /** A credentialed request keeps the scheme and hides the token that follows it. */
 const BEARER = /\b(Bearer\s+)([A-Za-z0-9._~+/=-]{8,})/g
@@ -41,7 +44,9 @@ const looksRandom = (value: string): boolean => /[0-9]/.test(value) && /[A-Za-z]
 export const maskSecrets = (text: string): string =>
   text
     .replace(PRIVATE_KEY, '-----BEGIN PRIVATE KEY-----…-----END PRIVATE KEY-----')
-    .replace(ASSIGNED, (_match: string, name: string, value: string) => hidden(name, value))
+    .replace(ASSIGNED, (_match: string, name: string, _quote: string, value: string) =>
+      hidden(name, value),
+    )
     .replace(BEARER, (_match: string, scheme: string, token: string) => hidden(scheme, token))
     .replace(PREFIXED, (_match: string, prefix: string, token: string) => hidden(prefix, token))
     .replace(JWT, (match: string) => hidden('', match))

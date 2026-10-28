@@ -7,6 +7,7 @@ describe('a secret shown in the conversation', () => {
       'GITHUB_TOKEN=…0123',
     )
     expect(maskSecrets('API_KEY = sk-proj-AbCdEfGhIjKlMnOpQrStUvWx0123')).toBe('API_KEY = …0123')
+    expect(maskSecrets('API_KEY="abcdefgh0123"')).toBe('API_KEY=…0123')
   })
 
   test('hides a token behind its scheme', () => {
@@ -43,6 +44,11 @@ describe('prose with no secret in it', () => {
   test('comes back exactly as it went in', () => {
     const prose = 'Please rename the monkey=banana fixture and say why the quick brown fox jumps.'
     expect(maskSecrets(prose)).toBe(prose)
+  })
+
+  test('keeps a setting whose name only contains a key word', () => {
+    const settings = 'MAX_KEY_LENGTH=100 and KEYBOARD=us'
+    expect(maskSecrets(settings)).toBe(settings)
   })
 
   test('keeps a long ordinary word that is not random', () => {
