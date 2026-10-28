@@ -149,7 +149,7 @@ macOS では、jzh を動かしている端末の「システム設定 > プラ�
 
 ### モデルにページを開かせる
 
-`browser` tool も opt-in である。使う run だけ、設定ファイルか `--patch` の `plugins:` に次の行を足す。
+`browser` の行も opt-in である。使う run だけ、設定ファイルか `--patch` の `plugins:` に次の行を足す。
 
 ```yaml
 plugins:
@@ -157,13 +157,21 @@ plugins:
     name: '@jozo-harness/browser'
 ```
 
-行を足した run では、モデルに公開ページを読ませられる。
+行を足すと、1 回読むだけの `browser` と、セッションが所有するブラウザを操作する `browser_open` / `browser_snapshot` / `browser_click` / `browser_type` の 5 tool が渡る。モデルにはこう頼める。
 
 ```
-このページを開いて、書いてある手順を要約して: https://example.com/
+このページを開いて、ログインしてから申し込みの手順を要約して: https://example.com/
 ```
 
-モデルは `browser` を `url`（http(s) のみ。`file:` や `data:` は `invalid-arguments`）で呼ぶ。このスライスは開いて本文を読むだけで、`action` は `text` だけ、クリックや入力はできない。chrome か chromium の `--headless --dump-dom` が使える環境でのみ動き、無い場合は `unavailable` と探したコマンド名を返す。ブラウザは run の sandbox を通した子プロセスで、DOM から script・style・head を除いた本文を返す。既定の profile に入れないのは、全セッションの tool 一覧を太らせないためである。
+モデルは `browser_open` に `url`（http(s) のみ。`file:` や `data:` は `invalid-arguments`）を渡す。返る値は可視テキストと、クリック・入力できる要素の一覧である。各要素には CSS selector が付くので、`browser_click` に selector、`browser_type` に selector と `text` を渡す。クリックはページ内の `element.click()`、入力はページの value setter と `input` / `change` event で行う。操作のあとは `browser_snapshot` でページの変化を確かめられる。
+
+ブラウザはセッションで 1 つだけ起動し、2 回目以降の `browser_open` はそのプロセスを使い回す。プロファイルはセッションごとの一時ディレクトリで、セッションが終わるとブラウザを kill してディレクトリごと消す。人間がサイドバーで開くブラウザとはプロファイルもプロセスも別なので、モデルの閲覧履歴はそちらに残らない。
+
+chrome か chromium が要る。`google-chrome` / `chromium` などを PATH から、macOS では Chrome の app bundle（`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`）も探す。無いとき、起動に失敗したとき、DevTools の応答が時間内に来ないときは `unavailable` と探したプログラム名・理由を返し、turn は落とさない。起動待ちは 10 秒、各 CDP 呼び出しは 10 秒、ページの読み込み待ちは 15 秒で打ち切る。
+
+このブラウザは run の sandbox では wrap しない。Chrome 自身が sandbox を張るため、macOS の seatbelt を外側にもう一重かけると `sandbox-exec: sandbox_apply: Operation not permitted` で起動できない。jzh 自身が別の sandbox（エージェントハーネスの sandbox など）の中で動いている場合も同じ理由で Chrome が起動せず（exit 133）、`unavailable` になる。通常のターミナルから起動した jzh では、Chrome の sandbox がそのまま効く。ページの移動は http(s) に限り、プロファイルは使い捨てる。
+
+既定の profile に入れないのは、全セッションの tool 一覧を太らせないためである。
 
 ### モデルに外部のエージェントへ委譲させる
 

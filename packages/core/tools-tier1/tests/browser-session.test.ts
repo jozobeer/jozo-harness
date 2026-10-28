@@ -56,6 +56,11 @@ const fakeHost = (options: FakeOptions = {}): FakeHost => {
     exit = resolve
   })
   const page = options.page ?? PAGE
+  /** What the page script asked for: a snapshot or an action result. */
+  const evaluated = (expression: string): unknown => {
+    if (expression.includes('document.querySelectorAll')) return page
+    return options.found === false ? { found: false } : { found: true, tag: 'button' }
+  }
   const connection: CdpConnection = {
     send: (method, params) => {
       calls.push({ method, params })
@@ -71,16 +76,8 @@ const fakeHost = (options: FakeOptions = {}): FakeHost => {
       if (expression === 'document.readyState') {
         return Promise.resolve({ result: { type: 'string', value: 'complete' } })
       }
-      if (expression.includes('document.querySelectorAll')) {
-        return Promise.resolve({ result: { type: 'string', value: JSON.stringify(page) } })
-      }
       return Promise.resolve({
-        result: {
-          type: 'string',
-          value: JSON.stringify(
-            options.found === false ? { found: false } : { found: true, tag: 'button' },
-          ),
-        },
+        result: { type: 'string', value: JSON.stringify(evaluated(expression)) },
       })
     },
     close: () => {},

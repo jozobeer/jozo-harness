@@ -357,6 +357,30 @@ const readPage = (running: RunningBrowser, cdpMs: number): Effect.Effect<Browser
     }),
   )
 
+/** The port in DevToolsActivePort, once the browser has written a usable one. */
+const portIn = (text: string): number | undefined => {
+  const port = Number(text.split('\n')[0]?.trim() ?? '')
+  return Number.isInteger(port) && port > 0 && port < 65_536 ? port : undefined
+}
+
+/** The child's stderr after it stopped; a stream that will not end is not a reason. */
+const stderrOf = (child: BrowserChild): Effect.Effect<string> =>
+  Effect.option(
+    Effect.tryPromise({ try: () => child.stderr(), catch: () => '' }).pipe(
+      Effect.timeout(Duration.millis(2_000)),
+      Effect.catchCause(() => Effect.succeed('')),
+    ),
+  ).pipe(Effect.map((text) => (Option.isSome(text) ? text.value.trim() : '')))
+
+/** Why no port appeared, with the child's own reason when it left one. */
+const noPortMessage = (startupMs: number, reason: string): ToolError =>
+  unavailable(
+    'browser did not start: no DevToolsActivePort after ' +
+      String(startupMs) +
+      'ms' +
+      (reason === '' ? '' : ': ' + reason.slice(0, 500)),
+  )
+
 /** Waits for the DevToolsActivePort the browser writes once its socket is up. */
 const waitForPort = (
   host: BrowserSessionHost,
@@ -367,33 +391,13 @@ const waitForPort = (
   const loop = (deadline: number): Effect.Effect<number, ToolError> =>
     Effect.gen(function* () {
       const text = yield* Effect.option(
-        Effect.tryPromise({
-          try: () => host.readTextFile(path),
-          catch: (error) => error,
-        }),
+        Effect.tryPromise({ try: () => host.readTextFile(path), catch: (error) => error }),
       )
-      if (Option.isSome(text)) {
-        const first = text.value.split('\n')[0]?.trim() ?? ''
-        const port = Number(first)
-        if (Number.isInteger(port) && port > 0 && port < 65_536) return port
-      }
+      const port = Option.isSome(text) ? portIn(text.value) : undefined
+      if (port !== undefined) return port
       if (Date.now() >= deadline) {
         running.child.kill()
-        const stderr = yield* Effect.option(
-          Effect.tryPromise({ try: () => running.child.stderr(), catch: () => '' }).pipe(
-            Effect.timeout(Duration.millis(2_000)),
-            Effect.catchCause(() => Effect.succeed('')),
-          ),
-        )
-        const reason = Option.isSome(stderr) ? stderr.value.trim() : ''
-        return yield* Effect.fail(
-          unavailable(
-            'browser did not start: no DevToolsActivePort after ' +
-              String(settings.startupMs) +
-              'ms' +
-              (reason === '' ? '' : ': ' + reason.slice(0, 500)),
-          ),
-        )
+        return yield* Effect.fail(noPortMessage(settings.startupMs, yield* stderrOf(running.child)))
       }
       yield* Effect.sleep(Duration.millis(settings.pollMs))
       return yield* loop(deadline)
