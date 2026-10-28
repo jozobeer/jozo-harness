@@ -21,11 +21,23 @@ export type PluginChange =
       readonly disabled: boolean
     }
 
-/** What one change left behind: the rows the settings hold, and what was wired now. */
+/** What taking one row back out of the running run left behind. */
+export interface PluginUnmount {
+  /** False when this run did not wire the row, so only the settings changed. */
+  readonly detached: boolean
+  /** The tools that left the run with the row. */
+  readonly tools: ReadonlyArray<string>
+}
+
+/** What one change left behind: the rows the settings hold, and what moved into or out of this run. */
 export interface PluginChangeOutcome {
   readonly rows: ReadonlyArray<PluginRowSummary>
   /** Tools this change added to the running registry; empty when it waits for the next start. */
   readonly mounted: ReadonlyArray<string>
+  /** Whether a removed row left this run then, rather than at the next start. */
+  readonly detached: boolean
+  /** Tools that left with a removed row; empty when it stays until the next start. */
+  readonly unmounted: ReadonlyArray<string>
 }
 
 /**
@@ -46,7 +58,7 @@ const ACTIONS = ['list', 'add', 'remove', 'set'] as const
 const Parameters = Schema.Struct({
   action: Schema.Literals(ACTIONS).annotate({
     description:
-      'list shows the rows this run was built from; add, remove, and set change the settings for the next start. An added row for an opt-in plugin may also be wired into this run.',
+      'list shows the rows this run was built from; add, remove, and set change the rows. An added row for an opt-in plugin may be wired into this run now, and a removed row this run wired leaves it from the next step.',
   }),
   id: Schema.optionalKey(
     Schema.String.annotate({
@@ -109,9 +121,9 @@ const addChange = (args: PluginArgs, host: PluginHost): PluginChange | ToolError
 
 const changeFor = (args: PluginArgs, host: PluginHost): PluginChange | ToolError => {
   if (args.action === 'add') return addChange(args, host)
-  if (args.action === 'remove') return { kind: 'remove', id: String(args.id) }
   const row = rowOf(host.rows(), args.id)
   if (row instanceof ToolError) return row
+  if (args.action === 'remove') return { kind: 'remove', id: row.id }
   return { kind: 'set-disabled', id: row.id, name: row.name, disabled: args.disabled === true }
 }
 
@@ -119,7 +131,9 @@ const questionFor = (change: PluginChange): string => {
   if (change.kind === 'add') {
     return 'Add the plugin row ' + change.id + ' (' + change.name + ') to the settings?'
   }
-  if (change.kind === 'remove') return 'Remove the plugin row ' + change.id + ' from the settings?'
+  if (change.kind === 'remove') {
+    return 'Remove the plugin row ' + change.id + ' from this run and from the settings?'
+  }
   return (
     'Switch the plugin row ' + change.id + (change.disabled ? ' off' : ' on') + ' in the settings?'
   )
@@ -139,17 +153,41 @@ const kept = (action: string, host: PluginHost): PluginValue => ({
   note: '(the user kept the plugin rows as they are)',
 })
 
-const changed = (action: string, outcome: PluginChangeOutcome): PluginValue => ({
+const changedNote = (change: PluginChange, outcome: PluginChangeOutcome): string => {
+  if (change.kind === 'remove' && outcome.detached) {
+    if (outcome.unmounted.length === 0) {
+      return '(the settings no longer hold ' + change.id + ', and the row left this run)'
+    }
+    return (
+      '(the settings no longer hold ' +
+      change.id +
+      '; ' +
+      outcome.unmounted.join(', ') +
+      ' left this run, so the next step no longer sees them, and a later resume needs --allow-preset-change)'
+    )
+  }
+  if (outcome.mounted.length > 0) {
+    return (
+      '(the settings changed; ' +
+      outcome.mounted.join(', ') +
+      ' is wired into this run now, and every row is wired when jozo-harness starts again)'
+    )
+  }
+  return (
+    '(the settings changed; every row is wired when jozo-harness starts again, and a session that ' +
+    'then loses a tool needs --allow-preset-change to resume)'
+  )
+}
+
+const changed = (
+  action: string,
+  change: PluginChange,
+  outcome: PluginChangeOutcome,
+): PluginValue => ({
   action,
   changed: true,
   rows: outcome.rows,
-  note:
-    outcome.mounted.length === 0
-      ? '(the settings changed; every row is wired when jozo-harness starts again, and a session that ' +
-        'then loses a tool needs --allow-preset-change to resume)'
-      : '(the settings changed; ' +
-        outcome.mounted.join(', ') +
-        ' is wired into this run now, and every row is wired when jozo-harness starts again)',
+  note: changedNote(change, outcome),
 })
 
 /**
@@ -161,7 +199,7 @@ const changed = (action: string, outcome: PluginChangeOutcome): PluginValue => (
 export const makePluginTool = (host: PluginHost): ToolDefinition<PluginArgs, PluginValue> => ({
   name: 'plugin',
   description:
-    'Lists the plugin rows this session runs with and changes them in the settings the next start reads: add a row for a plugin this build has, remove one, or switch one off. Every change is put to the user first. Adding a row for an opt-in plugin this build carries also wires its tools into this run when it can; the other changes take effect when jozo-harness starts again.',
+    'Lists the plugin rows this session runs with and changes them: add a row for a plugin this build has, remove one, or switch one off. Every change is put to the user first. Adding a row for an opt-in plugin this build carries wires its tools into this run when it can, and removing a row this run wired takes those tools back from the next step. Removing a row that carries config is refused; the other changes take effect when jozo-harness starts again.',
   parameters: Parameters,
   output: {
     schema: Schema.Struct({
@@ -185,6 +223,6 @@ export const makePluginTool = (host: PluginHost): ToolDefinition<PluginArgs, Plu
         options: OPTIONS,
       })
       if (answer.trim().toLowerCase() !== APPROVAL_ANSWER) return kept(args.action, host)
-      return changed(args.action, yield* host.change(change))
+      return changed(args.action, change, yield* host.change(change))
     }),
 })

@@ -8,6 +8,7 @@ import type {
   PluginChangeOutcome,
   PluginHost,
   PluginRowSummary,
+  PluginUnmount,
 } from '@jozo-harness/tools-tier1'
 import { parseConfigText } from './config-file.ts'
 import { applyEdit, type SettingsEdit } from './settings-edit.ts'
@@ -24,6 +25,11 @@ export interface PluginHostOptions {
    * the tools it wired. Absent when this caller cannot mount anything.
    */
   readonly mount?: (row: PluginRow) => Effect.Effect<ReadonlyArray<string>, ToolError>
+  /**
+   * Takes one row this run wired back out and says what left with it. Absent when
+   * this caller cannot unwire a row, which is every change but a wired row's own.
+   */
+  readonly unmount?: (id: string) => Effect.Effect<PluginUnmount, ToolError>
 }
 
 const summaryOf = (row: PluginRow): PluginRowSummary => ({
@@ -80,6 +86,25 @@ const unloadable = (
   })
 }
 
+/**
+ * A row written with a config cannot be taken back out of a running run yet: the
+ * services it built are not the ones a mounted row owns. The call is refused
+ * before anything is written, and switching the row off stays available.
+ */
+const carriesConfig = (
+  change: PluginChange,
+  configured: ReadonlySet<string>,
+): ToolError | undefined => {
+  if (change.kind !== 'remove' || !configured.has(change.id)) return undefined
+  return new ToolError({
+    code: 'invalid-arguments',
+    message:
+      'the row ' +
+      change.id +
+      ' carries config, and this run cannot take such a row back out yet; the settings and the tools are unchanged (set disabled=true switches it off from the next start)',
+  })
+}
+
 /** Adding a row for a plugin this run already holds under the same id only changes the settings. */
 const overridesActive = (rows: ReadonlyArray<PluginRow>, change: PluginChange): boolean =>
   change.kind === 'add' &&
@@ -114,6 +139,38 @@ const remember = (
   else rows[at] = added
 }
 
+/** A row this run took back out no longer belongs to the rows it lists. */
+const forget = (rows: Array<PluginRowSummary>, change: PluginChange): void => {
+  if (change.kind !== 'remove') return
+  const at = rows.findIndex((row) => row.id === change.id)
+  if (at !== -1) rows.splice(at, 1)
+}
+
+/** Keeps the rows this run lists in step with what this change moved into or out of it. */
+const settleRows = (
+  rows: Array<PluginRowSummary>,
+  configured: Set<string>,
+  change: PluginChange,
+  mounted: ReadonlyArray<string>,
+  unmounted: PluginUnmount,
+): void => {
+  remember(rows, change, mounted)
+  if (mounted.length > 0 && change.kind === 'add') configured.delete(change.id)
+  if (unmounted.detached) forget(rows, change)
+}
+
+/** The release waits until the settings are edited, so a refused edit unwires nothing. */
+const unmountFor = (
+  options: PluginHostOptions,
+  change: PluginChange,
+  edited: boolean,
+): Effect.Effect<PluginUnmount, ToolError> => {
+  if (!edited || change.kind !== 'remove' || options.unmount === undefined) {
+    return Effect.succeed({ detached: false, tools: [] })
+  }
+  return options.unmount(change.id)
+}
+
 const writeSettings = (path: string, text: string): Effect.Effect<void, ToolError> =>
   Effect.try({
     try: () => writeFileSync(path, text),
@@ -130,13 +187,18 @@ export const makePluginHost = (options: PluginHostOptions): PluginHost => {
   // A mounted row joins the composition this run knows; a row left to the next
   // start does not, so list keeps answering for the running process.
   const liveRows: Array<PluginRowSummary> = options.rows.map(summaryOf)
+  // Only a row written without config can be unmounted; a mounted one joins that
+  // set with no config of its own.
+  const configured = new Set(
+    options.rows.filter((row) => row.config !== undefined).map((row) => row.id),
+  )
   return {
     rows: () => [...liveRows],
     known: () => options.plugins.map((plugin) => plugin.name),
     ask: options.ask,
     change: (change) =>
       Effect.gen(function* () {
-        const refused = unloadable(change, options.plugins)
+        const refused = unloadable(change, options.plugins) ?? carriesConfig(change, configured)
         if (refused !== undefined) return yield* Effect.fail(refused)
         const path = options.settingsPath
         const text = existsSync(path) ? readFileSync(path, 'utf8') : ''
@@ -146,14 +208,17 @@ export const makePluginHost = (options: PluginHostOptions): PluginHost => {
           ),
         )
         const mounted = yield* mountFor(options, change, edited.changed)
+        const unmounted = yield* unmountFor(options, change, edited.changed)
         if (edited.changed) yield* writeSettings(path, edited.text)
-        remember(liveRows, change, mounted)
+        settleRows(liveRows, configured, change, mounted, unmounted)
         const parsed = yield* parseConfigText(edited.text).pipe(
           Effect.mapError((error) => failure(error.message)),
         )
         return {
           rows: (parsed.plugins ?? []).map(summaryOf),
           mounted,
+          detached: unmounted.detached,
+          unmounted: unmounted.tools,
         } satisfies PluginChangeOutcome
       }),
   }

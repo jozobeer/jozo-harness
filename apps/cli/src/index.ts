@@ -119,6 +119,7 @@ import {
   makePluginTool,
   makeTeamTool,
   type PluginHost,
+  type PluginUnmount,
   installScheduleRuns,
   installRepeatReminders,
   startGoalRound,
@@ -436,6 +437,8 @@ const installTier1 = (
   sandbox: SandboxShape | undefined,
   /** Builds an added row over this run's services and reports the tools it wired. */
   mount: (row: PluginRow) => Effect.Effect<ReadonlyArray<string>, ToolError>,
+  /** Takes a wired row back out and reports the tools that left with it. */
+  unmount: (id: string) => Effect.Effect<PluginUnmount, ToolError>,
 ) =>
   Effect.gen(function* () {
     // A run with nobody to answer leaves the seam unserved, so a question fails
@@ -448,6 +451,7 @@ const installTier1 = (
       settingsPath: options.settingsPath ?? configPaths().config,
       ask,
       mount,
+      unmount,
     })
     for (const tool of tier1ToolList(
       ask,
@@ -817,6 +821,32 @@ interface ProfileWiring {
   readonly jobs: JobsShape
 }
 
+/** A row this run wired: the tools it added, and how to take them back. */
+interface WiredRow {
+  readonly names: ReadonlyArray<string>
+  readonly release: Effect.Effect<void>
+}
+
+/** A name another row already offers: a second row of the same plugin would not load either. */
+const clashOf = (
+  row: PluginRow,
+  list: ReadonlyArray<ToolDefinition<any, any>>,
+  tools: ToolRegistry,
+): ToolError | undefined => {
+  const known = new Set(tools.schemas().map((schema) => schema.name))
+  const clash = list.find((tool) => known.has(tool.name))
+  if (clash === undefined) return undefined
+  return new ToolError({
+    code: 'duplicate-tool',
+    message:
+      'tool ' +
+      clash.name +
+      ' is already registered; another row of ' +
+      row.name +
+      ' would not load on the next start either',
+  })
+}
+
 /**
  * Registers the line an agent at the delegation limit reads. The entry reads the
  * agents registry, so every child sharing the prompt service sees its own depth.
@@ -906,21 +936,12 @@ const planModeFromProfile = (
 }
 
 /**
- * The artifact row is opt-in, and its page belongs beside the sessions root, so it
- * takes that root from the profile rather than one of its own.
- */
-/** The lsp tool is opt-in: a run that does not name the row never sees it. */
-const installLsp = (tools: ToolRegistry, wiring: ProfileWiring) =>
-  Effect.gen(function* () {
-    if (!hasEnabledRow(wiring.rows, '@jozo-harness/lsp')) return
-    for (const tool of Context.get(wiring.context, LspTools)) yield* tools.register(tool)
-  })
-
-/**
- * The tools one context's artifact service hands the run. The page is written by
- * a tool, not a command, so the sandbox never wraps it; the preset has to reach
- * the tool here to keep read-only runs from publishing. Without a safety row
- * there is no preset to obey.
+ * The tools one context's artifact service hands the run. The artifact row is
+ * opt-in and its page belongs beside the sessions root, so it takes that root from
+ * the profile rather than one of its own. The page is written by a tool, not a
+ * command, so the sandbox never wraps it; the preset has to reach the tool here to
+ * keep read-only runs from publishing. Without a safety row there is no preset to
+ * obey.
  */
 const artifactToolsOf = (
   source: Context.Context<any>,
@@ -931,12 +952,6 @@ const artifactToolsOf = (
     : noneSandbox
   return Context.get(source, ArtifactTools)(sessionRootOf(wiring.rows), sandbox)
 }
-
-const installArtifact = (tools: ToolRegistry, wiring: ProfileWiring) =>
-  Effect.gen(function* () {
-    if (!hasEnabledRow(wiring.rows, '@jozo-harness/artifact')) return
-    for (const tool of artifactToolsOf(wiring.context, wiring)) yield* tools.register(tool)
-  })
 
 /**
  * Past sessions are searchable only when the profile names the row. A hit is
@@ -980,17 +995,6 @@ const sessionSearchToolsOf = (
     return Context.get(source, SessionSearchTools)(host)
   })
 
-const installSessionSearch = (
-  tools: ToolRegistry,
-  wiring: ProfileWiring,
-): Effect.Effect<void, ToolError, Scope.Scope> =>
-  Effect.gen(function* () {
-    if (!hasEnabledRow(wiring.rows, '@jozo-harness/session-search')) return
-    for (const tool of yield* sessionSearchToolsOf(wiring.context, wiring)) {
-      yield* tools.register(tool)
-    }
-  })
-
 /**
  * Installs what the profile's rows ask for and reports the composition the session
  * runs with: the profiles it was launched from and every tool it was given. The
@@ -1001,9 +1005,12 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
   Effect.gen(function* () {
     const tools = Context.get(wiring.context, Tools)
     const planMode = planModeFromProfile(wiring.rows, wiring.agent.session)
-    // A row added while the session runs is built into this scope, so its tools
-    // leave with the session that mounted them.
+    // A row this run wires gets a scope of its own, forked from the session's, so
+    // taking the row back out releases only what it built. A row taken out lets go
+    // of that scope before the next request, once this step's calls have finished.
     const scope = yield* Scope.Scope
+    const wired = new Map<string, WiredRow>()
+    const pendingReleases: Array<Effect.Effect<void>> = []
 
     /** One opt-in row's tools, built from the services that row provides. */
     type RowMounter = (
@@ -1024,6 +1031,46 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
     }
 
     /**
+     * Registers the tools one row hands back in a scope of its own and keeps how to
+     * take them back. The check refuses the list before any of it is registered, so
+     * a refused row leaves the registry as it was.
+     */
+    const wireRow = (
+      row: PluginRow,
+      mounter: RowMounter,
+      source: Effect.Effect<Context.Context<any>, ToolError, Scope.Scope>,
+      check: (list: ReadonlyArray<ToolDefinition<any, any>>) => ToolError | undefined,
+    ): Effect.Effect<ReadonlyArray<string>, ToolError> =>
+      Effect.gen(function* () {
+        const child = yield* Scope.fork(scope)
+        const names = yield* Effect.gen(function* () {
+          const list = yield* mounter(yield* source)
+          const refused = check(list)
+          if (refused !== undefined) return yield* Effect.fail(refused)
+          for (const tool of list) yield* tools.register(tool)
+          return list.map((tool) => tool.name)
+        }).pipe(
+          Effect.provideService(Scope.Scope, child),
+          // A wiring that fails or is interrupted must not leave its scope open.
+          Effect.onExit((exit) =>
+            Exit.isFailure(exit) ? Scope.close(child, Exit.void) : Effect.void,
+          ),
+        )
+        wired.set(row.id, { names, release: Scope.close(child, Exit.void) })
+        return names
+      })
+
+    /** Wires the one row of a plugin this run was built with, when its rows hold one. */
+    const installWiredRow = (name: string): Effect.Effect<void, ToolError> =>
+      Effect.gen(function* () {
+        const mounter = mounterOf(name)
+        if (mounter === undefined) return
+        const row = wiring.rows.find((each) => each.name === name && isRowEnabled(each))
+        if (row === undefined) return
+        yield* wireRow(row, mounter, Effect.succeed(wiring.context), () => undefined)
+      })
+
+    /**
      * Builds one added row over the running services and registers what it adds.
      * A row no mounter knows is left to the next start. A tool that is already
      * registered is refused before the settings change, because another row of
@@ -1033,7 +1080,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
       Effect.gen(function* () {
         const mounter = mounterOf(row.name)
         if (mounter === undefined) return []
-        const source = yield* loadPluginRow({
+        const source = loadPluginRow({
           plugins: wiring.options.plugins,
           row,
           context: wiring.context,
@@ -1052,25 +1099,30 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
               }),
           ),
         )
-        const list = yield* mounter(source)
-        const known = new Set(tools.schemas().map((schema) => schema.name))
-        const clash = list.find((tool) => known.has(tool.name))
-        if (clash !== undefined) {
-          return yield* Effect.fail(
-            new ToolError({
-              code: 'duplicate-tool',
-              message:
-                'tool ' +
-                clash.name +
-                ' is already registered; another row of ' +
-                row.name +
-                ' would not load on the next start either',
-            }),
-          )
-        }
-        for (const tool of list) yield* tools.register(tool)
-        return list.map((tool) => tool.name)
-      }).pipe(Effect.provideService(Scope.Scope, scope))
+        return yield* wireRow(row, mounter, source, (list) => clashOf(row, list, tools))
+      })
+
+    /**
+     * Takes one row this run wired back out. Its tools leave the offered list now;
+     * the services it built are released before the next request, once this step's
+     * calls have finished.
+     */
+    const unmountRow = (id: string): Effect.Effect<PluginUnmount, ToolError> =>
+      Effect.sync((): PluginUnmount => {
+        const held = wired.get(id)
+        if (held === undefined) return { detached: false, tools: [] }
+        wired.delete(id)
+        for (const name of held.names) tools.retire(name)
+        pendingReleases.push(held.release)
+        return { detached: true, tools: held.names }
+      })
+
+    /** Releases the rows taken out since the last request; no step offers their tools now. */
+    const releaseUnmounted = (): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const releases = pendingReleases.splice(0, pendingReleases.length)
+        for (const release of releases) yield* release
+      })
     if (hasEnabledRow(wiring.rows, '@jozo-harness/tools-tier0')) {
       const sessions = Context.get(wiring.context, Agents)
       // A worktree call is shared with every child, so it moves the log of the
@@ -1118,15 +1170,26 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
         wiring.jobs,
         sandboxOf(wiring),
         mountRow,
+        unmountRow,
+      )
+      // A row the plugin tool took back out releases what it built before the next
+      // request, after the calls this step already chose have finished.
+      yield* wiring.hooks.on('agent/request', (_request, next) =>
+        Effect.gen(function* () {
+          yield* releaseUnmounted()
+          return yield* next()
+        }),
       )
       // An agent at the delegation limit reads it in the next runtime snapshot;
       // the tool stays visible and refuses the call, as dsh does.
       yield* installDelegationContext(wiring)
       yield* installTeamIdentityContext(wiring)
     }
-    yield* installLsp(tools, wiring)
-    yield* installArtifact(tools, wiring)
-    yield* installSessionSearch(tools, wiring)
+    // The opt-in rows this run was built with are wired like a row added later, so
+    // the plugin tool can take one back out without a restart.
+    yield* installWiredRow('@jozo-harness/lsp')
+    yield* installWiredRow('@jozo-harness/artifact')
+    yield* installWiredRow('@jozo-harness/session-search')
     // A failed provider attempt is retried for the codes the loop row lists; the
     // loop only decides what to do when a listener answers, so this is the wiring
     // that makes the retry path part of a run.
