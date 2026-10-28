@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Effect } from 'effect'
@@ -8,6 +8,7 @@ import {
   anonymousUserIdentity,
   createTelemetryExporter,
   otlpLogsPayload,
+  RECORD_BODY_LIMIT,
   resolveTelemetry,
   scopeSelects,
   type TelemetryFailure,
@@ -58,7 +59,7 @@ interface LogsBody {
         readonly body: { readonly stringValue: string }
         readonly attributes: ReadonlyArray<{
           readonly key: string
-          readonly value: { readonly stringValue?: string }
+          readonly value: { readonly stringValue?: string; readonly intValue?: string }
         }>
       }>
     }>
@@ -81,9 +82,13 @@ const attributeOf = (body: string, key: string): string | undefined => {
 
 const captureFetch = (status = 200) => {
   const requests: Captured[] = []
-  const fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const fetch = async (
+    input: Parameters<typeof globalThis.fetch>[0],
+    init?: RequestInit,
+  ): Promise<Response> => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-    requests.push({ url, body: String(init?.body ?? '') })
+    const body = typeof init?.body === 'string' ? init.body : ''
+    requests.push({ url, body })
     return new Response('{}', { status })
   }
   return { fetch, requests }
@@ -183,6 +188,36 @@ describe('sending a batch', () => {
     expect(exporter.pending()).toBe(0)
   })
 
+  test('cuts a record body that would make one batch huge', () => {
+    const long: SessionEvent = {
+      seq: 9,
+      time: 9000,
+      type: 'user/message',
+      data: { text: 'x'.repeat(RECORD_BODY_LIMIT + 10), source: 'user' },
+    }
+    const body = JSON.stringify(
+      otlpLogsPayload({
+        anonymousId: 'anon',
+        observedAt: 1,
+        records: [{ sessionId: 's-1', event: long }],
+      }),
+    )
+
+    expect(recordsOf(body)[0]?.body.stringValue.endsWith('…(truncated)')).toBe(true)
+  })
+
+  test('keeps the default report path from throwing', async () => {
+    const exporter = createTelemetryExporter({
+      endpoint: 'http://collector.invalid',
+      scope: 'feedback',
+      anonymousId: 'anon',
+      fetch: async () => new Response('nope', { status: 500 }),
+    })
+    exporter.enqueue('s-1', feedback(2))
+
+    await expect(Effect.runPromise(exporter.flush())).resolves.toBeUndefined()
+  })
+
   test('reports a collector that answers with an error status', async () => {
     const failures: TelemetryFailure[] = []
     const captured = captureFetch(503)
@@ -245,11 +280,8 @@ describe('anonymous identity', () => {
 
   test('rejects a blank identity file rather than sending an empty id', async () => {
     const path = join(root, 'blank', 'anonymous-user-id')
-    await writeFile(path, ' \n', { mode: 0o600 }).catch(async () => {
-      const { mkdir } = await import('node:fs/promises')
-      await mkdir(join(root, 'blank'), { recursive: true })
-      await writeFile(path, ' \n', { mode: 0o600 })
-    })
+    await mkdir(join(root, 'blank'), { recursive: true })
+    await writeFile(path, ' \n', { mode: 0o600 })
 
     const failure = await Effect.runPromise(
       anonymousUserIdentity({ path, random: () => 'unused' }).pipe(Effect.flip),

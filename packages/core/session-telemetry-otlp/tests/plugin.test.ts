@@ -70,9 +70,9 @@ const startCollector = async (status = 200) => {
   }
 }
 
-const withTelemetry = <A>(
+const withTelemetry = <A, E>(
   config: Readonly<Record<string, unknown>>,
-  body: (context: Context.Context<unknown>) => Effect.Effect<A>,
+  body: (context: Context.Context<Hooks | SessionTelemetry>) => Effect.Effect<A, E>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -95,7 +95,7 @@ const withTelemetry = <A>(
           return yield* body(context)
         }),
       )
-    }),
+    }).pipe(Effect.orDie),
   )
 
 const makeSessionWith = () =>
@@ -190,6 +190,32 @@ describe('sessionTelemetry plugin', () => {
         (attribute) => attribute.key === 'anonymous.user.id',
       )
       expect(resourceId?.value.stringValue).toMatch(/^[0-9a-f-]{36}$/)
+    } finally {
+      await collector.close()
+    }
+  })
+
+  test('stays off when the anonymous id cannot be kept', async () => {
+    const collector = await startCollector()
+    try {
+      const enabled = await withTelemetry(
+        {
+          endpoint: collector.endpoint,
+          scope: 'all',
+          identityPath: '/dev/null/anonymous-user-id',
+        },
+        (context) =>
+          Effect.gen(function* () {
+            const session = yield* makeSessionWith()
+            const hooks = Context.get(context, Hooks)
+            yield* hooks.emit('session/event', feedback(2), session)
+            const telemetry = Context.get(context, SessionTelemetry)
+            yield* telemetry.flush
+            return telemetry.enabled
+          }),
+      )
+      expect(enabled).toBe(false)
+      expect(collector.requests).toHaveLength(0)
     } finally {
       await collector.close()
     }
