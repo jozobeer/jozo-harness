@@ -187,6 +187,28 @@ describe('session_trace tool', () => {
       code: 'invalid-arguments',
     })
   })
+
+  test('renders a session line and one line per event', () => {
+    const tool = makeSessionTraceTool(readingHost([], { s1: '/work/current' }))
+
+    const blocks = tool.output.render(
+      { sessionId: 's1' },
+      {
+        sessionId: 's1',
+        events: [
+          { seq: 1, type: 'turn/start', summary: '' },
+          { seq: 2, type: 'user/message', summary: 'line 2' },
+        ],
+      },
+    )
+
+    expect(blocks).toEqual([
+      {
+        type: 'text',
+        text: 'session s1\nseq 1 turn/start\nseq 2 user/message: line 2',
+      },
+    ])
+  })
 })
 
 describe('session_event_read tool', () => {
@@ -237,6 +259,54 @@ describe('session_event_read tool', () => {
     })
 
     expect(value.target.text).toHaveLength(500)
+  })
+
+  test('reads assistant prose and structural data in the same window', async () => {
+    const events: ReadonlyArray<SessionEvent> = [
+      {
+        seq: 1,
+        time: 1001,
+        type: 'assistant/message',
+        data: {
+          provider: 'stub',
+          model: 'model',
+          content: [{ type: 'text', text: 'the answer' }],
+          stream: [],
+        },
+      },
+      { seq: 2, time: 1002, type: 'turn/start', data: { turn: 1 } },
+    ]
+
+    const value = await runRead(readingHost(events, { s1: '/work/current' }), {
+      sessionId: 's1',
+      seq: 1,
+      before: 0,
+      after: 1,
+    })
+
+    expect(value.target.text).toBe('the answer')
+    expect(value.after[0]?.text).toBe('{"turn":1}')
+  })
+
+  test('renders the target and the window around it', () => {
+    const tool = makeSessionEventReadTool(readingHost([], { s1: '/work/current' }))
+
+    const blocks = tool.output.render(
+      { sessionId: 's1', seq: 2 },
+      {
+        sessionId: 's1',
+        target: { seq: 2, type: 'user/message', text: 'target body' },
+        before: [{ seq: 1, type: 'turn/start', text: '{"turn":1}' }],
+        after: [],
+      },
+    )
+
+    expect(blocks).toEqual([
+      {
+        type: 'text',
+        text: 'session s1\n> seq 2 user/message\n>   target body\n\nbefore:\n  seq 1 turn/start\n    {"turn":1}',
+      },
+    ])
   })
 
   test('rejects a seq the session does not hold', async () => {
