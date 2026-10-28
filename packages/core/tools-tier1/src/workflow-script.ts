@@ -1,4 +1,4 @@
-import type { AgentsShape } from '@jozo-harness/agent'
+import type { AgentsShape, CreateAgentOptions } from '@jozo-harness/agent'
 import type { SandboxShape } from '@jozo-harness/safety'
 import { forkSeed, type JsonValue, type SessionEvent } from '@jozo-harness/session'
 import { createInterface } from 'node:readline'
@@ -28,6 +28,16 @@ export interface WorkflowSpawnValue {
   readonly tools: ReadonlyArray<{ readonly name: string; readonly summary?: string }>
 }
 
+/** One child a script started, named in the result so the conversation can open it. */
+export interface WorkflowSpawnSummary {
+  readonly step: number
+  /** The label the script gave the spawn; '' when it named none. */
+  readonly label: string
+  readonly status: 'done' | 'failed'
+  readonly sessionId?: string
+  readonly reason?: string
+}
+
 /** One script run: its return value, or the stage that failed and why. */
 export interface WorkflowScriptValue {
   readonly ok: boolean
@@ -36,6 +46,8 @@ export interface WorkflowScriptValue {
   readonly value?: JsonValue
   readonly stage?: string
   readonly reason?: string
+  /** The children the run started or tried to, in the order it asked for them. */
+  readonly spawns?: ReadonlyArray<WorkflowSpawnSummary>
 }
 
 /** The host a workflow script runs against. The child agents are started the same way subagent starts them. */
@@ -232,16 +244,50 @@ const childFailureOf = (events: ReadonlyArray<SessionEvent>): string | undefined
   return reason.kind === 'cancelled' || reason.kind === 'interrupted' ? reason.kind : undefined
 }
 
+/** The label a spawn names itself by; '' when it names none. */
+const labelOf = (call: ScriptCall): string =>
+  typeof call.args.label === 'string' ? call.args.label : ''
+
+/** How one spawn starts its child: the same arguments subagent uses. */
+const createOf = (
+  call: ScriptCall,
+  host: WorkflowScriptHost,
+  context: WorkflowScriptContext,
+): CreateAgentOptions => ({
+  cwd: typeof call.args.cwd === 'string' ? call.args.cwd : context.cwd,
+  options: { route: host.route },
+  seed: forkSeed(eventsOfAgent(host.agents, context.sessionId)),
+  parent: context.sessionId,
+})
+
+/** Writes one child into the run, so the result can name it and where it ran. */
+const recordSpawn = (
+  run: ScriptRun,
+  call: ScriptCall,
+  step: number,
+  status: 'done' | 'failed',
+  sessionId: string | undefined,
+  reason: string | undefined,
+): void => {
+  run.spawns.push({
+    step,
+    label: labelOf(call),
+    status,
+    ...(sessionId === undefined ? {} : { sessionId }),
+    ...(reason === undefined ? {} : { reason }),
+  })
+}
+
 /** Answers one spawn with the child's answer, or with the reason it could not run. */
 const answerSpawn = async (
   call: ScriptCall,
   child: Child,
   host: WorkflowScriptHost,
   context: WorkflowScriptContext,
-  count: { children: number },
+  run: ScriptRun,
   limit: number,
-  failure: { current: Failure | undefined },
 ): Promise<void> => {
+  const { count } = run
   const reply = (ok: boolean, body: { value?: WorkflowSpawnValue; error?: string }): void => {
     try {
       child.stdin.write(JSON.stringify({ t: 'result', id: call.id, ...body, ok }) + '\n')
@@ -249,8 +295,15 @@ const answerSpawn = async (
       // The script process is gone; its outcome no longer has a reader.
     }
   }
-  const unstartable = spawnFailure(call, count, limit, failure)
+  // A child that failed after it started still has a session the node can open.
+  const fail = (stage: string, reason: string, sessionId?: string): void => {
+    run.failure.current = { stage, reason }
+    recordSpawn(run, call, count.children, 'failed', sessionId, reason)
+    reply(false, { error: reason })
+  }
+  const unstartable = spawnFailure(call, count, limit, run.failure)
   if (unstartable !== undefined) {
+    recordSpawn(run, call, count.children + 1, 'failed', undefined, unstartable.reason)
     reply(false, { error: unstartable.reason })
     return
   }
@@ -258,18 +311,10 @@ const answerSpawn = async (
   const task = typeof call.args.task === 'string' ? call.args.task : ''
   count.children += 1
   const created = await Effect.runPromise(
-    host.agents
-      .create({
-        cwd: typeof call.args.cwd === 'string' ? call.args.cwd : context.cwd,
-        options: { route: host.route },
-        seed: forkSeed(eventsOfAgent(host.agents, context.sessionId)),
-        parent: context.sessionId,
-      })
-      .pipe(Effect.orElseSucceed(() => undefined)),
+    host.agents.create(createOf(call, host, context)).pipe(Effect.orElseSucceed(() => undefined)),
   )
   if (created === undefined) {
-    failure.current = { stage, reason: 'cannot start a child agent' }
-    reply(false, { error: failure.current.reason })
+    fail(stage, 'cannot start a child agent')
     return
   }
   const before = created.session.events().length
@@ -277,8 +322,7 @@ const answerSpawn = async (
     created.followup({ text: task, source: 'user' }).pipe(Effect.orElseSucceed(() => false)),
   )
   if (queued === false) {
-    failure.current = { stage, reason: 'the child agent took no message' }
-    reply(false, { error: failure.current.reason })
+    fail(stage, 'the child agent took no message', created.id)
     return
   }
   const idle = await Effect.runPromise(
@@ -290,18 +334,16 @@ const answerSpawn = async (
     ),
   )
   if (!idle) {
-    failure.current = { stage, reason: 'the child agent did not become idle' }
-    reply(false, { error: failure.current.reason })
+    fail(stage, 'the child agent did not become idle', created.id)
     return
   }
   const answered = created.session.events().slice(before)
   const childFailure = childFailureOf(answered)
   if (childFailure !== undefined) {
-    const reason = 'the child agent failed: ' + childFailure
-    failure.current = { stage, reason }
-    reply(false, { error: reason })
+    fail(stage, 'the child agent failed: ' + childFailure, created.id)
     return
   }
+  recordSpawn(run, call, count.children, 'done', created.id, undefined)
   reply(true, {
     value: {
       sessionId: created.id,
@@ -316,6 +358,8 @@ interface ScriptRun {
   readonly output: ReturnType<typeof makeOutput>
   readonly failure: { current: Failure | undefined }
   readonly count: { children: number }
+  /** The children reached so far, in the order the script asked for them. */
+  readonly spawns: Array<WorkflowSpawnSummary>
   timedOut: boolean
 }
 
@@ -376,7 +420,11 @@ const scriptOutcome = (
   detail: string,
   timeoutMs: number,
 ): WorkflowScriptValue => {
-  const base = { output: run.output.text(), children: run.count.children }
+  const base = {
+    output: run.output.text(),
+    children: run.count.children,
+    ...(run.spawns.length === 0 ? {} : { spawns: run.spawns }),
+  }
   const failure = scriptFailure(run, final, exitCode, detail, timeoutMs)
   if (failure !== undefined) {
     return { ...base, ok: false, stage: failure.stage, reason: failure.reason }
@@ -402,6 +450,7 @@ const runScriptSession = async (
     output: makeOutput(WORKFLOW_SCRIPT_OUTPUT_LIMIT),
     failure: { current: undefined },
     count: { children: 0 },
+    spawns: [],
     timedOut: false,
   }
   const timeoutMs = host.timeoutMs ?? WORKFLOW_SCRIPT_TIMEOUT_MS
@@ -415,9 +464,7 @@ const runScriptSession = async (
   const final = await consumeScript(lines, run, (call) => {
     // A spawn runs while the script keeps reading, so Promise.all in a script
     // starts children at the same time instead of one after another.
-    void answerSpawn(call, child, host, context, run.count, limit, run.failure).catch(
-      () => undefined,
-    )
+    void answerSpawn(call, child, host, context, run, limit).catch(() => undefined)
   })
   clearTimeout(timer)
   child.kill()

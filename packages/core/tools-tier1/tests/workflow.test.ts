@@ -127,10 +127,12 @@ describe('the workflow tool', () => {
 
     expect(result?.isError).toBe(false)
     expect(result?.value).toEqual([
-      { id: 'a', value: 'one' },
-      { id: 'b', value: 'two' },
+      { id: 'a', value: 'one', sessionId: 'child-1' },
+      { id: 'b', value: 'two', sessionId: 'child-2' },
     ])
-    expect(textOf(result)).toBe('a: one\nb: two')
+    expect(textOf(result)).toBe(
+      'a: one\nb: two\n\nchild sessions:\na: done [child session: child-1]\nb: done [child session: child-2]',
+    )
     expect(started.sort()).toEqual(['first job', 'second job'])
   })
 
@@ -148,11 +150,12 @@ describe('the workflow tool', () => {
 
     expect(result?.isError).toBe(false)
     expect(result?.value).toEqual([
-      { id: 'a', value: null, error: 'the answer is not JSON' },
-      { id: 'b', value: { ok: true } },
+      { id: 'a', value: null, error: 'the answer is not JSON', sessionId: 'child-1' },
+      { id: 'b', value: { ok: true }, sessionId: 'child-2' },
     ])
     expect(textOf(result)).toContain('a: (failed: the answer is not JSON)')
     expect(textOf(result)).toContain('b: {"ok":true}')
+    expect(textOf(result)).toContain('a: failed (the answer is not JSON) [child session: child-1]')
   })
 
   test('tasks that name the same id are refused before anything runs', async () => {
@@ -221,6 +224,9 @@ describe('the workflow script', () => {
     expect(textOf(result)).toContain('workflow script: ok')
     expect(textOf(result)).toContain('draft first')
     expect(textOf(result)).toContain('return: "done"')
+    expect(textOf(result)).toContain('child sessions:')
+    expect(textOf(result)).toContain('draft: done [child session: child-1]')
+    expect(textOf(result)).toContain('review: done [child session: child-2]')
   })
 
   test('turns a script exception into a failed result instead of a failed call', async () => {
@@ -505,7 +511,7 @@ describe('workflow child failures', () => {
 
     expect(result?.isError).toBe(false)
     expect(result?.value).toEqual([
-      { id: 'a', value: null, error: 'the child agent took no message' },
+      { id: 'a', value: null, error: 'the child agent took no message', sessionId: 'child-1' },
     ])
   })
 

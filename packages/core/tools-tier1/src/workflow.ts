@@ -8,6 +8,7 @@ import {
   WORKFLOW_MAX_CHILDREN,
   type WorkflowScriptHost,
   type WorkflowScriptValue,
+  type WorkflowSpawnSummary,
 } from './workflow-script.ts'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
 
@@ -66,6 +67,8 @@ export interface WorkflowItem {
   readonly id: string
   readonly value: JsonValue | null
   readonly error?: string
+  /** The child that ran the task, so the conversation can open its session. */
+  readonly sessionId?: string
 }
 
 /** What a workflow answers: one item per task, or what the script returned. */
@@ -76,14 +79,19 @@ export interface WorkflowHost extends WorkflowScriptHost {
   readonly route: string
 }
 
-const failed = (id: string, error: string): WorkflowItem => ({ id, value: null, error })
+const failed = (id: string, error: string, sessionId?: string): WorkflowItem => ({
+  id,
+  value: null,
+  error,
+  ...(sessionId === undefined ? {} : { sessionId }),
+})
 
 /** An answer that had to be JSON and was not becomes a failed item, not a failed run. */
-const parseAnswer = (id: string, answer: string): WorkflowItem => {
+const parseAnswer = (id: string, answer: string, sessionId: string): WorkflowItem => {
   try {
-    return { id, value: JSON.parse(answer) as JsonValue }
+    return { id, value: JSON.parse(answer) as JsonValue, sessionId }
   } catch {
-    return failed(id, 'the answer is not JSON')
+    return failed(id, 'the answer is not JSON', sessionId)
   }
 }
 
@@ -109,10 +117,14 @@ const runTask = (
     const queued = yield* child
       .followup({ text: task.task, source: 'user' })
       .pipe(Effect.orElseSucceed(() => false))
-    if (queued === false) return failed(task.id, 'the child agent took no message')
+    if (queued === false) {
+      return failed(task.id, 'the child agent took no message', child.id)
+    }
     yield* child.whenIdle
     const answer = childAnswerOf(child)
-    return task.expect === 'json' ? parseAnswer(task.id, answer) : { id: task.id, value: answer }
+    return task.expect === 'json'
+      ? parseAnswer(task.id, answer, child.id)
+      : { id: task.id, value: answer, sessionId: child.id }
   })
 
 const duplicateId = (tasks: ReadonlyArray<WorkflowTask>): string | undefined => {
@@ -129,6 +141,51 @@ const renderItem = (item: WorkflowItem): string =>
     ? item.id + ': ' + (typeof item.value === 'string' ? item.value : JSON.stringify(item.value))
     : item.id + ': (failed: ' + item.error + ')'
 
+/** One child as the result names it: what it was called, how it went, and where it ran. */
+interface ChildLine {
+  readonly name: string
+  readonly status: 'done' | 'failed'
+  readonly sessionId?: string
+  readonly reason?: string
+}
+
+/**
+ * The trailing block that names every child and its session. The answers above
+ * stay as they were; this block is what lets the conversation draw a node whose
+ * rows open a child's own session.
+ */
+const renderChildren = (children: ReadonlyArray<ChildLine>): ReadonlyArray<string> =>
+  children.length === 0
+    ? []
+    : [
+        '',
+        'child sessions:',
+        ...children.map(
+          (child) =>
+            child.name +
+            ': ' +
+            child.status +
+            (child.reason === undefined ? '' : ' (' + child.reason + ')') +
+            (child.sessionId === undefined ? '' : ' [child session: ' + child.sessionId + ']'),
+        ),
+      ]
+
+/** One task item as the child block reads it. */
+const lineOf = (item: WorkflowItem): ChildLine => ({
+  name: item.id,
+  status: item.error === undefined ? 'done' : 'failed',
+  ...(item.error === undefined ? {} : { reason: item.error }),
+  ...(item.sessionId === undefined ? {} : { sessionId: item.sessionId }),
+})
+
+/** One spawn as the child block reads it; an unnamed spawn goes by its step. */
+const spawnLineOf = (spawn: WorkflowSpawnSummary): ChildLine => ({
+  name: spawn.label === '' ? 'spawn ' + String(spawn.step) : spawn.label,
+  status: spawn.status,
+  ...(spawn.reason === undefined ? {} : { reason: spawn.reason }),
+  ...(spawn.sessionId === undefined ? {} : { sessionId: spawn.sessionId }),
+})
+
 /** Tells a script answer apart from the task array without reading either shape. */
 const isScriptValue = (value: WorkflowValue): value is WorkflowScriptValue => !Array.isArray(value)
 
@@ -141,6 +198,7 @@ const renderScript = (value: WorkflowScriptValue): string => {
     'children: ' + String(value.children),
     ...(value.output === '' ? [] : ['output:', value.output.trimEnd()]),
     ...(value.value === undefined ? [] : ['return: ' + JSON.stringify(value.value)]),
+    ...renderChildren((value.spawns ?? []).map(spawnLineOf)),
   ]
   return lines.join('\n')
 }
@@ -168,6 +226,7 @@ export const makeWorkflowTool = (
           id: Schema.String,
           value: Schema.NullOr(Schema.Json),
           error: Schema.optionalKey(Schema.String),
+          sessionId: Schema.optionalKey(Schema.String),
         }),
       ),
       Schema.Struct({
@@ -177,6 +236,17 @@ export const makeWorkflowTool = (
         value: Schema.optionalKey(Schema.Json),
         stage: Schema.optionalKey(Schema.String),
         reason: Schema.optionalKey(Schema.String),
+        spawns: Schema.optionalKey(
+          Schema.Array(
+            Schema.Struct({
+              step: Schema.Int,
+              label: Schema.String,
+              status: Schema.Literals(['done', 'failed']),
+              sessionId: Schema.optionalKey(Schema.String),
+              reason: Schema.optionalKey(Schema.String),
+            }),
+          ),
+        ),
       }),
     ]),
     render: (_args, value) => [
@@ -186,7 +256,10 @@ export const makeWorkflowTool = (
           ? renderScript(value)
           : value.length === 0
             ? '(no tasks)'
-            : value.map((item) => renderItem(item)).join('\n'),
+            : [
+                value.map((item) => renderItem(item)).join('\n'),
+                ...renderChildren(value.map(lineOf)),
+              ].join('\n'),
       },
     ],
   },
