@@ -407,6 +407,7 @@ describe('ripgrep search', () => {
     expect(calls).toHaveLength(2)
     for (const argv of calls) {
       expect(argv).toContain('--no-require-git')
+      expect(argv).toContain('--no-ignore-parent')
       expect(argv).not.toContain('--no-ignore')
     }
     const globCall = calls[0] ?? []

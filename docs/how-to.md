@@ -500,7 +500,7 @@ jzh config                         # 入ったことを確かめる
 
 ## 検索を ripgrep で行う
 
-`glob` と `grep` は、PATH に `rg` があれば ripgrep で検索する。`--no-ignore` は渡さないので、ワークスペース直下だけでなく入れ子の `.gitignore` と `.ignore` も効く。`grep` は ripgrep がバイナリと判定したファイルの一致を落とす。どちらも結果の上限を超えた分は spill に書き、locator から `read` で辿れる。
+`glob` と `grep` は、PATH に `rg` があれば ripgrep で検索する。`--no-ignore` は渡さず、`--no-ignore-parent` だけを渡すので、ワークスペース直下と入れ子の `.gitignore` / `.ignore` は効き、ワークスペースの外にある親ディレクトリの ignore は読まない。`grep` は ripgrep がバイナリと判定したファイルの一致を落とす。どちらも結果の上限を超えた分は spill に書き、locator から `read` で辿れる。
 
 `rg` が無い実行では組み込みの walker に落ちる。walker はワークスペース直下の `.gitignore` / `.ignore` しか読まないため、入れ子の ignore ファイルは効かない。結果の末尾にその理由と制限が出る。`rg` を入れるには `brew install ripgrep` などで PATH に置く。
 
