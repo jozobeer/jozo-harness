@@ -1,3 +1,4 @@
+import type { SessionEvent } from '@jozo-harness/session'
 import type { UiHost } from '@jozo-harness/ui-protocol'
 import type { Schedule } from '@jozo-harness/tools-tier1'
 import { Deferred, Effect, Exit, Scope } from 'effect'
@@ -8,7 +9,7 @@ import type {
   SessionSummary,
   SubagentMessageView,
 } from '../shared/rpc.ts'
-import type { WebError } from './errors.ts'
+import { WebError } from './errors.ts'
 
 /** One session the server can serve: the summary a page lists, and the UI face of its core. */
 export interface OpenSession {
@@ -49,11 +50,17 @@ export interface InitialSession {
 /** What the app that owns the profiles gives the server: the store's list, and one more session. */
 export interface SessionFactory {
   readonly list: () => Effect.Effect<ReadonlyArray<SessionSummary>, WebError>
-  /** Opens the named session, or creates one in `cwd` when the id is absent. */
+  /**
+   * Opens the named session, or creates one in `cwd` when the id is absent. A
+   * seed writes the events a fork starts from into the session being created.
+   */
   readonly open: (
     id: string | undefined,
     cwd: string | undefined,
+    seed?: ReadonlyArray<SessionEvent>,
   ) => Effect.Effect<OpenSession, WebError, Scope.Scope>
+  /** One session's log, read without opening it for writing. */
+  readonly read: (id: string) => Effect.Effect<ReadonlyArray<SessionEvent>, WebError>
 }
 
 /** The sessions one server serves: the one it started with, plus any the page asks for later. */
@@ -65,6 +72,11 @@ export interface SessionRegistry {
     id: string | undefined,
     cwd: string | undefined,
   ) => Effect.Effect<OpenSession, WebError>
+  /**
+   * Copies one session's log into a new session. The parent is only read; the
+   * child starts from the same events and remembers the parent.
+   */
+  readonly fork: (id: string) => Effect.Effect<OpenSession, WebError>
   /** Releases a session that is open; a no-op when nobody opened it. */
   readonly close: (id: string) => Effect.Effect<void>
   /** The host of a session already open; undefined when the page names one nobody opened. */
@@ -110,12 +122,13 @@ export const makeSessionRegistry = (input: {
     const build = (
       id: string | undefined,
       cwd: string | undefined,
+      seed?: ReadonlyArray<SessionEvent>,
     ): Effect.Effect<OpenSession, WebError, Scope.Scope> =>
       Effect.gen(function* () {
         const scope = yield* Scope.make()
         yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
         const session = yield* input.factory
-          .open(id, cwd)
+          .open(id, cwd, seed)
           .pipe(Effect.provideService(Scope.Scope, scope))
         opened.set(session.summary.id, {
           session,
@@ -187,6 +200,22 @@ export const makeSessionRegistry = (input: {
         )
       })
 
+    /**
+     * The parent's log is copied whole, header aside: a reader forks to continue
+     * from what the session had done, not to hand the child a different task.
+     */
+    const fork = (id: string): Effect.Effect<OpenSession, WebError> =>
+      Effect.gen(function* () {
+        const parent = (yield* input.factory.list()).find((summary) => summary.id === id)
+        if (parent === undefined) {
+          return yield* Effect.fail(new WebError({ message: 'no such session: ' + id }))
+        }
+        const events = yield* input.factory.read(id)
+        return yield* build(undefined, parent.cwd, events).pipe(
+          Effect.provideService(Scope.Scope, own),
+        )
+      })
+
     return {
       // '' when the server holds none yet, or once the page deleted the boot one.
       get initial() {
@@ -194,6 +223,7 @@ export const makeSessionRegistry = (input: {
       },
       list: input.factory.list,
       open: openInOwnScope,
+      fork,
       close,
       hostOf: (id) => opened.get(id)?.session.host,
       stateOf: (id) => opened.get(id)?.session.runState(),

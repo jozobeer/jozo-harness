@@ -26,6 +26,7 @@ import { Conversation } from '../components/conversation.tsx'
 import { Board } from '../components/board.tsx'
 import { Status } from '../components/status.tsx'
 import { emptyWatched, watchedAfter, type Watched } from '../../src/ui/board.ts'
+import type { SessionHit } from '../../src/shared/rpc.ts'
 import { Markdown } from '../components/markdown.tsx'
 import { Review } from '../components/review.tsx'
 import { Waterfall } from '../components/waterfall.tsx'
@@ -92,6 +93,7 @@ type Call =
   | { readonly kind: 'saveRunSettings'; readonly input: RunSettingsInput }
   | { readonly kind: 'askFiles'; readonly query: string }
   | { readonly kind: 'act'; readonly sessionId: string; readonly action: SessionAction }
+  | { readonly kind: 'fork'; readonly sessionId: string }
   | { readonly kind: 'askWorkspaces' }
   | { readonly kind: 'addWorkspace'; readonly cwd: string }
   | { readonly kind: 'openWorkspace'; readonly app: string }
@@ -115,6 +117,8 @@ type BrowseAnswer =
 const makeStore = (
   overrides: Partial<WebState> = {},
   watched: ReadonlyMap<string, Watched> = new Map(),
+  /** The body hits the store's index would answer for the active search. */
+  bodies: ReadonlyMap<string, SessionHit> = new Map(),
 ) => {
   const [state, setState] = createSignal<WebState>({ ...initialState, ...overrides })
   const calls: Array<Call> = []
@@ -182,6 +186,11 @@ const makeStore = (
     chooseModel: (model) => calls.push({ kind: 'chooseModel', model }),
     chooseEffort: (effort) => calls.push({ kind: 'chooseEffort', effort }),
     act: (sessionId, action) => calls.push({ kind: 'act', sessionId, action }),
+    fork: (sessionId) => calls.push({ kind: 'fork', sessionId }),
+    searchSessions: (query, reply) => {
+      const needle = query.toLowerCase()
+      reply([...bodies.values()].filter((hit) => hit.text.toLowerCase().includes(needle)))
+    },
     askWorkspaces: () => calls.push({ kind: 'askWorkspaces' }),
     openFolder: (path) => calls.push({ kind: 'openFolder', path }),
     closeFolder: (path) => calls.push({ kind: 'closeFolder', path }),
@@ -469,6 +478,99 @@ describe('the Solid page', () => {
     expect(search.value).toBe('')
     expect(ids()).toHaveLength(2)
     expect(document.activeElement).not.toBe(search)
+  })
+
+  test('a body hit shows the excerpt the index returned, apart from a title-only match', async () => {
+    const sessions = [
+      {
+        id: 'aaaabbbb',
+        cwd: '/one/work',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        title: 'first',
+      },
+      {
+        id: 'ccccdddd',
+        cwd: '/one/work',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        title: 'second',
+      },
+    ]
+    const bodies = new Map<string, SessionHit>([
+      [
+        'ccccdddd',
+        {
+          sessionId: 'ccccdddd',
+          seq: 4,
+          type: 'user/message',
+          text: 'the «ledger» is here',
+        },
+      ],
+    ])
+    const { store } = makeStore({ sessions }, new Map(), bodies)
+
+    const { container } = render(() => <Board store={store} />)
+    const search = container.querySelector('#session-search') as HTMLInputElement
+
+    fireEvent.input(search, { target: { value: 'ledger' } })
+    // The index answers after the typing pauses, and the excerpt lands under its row.
+    await vi.waitFor(() => {
+      expect(container.querySelectorAll('#session-list button.session')).toHaveLength(1)
+    })
+    expect(container.querySelector('.session-row[data-match="body"]')).toBeTruthy()
+    expect(container.querySelector('.session-excerpt')?.textContent).toContain('ledger')
+    expect(container.querySelector('.session-match')?.textContent).toMatch(/body|本文/)
+
+    // A title-only match is the only match, and shows no excerpt line.
+    fireEvent.input(search, { target: { value: 'first' } })
+    await vi.waitFor(() => {
+      expect(container.querySelector('.session-row[data-match="title"]')).toBeTruthy()
+    })
+    expect(container.querySelector('.session-excerpt')).toBeNull()
+  })
+
+  test('the row menu forks a session and moves one row above its neighbour', () => {
+    const cwd = '/one/work'
+    const now = Date.now()
+    const { store, calls } = makeStore({
+      sessions: [
+        { id: 'aaaa1111', cwd, createdAt: now, updatedAt: now - 2000, title: 'older' },
+        { id: 'bbbb2222', cwd, createdAt: now, updatedAt: now - 1000, title: 'newer' },
+      ],
+    })
+
+    const { container } = render(() => <Board store={store} />)
+    const rowOf = (id: string) =>
+      container.querySelector(`[data-session-id="${id}"]`)?.closest('.session-row') as HTMLElement
+    const rowIds = () =>
+      [...container.querySelectorAll('#session-list button.session')].map((row) =>
+        row.getAttribute('data-session-id'),
+      )
+
+    // The newer row starts below the older one only after the reader asks.
+    const openMenu = (id: string) => {
+      const button = rowOf(id).querySelector('.session-menu') as HTMLButtonElement
+      fireEvent.click(button)
+    }
+    openMenu('bbbb2222')
+    const items = [...rowOf('bbbb2222').querySelectorAll('.session-menu-item')]
+    const byLabel = (pattern: RegExp) =>
+      items.find((item) => pattern.test(item.textContent ?? '')) as HTMLButtonElement
+    // The newer row already leads, so moving it down is what shows a kept order.
+    fireEvent.click(byLabel(/Move down|下へ/))
+
+    expect(rowIds()).toEqual(['aaaa1111', 'bbbb2222'])
+    expect(JSON.parse(localStorage.getItem('jzh.session-order') ?? '{}')).toEqual({
+      [cwd]: ['aaaa1111', 'bbbb2222'],
+    })
+
+    openMenu('aaaa1111')
+    const fork = [...rowOf('aaaa1111').querySelectorAll('.session-menu-item')].find((item) =>
+      /Fork|フォーク/.test(item.textContent ?? ''),
+    ) as HTMLButtonElement
+    fireEvent.click(fork)
+    expect(calls).toContainEqual({ kind: 'fork', sessionId: 'aaaa1111' })
   })
 
   test('the page opens the search from / or Mod+K, but not while a field has the keys', () => {

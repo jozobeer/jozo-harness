@@ -58,6 +58,8 @@ export const SessionSummarySchema = Schema.Struct({
   archived: Schema.optionalKey(Schema.Boolean),
   /** Whether the log holds nothing but its header; absent reads as no. */
   empty: Schema.optionalKey(Schema.Boolean),
+  /** The session this one was forked from; absent for a session nobody forked. */
+  forkOf: Schema.optionalKey(Schema.String),
 })
 
 /** The wire shape of one session summary; the store's own summary carries these fields. */
@@ -155,6 +157,37 @@ export const AddWorkspaceRpc = Rpc.make('addWorkspace', {
 export const SessionActionRpc = Rpc.make('sessionAction', {
   payload: Schema.Struct({ sessionId: Schema.String, action: SessionActionSchema }),
   success: Schema.Boolean,
+  error: Schema.String,
+})
+
+/**
+ * Copies one session's log into a new session. The parent keeps its log; the
+ * child records the parent and starts ready for its own task.
+ */
+export const ForkSessionRpc = Rpc.make('forkSession', {
+  payload: Schema.Struct({ sessionId: Schema.String }),
+  success: SessionSummarySchema,
+  error: Schema.String,
+})
+
+/** One event of a session whose text holds the phrase searched for. */
+export const SessionHitSchema = Schema.Struct({
+  sessionId: Schema.String,
+  seq: Schema.Number,
+  type: Schema.String,
+  /** The matching text as the index marks it, with the match between «». */
+  text: Schema.String,
+})
+
+export type SessionHit = typeof SessionHitSchema.Type
+
+/**
+ * Searches the text of every stored session, not just the name the rail shows.
+ * The index is the one the store keeps, so a hit names the line it matched.
+ */
+export const SearchSessionsRpc = Rpc.make('searchSessions', {
+  payload: Schema.Struct({ query: Schema.String }),
+  success: Schema.Struct({ items: Schema.Array(SessionHitSchema) }),
   error: Schema.String,
 })
 
@@ -681,6 +714,8 @@ export const UiRpcs = RpcGroup.make(
   BrowseDirectoriesRpc,
   AddWorkspaceRpc,
   SessionActionRpc,
+  ForkSessionRpc,
+  SearchSessionsRpc,
   UiCommandRpc,
   UiEventsRpc,
   StoreChangedRpc,

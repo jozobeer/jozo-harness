@@ -34,7 +34,7 @@ import {
   type SessionSummary,
 } from '@jozo-harness/session'
 import { attachmentRootOf } from '@jozo-harness/session/attachment-store'
-import { expandHome, makeSessionQuery } from '@jozo-harness/session-jsonl'
+import { expandHome, makeSessionQuery, type SearchHit } from '@jozo-harness/session-jsonl'
 import {
   SystemPrompt,
   additionalInstructionsText,
@@ -739,6 +739,7 @@ const createAgent = (
   resume: SessionId | undefined,
   cwd: string,
   attachmentDir: string,
+  seed?: ReadonlyArray<SessionEvent>,
 ) =>
   Effect.gen(function* () {
     const agentOptions: AgentOptions = {
@@ -754,7 +755,11 @@ const createAgent = (
     // A resumed session opens with the workspace its header recorded; `cwd` only
     // decides where a session that does not exist yet is created.
     return resume === undefined
-      ? yield* agents.create({ cwd, options: agentOptions })
+      ? yield* agents.create({
+          cwd,
+          options: agentOptions,
+          ...(seed === undefined ? {} : { seed }),
+        })
       : yield* agents.create({ cwd, resume, options: agentOptions })
   })
 
@@ -1657,12 +1662,17 @@ const sessionFactoryOf = (
   spillTokens: number | undefined,
   live: LiveRunSettings,
   listSessions: SessionRuntime['listSessions'],
+  readSessionEvents: (id: string) => Effect.Effect<ReadonlyArray<SessionEvent>, SessionError>,
   plugins: PluginWiringState,
   gui: GuiEndpoint,
 ): SessionFactory => ({
   list: () =>
     listSessions().pipe(Effect.mapError((error) => new WebError({ message: messageOf(error) }))),
-  open: (id, cwd) =>
+  read: (id) =>
+    readSessionEvents(id).pipe(
+      Effect.mapError((error) => new WebError({ message: messageOf(error) })),
+    ),
+  open: (id, cwd, seed) =>
     Effect.gen(function* () {
       // The choices are read per open: a page may have picked another model or
       // effort since.
@@ -1683,6 +1693,7 @@ const sessionFactoryOf = (
         plugins,
         gui,
         live,
+        seed,
       )
       if (built.kind === 'refused') {
         return yield* Effect.fail(new WebError({ message: built.message }))
@@ -1740,6 +1751,8 @@ interface RunReading {
   readonly readSessionEvents: (
     id: string,
   ) => Effect.Effect<ReadonlyArray<SessionEvent>, SessionError>
+  /** The store's full-text index, which the rail searches from its field. */
+  readonly searchSessions: (text: string) => Effect.Effect<ReadonlyArray<SearchHit>, SessionError>
   /** The effort words the provider takes, which the blank seat offers. */
   readonly efforts: ReadonlyArray<string>
 }
@@ -1750,6 +1763,7 @@ interface RunReading {
  */
 const runReadingOf = (
   layer: Layer.Layer<any, PluginError, never>,
+  sessionRoot: string,
 ): Effect.Effect<RunReading, PluginError, Scope.Scope> =>
   Effect.gen(function* () {
     const context = yield* Layer.build(layer)
@@ -1757,11 +1771,24 @@ const runReadingOf = (
     // A reference reads a log without opening a live session: the page may attach a
     // session nobody has open, and reading it must not start one.
     const persistence = Context.get(context, SessionPersistenceService)
+    // The rail searches the same index the search tool and --search read, so a hit
+    // names the line it matched instead of the page rescanning every log.
+    const query = yield* Effect.acquireRelease(
+      Effect.sync(() => makeSessionQuery({ root: sessionRoot, sessions: persistence })),
+      (held) => Effect.sync(() => held.close()),
+    )
     // What the provider takes for an effort is the adapter's to say; a page only offers it.
     const efforts = Context.get(context, Llm).capabilities.reasoningEffort ?? []
+    // A reader must not take the write lock: an @ reference or a fork may name the
+    // very session this server has open, and opening it again would claim its log.
+    const readSessionEvents = (id: string) =>
+      persistence.read === undefined
+        ? persistence.open(id).pipe(Effect.map((opened) => opened.events))
+        : persistence.read(id)
     return {
       listSessions: () => sessions.list(),
-      readSessionEvents: (id) => persistence.open(id).pipe(Effect.map((opened) => opened.events)),
+      readSessionEvents,
+      searchSessions: (text) => (text.trim() === '' ? Effect.succeed([]) : query.search(text)),
       efforts,
     }
   })
@@ -1905,7 +1932,7 @@ const serveWebUi = (
     // the server they serve.
     return yield* Effect.scoped(
       Effect.gen(function* () {
-        const reading = yield* runReadingOf(layer)
+        const reading = yield* runReadingOf(layer, sessionRootOf(rows))
         // The facts are mutable: a save rebuilds the rows and the layer for the next
         // session, and updates the values a running call reads.
         const live = liveSettingsOf(options, rows)
@@ -1919,6 +1946,7 @@ const serveWebUi = (
             spillTokens,
             live,
             reading.listSessions,
+            reading.readSessionEvents,
             wiring,
             gui,
           ),
@@ -1927,6 +1955,10 @@ const serveWebUi = (
           workspaces: workspacesPortOf(options, reading.listSessions),
           openInApp: makeOpenInApp(),
           readSessionEvents: reading.readSessionEvents,
+          searchSessions: (text) =>
+            reading
+              .searchSessions(text)
+              .pipe(Effect.mapError((error) => new WebError({ message: messageOf(error) }))),
           ...(options.settings?.webhooks === undefined
             ? {}
             : { webhooks: options.settings.webhooks }),
@@ -2313,6 +2345,8 @@ const buildSession = (
   gui?: GuiEndpoint,
   /** The live limits; absent seeds them from the rows, as a one-shot run does. */
   live?: LiveRunSettings,
+  /** Events a new session starts from, e.g. a fork of another log. */
+  seed?: ReadonlyArray<SessionEvent>,
 ) =>
   Effect.gen(function* () {
     const liveSettings = live ?? liveSettingsOf(options, rows)
@@ -2334,6 +2368,7 @@ const buildSession = (
       resume,
       cwd,
       attachmentRootOf(sessionRootOf(rows)),
+      seed,
     )
     // The last explicit choice in the log outranks the profile: a resumed session
     // continues at the boundary the human last picked, without asking again.

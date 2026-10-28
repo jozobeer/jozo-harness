@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest'
+import type { SessionEvent } from '@jozo-harness/session'
 import type { UiHost } from '@jozo-harness/ui-protocol'
 import { Deferred, Effect, Fiber, Stream } from 'effect'
 import { WebError } from '../src/server/errors.ts'
@@ -38,23 +39,36 @@ interface Fake {
   readonly asked: Array<string | undefined>
   /** The workspace each ask named, beside the session it named. */
   readonly askedCwd: Array<string | undefined>
+  /** The events each created session started from. */
+  readonly seeds: Array<ReadonlyArray<SessionEvent> | undefined>
   readonly closed: Array<string>
+  /** The log a fork reads, as the store would hand it back. */
+  readonly log: Array<SessionEvent>
 }
 
 const makeFactory = (): Fake => {
   const asked: Array<string | undefined> = []
   const askedCwd: Array<string | undefined> = []
+  const seeds: Array<ReadonlyArray<SessionEvent> | undefined> = []
   const closed: Array<string> = []
+  const log: Array<SessionEvent> = [
+    { seq: 1, time: 1, type: 'user/message', data: { text: 'first ask', source: 'user' } },
+    { seq: 2, time: 2, type: 'user/message', data: { text: 'second ask', source: 'user' } },
+  ]
   return {
     asked,
     askedCwd,
+    seeds,
     closed,
+    log,
     factory: {
       list: () => Effect.succeed([summaryOf('a'), summaryOf('b')]),
-      open: (id, cwd) =>
+      read: () => Effect.succeed(log),
+      open: (id, cwd, seed) =>
         Effect.gen(function* () {
           asked.push(id)
           askedCwd.push(cwd)
+          seeds.push(seed)
           const made = id ?? 'new-' + String(asked.length)
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
@@ -125,6 +139,39 @@ const initial = (id: string): InitialSession => ({
 })
 
 describe('the session registry', () => {
+  test('a fork opens a new session seeded with the parent log, and leaves the parent alone', async () => {
+    const fake = makeFactory()
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* makeSessionRegistry({ factory: fake.factory })
+          const parent = yield* registry.open('a', undefined)
+          const forked = yield* registry.fork('a')
+          return { parent, forked }
+        }),
+      ),
+    )
+    // The fork starts from everything the parent logged, at the moment it was forked.
+    expect(result.forked.summary.id).toBe('new-2')
+    expect(fake.seeds.at(-1)?.map((event) => event.seq)).toEqual([1, 2])
+    expect(fake.asked.at(-1)).toBeUndefined()
+    expect(result.parent.summary.id).toBe('a')
+  })
+
+  test('forking a session the store does not hold says so and opens nothing', async () => {
+    const fake = makeFactory()
+    const failed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* makeSessionRegistry({ factory: fake.factory })
+          return yield* Effect.flip(registry.fork('gone'))
+        }),
+      ),
+    )
+    expect(failed.message).toBe('no such session: gone')
+    expect(fake.seeds).toEqual([])
+  })
+
   test('the session the server started with is served without opening another', async () => {
     const fake = makeFactory()
     const seen = await Effect.runPromise(
@@ -228,6 +275,7 @@ describe('the session registry', () => {
   test('a factory that cannot open the session says why and remembers nothing', async () => {
     const failing: SessionFactory = {
       list: () => Effect.succeed([]),
+      read: () => Effect.succeed([]),
       open: () => Effect.fail(new WebError({ message: 'it is gone' })),
     }
     const seen = await Effect.runPromise(
@@ -300,6 +348,7 @@ describe('the session registry', () => {
     const release = Deferred.makeUnsafe<void>()
     const factory: SessionFactory = {
       list: () => Effect.succeed([]),
+      read: () => Effect.succeed([]),
       open: (id) =>
         Effect.gen(function* () {
           asked.push(id)
@@ -345,6 +394,7 @@ describe('the session registry', () => {
     const asked: Array<string | undefined> = []
     const factory: SessionFactory = {
       list: () => Effect.succeed([]),
+      read: () => Effect.succeed([]),
       open: (id) =>
         Effect.gen(function* () {
           asked.push(id)

@@ -14,7 +14,7 @@ import {
 } from '@jozo-harness/tools-tier1'
 import { sendCommand, type SessionError, type SessionEvent } from '@jozo-harness/ui-protocol'
 import { attachmentRootOf, saveAttachment } from '@jozo-harness/session/attachment-store'
-import { UiRpcs, type CommandView } from '../shared/rpc.ts'
+import { UiRpcs, type CommandView, type SessionHit } from '../shared/rpc.ts'
 import {
   authCookie,
   COOKIE_NAME,
@@ -34,7 +34,8 @@ import {
 import { makeParticipantRegistry, type ParticipantRegistry } from './participants.ts'
 import { makeWebProtocol, type Connection } from './protocol.ts'
 import { answerShare } from './share.ts'
-import { applyMeta, readMeta, sessionActionOf, withMeta } from './session-meta.ts'
+import { applyMeta, markFork, readMeta, sessionActionOf, withMeta } from './session-meta.ts'
+import type { WebError } from './errors.ts'
 import {
   makeSessionRegistry,
   type InitialSession,
@@ -98,6 +99,11 @@ export interface ServeWebOptions {
   readonly readSessionEvents: (
     id: string,
   ) => Effect.Effect<ReadonlyArray<SessionEvent>, SessionError>
+  /**
+   * The store's full-text search, which reads the logs a page lists but does not
+   * open. Absent answers an empty list, so a test or an embedder keeps its store.
+   */
+  readonly searchSessions?: (text: string) => Effect.Effect<ReadonlyArray<SessionHit>, WebError>
   /** What the run can be told before any session exists: the blank page's own list. */
   readonly commands: () => ReadonlyArray<CommandView>
   /**
@@ -131,6 +137,7 @@ const handlersOf = (
   workspaces: WorkspacesPort,
   openInApp: OpenInAppPort,
   readSessionEvents: (id: string) => Effect.Effect<ReadonlyArray<SessionEvent>, SessionError>,
+  searchSessions: (text: string) => Effect.Effect<ReadonlyArray<SessionHit>, WebError>,
   commands: () => ReadonlyArray<CommandView>,
   store: StoreEvents,
   schedules: ScheduleStore,
@@ -189,6 +196,28 @@ const handlersOf = (
         // A rename, a pin, or a delete is another device's row as well.
         store.notify()
         return true
+      }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
+    searchSessions: ({ query }) =>
+      Effect.gen(function* () {
+        const text = query.trim()
+        if (text === '') return { items: [] }
+        // A hit is offered only for a session the rail already lists, so a log
+        // that another profile stores is never quoted through this page.
+        const listed = yield* registry.list()
+        const known = new Set(listed.map((summary) => summary.id))
+        const hits = yield* searchSessions(text)
+        return { items: hits.filter((hit) => known.has(hit.sessionId)) }
+      }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
+    forkSession: ({ sessionId }) =>
+      Effect.gen(function* () {
+        const forked = yield* registry.fork(sessionId)
+        const view = yield* settings.read()
+        // The child's log carries the work; the metadata carries where it began.
+        yield* markFork(view.sessionRoot, forked.summary.id, sessionId)
+        // A fork is a new row for every page, not only the one that asked.
+        store.notify()
+        const meta = yield* readMeta(view.sessionRoot)
+        return withMeta(forked.summary, meta[forked.summary.id])
       }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
     command: ({ sessionId, command }) => {
       const host = registry.hostOf(sessionId)
@@ -682,6 +711,12 @@ const refuseUpgrade = (socket: Duplex, status: number, message: string): void =>
   )
 }
 
+/** The search the rail uses: the caller's port, or one that answers no body hit. */
+const searchPortOf = (
+  options: ServeWebOptions,
+): ((text: string) => Effect.Effect<ReadonlyArray<SessionHit>, WebError>) =>
+  options.searchSessions ?? (() => Effect.succeed([]))
+
 /**
  * Serves the sessions of one profile: the browser app and the RPC socket.
  * Binds to loopback, and to this machine's detected tailnet address when there
@@ -872,6 +907,7 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
             options.workspaces,
             options.openInApp ?? noOpenInApp,
             options.readSessionEvents,
+            searchPortOf(options),
             options.commands,
             store,
             options.schedules,

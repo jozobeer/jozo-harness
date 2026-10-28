@@ -142,6 +142,28 @@ export const visibleSessions = (
   )
 }
 
+/** The sessions whose title or folder says what was typed, ignoring case. */
+export const matchesTitle = (summary: SessionSummary, query: string): boolean => {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return true
+  return summary.title.toLowerCase().includes(needle) || summary.cwd.toLowerCase().includes(needle)
+}
+
+/**
+ * The sessions a search keeps: those whose title or folder matches, and those
+ * whose body the store's index matched. A body hit carries the line that matched,
+ * so a row can show the excerpt and the reader can tell it from a title match.
+ */
+export const matchingSessions = (
+  sessions: ReadonlyArray<SessionSummary>,
+  query: string,
+  bodies: ReadonlyMap<string, { readonly text: string }>,
+): ReadonlyArray<SessionSummary> => {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return sessions
+  return sessions.filter((session) => matchesTitle(session, query) || bodies.has(session.id))
+}
+
 /** The board in the order a reader acts on it: what waits on them, what runs, the rest. */
 export interface Board {
   readonly waiting: ReadonlyArray<BoardEntry>
@@ -206,11 +228,40 @@ export const atKey = <Item>(items: ReadonlyMap<string, Item>, key: string): Item
 }
 
 /**
+ * A reader's own order of the rows in one workspace. A folder absent here keeps
+ * the board's recency; a folder present puts its named rows first in that order.
+ */
+export type SessionOrder = Readonly<Record<string, ReadonlyArray<string>>>
+
+/** Names a row that the reader placed, and where among the placed rows it sits. */
+const rankOf = (order: ReadonlyArray<string> | undefined): ReadonlyMap<string, number> =>
+  new Map((order ?? []).map((id, at) => [id, at] as const))
+
+/** The reader's order first, then pinned rows, then the newest; a stable tie keeps names. */
+const placedBefore = (
+  left: BoardEntry,
+  right: BoardEntry,
+  rank: ReadonlyMap<string, number>,
+): number => {
+  const at = rank.get(left.summary.id)
+  const other = rank.get(right.summary.id)
+  if (at !== undefined || other !== undefined) {
+    if (at === undefined) return 1
+    if (other === undefined) return -1
+    return at - other
+  }
+  return pinnedFirst(left, right) || newestFirst(left, right)
+}
+
+/**
  * Recent folded by workspace: each cwd once, the folders by their latest update,
  * and the rows inside a folder as the board sorts them. A folder keeps every
  * entry; the rail decides how many of them to draw.
  */
-export const recentGroupsOf = (entries: ReadonlyArray<BoardEntry>): ReadonlyArray<RecentGroup> => {
+export const recentGroupsOf = (
+  entries: ReadonlyArray<BoardEntry>,
+  order: SessionOrder = {},
+): ReadonlyArray<RecentGroup> => {
   const byCwd = new Map<string, Array<BoardEntry>>()
   for (const entry of entries) {
     const folder = byCwd.get(entry.summary.cwd)
@@ -221,9 +272,7 @@ export const recentGroupsOf = (entries: ReadonlyArray<BoardEntry>): ReadonlyArra
     .map(([cwd, folder]) => ({
       cwd,
       updatedAt: Math.max(...folder.map((entry) => entry.summary.updatedAt)),
-      entries: folder.toSorted(
-        (left, right) => pinnedFirst(left, right) || newestFirst(left, right),
-      ),
+      entries: folder.toSorted((left, right) => placedBefore(left, right, rankOf(order[cwd]))),
     }))
     .toSorted(folderFirst)
 }

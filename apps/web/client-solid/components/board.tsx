@@ -3,8 +3,10 @@ import {
   Match,
   Show,
   Switch,
+  createEffect,
   createMemo,
   createSignal,
+  on,
   onCleanup,
   onMount,
   type JSX,
@@ -12,19 +14,23 @@ import {
 import { Portal } from 'solid-js/web'
 import { plainText } from '@jozo-harness/ui-view'
 import { Linkify } from './linkify.tsx'
-import type { DirectoryView, SessionAction, SessionSummary } from '../../src/shared/rpc.ts'
+import type { DirectoryView, SessionAction, SessionHit } from '../../src/shared/rpc.ts'
 import {
   RECENT_PAGE,
   atKey,
   boardOf,
   byKey,
   keysOf,
+  matchingSessions,
+  matchesTitle,
   recentGroupsOf,
   visibleSessions,
   type BoardEntry,
   type RecentGroup,
+  type SessionOrder,
   type Waiting,
 } from '../../src/ui/board.ts'
+import { SESSION_ORDER_KEY, keepOrder, orderFrom, withMoved } from '../order.ts'
 import { useLocaleChoice, useTranslate, type Translate } from '../i18n.ts'
 import { basenameOf, whenOf } from '../lib.ts'
 import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY, keepPaths, pathsFrom } from '../recent.ts'
@@ -49,6 +55,64 @@ const createNow = () => {
 const titleOf = (entry: BoardEntry): string =>
   entry.summary.title === '' ? entry.summary.id.slice(0, 8) : entry.summary.title
 
+/** How a row met the search: its body, its title, or nothing the reader asked for. */
+const matchKindOf = (
+  hit: SessionHit | undefined,
+  matchedTitle: boolean | undefined,
+): string | undefined => {
+  if (hit !== undefined) return 'body'
+  if (matchedTitle === true) return 'title'
+  return undefined
+}
+
+/** The line the index matched, under the row it belongs to; a title match shows none. */
+const Excerpt = (props: { hit: SessionHit | undefined }) => {
+  const t = useTranslate()
+  return (
+    <Show when={props.hit}>
+      {(hit) => (
+        <p class="session-excerpt">
+          <span class="session-match">{t('board.matchBody')}</span>
+          {hit().text}
+        </p>
+      )}
+    </Show>
+  )
+}
+
+/** The two menu items that place a row by hand; absent for a row nobody orders. */
+const Moves = (props: { onMove: ((delta: number) => void) | undefined; close: () => void }) => {
+  const t = useTranslate()
+  return (
+    <Show when={props.onMove}>
+      {(move) => (
+        <>
+          <button
+            class="session-menu-item"
+            type="button"
+            onClick={() => {
+              move()(-1)
+              props.close()
+            }}
+          >
+            {t('menu.moveUp')}
+          </button>
+          <button
+            class="session-menu-item"
+            type="button"
+            onClick={() => {
+              move()(1)
+              props.close()
+            }}
+          >
+            {t('menu.moveDown')}
+          </button>
+        </>
+      )}
+    </Show>
+  )
+}
+
 /** What the row menu can say about a copy: nothing yet, or how it went. */
 type Copied = 'idle' | 'copied' | 'failed'
 
@@ -69,19 +133,6 @@ const copyLabel = (copied: Copied, t: Translate): string =>
     : copied === 'failed'
       ? t('menu.copyFailed')
       : t('menu.copyId')
-
-/** The sessions whose title or folder says what was typed, ignoring case. */
-const matching = (
-  sessions: ReadonlyArray<SessionSummary>,
-  query: string,
-): ReadonlyArray<SessionSummary> => {
-  const needle = query.trim().toLowerCase()
-  if (needle === '') return sessions
-  return sessions.filter(
-    (session) =>
-      session.title.toLowerCase().includes(needle) || session.cwd.toLowerCase().includes(needle),
-  )
-}
 
 const inField = (target: EventTarget | null): boolean =>
   target instanceof HTMLElement &&
@@ -162,7 +213,17 @@ const SessionMark = (props: { entry: BoardEntry }) => {
  * right-clicking offers the menu that renames, pins, archives, or deletes it;
  * a double-click puts the name itself in reach.
  */
-const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) => {
+const Row = (props: {
+  entry: BoardEntry
+  store: SessionStore
+  detail: string
+  /** The line the store's index matched, when the body matched rather than the title. */
+  hit?: SessionHit | undefined
+  /** Whether the title or folder matched the active search by itself. */
+  matchedTitle?: boolean
+  /** Moves the row inside its workspace; absent for a row nobody orders. */
+  onMove?: (delta: number) => void
+}) => {
   const t = useTranslate()
   const id = () => props.entry.summary.id
   const pinned = () => props.entry.summary.pinned === true
@@ -219,6 +280,7 @@ const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) 
   return (
     <div
       class="session-row"
+      data-match={matchKindOf(props.hit, props.matchedTitle)}
       ref={(node) => {
         row = node
       }}
@@ -302,6 +364,17 @@ const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) 
           <button
             class="session-menu-item"
             type="button"
+            onClick={() => {
+              props.store.fork(id())
+              close()
+            }}
+          >
+            {t('menu.fork')}
+          </button>
+          <Moves onMove={props.onMove} close={close} />
+          <button
+            class="session-menu-item"
+            type="button"
             onClick={() => act({ kind: 'pin', pinned: !pinned() })}
           >
             {t(pinned() ? 'menu.unpin' : 'menu.pin')}
@@ -331,6 +404,7 @@ const Row = (props: { entry: BoardEntry; store: SessionStore; detail: string }) 
           </button>
         </div>
       </Show>
+      <Excerpt hit={props.hit} />
       <Show when={confirming()}>
         <div
           class="session-menu-panel session-confirm"
@@ -477,6 +551,11 @@ const RecentFolder = (props: {
   shown: ReadonlySet<string>
   onFold: (cwd: string) => void
   onShown: (cwd: string) => void
+  /** The store's body hits for the active search, by session. */
+  hits: ReadonlyMap<string, SessionHit>
+  /** The search the reader typed; '' leaves every row its own match. */
+  query: string
+  onMove: (id: string, delta: number) => void
   now: number
 }) => {
   const t = useTranslate()
@@ -511,11 +590,17 @@ const RecentFolder = (props: {
           <For each={keysOf(rows(), (entry) => entry.summary.id)}>
             {(id) => {
               const entry = () => atKey(props.rows, id)
+              const hit = () => props.hits.get(entry().summary.id)
               return (
                 <Row
                   entry={entry()}
                   store={props.store}
                   detail={whenOf(entry().since, props.now, t, locale())}
+                  matchedTitle={
+                    props.query.trim() !== '' && matchesTitle(entry().summary, props.query)
+                  }
+                  onMove={(delta) => props.onMove(entry().summary.id, delta)}
+                  {...(hit() === undefined ? {} : { hit: hit() })}
                 />
               )
             }}
@@ -779,6 +864,28 @@ const WorkspacePicker = (props: { store: SessionStore }) => {
 export const Board = (props: { store: SessionStore }) => {
   const t = useTranslate()
   const [query, setQuery] = createSignal('')
+  const [hits, setHits] = createSignal<ReadonlyMap<string, SessionHit>>(new Map())
+  const [order, setOrder] = createSignal<SessionOrder>(
+    orderFrom(localStorage.getItem(SESSION_ORDER_KEY)),
+  )
+  // The index answers once the typing pauses, and only the last answer may land.
+  let searchTurn = 0
+  createEffect(
+    on(query, (text) => {
+      const needle = text.trim()
+      const turn = ++searchTurn
+      // An excerpt belongs to the words that found it, so a new query starts empty.
+      setHits(new Map())
+      if (needle === '') return
+      const timer = setTimeout(() => {
+        props.store.searchSessions(needle, (items) => {
+          if (turn !== searchTurn) return
+          setHits(new Map(items.map((item) => [item.sessionId, item])))
+        })
+      }, 150)
+      onCleanup(() => clearTimeout(timer))
+    }),
+  )
   const [showArchived, setShowArchived] = createSignal(false)
   const [showEmpty, setShowEmpty] = createSignal(false)
   const archivedCount = createMemo(
@@ -801,7 +908,9 @@ export const Board = (props: { store: SessionStore }) => {
       opened: opened(),
     }),
   )
-  const board = createMemo(() => boardOf(matching(visible(), query()), props.store.watched()))
+  const board = createMemo(() =>
+    boardOf(matchingSessions(visible(), query(), hits()), props.store.watched()),
+  )
   // The rail keys its rows by session and its folders by cwd, so a row whose
   // facts change is found again instead of drawn from scratch: <For> compares
   // the keys, and the row's own reads keep it current.
@@ -811,7 +920,7 @@ export const Board = (props: { store: SessionStore }) => {
   // A running session keeps its place in Recent too: moving it to a section of
   // its own made the rail jump on every turn.
   const recentEntries = createMemo(() => [...board().rest, ...board().running])
-  const recent = createMemo(() => recentGroupsOf(recentEntries()))
+  const recent = createMemo(() => recentGroupsOf(recentEntries(), order()))
   const folders = createMemo(() => byKey(recent(), (group) => group.cwd))
   const noMatch = (): boolean =>
     query().trim() !== '' &&
@@ -837,6 +946,20 @@ export const Board = (props: { store: SessionStore }) => {
     const next = toggled(shownFolders(), cwd)
     setShownFolders(next)
     keepPaths(RECENT_SHOWN_KEY, next)
+  }
+  /**
+   * Moves one row inside its folder. The first move seeds the folder's order
+   * from the rows already on screen, so a workspace nobody ordered is the only
+   * one that keeps recency.
+   */
+  const moveSession = (cwd: string, id: string, delta: number): void => {
+    const group = recent().find((each) => each.cwd === cwd)
+    if (group === undefined) return
+    const ids = group.entries.map((entry) => entry.summary.id)
+    const next = withMoved(order(), cwd, ids, id, delta)
+    if (next === order()) return
+    setOrder(next)
+    keepOrder(next)
   }
   const now = createNow()
   return (
@@ -895,8 +1018,11 @@ export const Board = (props: { store: SessionStore }) => {
                 store={props.store}
                 folded={foldedFolders()}
                 shown={shownFolders()}
+                hits={hits()}
+                query={query()}
                 onFold={foldFolder}
                 onShown={showFolder}
+                onMove={(id, delta) => moveSession(cwd, id, delta)}
                 now={now()}
               />
             )}

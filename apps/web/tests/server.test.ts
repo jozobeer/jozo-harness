@@ -258,6 +258,10 @@ interface FakeWeb {
   readonly hosts: Map<string, FakeHost>
   /** The boot sessions the server released, in the order it asked. */
   readonly closed: Array<string>
+  /** The events each created session started from. */
+  readonly seeds: Array<ReadonlyArray<SessionEvent> | undefined>
+  /** The log a fork reads, as the store would hand it back. */
+  readonly log: Array<SessionEvent>
 }
 
 /** The sessions one fake store holds: the boot one, plus whatever a page opens. */
@@ -265,9 +269,16 @@ const makeWeb = (initialId: string, cwd = '/work', working = true): FakeWeb => {
   const first = makeHost(initialId, cwd, working)
   const hosts = new Map<string, FakeHost>([[initialId, first]])
   const closed: Array<string> = []
+  const seeds: Array<ReadonlyArray<SessionEvent> | undefined> = []
+  const log: Array<SessionEvent> = [
+    { seq: 1, time: 1, type: 'user/message', data: { text: 'first ask', source: 'user' } },
+    { seq: 2, time: 2, type: 'user/message', data: { text: 'second ask', source: 'user' } },
+  ]
   return {
     hosts,
     closed,
+    seeds,
+    log,
     initial: {
       summary: first.summary,
       host: first.host,
@@ -285,8 +296,10 @@ const makeWeb = (initialId: string, cwd = '/work', working = true): FakeWeb => {
       }),
     factory: {
       list: () => Effect.succeed([...hosts.values()].map((fake) => fake.summary)),
-      open: (id, cwd) =>
+      read: () => Effect.succeed(log),
+      open: (id, cwd, seed) =>
         Effect.sync(() => {
+          seeds.push(seed)
           const made = id ?? 'new-' + String(hosts.size + 1)
           const known = hosts.get(made)
           if (known !== undefined) {
@@ -548,6 +561,8 @@ const start = (
   webhooks: ReadonlyArray<WebhookRule> = [],
   /** What the page may open the workspace with; absent keeps the route's no-app answer. */
   openInApp?: OpenInAppPort,
+  /** The store's full-text search; absent answers no body hits. */
+  searchSessions?: ServeWebOptions['searchSessions'],
 ): Effect.Effect<Started, never, Scope.Scope> =>
   Effect.gen(function* () {
     const ready = yield* Deferred.make<ReadyUrls>()
@@ -566,6 +581,7 @@ const start = (
         ),
         workspaces: workspaces.port,
         ...(openInApp === undefined ? {} : { openInApp }),
+        ...(searchSessions === undefined ? {} : { searchSessions }),
         commands: web.initial.commands,
         plugins,
         ...(webhooks.length === 0 ? {} : { webhooks }),
@@ -2178,6 +2194,198 @@ describe('the web transport', () => {
     expect(observed.refused).toBe('the session is not open')
     await rm(root, { recursive: true, force: true })
     await rm(workspace, { recursive: true, force: true })
+  })
+
+  test('the rail search keeps body hits in listed sessions and refuses a blank query', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-search-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a', '/work', false)
+    const settings = makeSettings()
+    const searched: Array<string> = []
+    const searchSessions = (text: string) => {
+      searched.push(text)
+      return Effect.succeed([
+        { sessionId: 'a', seq: 3, type: 'user/message', text: 'the «ledger» is here' },
+        { sessionId: 'gone', seq: 1, type: 'user/message', text: 'a «ledger» nobody lists' },
+      ])
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(
+            root,
+            web,
+            settings,
+            makeWorkspaces(),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            searchSessions,
+          )
+          const wsUrl = started.wsUrl
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const found = yield* client.searchSessions({ query: 'ledger' })
+            const blank = yield* client.searchSessions({ query: '  ' })
+            return { found, blank }
+          }).pipe(clientLayers(wsUrl))
+          const result = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    expect(observed.found.items).toEqual([
+      { sessionId: 'a', seq: 3, type: 'user/message', text: 'the «ledger» is here' },
+    ])
+    expect(observed.blank.items).toEqual([])
+    // A blank query never wakes the index.
+    expect(searched).toEqual(['ledger'])
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('a page whose store has no index finds no body hits', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-search-none-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a', '/work', false)
+
+    const found = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, makeSettings())
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            return yield* client.searchSessions({ query: 'ledger' })
+          }).pipe(clientLayers(started.wsUrl))
+          const answered = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return answered
+        }),
+      ),
+    )
+
+    // Without an index, the rail still narrows by title; there is no body hit to add.
+    expect(found.items).toEqual([])
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('the rail search says why the index could not answer', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-search-gone-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a', '/work', false)
+    const searchSessions = () => Effect.fail(new WebError({ message: 'the index is gone' }))
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(
+            root,
+            web,
+            makeSettings(),
+            makeWorkspaces(),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            searchSessions,
+          )
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const refused = yield* client.searchSessions({ query: 'ledger' }).pipe(Effect.flip)
+            return String(refused)
+          }).pipe(clientLayers(started.wsUrl))
+          const answered = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return answered
+        }),
+      ),
+    )
+
+    expect(observed).toContain('the index is gone')
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('a fork copies the parent log into a new session and records where it began', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-fork-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const home = await mkdtemp(join(tmpdir(), 'jozo-harness-web-fork-home-'))
+    const sessionRoot = join(home, 'sessions')
+    await mkdir(join(sessionRoot, 'a'), { recursive: true })
+    await mkdir(join(sessionRoot, 'b'), { recursive: true })
+    // The fake store names the next session new-2, and the route checks its log exists.
+    await mkdir(join(sessionRoot, 'new-2'), { recursive: true })
+    const web = makeWeb('a', '/work', false)
+    const base = makeSettings()
+    const settings = {
+      ...base,
+      port: {
+        ...base.port,
+        read: () => Effect.succeed({ ...settingsView, sessionRoot }),
+      } satisfies SettingsPort,
+    }
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const wsUrl = started.wsUrl
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const forked = yield* client.forkSession({ sessionId: 'a' })
+            const listed = yield* client.sessions()
+            return { forked, listed, seeds: web.seeds }
+          }).pipe(clientLayers(wsUrl))
+          const result = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    expect(observed.forked.id).toBe('new-2')
+    expect(observed.forked.forkOf).toBe('a')
+    // The fork starts from everything the parent logged, at the moment it was forked.
+    expect(observed.seeds.at(-1)?.map((event) => event.seq)).toEqual([1, 2])
+    expect(observed.listed.items.find((item) => item.id === 'a')?.forkOf).toBeUndefined()
+    expect(observed.listed.items.map((item) => item.id)).toContain('new-2')
+    expect(observed.listed.opened).toContain('new-2')
+    await rm(root, { recursive: true, force: true })
+    await rm(home, { recursive: true, force: true })
+  })
+
+  test('a fork of a session the store does not hold says so and copies nothing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-fork-gone-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a', '/work', false)
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, makeSettings())
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const refused = yield* client.forkSession({ sessionId: 'gone' }).pipe(Effect.flip)
+            return { refused: String(refused), seeds: web.seeds.length, opened: web.hosts.size }
+          }).pipe(clientLayers(started.wsUrl))
+          const answered = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return answered
+        }),
+      ),
+    )
+
+    expect(observed.refused).toBe('no such session: gone')
+    // A refused fork neither reads the log nor starts a child.
+    expect(observed.seeds).toBe(0)
+    expect(observed.opened).toBe(1)
+    await rm(root, { recursive: true, force: true })
   })
 
   test('the row menu deletes an open session, and its pages with it', async () => {
