@@ -1,5 +1,5 @@
-import { open, realpath, stat } from 'node:fs/promises'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { open, stat } from 'node:fs/promises'
+import { isAbsolute, resolve } from 'node:path'
 import {
   REFERENCE_LIMITS,
   clipReferences,
@@ -8,6 +8,7 @@ import {
   type SessionSummary,
 } from '@jozo-harness/ui-protocol'
 import { Effect } from 'effect'
+import { realOf, within } from './inside.ts'
 
 /** Where a reference may read another session: the store's list, and one session's log. */
 export interface SessionDigestSource {
@@ -53,19 +54,6 @@ export const referenceTargetsOf = (text: string): ReadonlyArray<string> => {
   }
   return targets
 }
-
-/** True when `path` is `root` or sits under it; a reference may not pass this. */
-const within = (root: string, path: string): boolean => {
-  const rel = relative(root, path)
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
-}
-
-/** The real path of something that must exist, or undefined when it does not. */
-const realOf = (path: string): Effect.Effect<string | undefined> =>
-  Effect.tryPromise({
-    try: () => realpath(path),
-    catch: () => undefined,
-  }).pipe(Effect.orElseSucceed(() => undefined))
 
 /** What stat says about something that must exist, or undefined when it does not. */
 const statOf = (path: string): Effect.Effect<Awaited<ReturnType<typeof stat>> | undefined> =>

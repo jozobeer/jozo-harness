@@ -486,6 +486,37 @@ export const FilesRpc = Rpc.make('files', {
   error: Schema.String,
 })
 
+/** One entry of the workspace tree: a folder to open, or a file to hand on. */
+export const WorkspaceEntrySchema = Schema.Struct({
+  name: Schema.String,
+  kind: Schema.Literals(['directory', 'file']),
+})
+
+/**
+ * One folder of the workspace tree. The page asks for one folder at a time and
+ * keeps what it opened, so a deep tree costs one listing per opened folder.
+ */
+export const WorkspaceDirectorySchema = Schema.Struct({
+  /** The folder relative to the workspace root; '' is the root itself. */
+  path: Schema.String,
+  /** Folders first, then files, each by name. */
+  entries: Schema.Array(WorkspaceEntrySchema),
+  /** True when the folder holds more entries than one listing carries. */
+  truncated: Schema.Boolean,
+})
+
+export type WorkspaceDirectory = typeof WorkspaceDirectorySchema.Type
+
+/**
+ * One folder of the session's workspace, read when the tree opens it. The blank
+ * id asks the run itself, so the tree opens before any session exists.
+ */
+export const WorkspaceDirectoryRpc = Rpc.make('workspaceDirectory', {
+  payload: Schema.Struct({ sessionId: Schema.String, path: Schema.String }),
+  success: WorkspaceDirectorySchema,
+  error: Schema.String,
+})
+
 /**
  * Keeps one file the composer attached under the hash of its bytes. The page
  * sends the bytes; the server validates the type and size and returns the
@@ -562,6 +593,7 @@ export const UiRpcs = RpcGroup.make(
   StoreChangedRpc,
   CommandsRpc,
   FilesRpc,
+  WorkspaceDirectoryRpc,
   AttachRpc,
   StateRpc,
   ScheduleCreateRpc,

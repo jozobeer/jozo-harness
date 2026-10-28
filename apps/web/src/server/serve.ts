@@ -45,7 +45,7 @@ import { answerArtifact } from './artifacts.ts'
 import { answerSessionExport } from './session-export.ts'
 import { answerPlugins, type PluginsPort } from './plugins.ts'
 import { answerWebhook, type WebhookGate, type WebhookRule } from './webhooks.ts'
-import { searchWorkspaceFiles } from './files.ts'
+import { listWorkspaceDirectory, searchWorkspaceFiles } from './files.ts'
 import {
   resolveReferences,
   sessionCandidateTargets,
@@ -295,6 +295,17 @@ const handlersOf = (
         // is always one a message can actually attach.
         const sessions = yield* sessionCandidateTargets(cwd, query, digests)
         return [...paths, ...sessions]
+      }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
+    workspaceDirectory: ({ sessionId, path }) =>
+      Effect.gen(function* () {
+        // The session names its own directory, the same answer the @ completion
+        // reads; the blank page asks the run's own.
+        const cwd =
+          sessionId === ''
+            ? (yield* settings.read()).cwd
+            : registry.sessionOf(sessionId)?.summary.cwd
+        if (cwd === undefined) return yield* Effect.fail('the session is not open')
+        return yield* listWorkspaceDirectory(cwd, path)
       }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
     attach: ({ name, mediaType, data }) =>
       Effect.gen(function* () {
