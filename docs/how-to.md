@@ -641,6 +641,24 @@ return review.text
 
 system prompt には、その step で見える tool の署名が 1 行ずつ出る。引数は必須と任意（`?`）を区別し、戻り値は tool の `output` schema から描く。plan mode や子 agent の制限で見えない tool は出ない。schema を型として読めない部分は `unknown` になる。
 
+## 配備ごとの persona を identity の前後に置く
+
+system prompt の `jzh:identity` は harness 自身の自己紹介である。配備ごとの口調や前提はここへ混ぜず、`system-prompt` 行の `persona` に分けて置く。`before` は identity の前、`after` は identity の直後に、それぞれ別の section として入る。
+
+```yaml
+plugins:
+  - id: system-prompt
+    name: '@jozo-harness/system-prompt'
+    config:
+      persona:
+        before: |
+          この配備では、利用者が日本語で話すときは日本語で答える。
+        after: |
+          変更を終えたら、確認したコマンドと結果を最後に並べる。
+```
+
+空文字・空白だけ・未設定の側は section を作らないので、空の見出しや空行は残らない。前後の空白は落とす。設定が同じなら、同じセッションのその部分は同じバイト列になる（時刻や環境の値は混ぜない）。同梱の `base` profile には入れていない。配備ごとに足す。
+
 ## モデルにプログラムを書かせて tool を束ねる（run_code）
 
 tier1 行がある run では、モデルに `run_code` が渡る。モデルは既定で async 関数の本体を書き、`await tools.name(args)` で可視の tool を呼べる。`runtime: 'python'` を渡すと python3 のスクリプトとして走り、同じ tool を `tools.name(...)` で呼べる。大量の read / grep を 1 step に畳むときに使う。
