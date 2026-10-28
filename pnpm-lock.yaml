@@ -220,6 +220,9 @@ importers:
       '@jozo-harness/session-jsonl':
         specifier: workspace:*
         version: link:../../packages/core/session-jsonl
+      '@jozo-harness/session-telemetry-otlp':
+        specifier: workspace:*
+        version: link:../../packages/core/session-telemetry-otlp
       '@jozo-harness/system-prompt':
         specifier: workspace:*
         version: link:../../packages/core/system-prompt
@@ -348,6 +351,9 @@ importers:
       '@jozo-harness/session-jsonl':
         specifier: workspace:*
         version: link:../../core/session-jsonl
+      '@jozo-harness/session-telemetry-otlp':
+        specifier: workspace:*
+        version: link:../../core/session-telemetry-otlp
       '@jozo-harness/system-prompt':
         specifier: workspace:*
         version: link:../../core/system-prompt
@@ -462,6 +468,18 @@ importers:
         version: 4.0.3
 
   packages/core/session-jsonl:
+    dependencies:
+      '@jozo-harness/kernel':
+        specifier: workspace:*
+        version: link:../../kernel/kernel
+      '@jozo-harness/session':
+        specifier: workspace:*
+        version: link:../session
+      effect:
+        specifier: 4.0.3
+        version: 4.0.3
+
+  packages/core/session-telemetry-otlp:
     dependencies:
       '@jozo-harness/kernel':
         specifier: workspace:*

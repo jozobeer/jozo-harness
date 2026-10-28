@@ -5,6 +5,7 @@ import { llmDeepSeekPlugin } from '@jozo-harness/llm-deepseek'
 import { llmOpenAiPlugin } from '@jozo-harness/llm-openai'
 import { sessionPlugin } from '@jozo-harness/session'
 import { sessionJsonlPlugin } from '@jozo-harness/session-jsonl'
+import { sessionTelemetryPlugin } from '@jozo-harness/session-telemetry-otlp'
 import { askPlugin, safetyPlugin } from '@jozo-harness/safety'
 import { systemPromptPlugin } from '@jozo-harness/system-prompt'
 import { toolsPlugin } from '@jozo-harness/tools'
@@ -111,6 +112,7 @@ export const optionalBundles: ReadonlyArray<OptionalBundle> = [
 export const bundledPlugins: ReadonlyArray<Plugin<any, any, any>> = [
   kernelPlugin,
   sessionJsonlPlugin,
+  sessionTelemetryPlugin,
   sessionPlugin,
   toolsPlugin,
   systemPromptPlugin,

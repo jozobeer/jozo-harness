@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from 'vitest'
 import { kernelPlugin, loadProfile, parseProfile } from '@jozo-harness/kernel'
 import { Sessions, sessionPlugin } from '@jozo-harness/session'
 import { sessionJsonlPlugin } from '@jozo-harness/session-jsonl'
+import { sessionTelemetryPlugin } from '@jozo-harness/session-telemetry-otlp'
 import { SystemPrompt, systemPromptPlugin } from '@jozo-harness/system-prompt'
 import { Tools, toolsPlugin } from '@jozo-harness/tools'
 import { Policy, askPlugin, safetyPlugin } from '@jozo-harness/safety'
@@ -22,6 +23,7 @@ const tempRoot = await mkdtemp(join(tmpdir(), 'jozo-harness-assembly-'))
 const plugins = [
   kernelPlugin,
   sessionJsonlPlugin,
+  sessionTelemetryPlugin,
   sessionPlugin,
   toolsPlugin,
   systemPromptPlugin,
@@ -71,7 +73,7 @@ describe('bundled profile assembly', () => {
     )
 
     expect(built).toEqual({
-      rows: 12,
+      rows: 13,
       listed: 1,
       status: 'idle',
       sessions: true,

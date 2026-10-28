@@ -8,6 +8,11 @@ plugins:
     name: '@jozo-harness/session-jsonl'
     config:
       root: ~/.jzh/sessions
+  - id: telemetry
+    name: '@jozo-harness/session-telemetry-otlp'
+    config:
+      # Nothing leaves the machine until this row names both an endpoint and a scope.
+      scope: off
   - id: tools
     name: '@jozo-harness/tools'
   - id: system-prompt
