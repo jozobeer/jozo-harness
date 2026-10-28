@@ -151,9 +151,9 @@ describe('the session registry', () => {
         }),
       ),
     )
-    // The last user message is the task the parent ran; the fork takes the work before it.
+    // The fork starts from everything the parent logged, at the moment it was forked.
     expect(result.forked.summary.id).toBe('new-2')
-    expect(fake.seeds.at(-1)?.map((event) => event.seq)).toEqual([1])
+    expect(fake.seeds.at(-1)?.map((event) => event.seq)).toEqual([1, 2])
     expect(fake.asked.at(-1)).toBeUndefined()
     expect(result.parent.summary.id).toBe('a')
   })

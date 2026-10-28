@@ -2288,8 +2288,8 @@ describe('the web transport', () => {
 
     expect(observed.forked.id).toBe('new-2')
     expect(observed.forked.forkOf).toBe('a')
-    // The last user message is the task the parent ran; the fork starts before it.
-    expect(observed.seeds.at(-1)?.map((event) => event.seq)).toEqual([1])
+    // The fork starts from everything the parent logged, at the moment it was forked.
+    expect(observed.seeds.at(-1)?.map((event) => event.seq)).toEqual([1, 2])
     expect(observed.listed.items.find((item) => item.id === 'a')?.forkOf).toBeUndefined()
     expect(observed.listed.items.map((item) => item.id)).toContain('new-2')
     expect(observed.listed.opened).toContain('new-2')

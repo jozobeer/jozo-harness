@@ -1,4 +1,4 @@
-import { forkSeed, type SessionEvent } from '@jozo-harness/session'
+import type { SessionEvent } from '@jozo-harness/session'
 import type { UiHost } from '@jozo-harness/ui-protocol'
 import type { Schedule } from '@jozo-harness/tools-tier1'
 import { Deferred, Effect, Exit, Scope } from 'effect'
@@ -201,8 +201,8 @@ export const makeSessionRegistry = (input: {
       })
 
     /**
-     * The parent's log is read whole and the last user message is left behind:
-     * a fork continues the work rather than repeating the ask that began it.
+     * The parent's log is copied whole, header aside: a reader forks to continue
+     * from what the session had done, not to hand the child a different task.
      */
     const fork = (id: string): Effect.Effect<OpenSession, WebError> =>
       Effect.gen(function* () {
@@ -211,8 +211,7 @@ export const makeSessionRegistry = (input: {
           return yield* Effect.fail(new WebError({ message: 'no such session: ' + id }))
         }
         const events = yield* input.factory.read(id)
-        const seed = forkSeed(events)
-        return yield* build(undefined, parent.cwd, seed).pipe(
+        return yield* build(undefined, parent.cwd, events).pipe(
           Effect.provideService(Scope.Scope, own),
         )
       })
