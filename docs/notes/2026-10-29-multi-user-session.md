@@ -23,3 +23,10 @@ Web は複数端末から同じサーバへ繋げるが、合言葉は起動時�
   通らない。
 - 参加者の入力も同じセッションの host に渡す。ログを書くのは
   セッションであって接続ではないため、書き手は一つのまま。
+
+## 確かめたこと
+
+- `pnpm run check`: exit 0。coverage lines 94.77% / functions 92.14%（床 93 / 92）。
+- `pnpm run build:web`: 成功。
+- `vp test apps/web/tests/server.test.ts apps/web/tests/auth.test.ts apps/web/tests/participants.test.ts`: 58 tests passed。参加したブラウザが `sessions` を読み、`command` を送り、所有者が書いた user message の event を同じ socket で受け取る。失効後は socket が 4001 で閉じ、handshake と join link は 401。
+- 実ブラウザでの手動確認は未実施。
