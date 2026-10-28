@@ -108,7 +108,7 @@ describe('telemetry defaults', () => {
     const exporter = createTelemetryExporter({
       endpoint: 'http://collector.invalid',
       scope: 'off',
-      anonymousId: 'anon',
+      identity: () => Effect.succeed('anon'),
       fetch: captured.fetch,
     })
     exporter.enqueue('s-1', feedback(2))
@@ -132,7 +132,7 @@ describe('sending a batch', () => {
     const exporter = createTelemetryExporter({
       endpoint: 'http://collector.invalid',
       scope: 'all',
-      anonymousId: 'anon',
+      identity: () => Effect.succeed('anon'),
       fetch: captured.fetch,
       maxBatchEvents: 20,
     })
@@ -146,6 +146,27 @@ describe('sending a batch', () => {
       'http://collector.invalid/v1/logs',
     ])
     expect(captured.requests.map((request) => recordsOf(request.body).length)).toEqual([20, 20, 5])
+  })
+
+  test('reads the identity for each batch so a deleted file starts a new id', async () => {
+    const captured = captureFetch()
+    const ids = ['first-id', 'second-id']
+    let index = 0
+    const exporter = createTelemetryExporter({
+      endpoint: 'http://collector.invalid',
+      scope: 'feedback',
+      identity: () => Effect.succeed(ids[index++] ?? 'exhausted'),
+      fetch: captured.fetch,
+      maxBatchEvents: 1,
+    })
+    exporter.enqueue('s-1', feedback(2))
+    exporter.enqueue('s-1', feedback(3))
+
+    await Effect.runPromise(exporter.flush())
+
+    expect(
+      captured.requests.map((request) => attributeOf(request.body, 'anonymous.user.id')),
+    ).toEqual(['first-id', 'second-id'])
   })
 
   test('keeps the anonymous id on the resource and out of each record body', () => {
@@ -168,7 +189,7 @@ describe('sending a batch', () => {
     const exporter = createTelemetryExporter({
       endpoint: 'http://collector.invalid',
       scope: 'feedback',
-      anonymousId: 'anon',
+      identity: () => Effect.succeed('anon'),
       fetch: async () => {
         throw new Error('connect ECONNREFUSED 127.0.0.1:1')
       },
@@ -210,7 +231,7 @@ describe('sending a batch', () => {
     const exporter = createTelemetryExporter({
       endpoint: 'http://collector.invalid',
       scope: 'feedback',
-      anonymousId: 'anon',
+      identity: () => Effect.succeed('anon'),
       fetch: async () => new Response('nope', { status: 500 }),
     })
     exporter.enqueue('s-1', feedback(2))
@@ -224,7 +245,7 @@ describe('sending a batch', () => {
     const exporter = createTelemetryExporter({
       endpoint: 'http://collector.invalid',
       scope: 'feedback',
-      anonymousId: 'anon',
+      identity: () => Effect.succeed('anon'),
       fetch: captured.fetch,
       report: (failure) => Effect.sync(() => failures.push(failure)),
     })
@@ -240,7 +261,7 @@ describe('sending a batch', () => {
     const exporter = createTelemetryExporter({
       endpoint: 'http://collector.invalid',
       scope: 'all',
-      anonymousId: 'anon',
+      identity: () => Effect.succeed('anon'),
       fetch: captured.fetch,
       maxBatchEvents: 2,
       maxBufferedEvents: 2,

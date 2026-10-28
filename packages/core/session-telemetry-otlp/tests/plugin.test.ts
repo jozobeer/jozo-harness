@@ -195,10 +195,10 @@ describe('sessionTelemetry plugin', () => {
     }
   })
 
-  test('stays off when the anonymous id cannot be kept', async () => {
+  test('keeps the session running when the anonymous id cannot be kept', async () => {
     const collector = await startCollector()
     try {
-      const enabled = await withTelemetry(
+      const result = await withTelemetry(
         {
           endpoint: collector.endpoint,
           scope: 'all',
@@ -207,14 +207,19 @@ describe('sessionTelemetry plugin', () => {
         (context) =>
           Effect.gen(function* () {
             const session = yield* makeSessionWith()
-            const hooks = Context.get(context, Hooks)
-            yield* hooks.emit('session/event', feedback(2), session)
             const telemetry = Context.get(context, SessionTelemetry)
+            yield* session.append('feedback/rated', { target: 1, rating: 'like' })
             yield* telemetry.flush
-            return telemetry.enabled
+            yield* session.append('user/message', { text: 'still here', source: 'user' })
+            yield* telemetry.flush
+            return {
+              enabled: telemetry.enabled,
+              types: session.events().map((event) => event.type),
+            }
           }),
       )
-      expect(enabled).toBe(false)
+      expect(result.enabled).toBe(true)
+      expect(result.types).toEqual(['session/header', 'feedback/rated', 'user/message'])
       expect(collector.requests).toHaveLength(0)
     } finally {
       await collector.close()

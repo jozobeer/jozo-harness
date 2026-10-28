@@ -21,7 +21,8 @@ export interface TelemetryFailure {
 export interface TelemetryExporterOptions {
   readonly endpoint: string
   readonly scope: TelemetryScope
-  readonly anonymousId: string
+  /** Read once per batch, so deleting the id file starts a new identity on the next send. */
+  readonly identity: () => Effect.Effect<string, Error>
   readonly headers?: Readonly<Record<string, string>>
   /** Replaced by tests; the plugin uses the process fetch. */
   readonly fetch?: typeof globalThis.fetch
@@ -58,26 +59,26 @@ export const createTelemetryExporter = (options: TelemetryExporterOptions): Tele
     ((failure: TelemetryFailure) =>
       Effect.logWarning('telemetry: a session log batch was not delivered', failure))
 
-  const post = async (records: ReadonlyArray<TelemetryRecord>): Promise<void> => {
+  const post = async (
+    records: ReadonlyArray<TelemetryRecord>,
+    anonymousId: string,
+  ): Promise<void> => {
     const response = await fetchImpl(url, {
       method: 'POST',
       headers: { ...options.headers, 'content-type': 'application/json' },
-      body: JSON.stringify(
-        otlpLogsPayload({
-          anonymousId: options.anonymousId,
-          observedAt: now(),
-          records,
-        }),
-      ),
+      body: JSON.stringify(otlpLogsPayload({ anonymousId, observedAt: now(), records })),
       signal: AbortSignal.timeout(timeoutMs),
     })
     if (!response.ok) throw new Error('collector answered HTTP ' + String(response.status))
   }
 
   const deliver = (records: ReadonlyArray<TelemetryRecord>): Effect.Effect<void> =>
-    Effect.tryPromise({
-      try: () => post(records),
-      catch: (cause) => cause,
+    Effect.gen(function* () {
+      const anonymousId = yield* options.identity()
+      yield* Effect.tryPromise({
+        try: () => post(records, anonymousId),
+        catch: (cause) => cause,
+      })
     }).pipe(
       Effect.catch((cause) =>
         report({ endpoint: url, recordCount: records.length, reason: describe(cause) }),

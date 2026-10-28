@@ -2,7 +2,7 @@ import { Hooks, type Plugin } from '@jozo-harness/kernel'
 import { Context, Effect, Layer, type Scope } from 'effect'
 import { resolveTelemetry, telemetryConfigSchema, type TelemetryConfig } from './config.ts'
 import { createTelemetryExporter } from './exporter.ts'
-import { anonymousUserIdentity, type AnonymousIdentity } from './identity.ts'
+import { anonymousUserIdentity } from './identity.ts'
 
 /** How often a waiting batch is sent; a closed scope flushes whatever is left. */
 export const FLUSH_INTERVAL_MS = 2000
@@ -19,16 +19,6 @@ export class SessionTelemetry extends Context.Service<SessionTelemetry, SessionT
 
 const DISABLED: SessionTelemetryHandle = { enabled: false, flush: Effect.void }
 
-const keepIdentity = (path: string): Effect.Effect<AnonymousIdentity | undefined> =>
-  anonymousUserIdentity({ path }).pipe(
-    Effect.catch((cause) =>
-      Effect.logWarning('telemetry stays off: the anonymous id could not be kept', {
-        path,
-        reason: cause.message,
-      }).pipe(Effect.as(undefined)),
-    ),
-  )
-
 /**
  * Builds the exporter only when a human named both an endpoint and a scope. No
  * endpoint and no scope means no listener, no id read, and no request.
@@ -39,13 +29,14 @@ export const makeSessionTelemetry = (
   Effect.gen(function* () {
     const resolved = resolveTelemetry(config)
     if (resolved.endpoint === '' || resolved.scope === 'off') return DISABLED
-    const identity = yield* keepIdentity(resolved.identityPath)
-    if (identity === undefined) return DISABLED
     const hooks = yield* Hooks
     const exporter = createTelemetryExporter({
       endpoint: resolved.endpoint,
       scope: resolved.scope,
-      anonymousId: identity.id,
+      identity: () =>
+        anonymousUserIdentity({ path: resolved.identityPath }).pipe(
+          Effect.map((identity) => identity.id),
+        ),
       headers: resolved.headers,
     })
     yield* hooks.on('session/event', (event, session) => {
