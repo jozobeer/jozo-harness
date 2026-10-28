@@ -2118,6 +2118,56 @@ describe('the Solid page', () => {
     ).toEqual(['/artifact/s1/report?download=1', '/artifact/s1/notes?download=1'])
   })
 
+  test('the run pane offers the session log and a transcript to copy', async () => {
+    const { store } = makeStore({
+      sessionId: 's1',
+      pane: { kind: 'run' },
+      run: {
+        goal: null,
+        schedules: [],
+        jobs: [],
+        subagents: [],
+        todos: [],
+        todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+        skills: [],
+        promptSections: [],
+        queued: [],
+        steering: [],
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+      },
+    })
+    const asked: Array<string> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        asked.push(
+          typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
+        )
+        return new Response('# Session s1\n\n## User\n\nhello', { status: 200 })
+      }),
+    )
+    const writeText = vi.fn(async () => undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    })
+
+    const { container } = render(() => <ContextPane store={store} />)
+
+    const download = container.querySelector('.run-export[download]')
+    expect(download?.getAttribute('href')).toBe('/session/s1/log.zip')
+    fireEvent.click(container.querySelector('button.run-export') as Element)
+    await vi.waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith('# Session s1\n\n## User\n\nhello'),
+    )
+    expect(container.querySelector('.run-export-notice')?.textContent).toBe('copied')
+    expect(asked).toContain('/session/s1/transcript.md')
+    vi.unstubAllGlobals()
+    Reflect.deleteProperty(navigator, 'clipboard')
+  })
+
   test('the run pane lists every page one run_code result published', () => {
     const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
     const { store } = makeStore({

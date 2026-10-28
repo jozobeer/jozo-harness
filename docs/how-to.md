@@ -149,6 +149,14 @@ URL は相対パスなので、同じ tailnet の別端末から jzh web の tai
 
 ページはセッションのログの隣に置く。セッションを削除すると、そのセッションが公開したページも一緒に消える。ログの `<sessions root>/<id>/` とページの `artifacts/<id>/` を同じ操作で消し、`/artifact/<id>/<name>` の URL も開けなくなる（#291 の時点ではページが残ったが、いまは残らない）。ページだけを消したいときは、Run ペインの `pages` の `Delete` か、ディスクの `artifacts/<id>/` から消す。
 
+### セッションのログと転写を持ち出す
+
+Run ペインの `export` に 2 つの操作がある。`Download log` は `/session/<id>/log.zip` を保存する。ZIP の中身はログ 1 本で、名前は `<id>/session.v1.jsonl`（新しいセッションは `<id>/session.v1.jsonl.zst`）になる。sessions root にそのまま展開すれば `<sessions root>/<id>/` に置かれ、同じ版の `jzh sessions <id>` がそのログを読める。
+
+`Copy transcript` は `/session/<id>/transcript.md` を読み、Markdown をクリップボードに置く。人間のメッセージは `## User`、assistant の本文は `## Assistant`、ツール呼び出しは `### Tool call \`<name>\``、ツールの結果は `## Tool result` で分かれ、ツールの入出力は code fence に入る。CLI の `jzh sessions <id>` と同じ fold を使う。
+
+どちらの route もログを読むだけで、セッションを開き直さず turn も起こさない。artifact と同じ gate（origin と、cookie・`?token=`・`?code=` のいずれか）を通るので、curl で落とすときは起動 URL の token を付ける。
+
 ### モデルに画面を撮らせる
 
 `screen_capture` tool も opt-in である。使う run だけ、設定ファイルか `--patch` の `plugins:` に次の行を足す。

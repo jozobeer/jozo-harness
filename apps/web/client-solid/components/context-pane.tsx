@@ -758,6 +758,48 @@ const Schedules = (props: { store: SessionStore; schedules: RunStateView['schedu
   )
 }
 
+/**
+ * The two ways a session leaves the page: the log a jzh can open again, and a
+ * transcript to paste. Copying reads the same route a download would, so neither
+ * asks the model for anything.
+ */
+const SessionExport = (props: { store: SessionStore }) => {
+  const [notice, setNotice] = createSignal('')
+  const id = (): string => props.store.state().sessionId
+  const copy = async (): Promise<void> => {
+    setNotice('')
+    try {
+      const answer = await fetch('/session/' + id() + '/transcript.md')
+      if (!answer.ok) {
+        setNotice('the server answered ' + String(answer.status))
+        return
+      }
+      await navigator.clipboard.writeText(await answer.text())
+      setNotice('copied')
+    } catch (error) {
+      setNotice('could not copy: ' + (error instanceof Error ? error.message : String(error)))
+    }
+  }
+  return (
+    <div class="run-section">
+      <span class="run-section-title">export</span>
+      <span class="run-exports">
+        <a class="run-export" href={'/session/' + id() + '/log.zip'} download="">
+          Download log
+        </a>
+        <button class="run-export" type="button" onClick={() => void copy()}>
+          Copy transcript
+        </button>
+        <Show when={notice() !== ''}>
+          <span class="run-export-notice" role="status">
+            {notice()}
+          </span>
+        </Show>
+      </span>
+    </div>
+  )
+}
+
 const Run = (props: { store: SessionStore }) => {
   const run = () => props.store.state().run
   return (
@@ -772,6 +814,7 @@ const Run = (props: { store: SessionStore }) => {
             <Todos todos={state().todos} counts={state().todoCounts} />
             <Skills skills={state().skills} />
             <PromptSections sections={state().promptSections} />
+            <SessionExport store={props.store} />
             <Pages store={props.store} pages={pagesOf(props.store.state().trace)} />
             <Schedules store={props.store} schedules={state().schedules} />
             <Show when={state().jobs.length > 0}>

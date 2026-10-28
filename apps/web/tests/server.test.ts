@@ -424,14 +424,14 @@ const start = (
   publicUrl?: PublicOrigin,
   /** The tailnet addresses a detection would name, when the test drives one. */
   tailnet?: TailnetAddresses,
-  /** The log read the session export route folds; tests that never export leave it empty. */
-  readSessionEvents: ServeWebOptions['readSessionEvents'] = () => Effect.succeed([]),
   /** The plugin route's port; a test that only lists rows may leave it empty. */
   plugins: PluginsPort = {
     view: () => ({ rows: [], catalog: [], failures: [] }),
     known: () => [],
     change: async () => ({ ok: true }),
   },
+  /** The log read the session export route folds; tests that never export leave it empty. */
+  readSessionEvents: ServeWebOptions['readSessionEvents'] = () => Effect.succeed([]),
 ): Effect.Effect<Started, never, Scope.Scope> =>
   Effect.gen(function* () {
     const ready = yield* Deferred.make<ReadyUrls>()
@@ -782,6 +782,7 @@ describe('the web transport', () => {
             web,
             settings,
             makeWorkspaces(),
+            undefined,
             undefined,
             undefined,
             (named) => Effect.succeed(named === id ? events : []),
