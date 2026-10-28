@@ -171,6 +171,30 @@ describe('applySpill', () => {
     expect(kept.content).toEqual(blocks('x'.repeat(100)))
   })
 
+  test('a read_image result is never spilled: showing it again is the way back', async () => {
+    let writes = 0
+    const kept = await Effect.runPromise(
+      applySpill(
+        {
+          isError: false,
+          content: [{ type: 'image', mediaType: 'image/png', data: 'A'.repeat(400) }],
+        },
+        { callId: 'c1', tool: 'read_image' },
+        {
+          maxSpillTokens: 1,
+          spillImage: () =>
+            Effect.sync(() => {
+              writes += 1
+              return 'x'
+            }),
+        },
+      ),
+    )
+
+    expect(writes).toBe(0)
+    expect(kept.content[0]?.type).toBe('image')
+  })
+
   test('keeps a small result and never writes', async () => {
     let writes = 0
     const kept = await Effect.runPromise(

@@ -32,8 +32,8 @@ export type SpillPlan =
       readonly lines: number
     }
 
-/** Tools whose result is never written away: reading it again is the way back. */
-const REREADABLE = new Set(['read'])
+/** Tools whose result is never written away: invoking them again is the way back. */
+const REREADABLE = new Set(['read', 'read_image'])
 
 /** The plain text of a result: text blocks joined, other blocks ignored. */
 export const textOf = (content: ReadonlyArray<ContentBlock>): string =>

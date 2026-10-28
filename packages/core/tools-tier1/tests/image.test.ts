@@ -1,5 +1,6 @@
 import { HooksLive } from '@jozo-harness/kernel'
 import {
+  makeImageSpillWriter,
   Tools,
   toolsLayer,
   type ToolDefinition,
@@ -52,6 +53,24 @@ describe('read_image tool', () => {
     expect(block?.type === 'image' ? block.mediaType : '').toBe('image/png')
     expect(block?.type === 'image' ? block.data.length : 0).toBeGreaterThan(0)
     expect(result?.value).toMatchObject({ mediaType: 'image/png', bytes: 8 })
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test('an image spilled under the session opens again through its locator', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-image-'))
+    const bytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
+    const write = makeImageSpillWriter({ root: join(dir, 'spill'), sessionId: 's1' })
+
+    const path = await Effect.runPromise(
+      write('c1', Buffer.from(bytes).toString('base64'), 'image/png'),
+    )
+    const result = await Effect.runPromise(call(readImageTool, { path }, dir))
+
+    const block = result?.content[0]
+    expect(block?.type).toBe('image')
+    expect(block?.type === 'image' ? Buffer.from(block.data, 'base64') : undefined).toEqual(
+      Buffer.from(bytes),
+    )
     await rm(dir, { recursive: true, force: true })
   })
 
