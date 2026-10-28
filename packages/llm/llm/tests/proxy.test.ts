@@ -9,8 +9,14 @@ interface Received {
   readonly body: string
 }
 
+interface Answer {
+  readonly status: number
+  readonly body: string
+  readonly headers?: Readonly<Record<string, string>>
+}
+
 const startServer = async (
-  handle: (request: Received) => { status: number; body: string },
+  handle: (request: Received) => Answer,
 ): Promise<{
   origin: string
   received: Received[]
@@ -31,7 +37,10 @@ const startServer = async (
       }
       received.push(request)
       const answer = handle(request)
-      response.writeHead(answer.status, { 'content-type': 'text/plain; charset=utf-8' })
+      response.writeHead(answer.status, {
+        'content-type': 'text/plain; charset=utf-8',
+        ...answer.headers,
+      })
       response.end(answer.body)
     })
   })
@@ -186,6 +195,50 @@ describe('outbound fetch', () => {
     const response = await outboundFetch(direct.origin + '/')
     expect(await response.text()).toBe('no proxy')
     await direct.stop()
+  })
+
+  test('follows a redirect and turns a redirected POST into a bodyless GET', async () => {
+    const proxy = await startServer((request) =>
+      request.url === 'http://upstream.example/start'
+        ? { status: 302, body: '', headers: { location: 'http://upstream.example/end' } }
+        : { status: 200, body: 'landed' },
+    )
+    vi.stubEnv('HTTP_PROXY', proxy.origin)
+
+    const response = await outboundFetch('http://upstream.example/start', {
+      method: 'POST',
+      body: 'payload',
+    })
+
+    expect(await response.text()).toBe('landed')
+    expect(proxy.received.map((request) => [request.url, request.method, request.body])).toEqual([
+      ['http://upstream.example/start', 'POST', 'payload'],
+      ['http://upstream.example/end', 'GET', ''],
+    ])
+    await proxy.stop()
+  })
+
+  test('carries proxy credentials from the variable as a Basic header', async () => {
+    const proxy = await startServer(() => ({ status: 200, body: 'ok' }))
+    vi.stubEnv('HTTP_PROXY', proxy.origin.replace('http://', 'http://alice:s3cret@'))
+
+    await outboundFetch('http://upstream.example/')
+
+    expect(proxy.received[0]?.headers['proxy-authorization']).toBe(
+      'Basic ' + Buffer.from('alice:s3cret').toString('base64'),
+    )
+    await proxy.stop()
+  })
+
+  test('returns a 204 response without a body', async () => {
+    const proxy = await startServer(() => ({ status: 204, body: '' }))
+    vi.stubEnv('HTTP_PROXY', proxy.origin)
+
+    const response = await outboundFetch('http://upstream.example/empty')
+
+    expect(response.status).toBe(204)
+    expect(response.body).toBeNull()
+    await proxy.stop()
   })
 
   test('tunnels an https target through CONNECT and reports a refusal with its reason', async () => {
