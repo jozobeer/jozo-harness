@@ -20,8 +20,19 @@ import {
 /** The passage shape a page sends with a message; the session owns it. */
 export { QuoteSchema, type Quote }
 
-/** The attached file or session shape a page sends with a message; the session owns it. */
-export { ReferenceSchema, type Reference }
+/**
+ * The attached file or session shape, its budget, and its cut. The page and the
+ * server read them from here, so neither needs the session package's whole face.
+ */
+export {
+  REFERENCE_LIMITS,
+  ReferenceSchema,
+  clipReferences,
+  type Reference,
+  type SessionError,
+  type SessionEvent,
+  type SessionSummary,
+} from '@jozo-harness/session'
 import { Effect, Schema, Stream } from 'effect'
 
 /**

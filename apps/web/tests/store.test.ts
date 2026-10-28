@@ -379,6 +379,7 @@ const serve = (
           : { initial: { session: openOf(host), close: () => Effect.void } }),
         factory,
         settings: (options.settings ?? makeSettings()).port,
+        readSessionEvents: () => Effect.succeed([]),
         schedules: makeScheduleStore(join(root, 'schedules.json')),
         workspaces: workspacesPort,
         commands: () => [],

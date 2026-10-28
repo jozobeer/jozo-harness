@@ -30,11 +30,7 @@ describe('clipReferences', () => {
     expect(kept?.text).toHaveLength(REFERENCE_LIMITS.maxFileChars + 1)
     expect(kept?.cut).toBe(REFERENCE_LIMITS.maxFileChars + 500)
     expect(rendered).toContain(
-      'cut after ' +
-        REFERENCE_LIMITS.maxFileChars +
-        ' of ' +
-        (REFERENCE_LIMITS.maxFileChars + 500) +
-        ' characters',
+      'cut: kept ' + REFERENCE_LIMITS.maxFileChars + ' of ' + (REFERENCE_LIMITS.maxFileChars + 500),
     )
   })
 })

@@ -432,6 +432,7 @@ const start = (
         initial: { session: web.initial, close: web.initialClose },
         factory: web.factory,
         settings: settings.port,
+        readSessionEvents: () => Effect.succeed([]),
         schedules: makeScheduleStore(
           join(
             tmpdir(),

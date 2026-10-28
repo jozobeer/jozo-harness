@@ -29,6 +29,7 @@ import {
   lastSkillCatalog,
   titleOf,
   type Session,
+  type SessionEvent,
   type SessionId,
   type SessionSummary,
 } from '@jozo-harness/session'
@@ -1575,6 +1576,10 @@ const defaultStaticRoot = fileURLToPath(new URL('../../web/dist/', import.meta.u
 interface RunReading {
   /** The store a page's rail lists from: the profile's own session store. */
   readonly listSessions: SessionRuntime['listSessions']
+  /** One session's log, as an @ reference in another message may quote it. */
+  readonly readSessionEvents: (
+    id: string,
+  ) => Effect.Effect<ReadonlyArray<SessionEvent>, SessionError>
   /** The effort words the provider takes, which the blank seat offers. */
   readonly efforts: ReadonlyArray<string>
 }
@@ -1589,9 +1594,16 @@ const runReadingOf = (
   Effect.gen(function* () {
     const context = yield* Layer.build(layer)
     const sessions = Context.get(context, Sessions)
+    // A reference reads a log without opening a live session: the page may attach a
+    // session nobody has open, and reading it must not start one.
+    const persistence = Context.get(context, SessionPersistenceService)
     // What the provider takes for an effort is the adapter's to say; a page only offers it.
     const efforts = Context.get(context, Llm).capabilities.reasoningEffort ?? []
-    return { listSessions: () => sessions.list(), efforts }
+    return {
+      listSessions: () => sessions.list(),
+      readSessionEvents: (id) => persistence.open(id).pipe(Effect.map((opened) => opened.events)),
+      efforts,
+    }
   })
 
 /** Where a page's registered workspaces live, under the jzh home. */
@@ -1746,6 +1758,7 @@ const serveWebUi = (
           settings: settingsPortOf(options, { rows, efforts: reading.efforts }, choice),
           schedules: scheduleStoreOf(options),
           workspaces: workspacesPortOf(options, reading.listSessions),
+          readSessionEvents: reading.readSessionEvents,
           commands: () => defaultCommands,
           plugins,
           port: work.port,

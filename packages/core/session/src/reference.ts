@@ -110,7 +110,7 @@ const labelOf = (reference: Reference): string => {
     reference.kind === 'file' ? 'File: ' + reference.path : 'Session: ' + reference.sessionId
   return reference.cut === undefined
     ? name
-    : name + ' (cut after ' + (reference.text.length - 1) + ' of ' + reference.cut + ' characters)'
+    : name + ' (cut: kept ' + (reference.text.length - 1) + ' of ' + reference.cut + ')'
 }
 
 /** One reference as the model reads it: a label, then its body in a fence. */
