@@ -1,5 +1,6 @@
 import { agentPlugin } from '@jozo-harness/agent'
 import { agentLoopPlugin } from '@jozo-harness/agent-loop'
+import { hooksJsonPlugin } from '@jozo-harness/hooks-json'
 import { kernelPlugin, type Plugin } from '@jozo-harness/kernel'
 import { llmDeepSeekPlugin } from '@jozo-harness/llm-deepseek'
 import { llmOpenAiPlugin } from '@jozo-harness/llm-openai'
@@ -120,6 +121,7 @@ export const bundledPlugins: ReadonlyArray<Plugin<any, any, any>> = [
   llmDeepSeekPlugin,
   agentPlugin,
   agentLoopPlugin,
+  hooksJsonPlugin,
   safetyPlugin,
   askPlugin,
   tier0Plugin,

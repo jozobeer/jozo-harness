@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from 'vitest'
+import { hooksJsonPlugin } from '@jozo-harness/hooks-json'
 import { kernelPlugin, loadProfile, parseProfile } from '@jozo-harness/kernel'
 import { Sessions, sessionPlugin } from '@jozo-harness/session'
 import { sessionJsonlPlugin } from '@jozo-harness/session-jsonl'
@@ -30,6 +31,7 @@ const plugins = [
   llmOpenAiPlugin,
   agentPlugin,
   agentLoopPlugin,
+  hooksJsonPlugin,
   safetyPlugin,
   tier0Plugin,
   askPlugin,
@@ -73,7 +75,7 @@ describe('bundled profile assembly', () => {
     )
 
     expect(built).toEqual({
-      rows: 13,
+      rows: 14,
       listed: 1,
       status: 'idle',
       sessions: true,

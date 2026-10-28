@@ -199,6 +199,9 @@ importers:
       '@jozo-harness/bundle-base':
         specifier: workspace:*
         version: link:../../packages/bundle/base
+      '@jozo-harness/hooks-json':
+        specifier: workspace:*
+        version: link:../../packages/core/hooks-json
       '@jozo-harness/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel/kernel
@@ -333,6 +336,9 @@ importers:
       '@jozo-harness/agent-loop':
         specifier: workspace:*
         version: link:../../core/agent-loop
+      '@jozo-harness/hooks-json':
+        specifier: workspace:*
+        version: link:../../core/hooks-json
       '@jozo-harness/kernel':
         specifier: workspace:*
         version: link:../../kernel/kernel

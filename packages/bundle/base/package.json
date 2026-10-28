@@ -6,6 +6,7 @@
   "dependencies": {
     "@jozo-harness/agent": "workspace:*",
     "@jozo-harness/agent-loop": "workspace:*",
+    "@jozo-harness/hooks-json": "workspace:*",
     "@jozo-harness/kernel": "workspace:*",
     "@jozo-harness/llm": "workspace:*",
     "@jozo-harness/llm-openai": "workspace:*",

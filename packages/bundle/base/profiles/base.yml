@@ -23,6 +23,9 @@ plugins:
       preset: workspace-write
       # Commands run contained by default; auto picks seatbelt on macOS and bwrap on Linux.
       sandbox: auto
+  # Runs a workspace's Claude Code / Codex hooks.json at the tool points; no file changes nothing.
+  - id: hooks-json
+    name: '@jozo-harness/hooks-json'
   - id: tier0
     name: '@jozo-harness/tools-tier0'
   - id: ask
