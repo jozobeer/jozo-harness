@@ -190,7 +190,7 @@ route は `opencode/<model>`、wire に送る model は `<model>` そのもの�
 |---|---|---|
 | 設定 | `~/.config/jzh/config.yaml` | `--config`、`XDG_CONFIG_HOME` |
 | 秘密 | `~/.config/jzh/secrets.env`（モード 600） | `jzh auth add` / `set` / `remove` / `list` |
-| セッションログ | `~/.jzh/sessions/<id>/session.v1.jsonl` | `@jozo-harness/session-jsonl` 行の `root` |
+| セッションログ | `~/.jzh/sessions/<id>/session.v1.jsonl.zst`（既存は `session.v1.jsonl`） | `@jozo-harness/session-jsonl` 行の `root` |
 | 添付ファイル | session root の隣の `attachments/<sha256>`（既定は `~/.jzh/attachments/...`） | `@jozo-harness/session-jsonl` 行の `root` を変えると一緒に移る。内容のハッシュが名前なので、同じ内容は 1 ファイル |
 | 予定 | `~/.config/jzh/schedules.json` | `XDG_CONFIG_HOME`。キーは無い |
 | 公開ページ | session root の隣の `artifacts/<sessionId>/<name>.html`（既定は `~/.jzh/artifacts/...`） | `@jozo-harness/artifact` 行を足す（キーは無い）。`session-jsonl` 行の `root` を変えると一緒に移る |
@@ -206,7 +206,7 @@ composer から添えたファイルもログの隣の `attachments/` に置く�
 
 - provider の能力（tool の強制なし、画像なし、prompt cache 制御なし）は adapter に固定されている。reasoning effort は `effort` / `--effort` で指定でき、adapter は `reasoning_effort` としてそのまま渡す（endpoint がその語を受け付けるかは検証しない）
 - Web UI の bind 先は `127.0.0.1` と、起動時に検出したこのマシンの tailnet IPv4 に限る（`0.0.0.0` / `::` では受けない）。tailnet の MagicDNS は listen ポート付きの `http://` で届く。ポート無しの https は `--public-url` と `tailscale serve` で公開する
-- セッションログの形式は `session.v1.jsonl` に固定されている
+- セッションログは新しいセッションが `session.v1.jsonl.zst`（1 行 1 zstd フレーム）、既存の `session.v1.jsonl` は平文のまま追記する。自動では移行しない
 - tool ごとの実行時間の上限は tool の定義側にある
 
 ## 読み込みの失敗

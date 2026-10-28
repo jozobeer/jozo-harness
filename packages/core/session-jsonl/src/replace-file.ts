@@ -6,10 +6,10 @@ import { rename, rm, writeFile } from 'node:fs/promises'
  * are written leaves the previous file in place, so repairing a log cannot
  * truncate the lines that were already complete.
  */
-export const replaceFile = async (path: string, text: string): Promise<void> => {
+export const replaceFile = async (path: string, content: string | Uint8Array): Promise<void> => {
   const temporary = path + '.' + randomUUID() + '.tmp'
   try {
-    await writeFile(temporary, text, { flag: 'wx' })
+    await writeFile(temporary, content, { flag: 'wx' })
     await rename(temporary, path)
   } catch (cause) {
     await rm(temporary, { force: true })

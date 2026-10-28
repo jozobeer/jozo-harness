@@ -10,6 +10,7 @@ import {
 import { Effect } from 'effect'
 import { persistenceError } from './errors.ts'
 import { readHead } from './head.ts'
+import { readZstdHead } from './zstd-log.ts'
 
 export { TITLE_MAX_CHARS } from '@jozo-harness/session'
 
@@ -38,13 +39,24 @@ const candidatesOfLine = (line: string): ReadonlyArray<TitleCandidate> => {
   ]
 }
 
+/** The name a stretch of log text carries; '' when it carries none. */
+const titleOfText = (text: string): string => {
+  let best: TitleCandidate | undefined
+  for (const line of text.split('\n')) {
+    for (const candidate of candidatesOfLine(line)) {
+      best = betterTitle(best, candidate)
+    }
+  }
+  return best?.title ?? ''
+}
+
 /**
- * The name of a log, read without carrying the rest: a listing names a session
- * without reading the ten thousand events behind it. A human's name wins, then the
- * model's, then the fallback, then the first message; a log whose words sit past
- * the budget stays unnamed rather than read whole. The model's name is written
- * before the answer of the first step, so the head holding the first message also
- * holds it.
+ * The name of a plaintext log, read without carrying the rest: a listing names a
+ * session without reading the ten thousand events behind it. A human's name wins,
+ * then the model's, then the fallback, then the first message; a log whose words
+ * sit past the budget stays unnamed rather than read whole. The model's name is
+ * written before the answer of the first step, so the head holding the first
+ * message also holds it.
  */
 export const readTitle = (
   path: string,
@@ -55,11 +67,18 @@ export const readTitle = (
       try: () => readHead(path, maxBytes),
       catch: (cause) => persistenceError(`cannot read ${path}`, cause),
     })
-    let best: TitleCandidate | undefined
-    for (const line of text.split('\n')) {
-      for (const candidate of candidatesOfLine(line)) {
-        best = betterTitle(best, candidate)
-      }
-    }
-    return best?.title ?? ''
+    return titleOfText(text)
+  })
+
+/** The name of a zstd log, decoded from the frames that fit in the head. */
+export const readZstdTitle = (
+  path: string,
+  maxBytes: number = TITLE_READ_BYTES,
+): Effect.Effect<string, SessionError> =>
+  Effect.gen(function* () {
+    const head = yield* Effect.tryPromise({
+      try: () => readZstdHead(path, maxBytes),
+      catch: (cause) => persistenceError(`cannot read ${path}`, cause),
+    })
+    return titleOfText(head.text)
   })

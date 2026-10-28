@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Effect } from 'effect'
 import { SESSION_FORMAT_VERSION, type SessionHeader } from '@jozo-harness/session'
-import { jsonlSessions } from '../src/index.ts'
+import {
+  encodeZstdFrame,
+  jsonlSessions,
+  SESSION_ZSTD_FILE_NAME,
+  splitZstdLog,
+} from '../src/index.ts'
 
 /**
  * A root this test process owns. One under the repo would be shared with every other
@@ -24,14 +29,14 @@ const header = (cwd = '/work'): SessionHeader => ({
   cwd,
 })
 
-const fileOf = (root: string, id: string): string => join(root, id, 'session.v1.jsonl')
+const fileOf = (root: string, id: string): string => join(root, id, SESSION_ZSTD_FILE_NAME)
 
 afterAll(async () => {
   await rm(tempRoot, { recursive: true, force: true })
 })
 
 describe('jsonlSessions', () => {
-  test('create writes a header, append adds a line, and open reconstructs both', async () => {
+  test('create writes a header frame, append adds a frame, and open reconstructs both', async () => {
     const { root, persistence } = isolated()
     const created = await Effect.runPromise(persistence.create(header()))
     const value = crypto.randomUUID()
@@ -53,8 +58,10 @@ describe('jsonlSessions', () => {
     ])
     expect(reopened.events[1]?.data).toEqual({ text: value, source: 'user' })
 
-    const lines = (await readFile(fileOf(root, created.id), 'utf8')).trim().split('\n')
-    expect(lines).toHaveLength(2)
+    const split = splitZstdLog(await readFile(fileOf(root, created.id)))
+    const lines = split.text.trim().split('\n')
+    expect(split.frames).toHaveLength(2)
+    expect(split.tornBytes).toBe(0)
     expect(JSON.parse(lines[0] ?? '{}')).toEqual(created.events[0])
   })
 
@@ -129,7 +136,7 @@ describe('jsonlSessions', () => {
   test('open fails on a malformed line', async () => {
     const { root, persistence } = isolated()
     const created = await Effect.runPromise(persistence.create(header()))
-    await appendFile(fileOf(root, created.id), 'not json\n')
+    await appendFile(fileOf(root, created.id), encodeZstdFrame('not json\n'))
 
     const error = await Effect.runPromise(Effect.flip(persistence.open(created.id)))
 
@@ -157,14 +164,14 @@ describe('jsonlSessions', () => {
     const { root, persistence } = isolated()
     const created = await Effect.runPromise(persistence.create(header()))
     const ignorable = { seq: 2, time: 101, type: 'plugin/unknown', data: {}, ignorable: true }
-    await appendFile(fileOf(root, created.id), JSON.stringify(ignorable) + '\n')
+    await appendFile(fileOf(root, created.id), encodeZstdFrame(JSON.stringify(ignorable) + '\n'))
 
     const reopened = await Effect.runPromise(persistence.open(created.id))
     expect(reopened.events).toHaveLength(1)
 
     await appendFile(
       fileOf(root, created.id),
-      JSON.stringify({ seq: 3, time: 102, type: 'plugin/other', data: {} }) + '\n',
+      encodeZstdFrame(JSON.stringify({ seq: 3, time: 102, type: 'plugin/other', data: {} }) + '\n'),
     )
     const error = await Effect.runPromise(Effect.flip(persistence.open(created.id)))
     expect(error.message).toContain('plugin/other')

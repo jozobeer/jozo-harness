@@ -11,7 +11,8 @@ import { Effect } from 'effect'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isMissing, notFound, persistenceError } from './errors.ts'
-import { expandHome, SESSION_FILE_NAME } from './paths.ts'
+import { expandHome, resolveSessionLog, type SessionLogFile } from './paths.ts'
+import { readZstdText } from './zstd-log.ts'
 
 /** How many hits one search returns unless the caller says otherwise. */
 export const SEARCH_LIMIT = 20
@@ -189,7 +190,15 @@ interface CacheEntry {
  */
 export function makeSessionQuery(options: SessionQueryOptions): SessionQuery {
   const root = expandHome(options.root)
-  const fileOf = (id: SessionId): string => join(root, id, SESSION_FILE_NAME)
+  const logFileOf = (id: SessionId): Effect.Effect<SessionLogFile, SessionError> =>
+    Effect.gen(function* () {
+      const file = yield* Effect.tryPromise({
+        try: () => resolveSessionLog(join(root, id)),
+        catch: (cause) => persistenceError(`cannot look at session ${id}`, cause),
+      })
+      if (file === undefined) return yield* Effect.fail(notFound(id))
+      return file
+    })
   // The index opens on the first search or sync: reading a session never
   // creates the file, and a run that only browses leaves the root as it was.
   let database: DatabaseSync | undefined
@@ -203,13 +212,16 @@ export function makeSessionQuery(options: SessionQueryOptions): SessionQuery {
   const cached = new Map<SessionId, CacheEntry>()
 
   const revisionOf = (id: SessionId): Effect.Effect<SessionRevision, SessionError> =>
-    Effect.tryPromise({
-      try: async () => {
-        const info = await stat(fileOf(id))
-        return { mtimeMs: info.mtimeMs, size: info.size }
-      },
-      catch: (cause) =>
-        isMissing(cause) ? notFound(id) : persistenceError(`cannot look at session ${id}`, cause),
+    Effect.gen(function* () {
+      const file = yield* logFileOf(id)
+      return yield* Effect.tryPromise({
+        try: async () => {
+          const info = await stat(file.path)
+          return { mtimeMs: info.mtimeMs, size: info.size }
+        },
+        catch: (cause) =>
+          isMissing(cause) ? notFound(id) : persistenceError(`cannot look at session ${id}`, cause),
+      })
     })
 
   const leaseOf = (entry: CacheEntry): SessionObservation => ({
@@ -276,8 +288,9 @@ export function makeSessionQuery(options: SessionQueryOptions): SessionQuery {
 
   const readIndexRows = (id: SessionId): Effect.Effect<ReadonlyArray<IndexRow>, SessionError> =>
     Effect.gen(function* () {
+      const file = yield* logFileOf(id)
       const text = yield* Effect.tryPromise({
-        try: () => readFile(fileOf(id), 'utf8'),
+        try: () => (file.format === 'zstd' ? readZstdText(file.path) : readFile(file.path, 'utf8')),
         catch: (cause) => persistenceError(`cannot read session ${id}`, cause),
       })
       return text.split('\n').flatMap((line) => {
