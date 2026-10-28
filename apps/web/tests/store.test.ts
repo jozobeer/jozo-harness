@@ -22,6 +22,7 @@ import type {
 } from '../src/shared/rpc.ts'
 import { createSessionStore, type BrowseAnswer, type SessionStore } from '../client-solid/store.ts'
 import { draftKey } from '../src/ui/draft.ts'
+import { FONT_FAMILY_KEY, FONT_SIZE_KEY } from '../src/ui/font.ts'
 import { THEME_KEY } from '../src/ui/theme.ts'
 
 /**
@@ -37,6 +38,8 @@ interface StubbedBrowser {
   /** What storage holds under one key, as a page opened again would read it. */
   readonly stored: (key: string) => string | undefined
   readonly attribute: () => string | undefined
+  /** What the page wrote to one of the stylesheet's custom properties. */
+  readonly property: (name: string) => string | undefined
   /** The URL the page last put in the address bar. */
   readonly address: () => string | undefined
   /** Paints the frame the page is waiting on, if it is waiting on one. */
@@ -44,11 +47,14 @@ interface StubbedBrowser {
 }
 
 /** The little of the browser the store touches, for a run outside one. */
-const stubTheBrowser = (options: { readonly frames?: boolean } = {}): StubbedBrowser => {
+const stubTheBrowser = (
+  options: { readonly frames?: boolean; readonly keep?: Readonly<Record<string, string>> } = {},
+): StubbedBrowser => {
   const globals = globalThis as unknown as Record<string, unknown>
-  const kept = new Map<string, string>()
+  const kept = new Map<string, string>(Object.entries(options.keep ?? {}))
   let address: string | undefined
   const dataset: Record<string, string | undefined> = {}
+  const properties = new Map<string, string>()
   globals.localStorage = {
     getItem: (key: string) => kept.get(key) ?? null,
     setItem: (key: string, value: string) => {
@@ -58,7 +64,16 @@ const stubTheBrowser = (options: { readonly frames?: boolean } = {}): StubbedBro
       kept.delete(key)
     },
   }
-  globals.document = { documentElement: { dataset } }
+  globals.document = {
+    documentElement: {
+      dataset,
+      style: {
+        setProperty: (name: string, value: string) => {
+          properties.set(name, value)
+        },
+      },
+    },
+  }
   globals.history = {
     replaceState: (_data: unknown, _unused: string, url?: string) => {
       address = url
@@ -82,6 +97,7 @@ const stubTheBrowser = (options: { readonly frames?: boolean } = {}): StubbedBro
     kept: () => kept.get(THEME_KEY),
     stored: (key: string) => kept.get(key),
     attribute: () => dataset.theme,
+    property: (name: string) => properties.get(name),
     address: () => address,
     paint: () => {
       for (const run of waiting.splice(0, waiting.length)) run()
@@ -952,6 +968,40 @@ describe('the page store', () => {
     expect(browser.kept()).toBe('dark')
     expect(browser.attribute()).toBe('dark')
   })
+
+  test('the face and size a reader picks are kept and written for the stylesheet', () => {
+    const browser = stubTheBrowser()
+    const store = createSessionStore()
+
+    store.chooseFontFamily('serif')
+    store.chooseFontSize(18)
+
+    expect(store.state().fontFamily).toBe('serif')
+    expect(store.state().fontSize).toBe(18)
+    expect(browser.stored(FONT_FAMILY_KEY)).toBe('serif')
+    expect(browser.stored(FONT_SIZE_KEY)).toBe('18')
+    expect(browser.property('--font-family')).toBe('var(--serif)')
+    expect(browser.property('--font-scale')).toBe(String(18 / 14))
+  })
+
+  test('a page opened again starts in the face and size it kept', async () => {
+    const browser = stubTheBrowser({
+      keep: { [FONT_FAMILY_KEY]: 'mono', [FONT_SIZE_KEY]: '18' },
+    })
+
+    await Effect.runPromise(
+      withStore(makeHost('a'), (store) =>
+        Effect.gen(function* () {
+          yield* until(() => store.state().sessionId === 'a', 'opened the session')
+
+          expect(store.state().fontFamily).toBe('mono')
+          expect(store.state().fontSize).toBe(18)
+          expect(browser.property('--font-family')).toBe('var(--mono)')
+          expect(browser.property('--font-scale')).toBe(String(18 / 14))
+        }),
+      ),
+    )
+  }, 15_000)
 
   test('New session moves the page to a blank one without asking for a session', async () => {
     const browser = stubTheBrowser()
