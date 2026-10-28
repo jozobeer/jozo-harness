@@ -9,6 +9,7 @@ import {
   acquireLock,
   encodeZstdFrame,
   jsonlSessions,
+  releaseAllLocks,
   LOCK_SUFFIX,
   makeSessionQuery,
   SESSION_ZSTD_FILE_NAME,
@@ -153,6 +154,32 @@ describe('the session log lock', () => {
 
     const error = await Effect.runPromise(Effect.flip(persistence.open(id)))
     expect(error.message).toContain('being written by another process')
+  })
+
+  test('releasing a lock whose file is already gone is harmless', async () => {
+    const { root } = isolated()
+    await mkdir(root, { recursive: true })
+    const path = join(root, 'gone.log')
+    const lock = await Effect.runPromise(acquireLock(path, 'gone'))
+    await rm(path + LOCK_SUFFIX)
+
+    await Effect.runPromise(lock.release)
+
+    expect(await readFile(path + LOCK_SUFFIX, 'utf8').catch(() => '')).toBe('')
+  })
+
+  test('the exit hook drops every lock this process holds', async () => {
+    const { root } = isolated()
+    await mkdir(root, { recursive: true })
+    const first = join(root, 'first.log')
+    const second = join(root, 'second.log')
+    await Effect.runPromise(acquireLock(first, 'first'))
+    await Effect.runPromise(acquireLock(second, 'second'))
+
+    releaseAllLocks()
+
+    expect(await readFile(first + LOCK_SUFFIX, 'utf8').catch(() => '')).toBe('')
+    expect(await readFile(second + LOCK_SUFFIX, 'utf8').catch(() => '')).toBe('')
   })
 
   test('releasing the lock removes it, and leaves a lock another writer took over', async () => {

@@ -77,43 +77,49 @@ const held = (id: SessionId, path: string): SessionError =>
   persistenceError('session ' + id + ' is being written by another process (lock ' + path + ')')
 
 /**
- * Unlinks locks when the process ends, whether it returned from main or threw.
- * A kill that skips this leaves the file behind; the next writer reads the dead
- * pid, takes the lock over, and repairs the tail the crash left.
+ * Drops every lock this process holds. A process that ends normally or throws
+ * runs this from the exit hook; a kill that skips the hook leaves the files
+ * behind, and the next writer reads the dead pid and repairs the tail.
  */
+export const releaseAllLocks = (): void => {
+  for (const path of registry.keys()) {
+    try {
+      unlinkSync(path)
+    } catch {
+      // The lock is gone already; nothing to clean up.
+    }
+  }
+  registry.clear()
+}
+
 const armExit = (): void => {
   if (exitArmed) return
   exitArmed = true
-  process.once('exit', () => {
-    for (const path of registry.keys()) {
-      try {
-        unlinkSync(path)
-      } catch {
-        // The lock is gone already; nothing to clean up.
-      }
-    }
-  })
+  process.once('exit', releaseAllLocks)
 }
 
 const releaseOf = (path: string, record: LockRecord): Effect.Effect<void> =>
-  Effect.gen(function* () {
+  Effect.promise(async () => {
     const shared = registry.get(path)
     if (shared !== undefined && shared.record.token === record.token) {
       shared.holders -= 1
       if (shared.holders > 0) return
       registry.delete(path)
     }
-    const text = yield* Effect.tryPromise({
-      try: () => readFile(path, 'utf8'),
-      catch: (cause) => cause,
-    }).pipe(Effect.match({ onFailure: () => '', onSuccess: (value) => value }))
+    let text = ''
+    try {
+      text = await readFile(path, 'utf8')
+    } catch {
+      // The lock is gone already.
+    }
     // A lock another process took over names its own token: removing it would
     // hand the log to two writers at once.
     if (recordOf(text)?.token !== record.token) return
-    yield* Effect.tryPromise({
-      try: () => unlink(path),
-      catch: (cause) => cause,
-    }).pipe(Effect.ignore)
+    try {
+      await unlink(path)
+    } catch {
+      // Another holder removed it first; the log is no longer ours either way.
+    }
   })
 
 const createLock = async (path: string): Promise<LockRecord> => {
@@ -124,7 +130,11 @@ const createLock = async (path: string): Promise<LockRecord> => {
     await handle.sync()
   } catch (error) {
     await handle.close()
-    await unlink(path).catch(() => undefined)
+    try {
+      await unlink(path)
+    } catch {
+      // Nothing was written, so there is nothing to clean up.
+    }
     throw error
   }
   await handle.close()
@@ -143,8 +153,30 @@ const tryCreateLock = async (path: string): Promise<LockRecord | undefined> => {
 
 /** Whether the lock's holder is gone, including one that died writing its record. */
 const staleAt = async (path: string): Promise<boolean> => {
-  const record = recordOf(await readFile(path, 'utf8').catch(() => ''))
+  let text = ''
+  try {
+    text = await readFile(path, 'utf8')
+  } catch {
+    // The holder removed its lock between our create and this read.
+  }
+  const record = recordOf(text)
   return record === undefined || !isProcessAlive(record.pid)
+}
+
+/** Registers a fresh lock as this process's, and hands out the first holder. */
+const registerLock = (path: string, record: LockRecord): SessionLock => {
+  registry.set(path, { record, holders: 1 })
+  armExit()
+  return { path, release: releaseOf(path, record) }
+}
+
+/** Removes a lock whose holder is gone; a contender may have removed it already. */
+const dropStale = async (path: string): Promise<void> => {
+  try {
+    await unlink(path)
+  } catch {
+    // The other contender removed the stale lock first.
+  }
 }
 
 const takeLock = async (logPath: string, id: SessionId): Promise<SessionLock> => {
@@ -156,14 +188,10 @@ const takeLock = async (logPath: string, id: SessionId): Promise<SessionLock> =>
   }
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const record = await tryCreateLock(path)
-    if (record !== undefined) {
-      registry.set(path, { record, holders: 1 })
-      armExit()
-      return { path, release: releaseOf(path, record) }
-    }
+    if (record !== undefined) return registerLock(path, record)
     if (!(await staleAt(path))) throw held(id, path)
     // Both contenders unlink; the one that creates second reads a live lock next round.
-    await unlink(path).catch(() => undefined)
+    await dropStale(path)
   }
   throw held(id, path)
 }
