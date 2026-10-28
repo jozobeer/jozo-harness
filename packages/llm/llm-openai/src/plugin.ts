@@ -1,4 +1,4 @@
-import { Llm } from '@jozo-harness/llm'
+import { Llm, outboundFetch } from '@jozo-harness/llm'
 import type { Plugin } from '@jozo-harness/kernel'
 import { Layer, Schema } from 'effect'
 import { openAiAdapter } from './adapter.ts'
@@ -59,7 +59,7 @@ export const localOllamaModelName = (model: string): string => {
  * and the effort words the row (or the wire's own) declares.
  */
 export const makeLlmOpenAiPlugin = (
-  send: typeof fetch = fetch,
+  send: typeof fetch = outboundFetch,
 ): Plugin<typeof llmOpenAiConfig.Type, Llm, never> => ({
   name: '@jozo-harness/llm-openai',
   config: llmOpenAiConfig,

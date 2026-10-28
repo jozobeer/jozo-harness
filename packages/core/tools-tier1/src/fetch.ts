@@ -1,3 +1,4 @@
+import { outboundFetch } from '@jozo-harness/llm'
 import { Schema, Effect } from 'effect'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
 import { NETWORK_TOOL_TIMEOUT_MS } from './timeouts.ts'
@@ -48,7 +49,7 @@ export const webFetchTool: ToolDefinition<WebFetchArgs, WebFetchValue> = {
       const limit = args.maxBytes ?? 100_000
       const fetched = yield* Effect.tryPromise({
         try: async () => {
-          const response = await fetch(args.url)
+          const response = await outboundFetch(args.url)
           const body = await response.text()
           return {
             url: args.url,
