@@ -187,6 +187,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@jozo-harness/acp':
+        specifier: workspace:*
+        version: link:../../packages/core/acp
       '@jozo-harness/agent':
         specifier: workspace:*
         version: link:../../packages/core/agent

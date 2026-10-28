@@ -1,5 +1,4 @@
-import { Data, Deferred, Duration, Effect, Option, Schema } from 'effect'
-import { JsonRpcResponseSchema } from './jsonrpc.ts'
+import { Data, Deferred, Duration, Effect, Option } from 'effect'
 import { dispatchJsonRpc, type DispatchResult } from './dispatcher.ts'
 import type { AcpHandlerRegistry } from './methods.ts'
 
@@ -32,6 +31,8 @@ export interface AcpClient {
 }
 
 export interface AcpConnection extends AcpClient {
+  /** The table the server registers its methods in. */
+  readonly registry: AcpHandlerRegistry
   /** Reads one line; a response settles a server request and owns no answer of its own. */
   readonly dispatch: (line: string) => Effect.Effect<DispatchResult>
   /** How many server requests wait for an answer right now. */
@@ -43,6 +44,18 @@ export const DEFAULT_PERMISSION_TIMEOUT_MS = 120_000
 
 const lineOf = (value: unknown): string => JSON.stringify(value)
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null
+
+/** An answer, not a call: it has an id and a result or error but no method. */
+type ResponseShape = Record<string, unknown> & { readonly id: unknown }
+
+const isResponseShaped = (value: unknown): value is ResponseShape =>
+  isRecord(value) &&
+  'id' in value &&
+  !('method' in value) &&
+  ('result' in value || 'error' in value)
+
 /**
  * Speaks JSON-RPC over a line writer. It keeps the ids of the requests the
  * server sent and settles them from the lines the peer writes back, so a
@@ -52,7 +65,10 @@ export const makeAcpConnection = (input: {
   readonly registry: AcpHandlerRegistry
   readonly write: (line: string) => void
 }): AcpConnection => {
-  const pending = new Map<number, Deferred.Deferred<unknown, AcpRequestFailed>>()
+  const pending = new Map<
+    number,
+    { readonly gate: Deferred.Deferred<unknown, AcpRequestFailed>; readonly method: string }
+  >()
   let nextId = 1
 
   const notify = (method: string, params: unknown): Effect.Effect<void> =>
@@ -69,7 +85,7 @@ export const makeAcpConnection = (input: {
       const id = nextId
       nextId += 1
       const gate = yield* Deferred.make<unknown, AcpRequestFailed>()
-      pending.set(id, gate)
+      pending.set(id, { gate, method })
       yield* Effect.sync(() => {
         input.write(lineOf({ jsonrpc: '2.0', id, method, params }))
       })
@@ -88,27 +104,40 @@ export const makeAcpConnection = (input: {
     })
 
   /**
-   * Matches one response line to the request that asked it. Anything else —
-   * a notification, a request, a malformed line — is left to the dispatcher.
+   * Matches one response line to the request that asked it. A response nobody
+   * waits on is still a response: answering it would put a second answer on the
+   * wire, so it is consumed silently. Anything else — a notification, a
+   * request, a malformed line — is left to the dispatcher.
    */
   const settle = (parsed: unknown): boolean => {
-    if (!Schema.is(JsonRpcResponseSchema)(parsed)) return false
-    if (typeof parsed.id !== 'number') return false
-    const gate = pending.get(parsed.id)
-    if (gate === undefined) return false
+    if (!isResponseShaped(parsed)) return false
+    if (typeof parsed.id !== 'number') return true
+    const entry = pending.get(parsed.id)
+    if (entry === undefined) return true
     pending.delete(parsed.id)
-    // The error branch is the peer refusing to answer; the waiter reads it as a failure.
-    const outcome: Effect.Effect<unknown, AcpRequestFailed> =
-      'error' in parsed
-        ? Effect.fail(
+    if ('error' in parsed) {
+      const error = parsed.error
+      // A peer that answers with something else answered nothing this server
+      // can read; the waiter times out rather than pretending it was refused.
+      if (
+        isRecord(error) &&
+        typeof error['code'] === 'number' &&
+        typeof error['message'] === 'string'
+      ) {
+        Deferred.doneUnsafe(
+          entry.gate,
+          Effect.fail(
             new AcpRequestFailed({
-              method: 'unknown',
-              code: parsed.error.code,
-              message: parsed.error.message,
+              method: entry.method,
+              code: error['code'],
+              message: error['message'],
             }),
-          )
-        : Effect.succeed(parsed.result)
-    Deferred.doneUnsafe(gate, outcome)
+          ),
+        )
+      }
+      return true
+    }
+    Deferred.doneUnsafe(entry.gate, Effect.succeed(parsed.result))
     return true
   }
 
@@ -125,6 +154,7 @@ export const makeAcpConnection = (input: {
     })
 
   return {
+    registry: input.registry,
     notify,
     request,
     dispatch,

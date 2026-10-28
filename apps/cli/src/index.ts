@@ -169,6 +169,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { runTui, type TuiIo } from '@jozo-harness/tui'
 import { fileURLToPath } from 'node:url'
 import { makeUiHost, type UiHost } from '@jozo-harness/ui-host'
+import { serveAcp } from '@jozo-harness/acp'
 import {
   WebError,
   detectTailnet,
@@ -199,6 +200,7 @@ import {
   renderSurface,
 } from './surface.ts'
 import type { JozoHarnessConfig } from './config-file.ts'
+import { acpSessionPortOf, type AcpSessionSource } from './acp.ts'
 
 export interface CommandOptions {
   /** Profile documents, first layer first (`bundle/base` then the selected profile). */
@@ -217,6 +219,8 @@ export interface CommandOptions {
   readonly task?: string
   /** Lines of a batch session, used when stdin is not a terminal. */
   readonly lines?: Stream.Stream<string>
+  /** When true, serve the ACP stdio server instead of running one turn. */
+  readonly acp?: boolean
   /** When present, the command serves the interactive terminal UI. */
   readonly tui?: TuiIo
   /** When present, the command serves the browser UI on that port (0 picks one). */
@@ -696,6 +700,7 @@ const serveTask = (agent: Agent, options: CommandOptions, task: string) =>
 
 /** What one run serves: a task, a batch of lines, or one of the UIs. */
 type Work =
+  | { readonly kind: 'acp' }
   | { readonly kind: 'task'; readonly task: string }
   | { readonly kind: 'lines'; readonly lines: Stream.Stream<string> }
   | { readonly kind: 'tui'; readonly io: TuiIo }
@@ -709,6 +714,9 @@ type Work =
     }
 
 const workOf = (options: CommandOptions): Work | undefined => {
+  // An editor owns stdin when it drives the server; a task or a line batch never
+  // shares the process with it.
+  if (options.acp === true) return { kind: 'acp' }
   if (options.task !== undefined) return { kind: 'task', task: options.task }
   if (options.web !== undefined) {
     return {
@@ -2060,6 +2068,57 @@ const serveWebWork = (
     return yield* serveWebUi(options, rows, route, effort, spillBytes, layer, work, initial, wiring)
   })
 
+/**
+ * Serves ACP over stdio. An editor names a cwd and gets a session built the way
+ * the browser UI builds one, so the turn writes the same JSONL and shows up in
+ * `jzh sessions` without a second store.
+ */
+const serveAcpWork = (
+  options: CommandOptions,
+  rows: ReadonlyArray<PluginRow>,
+  route: string,
+  effort: string,
+  spillBytes: number | undefined,
+  layer: Layer.Layer<any, PluginError, never>,
+): Effect.Effect<number, PluginError, Scope.Scope> =>
+  Effect.gen(function* () {
+    const source: AcpSessionSource = {
+      open: (cwd) =>
+        Effect.gen(function* () {
+          const scope = yield* Scope.make()
+          // The session lives until the server stops; its own scope is what
+          // closes the core, its jobs, and its child agents.
+          yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+          const built = yield* buildSession(
+            options,
+            rows,
+            route,
+            effort,
+            spillBytes,
+            layer,
+            true,
+            undefined,
+            cwd,
+          ).pipe(Effect.provideService(Scope.Scope, scope))
+          if (built.kind === 'refused') {
+            return yield* Effect.fail(new Error(built.message))
+          }
+          const { agent, ui } = built.runtime
+          if (ui === undefined) {
+            return yield* Effect.fail(new Error('the ACP session was built without a UI host'))
+          }
+          return { id: agent.id, host: ui }
+        }),
+    }
+    yield* serveAcp({
+      // The editor owns the process; stdin is the protocol, never a task.
+      input: process.stdin,
+      write: (line) => options.stdout(line + '\n'),
+      sessions: acpSessionPortOf(source),
+    })
+    return 0
+  })
+
 /** The scoped body that owns the built layer and serves one run. */
 const runSession = (
   options: CommandOptions,
@@ -2073,6 +2132,9 @@ const runSession = (
   Effect.gen(function* () {
     if (work.kind === 'web') {
       return yield* serveWebWork(options, rows, route, effort, spillBytes, layer, work)
+    }
+    if (work.kind === 'acp') {
+      return yield* serveAcpWork(options, rows, route, effort, spillBytes, layer)
     }
     const built = yield* buildSession(
       options,
@@ -2163,3 +2225,5 @@ export * from './auth.ts'
 export * from './auth-cli.ts'
 export * from './providers.ts'
 export * from './config-file.ts'
+
+export * from './acp.ts'

@@ -54,6 +54,7 @@ jzh models                      list the models the provider offers
 jzh auth [add|set|list|remove]  keep the keys a provider needs
 jzh web [--port N] [--public-url <https origin>]
                                 browser UI over a local server
+jzh acp                         ACP over stdio, for an editor
 jzh --resume <sessionId> [task]
 jzh sessions                    list the sessions on disk
 jzh sessions <sessionId>        read one session back
@@ -259,6 +260,7 @@ const commandOptions = (parsed: ParsedArgs, io: MainIo, inputs: CommandInputs): 
   surface: inputs.surface,
   ...(parsed.dumpConfig ? { dumpConfig: true } : {}),
   ...(parsed.json ? { json: true } : {}),
+  ...(parsed.acp ? { acp: true } : {}),
   ...optional('interrupt', io.interrupt),
 })
 
@@ -281,6 +283,34 @@ const printModels = (inputs: CommandInputs, io: MainIo): Effect.Effect<number> =
       },
     }),
   )
+
+/**
+ * The `jzh acp` entry point: read the settings and profile a run would read,
+ * then hand stdin and stdout to the protocol. It deliberately skips the batch
+ * stdin the one-shot path loads, because the editor keeps that pipe open.
+ */
+export function mainAcp(argv: ReadonlyArray<string>, io: MainIo): Effect.Effect<number> {
+  const parsed = parseArgs(argv)
+  if (parsed.help) {
+    io.stdout(HELP)
+    return Effect.succeed(0)
+  }
+  if (parsed.errors.length > 0) {
+    for (const error of parsed.errors) io.stderr(`jzh: ${error}\n`)
+    return Effect.succeed(2)
+  }
+  return Effect.gen(function* () {
+    const inputs = yield* loadInputs(parsed, io)
+    return yield* runCommand({ ...commandOptions(parsed, io, inputs), acp: true })
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.sync(() => {
+        io.stderr(`jzh: ${String(cause)}\n`)
+        return 1
+      }),
+    ),
+  )
+}
 
 /** The `jzh` entry point: parse argv, load the bundled base profile, run. */
 export function main(argv: ReadonlyArray<string>, io: MainIo): Effect.Effect<number> {

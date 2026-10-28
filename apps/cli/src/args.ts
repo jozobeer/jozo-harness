@@ -10,6 +10,8 @@ export interface ParsedArgs {
   readonly models: boolean
   /** `jzh web`: serve the browser UI instead of running a turn. */
   readonly web: boolean
+  /** `jzh acp`: speak ACP over stdio instead of running a turn. */
+  readonly acp: boolean
   /** `jzh sessions [id]`: list the sessions, or read one back. */
   readonly sessions: boolean
   readonly sessionId?: string | undefined
@@ -163,6 +165,7 @@ const publicOriginOf = (
 interface Words {
   readonly models: boolean
   readonly web: boolean
+  readonly acp: boolean
   readonly sessions: boolean
   readonly sessionId: string | undefined
   readonly task: string | undefined
@@ -171,6 +174,7 @@ interface Words {
 const NOTHING: Omit<Words, 'task'> = {
   models: false,
   web: false,
+  acp: false,
   sessions: false,
   sessionId: undefined,
 }
@@ -179,6 +183,8 @@ const wordsOf = (words: ReadonlyArray<string>): Words => {
   const first = words[0]
   if (words.length === 1 && first === 'models') return { ...NOTHING, models: true, task: undefined }
   if (words.length === 1 && first === 'web') return { ...NOTHING, web: true, task: undefined }
+  // An editor starts it; the protocol on stdin is the whole command.
+  if (first === 'acp' && words.length === 1) return { ...NOTHING, acp: true, task: undefined }
   // `jzh sessions` lists them; `jzh sessions <id>` reads one back.
   if (first === 'sessions' && words.length <= 2) {
     return { ...NOTHING, sessions: true, sessionId: words[1], task: undefined }

@@ -2,7 +2,7 @@
 import { processTuiIo, type TuiIo } from '@jozo-harness/tui'
 import { Deferred, Effect, Stream } from 'effect'
 import { parseArgs } from './args.ts'
-import { main, type MainIo } from './bin.ts'
+import { main, mainAcp, type MainIo } from './bin.ts'
 import { runAuthAtStart } from './auth-cli.ts'
 import { runConfigAtStart } from './config-cli.ts'
 
@@ -59,6 +59,21 @@ export function runAsProcess(argv: ReadonlyArray<string>): void {
     void runAuthAtStart(argv).then((code) => {
       process.exitCode = code ?? 0
     })
+    return
+  }
+
+  if (argv[0] === 'acp') {
+    // An editor owns stdin for the life of the process; the batch reader would
+    // wait for EOF and answer nothing until the editor went away.
+    void mainAcp(argv, {
+      stdout: (text) => process.stdout.write(text),
+      stderr: (text) => process.stderr.write(text),
+      cwd: process.cwd(),
+    })
+      .pipe(Effect.runPromise)
+      .then((code) => {
+        process.exitCode = code
+      })
     return
   }
 

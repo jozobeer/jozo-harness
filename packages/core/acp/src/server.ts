@@ -68,7 +68,9 @@ export const makeAcpServer = (
 ): Effect.Effect<AcpServer, never, Scope.Scope> =>
   Effect.gen(function* () {
     const connection = options.connection
-    const registry = makeAcpHandlerRegistry()
+    // The connection is the one reader of the wire, so its table is the one a
+    // method must land in; a second table would answer every method as missing.
+    const registry = connection.registry
     const opened = new Map<string, AcpSessionHost>()
 
     yield* Effect.addFinalizer(() =>
