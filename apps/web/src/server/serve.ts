@@ -4,7 +4,14 @@ import type { Duplex } from 'node:stream'
 import { WebSocket, WebSocketServer, type RawData } from 'ws'
 import { Effect, Layer, Option, Stream } from 'effect'
 import { RpcSerialization, RpcServer } from 'effect/rpc'
-import { artifactRootOf } from '@jozo-harness/tools-tier1'
+import {
+  artifactRootOf,
+  installHostScheduleRuns,
+  scheduleRuleOf,
+  scheduleTitleOf,
+  scheduleViewOf,
+  type ScheduleStore,
+} from '@jozo-harness/tools-tier1'
 import { sendCommand } from '@jozo-harness/ui-protocol'
 import { UiRpcs, type CommandView } from '../shared/rpc.ts'
 import {
@@ -53,6 +60,8 @@ export interface ServeWebOptions {
   readonly initial?: InitialSession
   /** Opens the rest: a page may ask for any session the store holds. */
   readonly factory: SessionFactory
+  /** The host's schedules: one store for every session this server serves. */
+  readonly schedules: ScheduleStore
   /** What the page may read and change about the run behind it. */
   readonly settings: SettingsPort
   /** The folders a page may start a session in. */
@@ -90,6 +99,7 @@ const handlersOf = (
   workspaces: WorkspacesPort,
   commands: () => ReadonlyArray<CommandView>,
   store: StoreEvents,
+  schedules: ScheduleStore,
 ) =>
   UiRpcs.toLayer({
     sessions: () =>
@@ -162,6 +172,69 @@ const handlersOf = (
       const view = registry.stateOf(sessionId)
       return view === undefined ? Effect.fail('the session is not open') : Effect.succeed(view)
     },
+    scheduleCreate: (payload) =>
+      Effect.gen(function* () {
+        const session = registry.sessionOf(payload.sessionId)
+        if (session === undefined) return yield* Effect.fail('the session is not open')
+        const list = yield* Effect.try({
+          // The model's tool builds the same record from the same checks, so a
+          // schedule either side creates is one the other lists.
+          try: () => {
+            session.adoptSchedules?.()
+            if (payload.prompt.trim() === '') throw new Error('prompt is required')
+            const now = schedules.now()
+            const rule = scheduleRuleOf(payload, now)
+            const title = scheduleTitleOf(payload.title)
+            schedules.write({
+              kind: 'created',
+              schedule: {
+                id: schedules.nextId(),
+                sessionId: payload.sessionId,
+                rule,
+                prompt: payload.prompt,
+                ...(title === undefined ? {} : { title }),
+                createdAt: now,
+              },
+            })
+            store.notify()
+            return schedules.list(payload.sessionId).map(scheduleViewOf)
+          },
+          catch: (error) => (error instanceof Error ? error.message : String(error)),
+        })
+        return list
+      }),
+    schedulePause: ({ sessionId, id, paused }) =>
+      Effect.gen(function* () {
+        const list = yield* Effect.try({
+          try: () => {
+            const current = schedules.find(id)
+            if (current === undefined || current.sessionId !== sessionId) {
+              throw new Error('no schedule with that id in this session')
+            }
+            schedules.write({ kind: 'updated', schedule: { ...current, paused } })
+            store.notify()
+            return schedules.list(sessionId).map(scheduleViewOf)
+          },
+          catch: (error) => (error instanceof Error ? error.message : String(error)),
+        })
+        return list
+      }),
+    scheduleDelete: ({ sessionId, id }) =>
+      Effect.gen(function* () {
+        const list = yield* Effect.try({
+          try: () => {
+            const current = schedules.find(id)
+            if (current === undefined || current.sessionId !== sessionId) {
+              throw new Error('no schedule with that id in this session')
+            }
+            schedules.write({ kind: 'deleted', id })
+            store.notify()
+            return schedules.list(sessionId).map(scheduleViewOf)
+          },
+          catch: (error) => (error instanceof Error ? error.message : String(error)),
+        })
+        return list
+      }),
     commands: ({ sessionId }) => {
       // The blank page has no session to ask, so the run answers for it: the
       // first line typed must complete before the session that receives it exists.
@@ -430,6 +503,20 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
         ...(options.initial === undefined ? {} : { initial: options.initial }),
         factory: options.factory,
       })
+      // The server owns the clock, not an agent: a schedule fires while its
+      // session is closed or while the page shows another one. A delivery to a
+      // session nobody opened is left due, so opening it later catches up.
+      yield* installHostScheduleRuns({
+        store: options.schedules,
+        deliver: (schedule) => {
+          const session =
+            schedule.sessionId === undefined ? undefined : registry.sessionOf(schedule.sessionId)
+          return session === undefined
+            ? Effect.succeed(false)
+            : (session.deliver?.(schedule) ?? Effect.succeed(false))
+        },
+        now: () => options.schedules.now(),
+      })
       const { protocol, attach } = yield* makeWebProtocol
       const store = makeStoreEvents()
       const connections = new Map<WebSocket, Connection>()
@@ -534,7 +621,14 @@ export const serveWeb = (options: ServeWebOptions): Effect.Effect<number> =>
       // service requirement as `unknown`; the layer is pinned to what it is.
       const rpc: Layer.Layer<never> = RpcServer.layer(UiRpcs).pipe(
         Layer.provide(
-          handlersOf(registry, options.settings, options.workspaces, options.commands, store),
+          handlersOf(
+            registry,
+            options.settings,
+            options.workspaces,
+            options.commands,
+            store,
+            options.schedules,
+          ),
         ),
         Layer.provide(Layer.succeed(RpcServer.Protocol, protocol)),
       ) as unknown as Layer.Layer<never>

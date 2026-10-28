@@ -10,6 +10,11 @@ import type { ScheduleRule } from './schedule-time.ts'
 /** One standing instruction: when it comes around, the model is told to do this. */
 export interface Schedule {
   readonly id: string
+  /**
+   * The session the schedule was written in and delivers to. Absent only for a
+   * schedule an older session log recorded before the host kept them.
+   */
+  readonly sessionId?: string
   readonly rule: ScheduleRule
   /** What to tell the model when the time arrives. */
   readonly prompt: string
@@ -17,6 +22,10 @@ export interface Schedule {
   readonly title?: string
   /** When the schedule was written, which is where an interval counts from. */
   readonly createdAt: number
+  /** When the host last delivered it; absent until then. A paused schedule keeps its place. */
+  readonly lastFiredAt?: number
+  /** A schedule the human stopped, kept so it can start again; absent reads as no. */
+  readonly paused?: boolean
 }
 
 /** The source of the message the driver sends when a schedule comes due. */
@@ -34,21 +43,36 @@ declare module '@jozo-harness/session/events' {
 /** The rule shapes a schedule accepts, as the model sees them in a schema. */
 export const RuleSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literals(['every']), seconds: Schema.Int }),
-  Schema.Struct({ kind: Schema.Literals(['daily']), time: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literals(['daily']),
+    time: Schema.String,
+    timeZone: Schema.optionalKey(Schema.String),
+  }),
   Schema.Struct({
     kind: Schema.Literals(['weekly']),
     weekdays: Schema.Array(Schema.Int),
     time: Schema.String,
+    timeZone: Schema.optionalKey(Schema.String),
   }),
-  Schema.Struct({ kind: Schema.Literals(['cron']), expression: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literals(['cron']),
+    expression: Schema.String,
+    timeZone: Schema.optionalKey(Schema.String),
+  }),
+  Schema.Struct({ kind: Schema.Literals(['at']), at: Schema.Number }),
+  Schema.Struct({ kind: Schema.Literals(['after']), seconds: Schema.Int }),
 ])
 
-const ScheduleSchema = Schema.Struct({
+/** One schedule as the host file, a session event, and the tool result all spell it. */
+export const ScheduleSchema = Schema.Struct({
   id: Schema.String,
+  sessionId: Schema.optionalKey(Schema.String),
   rule: RuleSchema,
   prompt: Schema.String,
   title: Schema.optionalKey(Schema.String),
   createdAt: Schema.Number,
+  lastFiredAt: Schema.optionalKey(Schema.Number),
+  paused: Schema.optionalKey(Schema.Boolean),
 })
 
 /** Schemas for the session events this module adds. */
@@ -97,9 +121,14 @@ export const lastFiredAt = (
 /** How a rule reads to the model: short, and the same everywhere it is shown. */
 export const ruleText = (rule: ScheduleRule): string => {
   if (rule.kind === 'every') return 'every ' + String(rule.seconds) + 's'
-  if (rule.kind === 'daily') return 'daily at ' + rule.time
-  if (rule.kind === 'weekly') return 'weekly on ' + rule.weekdays.join(',') + ' at ' + rule.time
-  return 'cron ' + rule.expression
+  if (rule.kind === 'at') return 'at ' + new Date(rule.at).toISOString()
+  if (rule.kind === 'after') return 'in ' + String(rule.seconds) + 's'
+  const zone = rule.timeZone === undefined ? '' : ' (' + rule.timeZone + ')'
+  if (rule.kind === 'daily') return 'daily at ' + rule.time + zone
+  if (rule.kind === 'weekly') {
+    return 'weekly on ' + rule.weekdays.join(',') + ' at ' + rule.time + zone
+  }
+  return 'cron ' + rule.expression + zone
 }
 
 /** The shortest name a schedule carries: its title, or the prompt's first line for older ones. */
@@ -109,9 +138,34 @@ export const scheduleTitle = (schedule: Schedule): string => {
   return first
 }
 
+/** The fields a page and the model read back about one schedule, the same in both places. */
+export interface ScheduleView {
+  readonly id: string
+  readonly when: string
+  readonly title: string
+  readonly prompt: string
+  readonly lastFiredAt: number
+  readonly paused: boolean
+}
+
+/** One schedule as the run pane and the model's list both show it. */
+export const scheduleViewOf = (schedule: Schedule): ScheduleView => ({
+  id: schedule.id,
+  when: ruleText(schedule.rule),
+  title: scheduleTitle(schedule),
+  prompt: schedule.prompt,
+  lastFiredAt: schedule.lastFiredAt ?? 0,
+  paused: schedule.paused === true,
+})
+
 /** How a schedule reads in a list. */
 export const scheduleLine = (schedule: Schedule): string =>
-  schedule.id + ' ' + ruleText(schedule.rule) + ' -> ' + scheduleTitle(schedule)
+  schedule.id +
+  ' ' +
+  ruleText(schedule.rule) +
+  ' -> ' +
+  scheduleTitle(schedule) +
+  (schedule.paused === true ? ' (paused)' : '')
 
 /** The message the driver sends when a schedule comes due. */
 export const renderSchedulePrompt = (schedule: Schedule): string =>

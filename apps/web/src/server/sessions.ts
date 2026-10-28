@@ -1,4 +1,5 @@
 import type { UiHost } from '@jozo-harness/ui-protocol'
+import type { Schedule } from '@jozo-harness/tools-tier1'
 import { Deferred, Effect, Exit, Scope } from 'effect'
 import type { CommandView, JobDetailView, RunStateView, SessionSummary } from '../shared/rpc.ts'
 import type { WebError } from './errors.ts'
@@ -19,6 +20,10 @@ export interface OpenSession {
   readonly stopSubagent: (id: string) => Effect.Effect<void, WebError>
   /** Whether the session still owns running work: a turn, a job, or a child agent. */
   readonly busy: () => boolean
+  /** Hands one due schedule to the session it belongs to; false when it could not. */
+  readonly deliver?: (schedule: Schedule) => Effect.Effect<boolean>
+  /** Reads the schedules an older session log recorded into the host store. */
+  readonly adoptSchedules?: () => void
 }
 
 /**

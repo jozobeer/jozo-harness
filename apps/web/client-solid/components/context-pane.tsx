@@ -12,7 +12,7 @@ import type { Pane } from '../../src/ui/state.ts'
 import { THEMES, type Theme } from '../../src/ui/theme.ts'
 import type { TurnView } from '../../src/ui/trajectory.ts'
 import { basenameOf, childSessionsOf, elapsedOf, pagesOf } from '../lib.ts'
-import type { SessionStore } from '../store.ts'
+import type { ScheduleDraft, SessionStore } from '../store.ts'
 import { Review } from './review.tsx'
 import { Inspector } from './inspector.tsx'
 import { Button } from './ui/button.tsx'
@@ -573,6 +573,191 @@ const Plugins = () => {
   )
 }
 
+/** The kinds a page offers; each maps to one field of the model's schedule tool. */
+const SCHEDULE_KINDS = ['after', 'daily', 'weekly', 'cron', 'at'] as const
+type ScheduleKind = (typeof SCHEDULE_KINDS)[number]
+
+const WHEN_HINT: Readonly<Record<ScheduleKind, string>> = {
+  after: 'seconds from now',
+  daily: '08:30',
+  weekly: '08:30',
+  cron: '30 18 * * 1-5',
+  at: 'date and time',
+}
+
+/** The New schedule form and the standing ones, over the same host store as the tool. */
+const Schedules = (props: { store: SessionStore; schedules: RunStateView['schedules'] }) => {
+  const [building, setBuilding] = createSignal(false)
+  const [prompt, setPrompt] = createSignal('')
+  const [title, setTitle] = createSignal('')
+  const [kind, setKind] = createSignal<ScheduleKind>('after')
+  const [when, setWhen] = createSignal('60')
+  const [weekdays, setWeekdays] = createSignal('1')
+  const [zone, setZone] = createSignal('')
+
+  /** The prompt and title every draft carries; only a wall-clock kind keeps the zone. */
+  const draftBase = (zoned: boolean): ScheduleDraft => ({
+    prompt: prompt(),
+    ...(title().trim() === '' ? {} : { title: title().trim() }),
+    ...(zoned && zone().trim() !== '' ? { timeZone: zone().trim() } : {}),
+  })
+
+  /** A blank seconds field still opens the form; only a number becomes the rule. */
+  const afterDraft = (draft: ScheduleDraft, when: string): ScheduleDraft => {
+    const seconds = Number(when)
+    return Number.isFinite(seconds) ? { ...draft, after: seconds } : draft
+  }
+
+  const weeklyDraft = (draft: ScheduleDraft, days: string, time: string): ScheduleDraft => ({
+    ...draft,
+    weekly: {
+      weekdays: days
+        .split(',')
+        .map((day) => Number(day.trim()))
+        .filter((day) => Number.isInteger(day)),
+      time,
+    },
+  })
+
+  /** A time the page cannot read becomes no draft, rather than a rule the host must refuse. */
+  const atDraft = (draft: ScheduleDraft, when: string): ScheduleDraft | undefined => {
+    const at = new Date(when)
+    return Number.isNaN(at.getTime()) ? undefined : { ...draft, at: at.toISOString() }
+  }
+
+  const draftOf = (): ScheduleDraft | undefined => {
+    if (prompt().trim() === '') return undefined
+    switch (kind()) {
+      case 'after':
+        return afterDraft(draftBase(false), when())
+      case 'daily':
+        return { ...draftBase(true), daily: when().trim() }
+      case 'weekly':
+        return weeklyDraft(draftBase(true), weekdays(), when().trim())
+      case 'cron':
+        return { ...draftBase(true), cron: when().trim() }
+      case 'at':
+        return atDraft(draftBase(false), when())
+    }
+  }
+
+  const create = () => {
+    const draft = draftOf()
+    if (draft === undefined) return
+    props.store.createSchedule(draft)
+    setPrompt('')
+    setTitle('')
+    setBuilding(false)
+  }
+
+  return (
+    <div class="run-schedules-wrap">
+      <div class="run-section">
+        <span class="run-section-title">schedules</span>
+        <button class="run-schedule-new" type="button" onClick={() => setBuilding(!building())}>
+          {building() ? 'Cancel' : 'New'}
+        </button>
+      </div>
+      <Show when={building()}>
+        <div class="run-schedule-form">
+          <input
+            class="run-schedule-prompt"
+            placeholder="what to tell the model"
+            value={prompt()}
+            onInput={(event) => setPrompt(event.currentTarget.value)}
+          />
+          <input
+            class="run-schedule-title"
+            placeholder="title (optional)"
+            value={title()}
+            onInput={(event) => setTitle(event.currentTarget.value)}
+          />
+          <select
+            class="run-schedule-kind"
+            value={kind()}
+            onChange={(event) => {
+              const next = event.currentTarget.value as ScheduleKind
+              setKind(next)
+              setWhen(next === 'after' ? '60' : next === 'at' ? '' : '08:30')
+            }}
+          >
+            <For each={SCHEDULE_KINDS}>{(each) => <option value={each}>{each}</option>}</For>
+          </select>
+          <Show when={kind() === 'weekly'}>
+            <input
+              class="run-schedule-weekdays"
+              placeholder="weekdays, 1 = Monday"
+              value={weekdays()}
+              onInput={(event) => setWeekdays(event.currentTarget.value)}
+            />
+          </Show>
+          <input
+            class="run-schedule-when"
+            type={kind() === 'at' ? 'datetime-local' : 'text'}
+            placeholder={WHEN_HINT[kind()]}
+            value={when()}
+            onInput={(event) => setWhen(event.currentTarget.value)}
+          />
+          <Show when={kind() === 'daily' || kind() === 'weekly' || kind() === 'cron'}>
+            <input
+              class="run-schedule-zone"
+              placeholder="IANA zone (optional)"
+              value={zone()}
+              onInput={(event) => setZone(event.currentTarget.value)}
+            />
+          </Show>
+          <button class="run-schedule-create" type="button" onClick={create}>
+            Create
+          </button>
+        </div>
+      </Show>
+      <Show
+        when={props.schedules.length === 0}
+        fallback={
+          <ul class="run-schedules">
+            <For each={props.schedules}>
+              {(schedule) => (
+                <li>
+                  <details class="run-schedule">
+                    <summary>
+                      <span class="run-when">{schedule.when}</span>
+                      <span class="run-title">{schedule.title}</span>
+                      <Show when={schedule.paused}>
+                        <span class="run-paused">paused</span>
+                      </Show>
+                    </summary>
+                    <p class="run-prompt">{schedule.prompt}</p>
+                    <div class="run-schedule-actions">
+                      <button
+                        type="button"
+                        class="run-schedule-pause"
+                        onClick={() =>
+                          props.store.pauseSchedule(schedule.id, schedule.paused !== true)
+                        }
+                      >
+                        {schedule.paused === true ? 'Resume' : 'Stop'}
+                      </button>
+                      <button
+                        type="button"
+                        class="run-schedule-delete"
+                        onClick={() => props.store.deleteSchedule(schedule.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </details>
+                </li>
+              )}
+            </For>
+          </ul>
+        }
+      >
+        <div class="run-empty">no schedules</div>
+      </Show>
+    </div>
+  )
+}
+
 const Run = (props: { store: SessionStore }) => {
   const run = () => props.store.state().run
   return (
@@ -588,23 +773,7 @@ const Run = (props: { store: SessionStore }) => {
             <Skills skills={state().skills} />
             <PromptSections sections={state().promptSections} />
             <Pages store={props.store} pages={pagesOf(props.store.state().trace)} />
-            <Show when={state().schedules.length > 0}>
-              <ul class="run-schedules">
-                <For each={state().schedules}>
-                  {(schedule) => (
-                    <li>
-                      <details class="run-schedule">
-                        <summary>
-                          <span class="run-when">{schedule.when}</span>
-                          <span class="run-title">{schedule.title}</span>
-                        </summary>
-                        <p class="run-prompt">{schedule.prompt}</p>
-                      </details>
-                    </li>
-                  )}
-                </For>
-              </ul>
-            </Show>
+            <Schedules store={props.store} schedules={state().schedules} />
             <Show when={state().jobs.length > 0}>
               <Jobs store={props.store} jobs={state().jobs} />
             </Show>

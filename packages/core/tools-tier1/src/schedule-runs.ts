@@ -1,4 +1,5 @@
 import { Duration, Effect, Queue } from 'effect'
+import type { ScheduleStore } from './schedule-store.ts'
 import type { HookRegistry } from '@jozo-harness/kernel'
 import type { Agent } from '@jozo-harness/agent'
 import type { SessionEvent } from '@jozo-harness/session'
@@ -80,4 +81,50 @@ export const installScheduleRuns = (
       if (session !== agent.session) return
       if (event.type.startsWith('schedule/')) Queue.offerUnsafe(changed, undefined)
     })
+  })
+
+/** What the host clock needs: the file it reads, the way to reach one session, and a clock. */
+export interface HostClock {
+  readonly store: Pick<ScheduleStore, 'due' | 'write'>
+  /** Hands one schedule to the session it belongs to; false when nobody could take it. */
+  readonly deliver: (schedule: Schedule) => Effect.Effect<boolean>
+  readonly now?: () => number
+  /** How often the clock looks; one second keeps the delivered instant close to the due one. */
+  readonly intervalMs?: number
+}
+
+/**
+ * Delivers every schedule whose time has come. A delivery nobody could take is
+ * left due instead of recorded as fired, so opening its session later catches up.
+ */
+export const fireDueSchedules = (clock: HostClock, at?: number): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const now = clock.now ?? Date.now
+    for (const schedule of clock.store.due(at ?? now())) {
+      const delivered = yield* clock
+        .deliver(schedule)
+        .pipe(Effect.catchCause(() => Effect.succeed(false)))
+      if (delivered) {
+        yield* Effect.sync(() => clock.store.write({ kind: 'fired', id: schedule.id, at: now() }))
+      }
+    }
+  })
+
+/**
+ * The host's clock: a loop that fires what is due, independent of any one agent.
+ * It belongs to the process that outlives sessions, which is why the web server
+ * installs it rather than each session.
+ */
+export const installHostScheduleRuns = (
+  clock: HostClock,
+): Effect.Effect<void, never, import('effect').Scope.Scope> =>
+  Effect.gen(function* () {
+    yield* Effect.forkScoped(
+      Effect.gen(function* () {
+        while (true) {
+          yield* fireDueSchedules(clock)
+          yield* Effect.sleep(Duration.millis(clock.intervalMs ?? 1000))
+        }
+      }),
+    )
   })

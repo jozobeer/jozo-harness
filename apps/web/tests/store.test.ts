@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import type { UiCommand, UiEvent, UiHost, UiSessionEvent } from '@jozo-harness/ui-protocol'
+import { makeScheduleStore } from '@jozo-harness/tools-tier1'
 import { Cause, Deferred, Effect, Queue, Stream, type Scope } from 'effect'
 import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -369,6 +370,7 @@ const serve = (
           : { initial: { session: openOf(host), close: () => Effect.void } }),
         factory,
         settings: (options.settings ?? makeSettings()).port,
+        schedules: makeScheduleStore(join(root, 'schedules.json')),
         workspaces: workspacesPort,
         commands: () => [],
         plugins: {

@@ -1,19 +1,18 @@
 import { Schema, Effect } from 'effect'
-import type { SessionEvent } from '@jozo-harness/session'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
-import { currentSchedules, RuleSchema, scheduleLine, type Schedule } from './schedule-state.ts'
-import { nextDue, type ScheduleRule } from './schedule-time.ts'
+import { ScheduleSchema, scheduleLine, type Schedule } from './schedule-state.ts'
+import { isValidTimeZone, nextDue, type ScheduleRule } from './schedule-time.ts'
 
-const ACTIONS = ['create', 'list', 'update', 'delete'] as const
+const ACTIONS = ['create', 'list', 'update', 'pause', 'resume', 'delete'] as const
 
 const Parameters = Schema.Struct({
   action: Schema.Literals(ACTIONS).annotate({
     description:
-      'create adds a schedule, list shows the standing ones, update changes one, delete removes one.',
+      'create adds a schedule, list shows the standing ones, update changes one, pause stops one without forgetting it, resume starts it again, and delete removes one.',
   }),
   id: Schema.optionalKey(
     Schema.String.annotate({
-      description: 'The schedule to change. Required with update and delete.',
+      description: 'The schedule to change. Required with update, pause, resume, and delete.',
     }),
   ),
   prompt: Schema.optionalKey(
@@ -46,6 +45,26 @@ const Parameters = Schema.Struct({
       description: "A five-field cron expression, like '30 18 * * 1-5'.",
     }),
   ),
+  timeZone: Schema.optionalKey(
+    Schema.String.annotate({
+      description:
+        "The IANA zone a daily, weekly, or cron wall clock reads, like 'Asia/Tokyo'. Defaults to this host's own zone.",
+    }),
+  ),
+  at: Schema.optionalKey(
+    Schema.String.annotate({
+      description:
+        "One absolute instant as ISO 8601 with an offset, like '2026-10-30T09:00:00+09:00'. A time that has passed is refused.",
+    }),
+  ),
+  after: Schema.optionalKey(
+    Schema.Int.annotate({ description: 'One run this many seconds from now. Must be positive.' }),
+  ),
+  paused: Schema.optionalKey(
+    Schema.Boolean.annotate({
+      description: 'With update, true stops the schedule and false starts it again.',
+    }),
+  ),
 })
 
 export type ScheduleArgs = Schema.Schema.Type<typeof Parameters>
@@ -56,14 +75,16 @@ export interface ScheduleValue {
   readonly schedules: ReadonlyArray<Schedule>
 }
 
-/** Where schedules live: the session log, which is also what makes them durable. */
-export interface ScheduleLog {
-  readonly events: () => ReadonlyArray<SessionEvent>
-  /** Records the newest state of one schedule. */
-  readonly write: (event: ScheduleWrite) => Effect.Effect<void, ToolError>
-  /** How the session names the schedule it is about to write. */
+/** Where this session's schedules live: the host store, shared with the web page. */
+export interface ScheduleHost {
+  /** The session a created schedule delivers to. */
+  readonly sessionId: string
+  /** The standing schedules of this session, as the host holds them now. */
+  readonly list: () => ReadonlyArray<Schedule>
+  /** Applies one change to the host store. */
+  readonly write: (write: ScheduleWrite) => Effect.Effect<void, ToolError>
+  /** A new id, unique in the host's file rather than only in this session. */
   readonly nextId: () => string
-  /** The clock the schedule is created against. */
   readonly now: () => number
 }
 
@@ -74,38 +95,111 @@ export type ScheduleWrite =
 
 const refuse = (message: string) => new ToolError({ code: 'invalid-arguments', message })
 
-/** The one rule the arguments describe, or a refusal when they describe none or several. */
-const ruleOf = (args: ScheduleArgs): ScheduleRule => {
+const recurring = (args: ScheduleRuleArgs): boolean =>
+  args.daily !== undefined || args.weekly !== undefined || args.cron !== undefined
+
+/** The rule arguments a model call and a page share, so both refuse the same ones. */
+export interface ScheduleRuleArgs {
+  readonly every?: number
+  readonly daily?: string
+  readonly weekly?: { readonly weekdays: ReadonlyArray<number>; readonly time: string }
+  readonly cron?: string
+  readonly timeZone?: string
+  readonly at?: string
+  readonly after?: number
+}
+
+/** The zone the call names, checked where a wall-clock rule can still be changed. */
+const zoneOfArgs = (args: ScheduleRuleArgs): string | undefined => {
+  const zone = args.timeZone
+  if (zone === undefined) return undefined
+  if (zone.trim() === '') throw refuse('timeZone is empty')
+  if (!isValidTimeZone(zone)) throw refuse('timeZone is not an IANA zone: ' + zone)
+  // A zone only means something to a rule that reads a wall clock, so pairing it
+  // with every, at, or after would be silently ignored rather than honoured.
+  if (!recurring(args)) {
+    throw refuse('timeZone goes with daily, weekly, or cron, not with every, at, or after')
+  }
+  return zone
+}
+
+/** One wall-clock rule, carrying the zone only when the call named one. */
+const inZone = (
+  rule:
+    | { readonly kind: 'daily'; readonly time: string }
+    | { readonly kind: 'weekly'; readonly weekdays: ReadonlyArray<number>; readonly time: string }
+    | { readonly kind: 'cron'; readonly expression: string },
+  zone: string | undefined,
+): ScheduleRule => (zone === undefined ? rule : { ...rule, timeZone: zone })
+
+/** One absolute instant; an offset is required because a bare date names no moment. */
+const atRule = (at: string): ScheduleRule => {
+  const instant = Date.parse(at)
+  if (Number.isNaN(instant)) throw refuse('at is not a date with an offset: ' + at)
+  if (!/(?:Z|[+-]\d{2}:\d{2})$/.test(at.trim())) {
+    throw refuse('at needs an offset, like 2026-10-30T09:00:00+09:00')
+  }
+  return { kind: 'at', at: instant }
+}
+
+/** Every rule the call names, in field order, so the refusal can count them. */
+const namedRules = (
+  args: ScheduleRuleArgs,
+  zone: string | undefined,
+): Array<readonly [string, ScheduleRule]> => {
   const named: Array<readonly [string, ScheduleRule]> = []
   if (args.every !== undefined) named.push(['every', { kind: 'every', seconds: args.every }])
-  if (args.daily !== undefined) named.push(['daily', { kind: 'daily', time: args.daily }])
+  if (args.daily !== undefined) {
+    named.push(['daily', inZone({ kind: 'daily', time: args.daily }, zone)])
+  }
   if (args.weekly !== undefined) {
     named.push([
       'weekly',
-      { kind: 'weekly', weekdays: args.weekly.weekdays, time: args.weekly.time },
+      inZone({ kind: 'weekly', weekdays: args.weekly.weekdays, time: args.weekly.time }, zone),
     ])
   }
-  if (args.cron !== undefined) named.push(['cron', { kind: 'cron', expression: args.cron }])
+  if (args.cron !== undefined) {
+    named.push(['cron', inZone({ kind: 'cron', expression: args.cron }, zone)])
+  }
+  if (args.at !== undefined) named.push(['at', atRule(args.at)])
+  if (args.after !== undefined) named.push(['after', { kind: 'after', seconds: args.after }])
+  return named
+}
+
+/** The one rule the arguments describe, or a refusal when they describe none or several. */
+const ruleOf = (args: ScheduleRuleArgs): ScheduleRule => {
+  const named = namedRules(args, zoneOfArgs(args))
   const [first] = named
   if (first === undefined) {
-    throw refuse('one of every, daily, weekly, or cron says when the schedule comes around')
+    throw refuse(
+      'one of every, daily, weekly, cron, at, or after says when the schedule comes around',
+    )
   }
   if (named.length > 1) {
-    throw refuse('name one of every, daily, weekly, or cron, not ' + String(named.length))
+    throw refuse(
+      'name one of every, daily, weekly, cron, at, or after, not ' + String(named.length),
+    )
   }
   return first[1]
 }
 
 /** A rule that never comes around is refused where the model can still change it. */
+export const scheduleRuleOf = (args: ScheduleRuleArgs, from: number): ScheduleRule =>
+  checkedRule(ruleOf(args), from)
+
 const checkedRule = (rule: ScheduleRule, from: number): ScheduleRule => {
   if (nextDue(rule, from, undefined) === undefined) {
-    throw refuse('this rule never comes around: ' + JSON.stringify(rule))
+    throw refuse(
+      rule.kind === 'at'
+        ? 'at is already in the past'
+        : 'this rule never comes around: ' + JSON.stringify(rule),
+    )
   }
   return rule
 }
 
 /** A title the lists can show: trimmed, non-empty, and no longer than dsh's 120 characters. */
-const checkedTitle = (title: string | undefined): string | undefined => {
+export const scheduleTitleOf = (title: string | undefined): string | undefined => {
   if (title === undefined) return undefined
   const trimmed = title.trim()
   if (trimmed === '') throw refuse('title cannot be empty')
@@ -113,106 +207,150 @@ const checkedTitle = (title: string | undefined): string | undefined => {
   return trimmed
 }
 
-const scheduleOf = (args: ScheduleArgs, log: ScheduleLog): Schedule => {
-  const title = checkedTitle(args.title)
+const scheduleOf = (args: ScheduleArgs, host: ScheduleHost): Schedule => {
+  const title = scheduleTitleOf(args.title)
+  const now = host.now()
   return {
-    id: log.nextId(),
-    rule: checkedRule(ruleOf(args), log.now()),
+    id: host.nextId(),
+    sessionId: host.sessionId,
+    rule: scheduleRuleOf(args, now),
     prompt: args.prompt ?? '',
     ...(title === undefined ? {} : { title }),
-    createdAt: log.now(),
+    createdAt: now,
   }
 }
 
-const createSchedule = (args: ScheduleArgs, log: ScheduleLog) => {
+const createSchedule = (args: ScheduleArgs, host: ScheduleHost) => {
   if (args.prompt === undefined || args.prompt.trim() === '') {
     return Effect.fail(refuse('prompt is required to create a schedule'))
   }
-  const schedule = scheduleOf(args, log)
-  return log
-    .write({ kind: 'created', schedule })
-    .pipe(Effect.map(() => ({ action: 'create', schedules: [schedule] })))
+  try {
+    const schedule = scheduleOf(args, host)
+    return host
+      .write({ kind: 'created', schedule })
+      .pipe(Effect.map(() => ({ action: 'create', schedules: [schedule] })))
+  } catch (error) {
+    return Effect.fail(error instanceof ToolError ? error : refuse(String(error)))
+  }
 }
 
-const updateSchedule = (args: ScheduleArgs, log: ScheduleLog) => {
-  const current = currentSchedules(log.events()).find((schedule) => schedule.id === args.id)
-  if (current === undefined) {
-    return Effect.fail(refuse('no schedule with that id: ' + String(args.id)))
-  }
-  const rule =
-    args.every === undefined &&
-    args.daily === undefined &&
-    args.weekly === undefined &&
-    args.cron === undefined
-      ? current.rule
-      : checkedRule(ruleOf(args), log.now())
-  const title = checkedTitle(args.title)
-  const schedule: Schedule = {
+/** The fields that say when a schedule comes around; naming one replaces the rule. */
+const RULE_FIELDS = ['every', 'daily', 'weekly', 'cron', 'at', 'after'] as const
+
+const namesRule = (args: ScheduleArgs): boolean =>
+  RULE_FIELDS.some((field) => args[field] !== undefined)
+
+/** The standing schedule a call names, or nothing when the host holds no such id. */
+const findSchedule = (args: ScheduleArgs, host: ScheduleHost): Schedule | undefined =>
+  host.list().find((schedule) => schedule.id === args.id)
+
+/** What an update turns a schedule into: the fields the call omits stay as they were. */
+const changedSchedule = (args: ScheduleArgs, host: ScheduleHost, current: Schedule): Schedule => {
+  const rule = namesRule(args) ? scheduleRuleOf(args, host.now()) : current.rule
+  const title = scheduleTitleOf(args.title)
+  return {
     ...current,
     rule,
     ...(args.prompt === undefined ? {} : { prompt: args.prompt }),
     ...(title === undefined ? {} : { title }),
+    ...(args.paused === undefined ? {} : { paused: args.paused }),
   }
-  return log
-    .write({ kind: 'updated', schedule })
-    .pipe(Effect.map(() => ({ action: 'update', schedules: [schedule] })))
 }
 
-const deleteSchedule = (args: ScheduleArgs, log: ScheduleLog) => {
-  const current = currentSchedules(log.events()).find((schedule) => schedule.id === args.id)
+const updateSchedule = (args: ScheduleArgs, host: ScheduleHost) => {
+  const current = findSchedule(args, host)
   if (current === undefined) {
     return Effect.fail(refuse('no schedule with that id: ' + String(args.id)))
   }
-  return log
+  try {
+    const schedule = changedSchedule(args, host, current)
+    return host
+      .write({ kind: 'updated', schedule })
+      .pipe(Effect.map(() => ({ action: 'update', schedules: [schedule] })))
+  } catch (error) {
+    return Effect.fail(error instanceof ToolError ? error : refuse(String(error)))
+  }
+}
+
+const setPaused = (args: ScheduleArgs, host: ScheduleHost, paused: boolean) => {
+  const current = findSchedule(args, host)
+  if (current === undefined) {
+    return Effect.fail(refuse('no schedule with that id: ' + String(args.id)))
+  }
+  const schedule: Schedule = { ...current, paused }
+  return host
+    .write({ kind: 'updated', schedule })
+    .pipe(Effect.map(() => ({ action: paused ? 'pause' : 'resume', schedules: [schedule] })))
+}
+
+const deleteSchedule = (args: ScheduleArgs, host: ScheduleHost) => {
+  const current = findSchedule(args, host)
+  if (current === undefined) {
+    return Effect.fail(refuse('no schedule with that id: ' + String(args.id)))
+  }
+  return host
     .write({ kind: 'deleted', id: current.id })
     .pipe(Effect.map(() => ({ action: 'delete', schedules: [] })))
 }
 
 /** The line the model reads back: what happened, and what stands now. */
-const renderValue = (value: ScheduleValue, events: ReadonlyArray<SessionEvent>): string => {
+const renderValue = (value: ScheduleValue, host: ScheduleHost): string => {
   if (value.action === 'list') {
-    const standing = currentSchedules(events)
+    const standing = host.list()
     return standing.length === 0
       ? '(no schedules)'
       : standing.map((schedule) => scheduleLine(schedule)).join('\n')
   }
   if (value.action === 'delete') return 'deleted the schedule'
   const [schedule] = value.schedules
-  return schedule === undefined ? '(nothing changed)' : 'scheduled ' + scheduleLine(schedule)
+  if (schedule === undefined) return '(nothing changed)'
+  if (value.action === 'pause') return 'paused ' + scheduleLine(schedule)
+  if (value.action === 'resume') return 'resumed ' + scheduleLine(schedule)
+  return 'scheduled ' + scheduleLine(schedule)
+}
+
+/** One action of the tool, routed to the function that carries it out. */
+const runAction = (
+  args: ScheduleArgs,
+  host: ScheduleHost,
+): Effect.Effect<ScheduleValue, ToolError> => {
+  switch (args.action) {
+    case 'create':
+      return createSchedule(args, host)
+    case 'list':
+      return Effect.succeed({ action: 'list', schedules: [] })
+    case 'pause':
+      return setPaused(args, host, true)
+    case 'resume':
+      return setPaused(args, host, false)
+    case 'update':
+      return updateSchedule(args, host)
+    case 'delete':
+      return deleteSchedule(args, host)
+  }
 }
 
 /**
- * Records the standing instructions whose time brings the model back. Each call
- * writes one state to the log, so a resumed session still knows its schedules.
+ * Records a standing instruction whose time brings the model back. The host
+ * store is what runs, so the model and the web page see and change one set.
  */
 export const makeScheduleTool = (
-  log: ScheduleLog,
+  host: ScheduleHost,
 ): ToolDefinition<ScheduleArgs, ScheduleValue> => ({
   name: 'schedule',
   description:
-    'Keeps a standing instruction that brings this session back when its time arrives: create one with a rule and the prompt to deliver, and list, update, or delete the ones standing. Use it for work that should happen later or repeatedly.',
+    'Keeps a standing instruction that brings this session back when its time arrives: create one with a rule and the prompt to deliver, and list, update, pause, resume, or delete the ones standing. A rule reads its wall clock in the IANA zone it names. Use it for work that should happen later or repeatedly.',
   parameters: Parameters,
   output: {
     schema: Schema.Struct({
       action: Schema.String,
-      schedules: Schema.Array(
-        Schema.Struct({
-          id: Schema.String,
-          rule: RuleSchema,
-          prompt: Schema.String,
-          title: Schema.optionalKey(Schema.String),
-          createdAt: Schema.Number,
-        }),
-      ),
+      schedules: Schema.Array(ScheduleSchema),
     }),
-    render: (_args, value) => [{ type: 'text', text: renderValue(value, log.events()) }],
+    render: (_args, value) => [{ type: 'text', text: renderValue(value, host) }],
   },
   execute: (args) => {
     try {
-      if (args.action === 'create') return createSchedule(args, log)
-      if (args.action === 'list') return Effect.succeed({ action: 'list', schedules: [] })
-      if (args.action === 'update') return updateSchedule(args, log)
-      return deleteSchedule(args, log)
+      return runAction(args, host)
     } catch (error) {
       return Effect.fail(error instanceof ToolError ? error : refuse(String(error)))
     }

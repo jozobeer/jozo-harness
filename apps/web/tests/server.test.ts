@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { request } from 'node:http'
-import { makeArtifactTool } from '@jozo-harness/tools-tier1'
+import { makeArtifactTool, makeScheduleStore } from '@jozo-harness/tools-tier1'
 import type { UiCommand, UiEvent, UiHost } from '@jozo-harness/ui-protocol'
 import { WebSocket } from 'ws'
 import { Deferred, Effect, Exit, Fiber, Option, Queue, Stream, type Scope } from 'effect'
@@ -430,6 +430,12 @@ const start = (
         initial: { session: web.initial, close: web.initialClose },
         factory: web.factory,
         settings: settings.port,
+        schedules: makeScheduleStore(
+          join(
+            tmpdir(),
+            'jzh-test-schedules-' + String(process.pid) + '-' + String(Math.random()).slice(2),
+          ),
+        ),
         workspaces: workspaces.port,
         commands: web.initial.commands,
         plugins,
@@ -559,6 +565,45 @@ describe('the web transport', () => {
     expect(observed.traversalStatus).toBe(404)
     await rm(root, { recursive: true, force: true })
     await rm(outside, { recursive: true, force: true })
+  })
+
+  test('a page creates, stops, and removes a schedule in the host store', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-schedule-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, makeSettings())
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const created = yield* client.scheduleCreate({
+              sessionId: 'a',
+              prompt: 'check the build',
+              title: 'build',
+              after: 60,
+            })
+            const id = created[0]?.id ?? ''
+            const paused = yield* client.schedulePause({ sessionId: 'a', id, paused: true })
+            const refused = yield* client
+              .scheduleCreate({ sessionId: 'a', prompt: 'never', cron: '0 0 30 2 *' })
+              .pipe(Effect.flip)
+            const deleted = yield* client.scheduleDelete({ sessionId: 'a', id })
+            return { created, paused, refused, deleted }
+          }).pipe(clientLayers(started.wsUrl))
+          const answer = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return answer
+        }),
+      ),
+    )
+
+    expect(observed.created).toMatchObject([{ when: 'in 60s', title: 'build', paused: false }])
+    expect(observed.paused).toMatchObject([{ paused: true }])
+    expect(observed.refused).toContain('never comes around')
+    expect(observed.deleted).toEqual([])
+    await rm(root, { recursive: true, force: true })
   })
 
   test('a page reads inline or as a download, and asks without a cookie are refused', async () => {
