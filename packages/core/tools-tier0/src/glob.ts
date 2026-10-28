@@ -1,7 +1,9 @@
+import { matchesGlob } from 'node:path'
 import { Schema, Effect } from 'effect'
 import { ToolError, writeSpill, type ToolDefinition } from '@jozo-harness/tools'
 import { takePage } from './page.ts'
-import { walkFiles } from './walk.ts'
+import { fallbackNote, defaultRipgrep, listWithRipgrep, type Ripgrep } from './ripgrep.ts'
+import { orderPaths, walkFiles } from './walk.ts'
 import { resolveSearchStart } from './workspace.ts'
 
 /** A glob stops collecting here; the walk is bounded so a broad pattern cannot run forever. */
@@ -33,6 +35,8 @@ export interface GlobValue {
   readonly truncated: boolean
   /** Where the complete list was stored, when the page cannot show all of it. */
   readonly locator?: string
+  /** Why the built-in walker ran instead of ripgrep, when it did. */
+  readonly fallback?: string
 }
 
 /** The way back to a result the page could not hold. */
@@ -43,10 +47,13 @@ const recovery = (locator: string | undefined): string =>
       locator +
       '; use the read tool with offset and limit to page through it'
 
+const noteOf = (fallback: string | undefined): string =>
+  fallback === undefined ? '' : '\n' + fallbackNote(fallback)
+
 const renderGlob = (
   value: GlobValue,
 ): ReadonlyArray<{ readonly type: 'text'; readonly text: string }> => {
-  const body = value.files.join('\n')
+  const body = value.files.join('\n') + noteOf(value.fallback)
   if (!value.truncated) return [{ type: 'text', text: body }]
   return [
     {
@@ -64,13 +71,19 @@ const renderGlob = (
   ]
 }
 
-/** Lists workspace files whose relative path matches a glob, newest modification last. Dot-entries are walked; .git and node_modules are not. */
-export const globTool: ToolDefinition<GlobArgs, GlobValue> = {
+/**
+ * Lists workspace files whose relative path matches a glob, newest modification
+ * last. ripgrep answers when PATH has it, so nested .gitignore files hold; a run
+ * without it says why it fell back to the walker.
+ */
+export const makeGlobTool = (
+  ripgrep: Ripgrep = defaultRipgrep,
+): ToolDefinition<GlobArgs, GlobValue> => ({
   name: 'glob',
   readOnly: true,
   presentCall: (args) => ({ summary: 'glob ' + args.pattern }),
   description:
-    'Lists workspace files matching a glob pattern, in modification-time order (oldest first). Use it to find files by name; use grep to search inside them. Dot-entries such as .github are walked; only node_modules and .git are never walked. A list too long to show is stored whole; read that file with offset and limit.',
+    'Lists workspace files matching a glob pattern, in modification-time order (oldest first). Use it to find files by name; use grep to search inside them. Dot-entries such as .github are walked; only node_modules and .git are never walked. ripgrep respects nested .gitignore files; without rg, the fallback reads only the workspace-root rules and says so. A list too long to show is stored whole; read that file with offset and limit.',
   parameters: Parameters,
   output: {
     schema: Schema.Struct({
@@ -78,6 +91,7 @@ export const globTool: ToolDefinition<GlobArgs, GlobValue> = {
       seen: Schema.Int,
       truncated: Schema.Boolean,
       locator: Schema.optionalKey(Schema.String),
+      fallback: Schema.optionalKey(Schema.String),
     }),
     render: (_args, value) => renderGlob(value),
   },
@@ -90,24 +104,43 @@ export const globTool: ToolDefinition<GlobArgs, GlobValue> = {
         )
       }
       const start = yield* resolveSearchStart(context.cwd, args.path)
-      // One path past the collection cap is enough to know the walk was stopped.
-      const found = yield* walkFiles({
-        cwd: context.cwd,
-        limit: GLOB_MAX_PATHS + 1,
-        pattern: args.pattern,
-        order: 'modified',
-        start,
-      })
+      // One path past the collection cap is enough to know the search was stopped.
+      const listing = yield* Effect.promise(() =>
+        listWithRipgrep(
+          {
+            cwd: context.cwd,
+            start,
+            limit: GLOB_MAX_PATHS + 1,
+            accept: (path) => matchesGlob(path, args.pattern),
+          },
+          ripgrep,
+        ),
+      )
+      const found =
+        listing.fallback === undefined
+          ? yield* orderPaths(context.cwd, listing.files, 'modified')
+          : yield* walkFiles({
+              cwd: context.cwd,
+              limit: GLOB_MAX_PATHS + 1,
+              pattern: args.pattern,
+              order: 'modified',
+              start,
+            })
       const complete = found.slice(0, GLOB_MAX_PATHS)
       const shown = takePage(complete, page, (path) => path)
-      if (found.length <= shown.length)
-        return { files: shown, seen: found.length, truncated: false }
+      const fallback = listing.fallback === undefined ? {} : { fallback: listing.fallback }
+      if (found.length <= shown.length) {
+        return { files: shown, seen: found.length, truncated: false, ...fallback }
+      }
       const locator = yield* writeSpill(context, 'glob', complete.join('\n'))
       return {
         files: shown,
         seen: found.length,
         truncated: true,
         ...(locator === undefined ? {} : { locator }),
+        ...fallback,
       }
     }),
-}
+})
+
+export const globTool: ToolDefinition<GlobArgs, GlobValue> = makeGlobTool()

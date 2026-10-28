@@ -498,6 +498,12 @@ jzh config                         # 入ったことを確かめる
 
 `/release` のように名前だけを送ると、その skill を読んで会話にカードを出す。turn は始まらない。後ろに文章を付けたときだけ、その文章を入力に turn が始まる。
 
+## 検索を ripgrep で行う
+
+`glob` と `grep` は、PATH に `rg` があれば ripgrep で検索する。`--no-ignore` は渡さないので、ワークスペース直下だけでなく入れ子の `.gitignore` と `.ignore` も効く。`grep` は ripgrep がバイナリと判定したファイルの一致を落とす。どちらも結果の上限を超えた分は spill に書き、locator から `read` で辿れる。
+
+`rg` が無い実行では組み込みの walker に落ちる。walker はワークスペース直下の `.gitignore` / `.ignore` しか読まないため、入れ子の ignore ファイルは効かない。結果の末尾にその理由と制限が出る。`rg` を入れるには `brew install ripgrep` などで PATH に置く。
+
 ## 書き込みと実行の許可を変える
 
 `preset` はコマンドを走らせる sandbox モードを決める。`read-only` は書き込み不可、`workspace-write` はコマンドの cwd と一時ディレクトリと `writableRoots` に書き込み可、`full` は封じ込めなし、`auto` は `workspace-write` と同じ sandbox で副作用のある呼び出しを実行前に審査する。同梱 `base` profile の `safety` 行に、変えたいキーだけを重ねる。
