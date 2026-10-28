@@ -248,6 +248,54 @@ const firstOf = <T>(fallback: T, values: ReadonlyArray<T | undefined>): T => {
   return fallback
 }
 
+/** What one request does with `reasoning_effort`, or the refusal that stops it. */
+export type ReasoningEffortDecision =
+  | { readonly kind: 'send'; readonly effort: string }
+  | { readonly kind: 'omit' }
+  | { readonly kind: 'reject'; readonly failure: LlmFailure }
+
+const acceptedEffortsOf = (
+  config: AgentLoopConfig,
+  capabilities: LlmCapabilities,
+  model: string,
+): ReadonlyArray<string> | null =>
+  config.models?.[model]?.reasoningEfforts ?? capabilities.reasoningEffort
+
+const defaultEffortOf = (config: AgentLoopConfig, model: string): string | undefined =>
+  config.models?.[model]?.defaultReasoningEffort ?? undefined
+
+const effortRefusal = (
+  model: string,
+  effort: string,
+  accepted: ReadonlyArray<string>,
+): LlmFailure => {
+  const offered = accepted.length === 0 ? 'none' : accepted.join(', ')
+  return new LlmFailure({
+    code: 'INVALID_REQUEST',
+    message: `model "${model}" does not accept reasoning effort "${effort}"; accepted: ${offered}`,
+  })
+}
+
+/**
+ * The effort one request sends. The model's own row wins over the endpoint-wide
+ * list, so a word another model on the same endpoint takes is still refused for
+ * this one. A session that names no word falls to the model's default, and a
+ * model that names none sends no field at all. An endpoint that declares no
+ * list keeps the deployment's word: the provider decides, as before.
+ */
+export const reasoningEffortOf = (
+  config: AgentLoopConfig,
+  capabilities: LlmCapabilities,
+  model: string,
+  selected: string | undefined,
+): ReasoningEffortDecision => {
+  const effort = selected ?? defaultEffortOf(config, model)
+  if (effort === undefined) return { kind: 'omit' }
+  const accepted = acceptedEffortsOf(config, capabilities, model)
+  if (accepted === null || accepted.includes(effort)) return { kind: 'send', effort }
+  return { kind: 'reject', failure: effortRefusal(model, effort, accepted) }
+}
+
 /**
  * The budget the loop measures requests against: the routed model's row where it
  * has one, the profile's single word where it has one, the adapter's where it
@@ -642,16 +690,21 @@ export const agentLoopEffect = (
     const envelopeOf = (agent: Agent, build: PromptBuild): Omit<AgentRequest, 'messages'> => {
       const route = splitRoute(agent.options.route)
       const budget = budgetFor(agent)
+      const effort = reasoningEffortOf(
+        config,
+        llm.capabilities,
+        route.model,
+        agent.options.reasoningEffort,
+      )
       return {
         provider: route.provider,
         model: route.model,
         // Params reach the provider as written, so the cap uses the field it reads and
-        // the header records what the budget above reserved. The effort uses the same
-        // wire vocabulary the provider's own API does.
+        // the header records what the budget above reserved. The effort uses the
+        // wire vocabulary the model's row offers, and a model that names none leaves
+        // the provider's own default in place.
         params: {
-          ...(agent.options.reasoningEffort === undefined
-            ? {}
-            : { reasoning_effort: agent.options.reasoningEffort }),
+          ...(effort.kind === 'send' ? { reasoning_effort: effort.effort } : {}),
           ...(budget.reserveTokens === 0 ? {} : { max_tokens: budget.reserveTokens }),
         },
         tools: build.tools,
@@ -804,6 +857,16 @@ export const agentLoopEffect = (
           cwdOf(agent.session.events(), agent.session.header),
           opening,
         )
+        // The input stays in the log even when the effort is refused, but no
+        // request is built or sent: a provider must not turn a word this model
+        // does not take into an HTTP 400.
+        const effort = reasoningEffortOf(
+          config,
+          llm.capabilities,
+          modelOfRoute(agent.options.route),
+          agent.options.reasoningEffort,
+        )
+        if (effort.kind === 'reject') return { ok: false as const, failure: effort.failure }
         yield* nameSession(agent)
         const envelope = envelopeOf(agent, build)
         yield* recordCompaction(agent, envelope)
@@ -1128,9 +1191,10 @@ export const agentLoopConfigSchema = Schema.Struct({
   /** The routed model's context window in tokens. Defaults to the adapter's, or 128000. */
   contextWindow: Schema.optionalKey(Schema.Int),
   /**
-   * Per-model windows and output reservations, keyed by the model part of the
-   * route. An entry overrides the single `contextWindow` and `maxTokens` values
-   * for that route only, so switching models does not carry another model's limit.
+   * Per-model windows, output reservations, and effort words, keyed by the model
+   * part of the route. An entry overrides the single `contextWindow` and
+   * `maxTokens` values for that route only, so switching models does not carry
+   * another model's limit.
    */
   models: Schema.optionalKey(
     Schema.Record(
@@ -1138,6 +1202,16 @@ export const agentLoopConfigSchema = Schema.Struct({
       Schema.Struct({
         contextWindow: Schema.optionalKey(Schema.Int),
         maxTokens: Schema.optionalKey(Schema.Int),
+        /**
+         * The effort words this model takes. The row wins over the endpoint-wide
+         * `reasoningEfforts`; an empty list takes none.
+         */
+        reasoningEfforts: Schema.optionalKey(Schema.Array(Schema.String)),
+        /**
+         * The word a request sends when the session names none. Absent or null
+         * sends no field and leaves the provider's own default in place.
+         */
+        defaultReasoningEffort: Schema.optionalKey(Schema.NullOr(Schema.String)),
       }),
     ),
   ),

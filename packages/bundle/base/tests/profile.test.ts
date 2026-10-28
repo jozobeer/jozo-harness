@@ -48,6 +48,14 @@ describe('base profile', () => {
       expect(budget.contextWindow, model).toBe(1_048_576)
       expect(budget.reserveTokens, model).toBe(393_216)
       expect(thresholdOf(budget), model).toBe(589_824)
+      expect(loopConfig.models?.[model]?.reasoningEfforts, model).toEqual([
+        'low',
+        'medium',
+        'high',
+        'xhigh',
+        'max',
+      ])
+      expect(loopConfig.models?.[model]?.defaultReasoningEffort, model).toBeNull()
     }
   })
 
