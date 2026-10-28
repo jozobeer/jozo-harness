@@ -105,6 +105,26 @@ URL は相対パスなので、同じ tailnet の別端末から jzh web の tai
 
 ページはセッションのログの隣に置く。セッションを削除すると、そのセッションが公開したページも一緒に消える。ログの `<sessions root>/<id>/` とページの `artifacts/<id>/` を同じ操作で消し、`/artifact/<id>/<name>` の URL も開けなくなる（#291 の時点ではページが残ったが、いまは残らない）。ページだけを消したいときは、Run ペインの `pages` の `Delete` か、ディスクの `artifacts/<id>/` から消す。
 
+### モデルに画面を撮らせる
+
+`screen_capture` tool も opt-in である。使う run だけ、設定ファイルか `--patch` の `plugins:` に次の行を足す。
+
+```yaml
+plugins:
+  - id: screen-capture
+    name: '@jozo-harness/screen-capture'
+```
+
+行を足した run では、モデルに画面を見せて頼める。
+
+```
+いまの画面を見て、このエラーが出ている原因を教えて。
+```
+
+モデルは `screen_capture` を引数なしで、または macOS で表示を選ぶ `display`（0 始まり）付きで呼ぶ。macOS は `screencapture -x -t png`、Linux は `grim`、無ければ ImageMagick の `import -window root` で撮る。撮影は run の sandbox を通した子プロセスで、一時ディレクトリに png を書いてから base64 として読み、ディレクトリごと消す。結果は `read_image` と同じく image block としてモデルに届くので、画像を運べない route では撮らずに `unavailable` を返す。
+
+画面収録の許可が無い、撮影プログラムが無い、sandbox が子プロセスを拒否した、といった場合は撮らずに `unavailable` と理由を返す。既定の profile に入れないのは、全セッションの tool 一覧を太らせないためである。
+
 ### モデルを選ぶ（走っているセッションと、これから開くセッション）
 
 composer のモデルのチップを押すと、その endpoint が持つモデルの一覧が開く。選ぶと**そのセッションの route が変わり**、同時に**この run でこれから開くセッションもその route で始まる**。効くのは次のリクエストから（turn の途中なら次の step、待っていれば次の turn）。いま効いているモデルには印が付く。
@@ -351,7 +371,7 @@ tier1 行がある run では、モデルに `run_code` が渡る。モデルは
 
 モデルは `plugin` ツールで settings の `plugins` 行を list / add / remove / disable できる。1 回ごとに承認を求められ、足せるのは同梱のパッケージ名だけ。
 
-add した行の plugin をこの run の service の上に組めるなら、その tool は**次の step から**見える。設定ファイルには同時に書くので、次の起動でも同じ行が効く。組めるのは config が空の opt-in 行（`@jozo-harness/lsp`・`@jozo-harness/artifact`・`@jozo-harness/session-search`）である。
+add した行の plugin をこの run の service の上に組めるなら、その tool は**次の step から**見える。設定ファイルには同時に書くので、次の起動でも同じ行が効く。組めるのは config が空の opt-in 行（`@jozo-harness/lsp`・`@jozo-harness/artifact`・`@jozo-harness/session-search`・`@jozo-harness/screen-capture`）である。
 
 remove はその逆で、この run が組んだ行なら settings から消すのと同じ呼び出しで、次の step から tool 一覧から外す。走っている step と tool 呼び出しはそのまま終わる。外した行は同じ id で add し直せる。config を持つ行（`mcp` など）を実行中の run から外す経路はまだ無いので、remove は拒否する。config が要る行の add も、次の起動で読めない行になるため拒否する。disable は次の起動から効く。
 

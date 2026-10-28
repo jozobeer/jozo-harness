@@ -12,6 +12,7 @@ import {
   artifactPlugin,
   lspPlugin,
   mcpPlugin,
+  screenCapturePlugin,
   sessionSearchPlugin,
   tier1Plugin,
 } from '@jozo-harness/tools-tier1'
@@ -36,6 +37,7 @@ export const bundledPlugins: ReadonlyArray<Plugin<any, any, any>> = [
   tier0Plugin,
   tier1Plugin,
   artifactPlugin,
+  screenCapturePlugin,
   mcpPlugin,
   lspPlugin,
   sessionSearchPlugin,
