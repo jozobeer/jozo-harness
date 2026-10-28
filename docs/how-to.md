@@ -143,6 +143,28 @@ plugins:
 
 モデルは `browser` を `url`（http(s) のみ。`file:` や `data:` は `invalid-arguments`）で呼ぶ。このスライスは開いて本文を読むだけで、`action` は `text` だけ、クリックや入力はできない。chrome か chromium の `--headless --dump-dom` が使える環境でのみ動き、無い場合は `unavailable` と探したコマンド名を返す。ブラウザは run の sandbox を通した子プロセスで、DOM から script・style・head を除いた本文を返す。既定の profile に入れないのは、全セッションの tool 一覧を太らせないためである。
 
+### モデルに外部のエージェントへ委譲させる
+
+`delegate` tool も opt-in である。委譲してよい CLI を設定で名指しした run だけ、次の行を足す。
+
+```yaml
+plugins:
+  - id: delegate
+    name: '@jozo-harness/delegate'
+    config:
+      tools:
+        - name: codex
+          argv: [codex, exec, --full-auto]
+```
+
+行を足した run では、モデルに外部のエージェントへ仕事を渡せる。
+
+```
+このリポジトリの失敗しているテストを、codex に直させて。
+```
+
+モデルは `delegate` を `command`（設定の `name`）、`task`、任意の `cwd` で呼ぶ。実行される argv は設定の `argv` に `task` を最後の引数として足したもので、設定に無い名前は `invalid-arguments` になる。CLI が PATH に無ければ `unavailable` と探したコマンド名を返し、コマンドは run の sandbox を通した子プロセスで走る。出力は最大 100,000 文字で切り、終了コードが 0 でなければ `unavailable` と stderr の理由を返す。既定の profile に入れないのは、全セッションの tool 一覧を太らせないためである。
+
 ### モデルを選ぶ（走っているセッションと、これから開くセッション）
 
 composer のモデルのチップを押すと、その endpoint が持つモデルの一覧が開く。選ぶと**そのセッションの route が変わり**、同時に**この run でこれから開くセッションもその route で始まる**。効くのは次のリクエストから（turn の途中なら次の step、待っていれば次の turn）。いま効いているモデルには印が付く。

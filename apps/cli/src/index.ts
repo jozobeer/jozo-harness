@@ -114,6 +114,7 @@ import {
   LspTools,
   ScreenCaptureTools,
   BrowserTools,
+  DelegateTools,
   teamIdentityLine,
   teamIdentityOf,
   makeScheduleTool,
@@ -1039,6 +1040,11 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
         return (source) =>
           Effect.succeed(Context.get(source, BrowserTools)(sandboxOf(wiring) ?? noneSandbox))
       }
+      if (name === '@jozo-harness/delegate') {
+        // A delegated CLI runs through the run's sandbox too; the row fixes what it may start.
+        return (source) =>
+          Effect.succeed(Context.get(source, DelegateTools)(sandboxOf(wiring) ?? noneSandbox))
+      }
       return undefined
     }
 
@@ -1204,6 +1210,7 @@ const installFromProfile = (wiring: ProfileWiring): Effect.Effect<Preset, ToolEr
     yield* installWiredRow('@jozo-harness/session-search')
     yield* installWiredRow('@jozo-harness/screen-capture')
     yield* installWiredRow('@jozo-harness/browser')
+    yield* installWiredRow('@jozo-harness/delegate')
     // A failed provider attempt is retried for the codes the loop row lists; the
     // loop only decides what to do when a listener answers, so this is the wiring
     // that makes the retry path part of a run.

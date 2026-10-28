@@ -1,10 +1,8 @@
-import { accessSync, constants, statSync } from 'node:fs'
-import { delimiter, join } from 'node:path'
 import { Context, Effect, Layer, Schema } from 'effect'
 import type { Plugin } from '@jozo-harness/kernel'
-import { spawn } from '@jozo-harness/process'
 import { noneSandbox, type SandboxShape } from '@jozo-harness/safety'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
+import { messageOf, programExists, reasonOf, runProcess } from './program.ts'
 
 const Parameters = Schema.Struct({
   url: Schema.String.annotate({ description: 'The http(s) URL to open.' }),
@@ -40,44 +38,11 @@ export interface BrowserHost {
   }) => Promise<{ readonly exitCode: number; readonly stdout: string; readonly stderr: string }>
 }
 
-/** True when the program is an executable file, either on PATH or at an absolute path. */
-const executable = (program: string): boolean => {
-  if (program.includes('/')) {
-    try {
-      accessSync(program, constants.X_OK)
-      return statSync(program).isFile()
-    } catch {
-      return false
-    }
-  }
-  return (process.env.PATH ?? '').split(delimiter).some((directory) => {
-    const candidate = join(directory, program)
-    try {
-      accessSync(candidate, constants.X_OK)
-      return statSync(candidate).isFile()
-    } catch {
-      return false
-    }
-  })
-}
-
 /** The host a real run uses. A child that cannot start reads as a failed page, not a crash. */
 export const systemBrowserHost: BrowserHost = {
   platform: process.platform,
-  hasProgram: executable,
-  run: async (command) => {
-    const child = spawn([...command.argv], {
-      cwd: command.cwd,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    })
-    const [exitCode, stdout, stderr] = await Promise.all([
-      child.exited,
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-    ])
-    return { exitCode, stdout, stderr }
-  },
+  hasProgram: programExists,
+  run: (command) => runProcess(command.argv, command.cwd),
 }
 
 /**
@@ -156,16 +121,6 @@ const isHttpUrl = (raw: string): boolean => {
   } catch {
     return false
   }
-}
-
-const messageOf = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error)
-
-/** Keeps a failure's stderr a reason rather than a transcript. */
-const reasonOf = (stderr: string): string => {
-  const trimmed = stderr.trim()
-  if (trimmed === '') return 'no reason given'
-  return trimmed.length > 500 ? trimmed.slice(0, 500) + '…' : trimmed
 }
 
 /**
