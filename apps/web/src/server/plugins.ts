@@ -1,14 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { PluginRowView } from '../shared/rpc.ts'
 import { originAllowed, requestAuthorized, type CodeExchange, type PublicOrigin } from './auth.ts'
 import type { TailnetAddresses } from './tailnet.ts'
-
-/** One row of the composition as the page lists it. */
-export interface PluginRowView {
-  readonly id: string
-  readonly name: string
-  readonly enabled: boolean
-}
-
 /** The gate the plugin list shares with the artifact route: same host, origin, and token. */
 export interface PluginsGate {
   /** The rows the run in front of the page was built from, in composition order. */

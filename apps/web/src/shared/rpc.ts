@@ -2,6 +2,13 @@ import { UiCommandSchema, UiEventSchema } from '@jozo-harness/ui-protocol'
 import { type Effect, Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
+/** One row of the composition as the plugin route lists it. */
+export interface PluginRowView {
+  readonly id: string
+  readonly name: string
+  readonly enabled: boolean
+}
+
 /** A session as a page lists it: what the store holds, without reading its log. */
 export const SessionSummarySchema = Schema.Struct({
   id: Schema.String,

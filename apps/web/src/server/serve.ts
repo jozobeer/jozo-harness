@@ -28,8 +28,9 @@ import {
   type SessionFactory,
   type SessionRegistry,
 } from './sessions.ts'
+import type { PluginRowView } from '../shared/rpc.ts'
 import { answerArtifact } from './artifacts.ts'
-import { answerPlugins, type PluginRowView } from './plugins.ts'
+import { answerPlugins } from './plugins.ts'
 import { searchWorkspaceFiles } from './files.ts'
 import { branchOf } from './git-branch.ts'
 import type { SettingsPort } from './settings.ts'

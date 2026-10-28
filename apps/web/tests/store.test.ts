@@ -371,6 +371,7 @@ const serve = (
         settings: (options.settings ?? makeSettings()).port,
         workspaces: workspacesPort,
         commands: () => [],
+        plugins: () => [],
         port: 0,
         staticRoot: root,
         onReady: (urls) => {
