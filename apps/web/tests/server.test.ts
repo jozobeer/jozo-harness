@@ -14,6 +14,7 @@ import {
   serveWeb,
   WebError,
   type OpenSession,
+  type PluginRowView,
   type PublicOrigin,
   type ReadyUrls,
   type SessionFactory,
@@ -411,6 +412,8 @@ const start = (
   publicUrl?: PublicOrigin,
   /** The tailnet addresses a detection would name, when the test drives one. */
   tailnet?: TailnetAddresses,
+  /** The rows the run was built from, as the plugin route lists them. */
+  plugins: ReadonlyArray<PluginRowView> = [],
 ): Effect.Effect<Started, never, Scope.Scope> =>
   Effect.gen(function* () {
     const ready = yield* Deferred.make<ReadyUrls>()
@@ -422,6 +425,7 @@ const start = (
         settings: settings.port,
         workspaces: workspaces.port,
         commands: web.initial.commands,
+        plugins: () => plugins,
         port: 0,
         staticRoot,
         ...(publicUrl === undefined ? {} : { publicUrl }),
@@ -733,6 +737,39 @@ describe('the web transport', () => {
     expect(observed.anonymous).toBe(401)
     await rm(root, { recursive: true, force: true })
     await rm(home, { recursive: true, force: true })
+  })
+
+  test('the plugin route lists the rows the run was built from, and refuses an anonymous page', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-plugins-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const settings = makeSettings()
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const listed = yield* Effect.promise(() =>
+            fetch(started.origin + '/plugins', { headers: { cookie: started.cookie } }),
+          )
+          const text = yield* Effect.promise(() => listed.text())
+          const anonymous = yield* Effect.promise(() => fetch(started.origin + '/plugins'))
+          yield* Deferred.succeed(started.stop, undefined)
+          return {
+            status: listed.status,
+            type: listed.headers.get('content-type'),
+            text,
+            anonymous: anonymous.status,
+          }
+        }),
+      ),
+    )
+
+    expect(observed.status).toBe(200)
+    expect(observed.type).toBe('application/json; charset=utf-8')
+    expect(JSON.parse(observed.text)).toEqual({ rows: [] })
+    expect(observed.anonymous).toBe(401)
+    await rm(root, { recursive: true, force: true })
   })
 
   test('a deleted page is gone from its session while another session keeps its own', async () => {

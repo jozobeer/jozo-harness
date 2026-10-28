@@ -166,6 +166,19 @@ export const originAllowed = (
 ): boolean =>
   origin === undefined || originsAt(port, publicOrigin, tailnet).includes(origin.toLowerCase())
 
+/**
+ * True when the request repeats the run's token in its cookie or its URL, or
+ * still carries a startup code worth trading. The artifact list and the plugin
+ * list share this gate; the page itself arrives before either.
+ */
+export const requestAuthorized = (
+  url: string,
+  cookie: string | undefined,
+  gate: { readonly token: string; readonly codes: CodeExchange },
+): boolean =>
+  tokenMatches(cookieOf(cookie, COOKIE_NAME) ?? tokenFromUrl(url), gate.token) ||
+  gate.codes.peek(codeFromUrl(url))
+
 /** Compares the token in constant time, so a reply says only match or no match. */
 export const tokenMatches = (given: string | undefined, expected: string): boolean => {
   if (given === undefined) return false

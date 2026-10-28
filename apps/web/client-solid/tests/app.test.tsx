@@ -1997,6 +1997,53 @@ describe('the Solid page', () => {
     ])
   })
 
+  test('the run pane lists the plugin rows with their state', async () => {
+    const { store } = makeStore({
+      pane: { kind: 'run' },
+      run: {
+        goal: null,
+        schedules: [],
+        jobs: [],
+        subagents: [],
+        todos: [],
+        todoCounts: { pending: 0, inProgress: 0, completed: 0 },
+        skills: [],
+        promptSections: [],
+        queued: [],
+        steering: [],
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+      },
+    })
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            rows: [
+              { id: 'lsp', name: '@jozo-harness/lsp', enabled: true },
+              { id: 'mcp', name: '@jozo-harness/mcp', enabled: false },
+            ],
+          }),
+      }),
+    )
+    try {
+      const { container } = render(() => <ContextPane store={store} />)
+
+      await vi.waitFor(() => expect(container.querySelectorAll('.run-plugin')).toHaveLength(2))
+      expect(
+        [...container.querySelectorAll('.run-plugin-name')].map((name) => name.textContent),
+      ).toEqual(['@jozo-harness/lsp', '@jozo-harness/mcp'])
+      expect(
+        [...container.querySelectorAll('.run-plugin-state')].map((state) => state.textContent),
+      ).toEqual(['on', 'off'])
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   test('a page row deletes its page and leaves the list once the route answers 204', async () => {
     const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
     const publish = (seq: number, callId: string, page: string) => [
@@ -2049,7 +2096,8 @@ describe('the Solid page', () => {
       const notes = container.querySelectorAll('.run-page-delete')[0]
       fireEvent.click(notes as Element)
 
-      expect(asked).toEqual([
+      // The pane reads its plugin rows on mount; only the delete is this test's call.
+      expect(asked.filter((call) => call.url !== '/plugins')).toEqual([
         {
           url: '/artifact/s1/notes',
           init: { method: 'DELETE', headers: { 'X-Requested-With': 'fetch' } },

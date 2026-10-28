@@ -1,6 +1,6 @@
 import { For, Match, Show, Switch, createEffect, createSignal, onCleanup, onMount } from 'solid-js'
 import type { ConversationBlock } from '@jozo-harness/ui-view'
-import type { RunStateView, SettingsView } from '../../src/shared/rpc.ts'
+import type { PluginRowView, RunStateView, SettingsView } from '../../src/shared/rpc.ts'
 import type { Pane } from '../../src/ui/state.ts'
 import { THEMES, type Theme } from '../../src/ui/theme.ts'
 import type { TurnView } from '../../src/ui/trajectory.ts'
@@ -348,6 +348,57 @@ const Jobs = (props: { store: SessionStore; jobs: RunStateView['jobs'] }) => {
   )
 }
 
+/**
+ * The rows this run was built from. The route reads them on every request, so
+ * opening the pane again shows the rows a change since the last look left.
+ */
+const Plugins = () => {
+  const [rows, setRows] = createSignal<ReadonlyArray<PluginRowView> | undefined>(undefined)
+  const [failed, setFailed] = createSignal(false)
+  onMount(() => {
+    void (async () => {
+      try {
+        const answer = await fetch('/plugins')
+        if (!answer.ok) throw new Error(String(answer.status))
+        const body: { readonly rows: ReadonlyArray<PluginRowView> } = await answer.json()
+        setRows(body.rows)
+      } catch {
+        setFailed(true)
+      }
+    })()
+  })
+  return (
+    <section class="run-work run-work-plugins">
+      <span class="run-section-title">plugins</span>
+      <Show
+        when={rows()}
+        fallback={
+          <Show when={failed()} fallback={<div class="run-empty">reading…</div>}>
+            <div class="run-empty">could not read the plugin rows</div>
+          </Show>
+        }
+      >
+        {(list) => (
+          <Show when={list().length > 0} fallback={<div class="run-empty">no plugin rows</div>}>
+            <ul class="run-plugins">
+              <For each={list()}>
+                {(row) => (
+                  <li class="run-plugin" data-plugin={row.id}>
+                    <span class="run-plugin-name">{row.name}</span>
+                    <span class={'run-plugin-state ' + (row.enabled ? 'on' : 'off')}>
+                      {row.enabled ? 'on' : 'off'}
+                    </span>
+                  </li>
+                )}
+              </For>
+            </ul>
+          </Show>
+        )}
+      </Show>
+    </section>
+  )
+}
+
 const Run = (props: { store: SessionStore }) => {
   const run = () => props.store.state().run
   return (
@@ -358,6 +409,7 @@ const Run = (props: { store: SessionStore }) => {
           <>
             <Goal goal={state().goal} />
             <Usage usage={state().usage} />
+            <Plugins />
             <Todos todos={state().todos} counts={state().todoCounts} />
             <Skills skills={state().skills} />
             <PromptSections sections={state().promptSections} />

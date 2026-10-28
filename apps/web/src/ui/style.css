@@ -612,6 +612,7 @@ body {
 
 .run-schedules,
 .run-jobs,
+.run-plugins,
 .run-children {
   display: flex;
   flex-direction: column;
@@ -664,6 +665,33 @@ body {
   color: var(--dim);
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.run-plugin {
+  display: flex;
+  gap: var(--s2);
+  align-items: baseline;
+  padding: 0 var(--s2);
+  overflow: hidden;
+}
+
+.run-plugin-name {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-plugin-state {
+  margin-left: auto;
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.run-plugin-state.on {
+  color: var(--text);
 }
 
 .run-job {
