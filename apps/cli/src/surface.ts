@@ -179,7 +179,7 @@ const renderFlags = (): string =>
 
 const renderEnvironment = (): string =>
   [
-    'environment (the shell wins, then the nearest .env, then secrets.env):',
+    "environment and credentials (the shell wins, then the nearest .env, then secrets.env, then a row's apiKeyRef):",
     '  - ' + CONFIG_HOME_ENV + ': moves the directory that holds config.yaml and secrets.env',
     '  - ' + SEARCH_KEY_ENV + ': with it the default web_search provider is registered',
     '  - ' + DEEPSEEK_KEY_ENV + ': the key search: deepseek sends to the Search API',

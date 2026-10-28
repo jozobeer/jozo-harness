@@ -43,4 +43,4 @@ pnpm exec vp test apps/cli/tests/credentials.test.ts apps/cli/tests/auth-provide
 pnpm run check
 ```
 
-`pnpm run check` の結果は PR の CI を見る。
+`pnpm run check` は成功した（307 files / 2160 tests passed、1 file skipped は real-api）。coverage は lines 94.74%（床 93%）、functions 92.07%（床 92%）。CI は macOS と Ubuntu の 2 本で同じ `pnpm run check` を走らせる。
