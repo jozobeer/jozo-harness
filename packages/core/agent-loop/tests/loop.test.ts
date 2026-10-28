@@ -7,7 +7,13 @@ import {
   type AgentsShape,
 } from '@jozo-harness/agent'
 import { Hooks, makeHooks, type HookRegistry } from '@jozo-harness/kernel'
-import { Llm, LlmFailure, type LlmAdapter, type StreamChunk } from '@jozo-harness/llm'
+import {
+  Llm,
+  LlmFailure,
+  type LlmAdapter,
+  type LlmCapabilities,
+  type StreamChunk,
+} from '@jozo-harness/llm'
 import {
   QUOTE_LIMITS,
   SessionError,
@@ -58,16 +64,22 @@ const forever =
   () =>
     Stream.concat(Stream.fromIterable(list), Stream.never)
 
-const adapter = (scripts: ReadonlyArray<Script>): LlmAdapter => {
+const capabilitiesOf = (overrides: Partial<LlmCapabilities> = {}): LlmCapabilities => ({
+  toolChoice: false,
+  reasoningEffort: null,
+  images: 'none',
+  promptCacheControl: false,
+  ...overrides,
+})
+
+const adapter = (
+  scripts: ReadonlyArray<Script>,
+  capabilities: LlmCapabilities = capabilitiesOf(),
+): LlmAdapter => {
   let call = 0
   return {
     name: 'fake',
-    capabilities: {
-      toolChoice: false,
-      reasoningEffort: null,
-      images: 'none',
-      promptCacheControl: false,
-    },
+    capabilities,
     stream: () => {
       const script = scripts[call] ?? chunks([])
       call += 1
@@ -122,6 +134,7 @@ const scenario = <A>(
   body: (ctx: Ctx) => Effect.Effect<A, AgentError | ToolError, Scope.Scope>,
   persistence: SessionPersistence = sessionPersistence(),
   config: AgentLoopConfig = {},
+  capabilities: LlmCapabilities = capabilitiesOf(),
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -132,7 +145,7 @@ const scenario = <A>(
         Layer.succeed(Hooks, hooks),
         Layer.succeed(Tools, tools),
         Layer.succeed(SystemPrompt, prompt),
-        Layer.succeed(Llm, adapter(scripts)),
+        Layer.succeed(Llm, adapter(scripts, capabilities)),
       )
       const runner = yield* AgentLoop.pipe(
         Effect.provide(Layer.provide(Layer.effect(AgentLoop, agentLoopEffect(config)), services)),
@@ -954,6 +967,166 @@ describe('agent loop', () => {
 
     // One turn, two requests: the one that called the tool, and the one after it.
     expect(params).toEqual([{}, { reasoning_effort: 'high' }])
+  })
+
+  test('sends an effort the model declares it takes', async () => {
+    const events = await scenario(
+      [chunks(textTurn('hi'))],
+      (ctx) =>
+        Effect.gen(function* () {
+          const agent = yield* ctx.agents.create({
+            cwd: '/work',
+            options: { route: 'fake/model', reasoningEffort: 'high' },
+          })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+      undefined,
+      { models: { model: { reasoningEfforts: ['low', 'high'] } } },
+    )
+
+    const params = events.session
+      .events()
+      .flatMap((event) => (event.type === 'request/header' ? [event.data.params] : []))
+
+    expect(params).toEqual([{ reasoning_effort: 'high' }])
+  })
+
+  test('refuses an effort the model does not take before a request leaves', async () => {
+    const events = await scenario(
+      [chunks(textTurn('never sent'))],
+      (ctx) =>
+        Effect.gen(function* () {
+          const agent = yield* ctx.agents.create({
+            cwd: '/work',
+            options: { route: 'fake/model', reasoningEffort: 'max' },
+          })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+      undefined,
+      { models: { model: { reasoningEfforts: ['low', 'high'] } } },
+    )
+
+    // Nothing reached the provider: no header and no attempt were recorded.
+    const kinds = types(events)
+    expect(kinds).not.toContain('request/header')
+    expect(kinds).not.toContain('assistant/attempt')
+    expect(reason(events)).toEqual([
+      {
+        kind: 'error',
+        failure: {
+          _tag: 'LlmFailure',
+          code: 'INVALID_REQUEST',
+          message: 'model "model" does not accept reasoning effort "max"; accepted: low, high',
+        },
+      },
+    ])
+  })
+
+  test('sends the model default when the session names no effort', async () => {
+    const events = await scenario(
+      [chunks(textTurn('hi'))],
+      (ctx) =>
+        Effect.gen(function* () {
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+      undefined,
+      {
+        models: {
+          model: { reasoningEfforts: ['low', 'high'], defaultReasoningEffort: 'low' },
+        },
+      },
+    )
+
+    const params = events.session
+      .events()
+      .flatMap((event) => (event.type === 'request/header' ? [event.data.params] : []))
+
+    expect(params).toEqual([{ reasoning_effort: 'low' }])
+  })
+
+  test('sends no effort field for a model that names no default', async () => {
+    const events = await scenario(
+      [chunks(textTurn('hi'))],
+      (ctx) =>
+        Effect.gen(function* () {
+          const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+      undefined,
+      { models: { model: { reasoningEfforts: ['low'], defaultReasoningEffort: null } } },
+    )
+
+    const params = events.session
+      .events()
+      .flatMap((event) => (event.type === 'request/header' ? [event.data.params] : []))
+
+    expect(params).toEqual([{}])
+  })
+
+  test('prefers the model effort list over the endpoint list', async () => {
+    const events = await scenario(
+      [chunks(textTurn('never sent'))],
+      (ctx) =>
+        Effect.gen(function* () {
+          const agent = yield* ctx.agents.create({
+            cwd: '/work',
+            options: { route: 'fake/model', reasoningEffort: 'high' },
+          })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+      undefined,
+      { models: { model: { reasoningEfforts: ['low'] } } },
+      capabilitiesOf({ reasoningEffort: ['low', 'high'] }),
+    )
+
+    // The endpoint offers high, but this model does not: the model row wins.
+    expect(types(events)).not.toContain('request/header')
+    expect(reason(events)).toEqual([
+      {
+        kind: 'error',
+        failure: {
+          _tag: 'LlmFailure',
+          code: 'INVALID_REQUEST',
+          message: 'model "model" does not accept reasoning effort "high"; accepted: low',
+        },
+      },
+    ])
+  })
+
+  test('accepts an effort the endpoint list omits when the model names it', async () => {
+    const events = await scenario(
+      [chunks(textTurn('hi'))],
+      (ctx) =>
+        Effect.gen(function* () {
+          const agent = yield* ctx.agents.create({
+            cwd: '/work',
+            options: { route: 'fake/model', reasoningEffort: 'high' },
+          })
+          yield* agent.followup({ text: 'go', source: 'user' })
+          yield* agent.whenIdle
+          return agent
+        }),
+      undefined,
+      { models: { model: { reasoningEfforts: ['low', 'high'] } } },
+      capabilitiesOf({ reasoningEffort: ['low'] }),
+    )
+
+    const params = events.session
+      .events()
+      .flatMap((event) => (event.type === 'request/header' ? [event.data.params] : []))
+
+    expect(params).toEqual([{ reasoning_effort: 'high' }])
   })
 
   test('a turn that changes nothing reuses the header it opened', async () => {
