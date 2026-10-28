@@ -630,6 +630,53 @@ bash: /etc/hosts: Operation not permitted
 
 `bash` の `session` は同じ名前の次の呼び出しにシェルを残し、ディレクトリと変数を持ち越す。残るのは起動したときのシェル・ディレクトリ・sandbox モードだけである。広いモードを承認したあとに同じ名前を指定しても、その広いモードでは走らない。シェル・ディレクトリ・モードのどれかが違う呼び出しはコマンドを走らせず `invalid-arguments` を返し、別の session 名を要する。
 
+## ワークスペースの hooks.json でツールを止める
+
+ワークスペース直下に `hooks.json` を置くと、Claude Code と Codex の command hook を jzh の tool 実行の前後で走らせられる。同梱の `base` profile には `@jozo-harness/hooks-json` の行が入っているので、ファイルを置くだけで効く。行を外すか `disabled: true` にすれば、ファイルがあっても走らない。
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write",
+        "hooks": [
+          { "type": "command", "command": "scripts/guard.sh", "timeout": 30 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [{ "command": "scripts/format.sh" }]
+      }
+    ]
+  }
+}
+```
+
+`hooks` の包みは無くてもよい。`PreToolUse` は tool 本体の前、`PostToolUse` は後で、設定の順に 1 つずつ走る。他のイベント（`Stop` など）と command 以外のフックは無視する。`matcher` は tool 名への正規表現で、大文字小文字を区別せず名前全体に一致する。Claude Code 用に書いた `Bash` は jzh の `bash` に届き、`Edit|Write` は両方に届く。省略・空文字・`*` はすべての tool に一致する。
+
+フックはセッションの sandbox の中で `bash -c` として走り、stdin に次の JSON を 1 行で受け取る。
+
+```json
+{
+  "session_id": "…",
+  "transcript_path": "",
+  "cwd": "/path/to/workspace",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "bash",
+  "tool_input": { "command": "ls" },
+  "tool_use_id": "call-1"
+}
+```
+
+`PostToolUse` には `tool_response`（`is_error` と `content`）が加わる。`tool_input` は tool の引数をデコードしたもので、`tool_use_id` はセッションログの `tool/call` と対応する。
+
+拒否は 2 通りである。終了コードが 0 以外なら拒否で、stderr が理由になる。終了コード 0 でも、stdout の JSON が `{"decision":"deny","reason":"…"}` か、`hookSpecificOutput` の `permissionDecision` が `deny` なら拒否する。拒否された呼び出しは tool 本体を走らせず、理由を `denied` の結果とセッションログに残す。`PostToolUse` の拒否は、すでに走った結果をエラーに置き換える。
+
+`hooks.json` が無いセッションの挙動は変えない。ファイルが壊れている・読めないときはツールをそのまま走らせ、理由を次のリクエストの文脈に 1 行残して turn は落とさない。フックが `timeout`（秒）を書かなければ `timeoutMs`（既定 10 分）で打ち切り、timeout は拒否として扱う。sandbox がコマンドを拒否したときも、守れない呼び出しを素通しせず拒否する。
+
 ## worktree に移って続ける
 
 モデルが `create_worktree` を呼ぶと、今の HEAD（か `base` で指名した commit）から新しい branch の worktree を作り、session の cwd とワークスペースの根をそこへ移す。以後の `bash` / `write` / `edit` はその中で走り、元の checkout は branch も commit も変えない。
