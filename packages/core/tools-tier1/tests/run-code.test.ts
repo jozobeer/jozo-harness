@@ -17,7 +17,12 @@ import {
 import { Context, Effect, Layer, Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
 import { tier1Tools } from '../src/index.ts'
-import { makeRunCodeTool, RUN_CODE_OUTPUT_LIMIT, type RunCodeHost } from '../src/run-code.ts'
+import {
+  childArgv,
+  makeRunCodeTool,
+  RUN_CODE_OUTPUT_LIMIT,
+  type RunCodeHost,
+} from '../src/run-code.ts'
 
 const context = { sessionId: 's-1', cwd: process.cwd(), callId: 'call-1' }
 
@@ -58,7 +63,7 @@ const host = (
   ...(sandbox === undefined ? {} : { sandbox }),
 })
 
-const run = (tool: ToolDefinition<any, any>, code: string) =>
+const runWith = (tool: ToolDefinition<any, any>, args: Record<string, unknown>) =>
   Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -68,12 +73,14 @@ const run = (tool: ToolDefinition<any, any>, code: string) =>
         return yield* tools.call({
           callId: context.callId,
           tool: tool.name,
-          arguments: JSON.stringify({ code }),
+          arguments: JSON.stringify(args),
           context,
         })
       }),
     ),
   )
+
+const run = (tool: ToolDefinition<any, any>, code: string) => runWith(tool, { code })
 
 describe('run_code', () => {
   test('calls a tool from the program and returns its output and value', async () => {
@@ -338,6 +345,39 @@ describe('run_code', () => {
     const outcome = await run(tool, 'return typeof tools.run_code')
 
     expect(textOf(outcome.content)).toContain('return: "undefined"')
+  })
+
+  test('runs a python program when the runtime asks for it', async () => {
+    const tool = makeRunCodeTool(host(() => Effect.succeed(ok('unused', {}))))
+
+    const outcome = await runWith(tool, {
+      runtime: 'python',
+      code: 'print("hi from python")',
+    })
+
+    expect(outcome.isError).toBe(false)
+    expect(textOf(outcome.content)).toContain('hi from python')
+    expect(outcome.value).toMatchObject({ toolCalls: 0 })
+  })
+
+  test('a python program is told that tools are out of reach', async () => {
+    const tool = makeRunCodeTool(host(() => Effect.succeed(ok('unused', {}))))
+
+    const outcome = await runWith(tool, {
+      runtime: 'python',
+      code: 'tools.echo(text="hi")',
+    })
+
+    // A program that reaches for a tool the runtime does not offer fails the call,
+    // the same way a throwing node program does.
+    expect(outcome.isError).toBe(true)
+    expect(textOf(outcome.content)).toContain('tools are not available in the python runtime')
+  })
+
+  test('the python runtime runs python3, and node stays the default', () => {
+    expect(childArgv('python')).toEqual(['python3', '-c', expect.any(String)])
+    expect(childArgv('node')[0]).toBe(process.execPath)
+    expect(childArgv('node')[1]).toBe('-e')
   })
 
   test('tier 1 lists run_code only when it was given a host', async () => {

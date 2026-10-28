@@ -111,7 +111,15 @@ const Parameters = Schema.Struct({
     description:
       'The body of an async JavaScript function. Call another tool as `await tools.name(args)`; the resolved value is the tool result. Use `return` for what the model should read, with `console.log` for progress.',
   }),
+  runtime: Schema.optionalKey(
+    Schema.Literals(['node', 'python']).annotate({
+      description:
+        'Which runtime runs the code. Defaults to node. python runs the body with python3 as a plain script: no tool calls, and what it prints is the output.',
+    }),
+  ),
 })
+
+export type RunCodeRuntime = 'node' | 'python'
 
 export interface RunCodeValue {
   /** The program's printed output, then its returned value when it returned one. */
@@ -185,6 +193,29 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   const settle = pending.get(message.id)
   if (settle !== undefined) { pending.delete(message.id); settle(message) }
 })
+`
+
+/**
+ * The program that runs in the child when the runtime is python. It speaks the
+ * same one-line-of-JSON protocol as the node bootstrap so the parent reads both
+ * the same way, but a python program cannot reach other tools yet: the body runs
+ * as a plain script and only its printed output comes back.
+ */
+const PYTHON_BOOTSTRAP = String.raw`
+import json, sys, traceback
+RS = chr(30)
+config = json.loads(sys.stdin.readline())
+class Tools:
+    def __getattr__(self, name):
+        raise RuntimeError('tools are not available in the python runtime yet: ' + name)
+namespace = {'tools': Tools()}
+try:
+    exec(compile(config.get('code') or '', '<run_code>', 'exec'), namespace, namespace)
+    message = {'t': 'final'}
+except Exception:
+    message = {'t': 'final', 'error': traceback.format_exc()}
+sys.stdout.write(RS + json.dumps(message) + '\n')
+sys.stdout.flush()
 `
 
 const textOf = (result: ToolExecutionResult): string =>
@@ -351,7 +382,9 @@ const runSession = async (
   }
 }
 
-const childArgv = (): ReadonlyArray<string> => [process.execPath, '-e', BOOTSTRAP]
+/** The argv of the child that runs the program, per runtime. */
+export const childArgv = (runtime: RunCodeRuntime): ReadonlyArray<string> =>
+  runtime === 'python' ? ['python3', '-c', PYTHON_BOOTSTRAP] : [process.execPath, '-e', BOOTSTRAP]
 
 /**
  * A tool that runs a model-written program in a child process. The program
@@ -360,7 +393,7 @@ const childArgv = (): ReadonlyArray<string> => [process.execPath, '-e', BOOTSTRA
  */
 export const makeRunCodeTool = (
   host: RunCodeHost,
-): ToolDefinition<{ readonly code: string }, RunCodeValue> => ({
+): ToolDefinition<{ readonly code: string; readonly runtime?: RunCodeRuntime }, RunCodeValue> => ({
   name: 'run_code',
   description:
     'Runs a program you write in a child process and returns its output. The code is the body of an async function: call another tool as `await tools.name(args)` and the call reaches the same policy and sandbox as a direct call. Return the value the next step should read; console.log lines are returned too. Output past the limit is cut with a marker, and a program still running at the timeout is ended.',
@@ -372,7 +405,8 @@ export const makeRunCodeTool = (
   timeoutMs: RUN_CODE_TIMEOUT_MS,
   execute: (args, context) =>
     Effect.gen(function* () {
-      const base = { argv: childArgv(), cwd: context.cwd }
+      const runtime = args.runtime ?? 'node'
+      const base = { argv: childArgv(runtime), cwd: context.cwd }
       const wrapped =
         host.sandbox === undefined
           ? base
@@ -384,19 +418,31 @@ export const makeRunCodeTool = (
                     new ToolError({ code: 'execution', message: 'sandbox: ' + error.message }),
                 ),
               )
-      const names = host
-        .tools()
-        .map((declaration) => declaration.name)
-        .filter((name) => name !== 'run_code')
+      // A python program cannot reach other tools yet, so it is not offered any.
+      const names =
+        runtime === 'node'
+          ? host
+              .tools()
+              .map((declaration) => declaration.name)
+              .filter((name) => name !== 'run_code')
+          : []
       return yield* Effect.acquireUseRelease(
-        Effect.sync(() =>
-          spawn(wrapped.argv, {
-            cwd: wrapped.cwd,
-            stdin: 'pipe',
-            stdout: 'pipe',
-            stderr: 'pipe',
-          }),
-        ),
+        Effect.try({
+          try: () =>
+            spawn(wrapped.argv, {
+              cwd: wrapped.cwd,
+              stdin: 'pipe',
+              stdout: 'pipe',
+              stderr: 'pipe',
+            }),
+          // A missing runtime is the run's shape, not a broken program: say which
+          // one is absent instead of failing the turn.
+          catch: (error) =>
+            new ToolError({
+              code: 'unavailable',
+              message: 'no ' + runtime + ' runtime in this run: ' + String(error),
+            }),
+        }),
         (child) =>
           Effect.tryPromise({
             try: () => runSession(child, { code: args.code, tools: names }, host, context),
