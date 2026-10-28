@@ -1025,6 +1025,27 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     Queue.offerUnsafe(commands, { sessionId, command })
   }
 
+  /** Opens the session the first line starts and keeps that line for it. */
+  const startWithLine = (text: string, quotes: ReadonlyArray<Quote>): void => {
+    owed = quotes.length === 0 ? { text } : { text, quotes }
+    Queue.offerUnsafe(moves, { kind: 'open', id: undefined, cwd: blankCwd })
+    clearDraft('')
+    update((now) => withQuotes(now, []))
+  }
+
+  /** What one line becomes: its body, the passages it quotes, and the mode it asked for. */
+  const submitCommand = (
+    text: string,
+    quotes: ReadonlyArray<Quote>,
+    mode: SubmitMode | undefined,
+  ): UiCommand => {
+    const line =
+      quotes.length === 0
+        ? { kind: 'submit' as const, text }
+        : { kind: 'submit' as const, text, quotes }
+    return mode === undefined ? line : { ...line, mode }
+  }
+
   return {
     state,
     watched,
@@ -1044,23 +1065,17 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
       // A message may be a body, a set of quotations, or both; neither is nothing.
       const quotes = current.quotes
       if (value === '' && quotes.length === 0) return
-      const sent = quotes.length === 0 ? { text: value } : { text: value, quotes }
       if (current.sessionId === '') {
         // The session this line starts is already on its way; keep the line.
         if (owed !== undefined) return
-        owed = sent
-        Queue.offerUnsafe(moves, { kind: 'open', id: undefined, cwd: blankCwd })
-        clearDraft(current.sessionId)
-        update((now) => withQuotes(now, []))
+        startWithLine(value, quotes)
         return
       }
       const ask = current.conversation.ask
       sendTo(
         current.sessionId,
         ask === undefined
-          ? mode === undefined
-            ? { kind: 'submit', ...sent }
-            : { kind: 'submit', ...sent, mode }
+          ? submitCommand(value, quotes, mode)
           : { kind: 'answer', id: ask.id, answer: value },
       )
       clearDraft(current.sessionId)
