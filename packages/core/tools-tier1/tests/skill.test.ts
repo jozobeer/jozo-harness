@@ -54,6 +54,21 @@ describe('skill tool', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('a skill the slash list hides is still readable by the model', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-skill-'))
+    const path = join(root, 'demo', 'SKILL.md')
+    await writeFileDeep(
+      path,
+      '---\nname: demo\ndescription: Runs by the model\nuserInvocable: false\n---\n\nsteps\n',
+    )
+
+    const result = await Effect.runPromise(call(makeSkillTool([root]), { name: 'demo' }))
+
+    expect(result?.isError).toBe(false)
+    expect(result?.value).toEqual({ name: 'demo', path, body: 'steps' })
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('refuses a name that could escape the root', async () => {
     const result = await Effect.runPromise(call(makeSkillTool([]), { name: '../secrets' }))
 
