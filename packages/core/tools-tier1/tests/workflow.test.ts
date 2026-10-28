@@ -21,6 +21,8 @@ interface FakeAgentsOptions {
   readonly events?: ReadonlyArray<SessionEvent>
   readonly failCreate?: boolean
   readonly refuseFollowup?: boolean
+  readonly failFollowup?: boolean
+  readonly failIdle?: boolean
   readonly idle?: Effect.Effect<void>
   readonly childEvents?: ReadonlyArray<SessionEvent>
   readonly created?: Array<{
@@ -58,14 +60,19 @@ const fakeAgents = (
               session: { events: () => events },
               // The child answers whatever it is told, once it is told.
               followup: (message: { text: string }) =>
-                options.refuseFollowup === true
-                  ? Effect.succeed(false)
-                  : Effect.sync(() => {
-                      started.push(message.text)
-                      answer = answers[message.text] ?? ''
-                      events = [answerEvent(answer), ...(options.childEvents ?? [])]
-                    }),
-              whenIdle: options.idle ?? Effect.sleep('2 millis'),
+                options.failFollowup === true
+                  ? Effect.fail(new Error('the child is gone'))
+                  : options.refuseFollowup === true
+                    ? Effect.succeed(false)
+                    : Effect.sync(() => {
+                        started.push(message.text)
+                        answer = answers[message.text] ?? ''
+                        events = [answerEvent(answer), ...(options.childEvents ?? [])]
+                      }),
+              whenIdle:
+                options.failIdle === true
+                  ? Effect.fail(new Error('the child is stuck'))
+                  : (options.idle ?? Effect.sleep('2 millis')),
             } as unknown as Agent
             return agent
           }),
@@ -200,6 +207,7 @@ describe('the workflow script', () => {
     const result = await Effect.runPromise(
       call(makeWorkflowTool({ agents, route: 'stub/model' }), {
         script: `
+          console.log('draft first')
           const first = await workflow.spawn('first job', { label: 'draft' })
           const second = await workflow.spawn('review: ' + first.text, { label: 'review' })
           return second.text
@@ -211,6 +219,7 @@ describe('the workflow script', () => {
     expect(result?.value).toMatchObject({ ok: true, children: 2, value: 'done' })
     expect(started).toEqual(['first job', 'review: draft'])
     expect(textOf(result)).toContain('workflow script: ok')
+    expect(textOf(result)).toContain('draft first')
     expect(textOf(result)).toContain('return: "done"')
   })
 
@@ -467,6 +476,68 @@ describe('the workflow child path', () => {
       ok: false,
       stage: 'spawn 1',
       reason: 'the child agent failed: provider fell over',
+    })
+  })
+})
+
+describe('workflow child failures', () => {
+  test('a task whose child cannot start becomes a null item', async () => {
+    const agents = fakeAgents({}, [], { failCreate: true })
+
+    const result = await Effect.runPromise(
+      call(makeWorkflowTool({ agents, route: 'stub/model' }), {
+        tasks: [{ id: 'a', task: 'first job' }],
+      }),
+    )
+
+    expect(result?.isError).toBe(false)
+    expect(result?.value).toEqual([{ id: 'a', value: null, error: 'cannot start a child agent' }])
+  })
+
+  test('a task whose followup raises becomes a null item', async () => {
+    const agents = fakeAgents({}, [], { failFollowup: true })
+
+    const result = await Effect.runPromise(
+      call(makeWorkflowTool({ agents, route: 'stub/model' }), {
+        tasks: [{ id: 'a', task: 'first job' }],
+      }),
+    )
+
+    expect(result?.isError).toBe(false)
+    expect(result?.value).toEqual([
+      { id: 'a', value: null, error: 'the child agent took no message' },
+    ])
+  })
+
+  test('a script spawn whose followup raises fails at that stage', async () => {
+    const agents = fakeAgents({}, [], { failFollowup: true })
+
+    const result = await Effect.runPromise(
+      call(makeWorkflowTool({ agents, route: 'stub/model' }), {
+        script: "await workflow.spawn('first job')",
+      }),
+    )
+
+    expect(result?.value).toMatchObject({
+      ok: false,
+      stage: 'spawn 1',
+      reason: 'the child agent took no message',
+    })
+  })
+
+  test('a script spawn whose child never becomes idle fails at that stage', async () => {
+    const agents = fakeAgents({}, [], { failIdle: true })
+
+    const result = await Effect.runPromise(
+      call(makeWorkflowTool({ agents, route: 'stub/model' }), {
+        script: "await workflow.spawn('first job')",
+      }),
+    )
+
+    expect(result?.value).toMatchObject({
+      ok: false,
+      stage: 'spawn 1',
+      reason: 'the child agent did not become idle',
     })
   })
 })

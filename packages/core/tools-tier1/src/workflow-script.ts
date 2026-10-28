@@ -281,7 +281,19 @@ const answerSpawn = async (
     reply(false, { error: failure.current.reason })
     return
   }
-  await Effect.runPromise(created.whenIdle.pipe(Effect.orElseSucceed(() => undefined)))
+  const idle = await Effect.runPromise(
+    created.whenIdle.pipe(
+      Effect.match({
+        onFailure: () => false,
+        onSuccess: () => true,
+      }),
+    ),
+  )
+  if (!idle) {
+    failure.current = { stage, reason: 'the child agent did not become idle' }
+    reply(false, { error: failure.current.reason })
+    return
+  }
   const answered = created.session.events().slice(before)
   const childFailure = childFailureOf(answered)
   if (childFailure !== undefined) {
