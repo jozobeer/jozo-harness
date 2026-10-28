@@ -1,11 +1,12 @@
 import type { SubmitMode } from '@jozo-harness/ui-protocol'
-import { createSignal, onCleanup, onMount } from 'solid-js'
+import { Show, createSignal, onCleanup, onMount } from 'solid-js'
 import { Board } from './components/board.tsx'
 import { Composer } from './components/composer.tsx'
 import { ContextPane } from './components/context-pane.tsx'
 import { Conversation } from './components/conversation.tsx'
 import { LensSwitch } from './components/lens-switch.tsx'
 import { Status } from './components/status.tsx'
+import { ShortcutsContext, ShortcutsDialog, createShortcuts } from './components/shortcuts.tsx'
 import { Waterfall } from './components/waterfall.tsx'
 import { LENS_KEY, lensFrom, type Lens } from './lens.ts'
 import {
@@ -29,15 +30,12 @@ import {
   type Locale,
   type MessageKey,
 } from './locale.ts'
+import { boundChord, chordLabel, matches, shortcutOf, type ShortcutId } from './shortcuts.ts'
 import { createSessionStore, type SessionStore } from './store.ts'
 import { SeenContext, createSeen } from './seen.ts'
 
 /** How far the arrow keys move the boundary between the rail and the page. */
 const KEY_STEP = 8
-
-/** Mod+B folds the rail, as long as a field is not taking the keys. */
-const foldCombo = (event: KeyboardEvent): boolean =>
-  (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'b'
 
 const inField = (target: EventTarget | null): boolean =>
   target instanceof HTMLElement &&
@@ -59,6 +57,8 @@ const drawerAttr = (open: boolean): string | undefined => (open ? '' : undefined
 /** The page: the strip, the board of sessions, the answers or the trace, and the pane. */
 export const App = (props: { store?: SessionStore; lens?: Lens }) => {
   const store = props.store ?? createSessionStore()
+  const shortcuts = createShortcuts()
+  const [panel, setPanel] = createSignal(false)
   const [locale, setLocale] = createSignal(
     localeFrom(localStorage.getItem(LOCALE_KEY), browserLanguages()),
   )
@@ -101,10 +101,20 @@ export const App = (props: { store?: SessionStore; lens?: Lens }) => {
     setFolded(next)
     localStorage.setItem(RAIL_COLLAPSED_KEY, String(next))
   }
-  /** The fold button and Mod+B work whichever rail the page draws. */
+  /** The fold button and its key work whichever rail the page draws. */
   const toggleRail = (): void => {
     if (narrow()) setDrawer(!drawer())
     else fold(!folded())
+  }
+  /** The key an action answers to now, drawn for this platform. */
+  const keyOf = (id: ShortcutId): string => {
+    const row = shortcutOf(id)
+    return row === undefined ? '' : chordLabel(boundChord(shortcuts.bindings(), row))
+  }
+  /** A hint keeps its key beside it, so the reader need not open the list. */
+  const hintOf = (id: ShortcutId): string => {
+    const key = keyOf(id)
+    return key === '' ? '' : ' (' + key + ')'
   }
   /** A drag starts at the boundary and follows the pointer until it lets go. */
   const drag = (event: PointerEvent): void => {
@@ -135,9 +145,15 @@ export const App = (props: { store?: SessionStore; lens?: Lens }) => {
     store.start()
     document.documentElement.lang = locale()
     const onKey = (event: KeyboardEvent): void => {
-      if (!foldCombo(event) || inField(event.target)) return
-      event.preventDefault()
-      toggleRail()
+      if (matches(shortcuts.bindings(), 'shortcuts.open', event)) {
+        event.preventDefault()
+        setPanel(!panel())
+        return
+      }
+      if (matches(shortcuts.bindings(), 'rail.toggle', event) && !inField(event.target)) {
+        event.preventDefault()
+        toggleRail()
+      }
     }
     document.addEventListener('keydown', onKey)
     const onNarrow = (event: MediaQueryListEvent): void => {
@@ -157,68 +173,87 @@ export const App = (props: { store?: SessionStore; lens?: Lens }) => {
   const seen = createSeen(() => store.state().sessionId)
   return (
     <LocaleContext.Provider value={{ locale, choose: chooseLocale }}>
-      <SeenContext.Provider value={seen}>
-        <header id="status" aria-live="polite" style={stripRoom(stripWidth())}>
-          <button
-            id="rail-fold"
-            class="rail-fold"
-            type="button"
-            aria-controls="sidebar"
-            aria-expanded={railOpen()}
-            aria-label={t(railState() === 'open' ? 'rail.hide' : 'rail.show')}
-            title={t(railState() === 'open' ? 'rail.hideHint' : 'rail.showHint')}
-            onClick={toggleRail}
-          >
-            {folded() ? '»' : '«'}
-          </button>
-          <Status
-            store={store}
-            drawer={drawer()}
-            onDrawer={() => {
-              setDrawer(!drawer())
-            }}
-          />
-        </header>
-        <div
-          id="shell"
-          data-rail={railState()}
-          data-drawer={drawerAttr(drawer())}
-          style={'--rail-w: ' + String(railWidth()) + 'px'}
-        >
-          <aside id="sidebar">
-            <Board store={store} />
-          </aside>
+      <ShortcutsContext.Provider value={shortcuts}>
+        <SeenContext.Provider value={seen}>
+          <header id="status" aria-live="polite" style={stripRoom(stripWidth())}>
+            <button
+              id="rail-fold"
+              class="rail-fold"
+              type="button"
+              aria-controls="sidebar"
+              aria-expanded={railOpen()}
+              aria-label={t(railState() === 'open' ? 'rail.hide' : 'rail.show')}
+              title={t(railState() === 'open' ? 'rail.hide' : 'rail.show') + hintOf('rail.toggle')}
+              onClick={toggleRail}
+            >
+              {folded() ? '»' : '«'}
+            </button>
+            <button
+              id="shortcuts-open"
+              class="shortcuts-open"
+              type="button"
+              aria-label={t('shortcuts.title')}
+              title={t('shortcuts.openHint') + hintOf('shortcuts.open')}
+              onClick={() => setPanel(true)}
+            >
+              {keyOf('shortcuts.open')}
+            </button>
+            <Status
+              store={store}
+              drawer={drawer()}
+              onDrawer={() => {
+                setDrawer(!drawer())
+              }}
+            />
+          </header>
           <div
-            id="rail-resize"
-            role="separator"
-            aria-orientation="vertical"
-            aria-label={t('rail.resize')}
-            aria-valuemin={RAIL_MIN}
-            aria-valuemax={RAIL_MAX}
-            aria-valuenow={railWidth()}
-            tabIndex={0}
-            onPointerDown={drag}
-            onKeyDown={resizeKeys}
-          />
-          <div id="main" data-lens={lens()}>
-            <div class="column-head">
-              <LensSwitch lens={lens()} onChoose={choose} />
-            </div>
-            <Conversation store={store} />
-            <Waterfall store={store} live={lens() === 'timeline'} />
-            <Composer store={store} busyEnter={busyEnter()} onBusyEnter={chooseBusyEnter} />
-          </div>
-          <aside
-            id="context"
-            aria-label={t('context.title')}
-            ref={(element) => {
-              context = element
-            }}
+            id="shell"
+            data-rail={railState()}
+            data-drawer={drawerAttr(drawer())}
+            style={'--rail-w: ' + String(railWidth()) + 'px'}
           >
-            <ContextPane store={store} />
-          </aside>
-        </div>
-      </SeenContext.Provider>
+            <aside id="sidebar">
+              <Board store={store} />
+            </aside>
+            <div
+              id="rail-resize"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t('rail.resize')}
+              aria-valuemin={RAIL_MIN}
+              aria-valuemax={RAIL_MAX}
+              aria-valuenow={railWidth()}
+              tabIndex={0}
+              onPointerDown={drag}
+              onKeyDown={resizeKeys}
+            />
+            <div id="main" data-lens={lens()}>
+              <div class="column-head">
+                <LensSwitch lens={lens()} onChoose={choose} />
+              </div>
+              <Conversation store={store} />
+              <Waterfall store={store} live={lens() === 'timeline'} />
+              <Composer store={store} busyEnter={busyEnter()} onBusyEnter={chooseBusyEnter} />
+            </div>
+            <aside
+              id="context"
+              aria-label={t('context.title')}
+              ref={(element) => {
+                context = element
+              }}
+            >
+              <ContextPane store={store} />
+            </aside>
+          </div>
+        </SeenContext.Provider>
+        <Show when={panel()}>
+          <ShortcutsDialog
+            onClose={() => {
+              setPanel(false)
+            }}
+          />
+        </Show>
+      </ShortcutsContext.Provider>
     </LocaleContext.Provider>
   )
 }
