@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Duration, Effect, Exit, Option, Ref, Schema, type Scope } from 'effect'
 import { spawn } from '@jozo-harness/process'
-import { noneSandbox, type SandboxShape } from '@jozo-harness/safety'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
 import { messageOf, programExists } from './program.ts'
 
@@ -379,11 +378,20 @@ const waitForPort = (
         if (Number.isInteger(port) && port > 0 && port < 65_536) return port
       }
       if (Date.now() >= deadline) {
+        running.child.kill()
+        const stderr = yield* Effect.option(
+          Effect.tryPromise({ try: () => running.child.stderr(), catch: () => '' }).pipe(
+            Effect.timeout(Duration.millis(2_000)),
+            Effect.catchCause(() => Effect.succeed('')),
+          ),
+        )
+        const reason = Option.isSome(stderr) ? stderr.value.trim() : ''
         return yield* Effect.fail(
           unavailable(
             'browser did not start: no DevToolsActivePort after ' +
               String(settings.startupMs) +
-              'ms',
+              'ms' +
+              (reason === '' ? '' : ': ' + reason.slice(0, 500)),
           ),
         )
       }
@@ -425,7 +433,6 @@ const pageSocket = (host: BrowserSessionHost, port: number): Effect.Effect<strin
 /** Starts the one browser a session owns, and cleans up whatever a failure left. */
 const startBrowser = (
   host: BrowserSessionHost,
-  sandbox: SandboxShape,
   settings: Required<BrowserTimeouts>,
   cwd: string,
 ): Effect.Effect<RunningBrowser, ToolError> =>
@@ -447,15 +454,11 @@ const startBrowser = (
     }
     const argv = sessionBrowserCommand(program, profile)
     const launched = Effect.gen(function* () {
-      const confined = yield* sandbox
-        .wrap({ argv, cwd })
-        .pipe(
-          Effect.mapError((error) =>
-            unavailable('browser is unavailable: the sandbox refused the launch: ' + error.message),
-          ),
-        )
+      // The browser is not wrapped in the run's sandbox: chrome applies its own
+      // sandbox, and a second seatbelt around it makes the launch fail. The
+      // throwaway profile and the http(s) check bound what the page can be.
       const child = yield* Effect.try({
-        try: () => host.spawn(confined.argv, confined.cwd),
+        try: () => host.spawn(argv, cwd),
         catch: (error) => unavailable('browser failed to start: ' + messageOf(error)),
       })
       const afterSpawn = Effect.gen(function* () {
@@ -483,6 +486,25 @@ const startBrowser = (
     )
   })
 
+/** Removes the profile, retrying while the stopping browser still has files open. */
+const removeProfile = (
+  host: BrowserSessionHost,
+  profile: string,
+  attempt = 0,
+): Effect.Effect<void> =>
+  Effect.tryPromise({
+    try: () => host.removeDirectory(profile),
+    catch: (error) => error,
+  }).pipe(
+    Effect.catchCause(() =>
+      attempt < 10
+        ? Effect.sleep(Duration.millis(100)).pipe(
+            Effect.andThen(removeProfile(host, profile, attempt + 1)),
+          )
+        : Effect.void,
+    ),
+  )
+
 /** Stops the browser and removes the profile, so no history outlives the session. */
 const closeBrowser = (host: BrowserSessionHost, running: RunningBrowser): Effect.Effect<void> =>
   Effect.gen(function* () {
@@ -490,7 +512,13 @@ const closeBrowser = (host: BrowserSessionHost, running: RunningBrowser): Effect
       running.connection.close()
       running.child.kill()
     })
-    yield* Effect.promise(() => host.removeDirectory(running.profile)).pipe(Effect.ignore)
+    // The files stay open until the child is gone; a bounded wait keeps the
+    // finalizer from hanging on a browser that ignores the kill.
+    yield* Effect.tryPromise({
+      try: () => running.child.exited,
+      catch: () => 0,
+    }).pipe(Effect.timeout(Duration.millis(5_000)), Effect.ignore)
+    yield* removeProfile(host, running.profile)
   })
 
 /** Navigates and waits until the page's DOM is ready, or says the navigation failed. */
@@ -662,7 +690,6 @@ const actionFrom = (
  */
 export const makeBrowserSession = (
   host: BrowserSessionHost,
-  sandbox: SandboxShape = noneSandbox,
   timeouts: BrowserTimeouts = {},
 ): Effect.Effect<BrowserSession, never, Scope.Scope> =>
   Effect.gen(function* () {
@@ -683,7 +710,7 @@ export const makeBrowserSession = (
             yield* navigate(current, url, settings)
             return yield* readPage(current, settings.cdpMs)
           }
-          const started = yield* startBrowser(host, sandbox, settings, cwd)
+          const started = yield* startBrowser(host, settings, cwd)
           yield* Ref.set(running, started)
           yield* navigate(started, url, settings)
           return yield* readPage(started, settings.cdpMs)

@@ -198,7 +198,7 @@ export const makeBrowserTool = (
 
 /**
  * The browser tools, ready for whoever registers tools into the registry; the
- * run's sandbox wraps the one-shot read, and the session browser's launch.
+ * run's sandbox wraps the one-shot read, while the session browser owns chrome.
  */
 export class BrowserTools extends Context.Service<
   BrowserTools,
@@ -215,7 +215,7 @@ export const browserPlugin: Plugin<{}, BrowserTools, never> = {
   requires: [],
   layer: () =>
     Layer.succeed(BrowserTools, (sandbox) =>
-      makeBrowserSession(systemBrowserSessionHost, sandbox).pipe(
+      makeBrowserSession(systemBrowserSessionHost).pipe(
         Effect.map((session) => [makeBrowserTool(sandbox), ...browserSessionTools(session)]),
       ),
     ),
