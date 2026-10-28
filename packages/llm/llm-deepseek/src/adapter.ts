@@ -31,16 +31,14 @@ export interface DeepSeekMessagesOptions {
 const DEFAULT_MAX_TOKENS = 8192
 const ANTHROPIC_VERSION = '2023-06-01'
 
-/** Top-level fields the adapter owns; a route's params cannot rewrite the shape. */
-const STRUCTURAL = new Set([
-  'model',
-  'messages',
-  'system',
-  'tools',
-  'stream',
-  'stream_options',
-  'max_tokens',
-  'reasoning_effort',
+/** The Messages sampling fields a route may pass through; nothing else is a body field. */
+const SAMPLING = new Set([
+  'temperature',
+  'top_p',
+  'top_k',
+  'stop_sequences',
+  'metadata',
+  'service_tier',
 ])
 
 const textOf = (content: ReadonlyArray<ContentBlock>): string =>
@@ -126,7 +124,7 @@ const toolOf = (tool: ToolSchema): Record<string, unknown> => ({
 })
 
 const paramsOf = (params: Readonly<Record<string, unknown>>): Record<string, unknown> =>
-  Object.fromEntries(Object.entries(params).filter(([key]) => !STRUCTURAL.has(key)))
+  Object.fromEntries(Object.entries(params).filter(([key]) => SAMPLING.has(key)))
 
 /** A bound is required; a request's own number wins over the row's default. */
 const maxTokensOf = (request: LlmRequest, configured: number | undefined): number => {

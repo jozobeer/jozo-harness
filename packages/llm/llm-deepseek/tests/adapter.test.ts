@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { LlmFailure, type LlmRequest, type StreamChunk } from '@jozo-harness/llm'
 import { Effect, Stream } from 'effect'
-import { deepSeekMessagesAdapter } from '../src/index.ts'
+import { decodeMessagesStream, deepSeekMessagesAdapter } from '../src/index.ts'
 
 const request: LlmRequest = {
   provider: 'deepseek',
@@ -67,7 +67,10 @@ describe('deepSeekMessagesAdapter', () => {
   test('sends the official Messages body, not the OpenAI-compatible one', async () => {
     const { seen, send } = capture('')
 
-    await collect(send, { ...request, params: { temperature: 0.2 } })
+    await collect(send, {
+      ...request,
+      params: { temperature: 0.2, reasoning_effort: 'high', thinking: { type: 'enabled' } },
+    })
 
     const sent = JSON.parse(seen[0]?.body ?? '{}') as Record<string, unknown>
     expect(seen[0]?.url).toBe('https://api.deepseek.com/anthropic/v1/messages')
@@ -241,6 +244,47 @@ describe('deepSeekMessagesAdapter', () => {
     const sent = JSON.parse(extended.seen[0]?.body ?? '{}') as Record<string, unknown>
     expect(sent['thinking']).toEqual({ type: 'enabled' })
     expect(sent['reasoning']).toBe('high')
+  })
+
+  test('refuses an image block before the official endpoint sees it', async () => {
+    let fetched = 0
+    const send = (() => {
+      fetched += 1
+      return Promise.resolve(new Response(''))
+    }) as unknown as typeof fetch
+
+    const error = await Effect.runPromise(
+      Effect.flip(
+        Stream.runCollect(
+          adapterWith(send).stream({
+            ...request,
+            messages: [
+              {
+                role: 'user',
+                content: [{ type: 'image', mediaType: 'image/png', data: 'AA==' }],
+              },
+            ],
+          }),
+        ),
+      ),
+    )
+
+    expect(error).toBeInstanceOf(LlmFailure)
+    expect(error.code).toBe('INVALID_REQUEST')
+    expect(fetched).toBe(0)
+  })
+
+  test('ignores malformed and unknown events, then settles the stream', () => {
+    const chunks = decodeMessagesStream([
+      'event: ping',
+      'data: {"type":"ping"}',
+      'data: not json',
+      'data: {"type":"content_block_start","index":0,"content_block":{"type":"audio"}}',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta"}}',
+      'data: {"type":"message_stop"}',
+    ])
+
+    expect(chunks).toEqual([{ type: 'finish', kind: 'stop' }])
   })
 
   test('an HTTP rejection keeps the provider detail and its class', async () => {
