@@ -352,6 +352,12 @@ importers:
         specifier: 4.0.3
         version: 4.0.3
 
+  packages/core/acp:
+    dependencies:
+      effect:
+        specifier: 4.0.3
+        version: 4.0.3
+
   packages/core/agent:
     dependencies:
       '@jozo-harness/kernel':
