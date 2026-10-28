@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { nextDue, parseCron } from '../src/index.ts'
+import { isValidTimeZone, nextDue, parseCron } from '../src/index.ts'
 
 /** A local instant, so the tests speak in the same clock the schedules do. */
 const at = (
@@ -136,5 +136,86 @@ describe('cron', () => {
     expect(() => parseCron('* * * *')).toThrow()
     expect(() => parseCron('* * * * * *')).toThrow()
     expect(() => parseCron('* * 32 * *')).toThrow()
+  })
+})
+describe('time zones', () => {
+  const utc = (text: string): number => Date.parse(text)
+  const iso = (ms: number | undefined): string =>
+    ms === undefined ? 'never' : new Date(ms).toISOString()
+
+  test('reads a daily time on the named zone, not the process clock', () => {
+    const rule = { kind: 'daily', time: '08:30', timeZone: 'Asia/Tokyo' } as const
+
+    // 2026-10-14T00:00Z is 09:00 in Tokyo, so that day's 08:30 has gone.
+    expect(iso(nextDue(rule, utc('2026-10-14T00:00:00Z'), undefined))).toBe(
+      '2026-10-14T23:30:00.000Z',
+    )
+    expect(iso(nextDue(rule, utc('2026-10-13T00:00:00Z'), undefined))).toBe(
+      '2026-10-13T23:30:00.000Z',
+    )
+  })
+
+  test('keeps the wall clock across a spring-forward change', () => {
+    const rule = { kind: 'daily', time: '08:30', timeZone: 'America/New_York' } as const
+
+    // DST begins on 2026-03-08 at 02:00; 08:30 is 12:30 UTC, not 13:30.
+    expect(iso(nextDue(rule, utc('2026-03-07T14:00:00Z'), undefined))).toBe(
+      '2026-03-08T12:30:00.000Z',
+    )
+  })
+
+  test('keeps the wall clock across a fall-back change', () => {
+    const rule = { kind: 'daily', time: '08:30', timeZone: 'America/New_York' } as const
+
+    // DST ends on 2026-11-01 at 02:00; 08:30 is 13:30 UTC, not 12:30.
+    expect(iso(nextDue(rule, utc('2026-10-31T14:00:00Z'), undefined))).toBe(
+      '2026-11-01T13:30:00.000Z',
+    )
+  })
+
+  test('passes over an hour the zone deletes', () => {
+    const rule = { kind: 'cron', expression: '30 2 * * *', timeZone: 'America/New_York' } as const
+
+    // 02:30 does not exist on 2026-03-08, so the next one is on the 9th.
+    expect(iso(nextDue(rule, utc('2026-03-07T12:00:00Z'), undefined))).toBe(
+      '2026-03-09T06:30:00.000Z',
+    )
+  })
+
+  test('a weekly rule uses the named zone weekday', () => {
+    const rule = {
+      kind: 'weekly',
+      weekdays: [0],
+      time: '00:30',
+      timeZone: 'Pacific/Auckland',
+    } as const
+
+    // 2026-10-17T00:00Z is Sunday 13:00 in Auckland; the next Sunday 00:30 is
+    // 2026-10-18T00:30 +13:00 = 2026-10-17T11:30Z.
+    expect(iso(nextDue(rule, utc('2026-10-17T00:00:00Z'), undefined))).toBe(
+      '2026-10-17T11:30:00.000Z',
+    )
+  })
+
+  test('knows which zone names it can read', () => {
+    expect(isValidTimeZone('Europe/Berlin')).toBe(true)
+    expect(isValidTimeZone('Mars/Olympus_Mons')).toBe(false)
+    expect(isValidTimeZone('')).toBe(false)
+  })
+})
+
+describe('one-time rules', () => {
+  test('at names one instant, and only while it is still ahead', () => {
+    const at = Date.parse('2026-10-14T18:30:00Z')
+
+    expect(nextDue({ kind: 'at', at }, at - 1000, undefined)).toBe(at)
+    expect(nextDue({ kind: 'at', at }, at, undefined)).toBeUndefined()
+  })
+
+  test('after counts from the time the schedule was written', () => {
+    const from = Date.parse('2026-10-14T09:00:00Z')
+
+    expect(nextDue({ kind: 'after', seconds: 90 }, from, undefined)).toBe(from + 90_000)
+    expect(nextDue({ kind: 'after', seconds: 90 }, from, from + 90_000)).toBeUndefined()
   })
 })
