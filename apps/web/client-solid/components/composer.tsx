@@ -13,7 +13,7 @@ import {
 } from 'solid-js'
 import { plainText } from '@jozo-harness/ui-view'
 import type { SubmitMode } from '@jozo-harness/ui-protocol'
-import type { CommandView } from '../../src/shared/rpc.ts'
+import type { CommandView, RunStateView } from '../../src/shared/rpc.ts'
 import {
   commandCandidates,
   commandTokenAt,
@@ -40,6 +40,7 @@ import { Button } from './ui/button.tsx'
 import { Fizz } from './ui/fizz.tsx'
 import { GoalMark, roundsOf } from './ui/goal-mark.tsx'
 import { Icon } from './ui/icon.tsx'
+import { Mug } from './ui/mug.tsx'
 import { ContextRing } from './usage.tsx'
 
 /** The one line a quote chip shows, however long the passage the reader selected. */
@@ -86,6 +87,62 @@ const Queue = (props: { store: SessionStore }) => (
     <Waiting label="queued" messages={props.store.state().run?.queued ?? []} />
   </>
 )
+
+/** What a step's mark says to a reader who cannot see the icon. */
+const todoSay: Readonly<Record<RunStateView['todos'][number]['status'], string>> = {
+  pending: 'not started',
+  in_progress: 'in progress',
+  completed: 'completed',
+}
+
+/**
+ * The session's todo list above the composer. The closed line says how many
+ * steps still wait and which one runs now; opening it reads the whole list the
+ * Run pane shows. A session without todos leaves the dock out, so the input
+ * keeps its room.
+ */
+const TodoDock = (props: { store: SessionStore }) => {
+  const t = useTranslate()
+  const todos = (): RunStateView['todos'] => props.store.state().run?.todos ?? []
+  const left = (): number => todos().filter((todo) => todo.status !== 'completed').length
+  const current = (): string | undefined =>
+    todos().find((todo) => todo.status === 'in_progress')?.content
+
+  return (
+    <Show when={todos().length > 0}>
+      <details id="todo-dock" class="todo-dock">
+        <summary class="todo-dock-head">
+          <span class="todo-dock-title">{t('composer.todo')}</span>
+          <span class="todo-dock-count">
+            {String(left()) + '/' + String(todos().length) + ' ' + t('composer.todoLeft')}
+          </span>
+          <Show when={current()}>
+            {(content) => <span class="todo-dock-current">{content()}</span>}
+          </Show>
+        </summary>
+        <ul class="todo-dock-list">
+          <For each={todos()}>
+            {(todo) => (
+              <li class={'todo-dock-item ' + todo.status}>
+                <span class="todo-dock-mark" role="img" aria-label={todoSay[todo.status]}>
+                  <Switch fallback={<Icon name="square" />}>
+                    <Match when={todo.status === 'in_progress'}>
+                      <Mug state="filling" />
+                    </Match>
+                    <Match when={todo.status === 'completed'}>
+                      <Icon name="check-square" />
+                    </Match>
+                  </Switch>
+                </span>
+                <span class="todo-dock-content">{todo.content}</span>
+              </li>
+            )}
+          </For>
+        </ul>
+      </details>
+    </Show>
+  )
+}
 
 /**
  * The goal the session works toward, above the composer. Every button is only the
@@ -988,6 +1045,7 @@ export const Composer = (props: {
   return (
     <footer data-takeover={takeover() ? 'true' : 'false'}>
       <GoalBar store={props.store} onEdit={editGoal} />
+      <TodoDock store={props.store} />
       <div id="queue">
         <Queue store={props.store} />
       </div>

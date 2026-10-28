@@ -2680,6 +2680,86 @@ footer {
   white-space: nowrap;
 }
 
+/* The todo dock above the composer: what is left, which step runs, and the full list on open. */
+#todo-dock {
+  max-width: var(--prose-w);
+  margin: 0 auto 6px;
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-size: var(--text-sm);
+}
+
+#todo-dock > summary {
+  display: flex;
+  gap: var(--s2);
+  align-items: baseline;
+  min-width: 0;
+  list-style: none;
+  cursor: pointer;
+}
+
+#todo-dock > summary::-webkit-details-marker {
+  display: none;
+}
+
+.todo-dock-title,
+.todo-dock-count {
+  flex: none;
+  font-size: var(--text-xs);
+}
+
+.todo-dock-title {
+  color: var(--dim);
+}
+
+/* The count of unfinished steps is what the reader needs first, so it keeps the accent. */
+.todo-dock-count {
+  color: var(--accent);
+}
+
+.todo-dock-current,
+.todo-dock-content {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-dock-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 40vh;
+  margin: var(--s2) 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.todo-dock-item {
+  display: flex;
+  gap: var(--s2);
+  align-items: baseline;
+  min-width: 0;
+}
+
+.todo-dock-mark {
+  display: inline-flex;
+  flex: none;
+  width: 16px;
+  color: var(--dim);
+}
+
+.todo-dock-item.in_progress .todo-dock-mark {
+  color: var(--accent);
+}
+
+.todo-dock-item.completed .todo-dock-content {
+  color: var(--dim);
+  text-decoration: line-through;
+}
+
 /* The goal above the composer: what the session works toward, and the words that move it. */
 .goal-bar {
   display: flex;
