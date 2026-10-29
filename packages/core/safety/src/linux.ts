@@ -65,9 +65,11 @@ export function probeBwrap(run: CommandProbe = commandRuns): boolean {
 export const bwrapUnavailableMessage = (platform: string): string =>
   'no usable bwrap sandbox on ' +
   platform +
-  ': bwrap is not installed, or it cannot create the user namespace it needs. ' +
-  'Install bubblewrap (bwrap) or pass sandbox: none to run commands without one. ' +
-  'The landlock fallback is not implemented yet.'
+  ': bwrap is not installed, or it cannot create the user namespace it needs, ' +
+  'and landlock-run is missing or this kernel cannot enforce its full write set ' +
+  '(Linux 6.2 or newer, so truncate is included). ' +
+  'Install bubblewrap (bwrap), or install landlock-run on such a kernel. ' +
+  'Pass sandbox: none to run commands without one.'
 
 /**
  * Wraps commands with bwrap on Linux. The mode decides what the command may
@@ -114,8 +116,8 @@ export type LandlockProbe = () => string | undefined
 
 /**
  * Picks the first helper that applies a ruleset. The helper's own `--probe` is the
- * whole test: a kernel without Landlock refuses the ruleset, and a binary that was
- * never built cannot be spawned at all.
+ * whole test: a kernel that cannot enforce the full write set, including truncate,
+ * refuses the ruleset, and a binary that was never built cannot be spawned at all.
  */
 export function probeLandlock(
   run: CommandProbe = commandRuns,

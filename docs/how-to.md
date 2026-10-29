@@ -967,7 +967,7 @@ cargo build -p landlock-run                # checkout なら target/debug も探
 landlock-run --probe && echo ok
 ```
 
-helper は読み取りを制限せず、書き込みだけを閉じる。`--probe` は ruleset を適用してすぐ終わるので、カーネルが Landlock を受け付けるかどうかをそのまま確かめられる。
+helper は読み取りを制限せず、書き込みだけを閉じる。`--probe` は ruleset を適用してすぐ終わる。truncate まで含めて書き込み一式を強制できないカーネル（Linux 6.2 より前の Landlock）では失敗する。その状態で通すと `truncate(2)` が作業ディレクトリの外のファイルを空にできる。失敗したら bwrap を用意するか、`sandbox: none` を明示する。
 
 ## PowerShell でコマンドを走らせる
 

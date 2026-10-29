@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -356,6 +356,50 @@ describe.skipIf(process.platform !== 'linux')('landlock helper on Linux', () => 
 
     expect(result.status).not.toBe(0)
     expect(existsSync(join(cwd, 'made.txt'))).toBe(false)
+  })
+
+  // Node's fs.truncateSync opens the path for writing, which the write-file
+  // right already denies. The hole is truncate(2) itself, so the probe has to
+  // call that syscall. Python's os.truncate does.
+  const truncate = (target: string): ReadonlyArray<string> => [
+    'python3',
+    '-c',
+    'import os, sys; os.truncate(sys.argv[1], 0)',
+    target,
+  ]
+
+  test('refuses to truncate a file outside the writable roots', async () => {
+    const cwd = mkdtempSync(join(scratch, 'trunc-cwd-'))
+    const outside = mkdtempSync(join(scratch, 'trunc-outside-'))
+    const target = join(outside, 'kept.txt')
+    writeFileSync(target, 'secret')
+
+    const result = await run('workspace-write', cwd, truncate(target))
+
+    expect(result.status).not.toBe(0)
+    expect(readFileSync(target, 'utf8')).toBe('secret')
+  })
+
+  test('truncates a file inside the cwd', async () => {
+    const cwd = mkdtempSync(join(scratch, 'trunc-inside-'))
+    const target = join(cwd, 'note.txt')
+    writeFileSync(target, 'secret')
+
+    const result = await run('workspace-write', cwd, truncate(target))
+
+    expect(result.status).toBe(0)
+    expect(readFileSync(target, 'utf8')).toBe('')
+  })
+
+  test('read-only refuses to truncate a file in the cwd', async () => {
+    const cwd = mkdtempSync(join(scratch, 'trunc-readonly-'))
+    const target = join(cwd, 'note.txt')
+    writeFileSync(target, 'secret')
+
+    const result = await run('read-only', cwd, truncate(target))
+
+    expect(result.status).not.toBe(0)
+    expect(readFileSync(target, 'utf8')).toBe('secret')
   })
 
   test('the probe accepts the built helper and refuses a path that is not there', () => {
