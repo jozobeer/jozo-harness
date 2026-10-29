@@ -109,9 +109,14 @@ mod linux {
 
     /// Applies one ruleset to this process. Landlock has no way to describe a
     /// hierarchy from the outside, so every writable root becomes a path-beneath
-    /// rule and the rights the kernel does not know are dropped by the crate.
+    /// rule and the rights the newer kernel does not know are dropped by the crate.
+    ///
+    /// ABI 3 is the newest level whose write set holds only filesystem writes. ABI 5
+    /// adds IoctlDev and ABI 9 ResolveUnix, which would also constrain a command's
+    /// terminal and its unix-socket lookups; leaving those unhandled keeps ioctls
+    /// and the network as open as the bwrap profile leaves them.
     fn confine(roots: &[PathBuf]) -> Result<(), String> {
-        let access = AccessFs::from_write(ABI::V9);
+        let access = AccessFs::from_write(ABI::V3);
         let mut ruleset = Ruleset::default()
             .handle_access(access)
             .map_err(|error| format!("cannot build the ruleset: {error}"))?
