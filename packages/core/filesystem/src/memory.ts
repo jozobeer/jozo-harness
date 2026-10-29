@@ -28,6 +28,17 @@ const parentOf = (path: string): string => {
   return cut <= 0 ? '/' : path.slice(0, cut)
 }
 
+/** The name a child has under one directory key. */
+const nameIn = (key: string, child: string): string =>
+  key === '/' ? child.slice(1) : child.slice(key.length + 1)
+
+const entryIn = (key: string, child: string, isFile: boolean): DirEntry => ({
+  name: nameIn(key, child),
+  isFile,
+  isDirectory: !isFile,
+  isSymbolicLink: false,
+})
+
 /** A short fingerprint of one string. A store with no hash function still notices a change. */
 const digestOf = (content: string): string => {
   let hash = 0x811c9dc5
@@ -108,22 +119,13 @@ export const makeMemoryFileSystem = (
 
   const readdir = (path: string): ReadonlyArray<DirEntry> => {
     const key = normalized(path)
-    const names = new Map<string, DirEntry>()
-    for (const file of files.keys()) {
-      if (parentOf(file) !== key) continue
-      names.set(file.slice(key === '/' ? 1 : key.length + 1), {
-        name: file.slice(key === '/' ? 1 : key.length + 1),
-        isFile: true,
-        isDirectory: false,
-        isSymbolicLink: false,
-      })
-    }
-    for (const directory of directories) {
-      if (directory === key || parentOf(directory) !== key) continue
-      const name = directory.slice(key === '/' ? 1 : key.length + 1)
-      names.set(name, { name, isFile: false, isDirectory: true, isSymbolicLink: false })
-    }
-    return [...names.values()]
+    const candidates: ReadonlyArray<readonly [string, boolean]> = [
+      ...[...files.keys()].map((file): readonly [string, boolean] => [file, true]),
+      ...[...directories].map((directory): readonly [string, boolean] => [directory, false]),
+    ]
+    return candidates
+      .filter(([candidate]) => candidate !== key && parentOf(candidate) === key)
+      .map(([candidate, isFile]) => entryIn(key, candidate, isFile))
   }
 
   for (const [path, content] of Object.entries(initial)) put(path, content)
