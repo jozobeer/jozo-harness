@@ -284,6 +284,9 @@ importers:
       '@jozo-harness/filesystem':
         specifier: workspace:*
         version: link:../../packages/core/filesystem
+      '@jozo-harness/runtime-browser':
+        specifier: workspace:*
+        version: link:../../packages/core/runtime-browser
       '@jozo-harness/session':
         specifier: workspace:*
         version: link:../../packages/core/session
