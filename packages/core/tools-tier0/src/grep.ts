@@ -1,6 +1,6 @@
-import { readFile } from 'node:fs/promises'
 import { matchesGlob } from 'node:path'
 import { Schema, Effect } from 'effect'
+import { FileSystem, withFileSystem, type FileSystemShape } from '@jozo-harness/filesystem'
 import { ToolError, writeSpill, type ToolDefinition } from '@jozo-harness/tools'
 import { takePage } from './page.ts'
 import {
@@ -95,32 +95,35 @@ const matchesIn = (file: string, text: string, expression: RegExp): ReadonlyArra
 }
 
 /** A file's text, or undefined when it is binary or not UTF-8; either way it has no lines to match. */
-const searchableText = async (path: string): Promise<string | undefined> => {
-  const bytes: Uint8Array | undefined = await readFile(path).catch(() => undefined)
-  if (bytes === undefined || isBinary(bytes)) return undefined
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-  } catch {
-    return undefined
-  }
-}
+const searchableText = (path: string): Effect.Effect<string | undefined, never, FileSystem> =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem
+    const bytes = yield* fileSystem.readBytes(path).pipe(Effect.orElseSucceed(() => undefined))
+    if (bytes === undefined || isBinary(bytes)) return undefined
+    try {
+      return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    } catch {
+      return undefined
+    }
+  })
 
 /** Walks the files in order and stops one match past the limit, which is all the caller needs. */
-const findMatches = async (
+const findMatches = (
   files: ReadonlyArray<string>,
   cwd: string,
   expression: RegExp,
   limit: number,
-): Promise<Array<GrepMatch>> => {
-  const matches: Array<GrepMatch> = []
-  for (const file of files) {
-    if (matches.length > limit) break
-    const text = await searchableText(cwd + '/' + file)
-    if (text === undefined) continue
-    matches.push(...matchesIn(file, text, expression))
-  }
-  return matches
-}
+): Effect.Effect<ReadonlyArray<GrepMatch>, never, FileSystem> =>
+  Effect.gen(function* () {
+    const matches: Array<GrepMatch> = []
+    for (const file of files) {
+      if (matches.length > limit) break
+      const text = yield* searchableText(cwd + '/' + file)
+      if (text === undefined) continue
+      matches.push(...matchesIn(file, text, expression))
+    }
+    return matches
+  })
 
 const compile = (pattern: string): Effect.Effect<RegExp, ToolError> =>
   Effect.try({
@@ -147,7 +150,7 @@ const searchMatches = (
   start: string,
   expression: RegExp,
   ripgrep: Ripgrep,
-): Effect.Effect<FoundMatches> =>
+): Effect.Effect<FoundMatches, never, FileSystem> =>
   Effect.gen(function* () {
     const include = args.include
     const direct = yield* Effect.promise(() =>
@@ -171,9 +174,7 @@ const searchMatches = (
       start,
       ...(include === undefined ? {} : { pattern: include }),
     })
-    const found = yield* Effect.promise(() =>
-      findMatches(files, cwd, expression, GREP_MAX_MATCHES + 1),
-    )
+    const found = yield* findMatches(files, cwd, expression, GREP_MAX_MATCHES + 1)
     return { found, fallback: direct.fallback }
   })
 
@@ -183,6 +184,7 @@ const searchMatches = (
  * files out; a run without it says why it fell back to the walker.
  */
 export const makeGrepTool = (
+  fileSystem: FileSystemShape,
   ripgrep: Ripgrep = defaultRipgrep,
 ): ToolDefinition<GrepArgs, GrepValue> => ({
   name: 'grep',
@@ -221,38 +223,39 @@ export const makeGrepTool = (
     },
   },
   execute: (args, context) =>
-    Effect.gen(function* () {
-      // The pattern is compiled before a single file is read.
-      const expression = yield* compile(args.pattern)
-      const page = args.limit ?? GREP_PAGE_MATCHES
-      if (page < 1) {
-        return yield* Effect.fail(
-          new ToolError({ code: 'invalid-arguments', message: 'limit starts at 1' }),
+    withFileSystem(
+      fileSystem,
+      Effect.gen(function* () {
+        // The pattern is compiled before a single file is read.
+        const expression = yield* compile(args.pattern)
+        const page = args.limit ?? GREP_PAGE_MATCHES
+        if (page < 1) {
+          return yield* Effect.fail(
+            new ToolError({ code: 'invalid-arguments', message: 'limit starts at 1' }),
+          )
+        }
+        const start = yield* resolveSearchStart(fileSystem, context.cwd, args.path)
+        const { found, fallback } = yield* searchMatches(
+          args,
+          context.cwd,
+          start,
+          expression,
+          ripgrep,
         )
-      }
-      const start = yield* resolveSearchStart(context.cwd, args.path)
-      const { found, fallback } = yield* searchMatches(
-        args,
-        context.cwd,
-        start,
-        expression,
-        ripgrep,
-      )
-      const complete = inPathOrder(found).slice(0, GREP_MAX_MATCHES)
-      const shown = takePage(complete, page, matchLineOf)
-      const note = fallback === undefined ? {} : { fallback }
-      if (found.length <= shown.length) {
-        return { matches: shown, seen: found.length, truncated: false, ...note }
-      }
-      const locator = yield* writeSpill(context, 'grep', matchLines(complete))
-      return {
-        matches: shown,
-        seen: found.length,
-        truncated: true,
-        ...(locator === undefined ? {} : { locator }),
-        ...note,
-      }
-    }),
+        const complete = inPathOrder(found).slice(0, GREP_MAX_MATCHES)
+        const shown = takePage(complete, page, matchLineOf)
+        const note = fallback === undefined ? {} : { fallback }
+        if (found.length <= shown.length) {
+          return { matches: shown, seen: found.length, truncated: false, ...note }
+        }
+        const locator = yield* writeSpill(context, 'grep', matchLines(complete))
+        return {
+          matches: shown,
+          seen: found.length,
+          truncated: true,
+          ...(locator === undefined ? {} : { locator }),
+          ...note,
+        }
+      }),
+    ),
 })
-
-export const grepTool: ToolDefinition<GrepArgs, GrepValue> = makeGrepTool()

@@ -1,4 +1,5 @@
 import { Schema, Effect } from 'effect'
+import { withFileSystem, type FileSystemShape } from '@jozo-harness/filesystem'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
 import { look, type ObservedFiles } from './observed-files.ts'
 import { linesOf, readUtf8 } from './text.ts'
@@ -170,7 +171,10 @@ const checkWindow = (
  * read is remembered for the session, so a later write or edit can tell whether
  * somebody else changed the file in between.
  */
-export const makeReadTool = (observed: ObservedFiles): ToolDefinition<ReadArgs, ReadValue> => ({
+export const makeReadTool = (
+  fileSystem: FileSystemShape,
+  observed: ObservedFiles,
+): ToolDefinition<ReadArgs, ReadValue> => ({
   name: 'read',
   readOnly: true,
   presentCall: (args) => ({ summary: 'read ' + rangeOf(args) }),
@@ -195,23 +199,26 @@ export const makeReadTool = (observed: ObservedFiles): ToolDefinition<ReadArgs, 
     ],
   },
   execute: (args, context) =>
-    Effect.gen(function* () {
-      const path = args.path.startsWith('/') ? args.path : context.cwd + '/' + args.path
-      const offset = args.offset ?? 1
-      const limit = args.limit ?? 2000
-      const lines = linesOf(yield* readUtf8(path))
-      yield* checkWindow(path, offset, limit, lines.length)
-      const window = windowed(lines, offset, limit)
-      const current = yield* look(path)
-      if (current !== undefined) observed.observe(context.sessionId, path, current)
-      return {
-        text: window.text,
-        totalLines: lines.length,
-        from: lines.length === 0 ? 0 : offset,
-        to: window.to,
-        truncated: window.truncated,
-        capped: window.capped,
-        shortened: window.shortened,
-      }
-    }),
+    withFileSystem(
+      fileSystem,
+      Effect.gen(function* () {
+        const path = args.path.startsWith('/') ? args.path : context.cwd + '/' + args.path
+        const offset = args.offset ?? 1
+        const limit = args.limit ?? 2000
+        const lines = linesOf(yield* readUtf8(path))
+        yield* checkWindow(path, offset, limit, lines.length)
+        const window = windowed(lines, offset, limit)
+        const current = yield* look(path)
+        if (current !== undefined) observed.observe(context.sessionId, path, current)
+        return {
+          text: window.text,
+          totalLines: lines.length,
+          from: lines.length === 0 ? 0 : offset,
+          to: window.to,
+          truncated: window.truncated,
+          capped: window.capped,
+          shortened: window.shortened,
+        }
+      }),
+    ),
 })

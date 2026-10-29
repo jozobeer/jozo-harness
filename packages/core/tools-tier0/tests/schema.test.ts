@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest'
+import { nodeFileSystem } from '@jozo-harness/filesystem/node'
 import { noneSandbox } from '@jozo-harness/safety'
 import { toolDeclaration, toolSchemaIssues } from '@jozo-harness/tools'
 import { Effect } from 'effect'
@@ -10,7 +11,7 @@ describe('tier 0 tool schemas', () => {
       rootOf: () => '/work',
       change: () => Effect.void,
     })
-    const issues = [...tier0Tools(noneSandbox), worktree].flatMap((tool) =>
+    const issues = [...tier0Tools(nodeFileSystem, noneSandbox), worktree].flatMap((tool) =>
       toolSchemaIssues(toolDeclaration(tool)),
     )
 

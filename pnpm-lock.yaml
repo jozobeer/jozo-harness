@@ -281,6 +281,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@jozo-harness/filesystem':
+        specifier: workspace:*
+        version: link:../../packages/core/filesystem
       '@jozo-harness/session':
         specifier: workspace:*
         version: link:../../packages/core/session
@@ -418,6 +421,12 @@ importers:
         specifier: 4.0.3
         version: 4.0.3
 
+  packages/core/filesystem:
+    dependencies:
+      effect:
+        specifier: 4.0.3
+        version: 4.0.3
+
   packages/core/hooks-json:
     dependencies:
       '@jozo-harness/kernel':
@@ -544,6 +553,9 @@ importers:
 
   packages/core/tools-tier0:
     dependencies:
+      '@jozo-harness/filesystem':
+        specifier: workspace:*
+        version: link:../filesystem
       '@jozo-harness/kernel':
         specifier: workspace:*
         version: link:../../kernel/kernel

@@ -1,15 +1,9 @@
-import { createHash } from 'node:crypto'
-import { readFile, stat } from 'node:fs/promises'
 import { Effect } from 'effect'
+import { FileSystem, type Observation } from '@jozo-harness/filesystem'
 import { ToolError } from '@jozo-harness/tools'
 
 /** What one look at a path saw: enough to notice that it changed afterwards. */
-export interface FileObservation {
-  readonly bytes: number
-  readonly mtimeMs: number
-  /** SHA-256 of the bytes, so a same-size write with a restored mtime is still a change. */
-  readonly digest: string
-}
+export type FileObservation = Observation
 
 /** What one session has observed about the files it may change. */
 export interface ObservedFiles {
@@ -35,23 +29,13 @@ export function makeObservedFiles(): ObservedFiles {
 /**
  * What the file on disk looks like now, or undefined when it is not there. A
  * regular file that exists but cannot be read still gets an observation, so it
- * never looks like new work that a write may create.
+ * never looks like new work that a write may create. The implementation decides
+ * how the bytes are fingerprinted; one run never compares two of them.
  */
-export const look = (path: string): Effect.Effect<FileObservation | undefined> =>
-  Effect.promise(async () => {
-    const info = await stat(path).catch(() => undefined)
-    if (info === undefined) return undefined
-    const bytes = await readFile(path).catch(() => undefined)
-    if (bytes === undefined) {
-      return info.isFile()
-        ? { bytes: info.size, mtimeMs: info.mtimeMs, digest: 'unreadable' }
-        : undefined
-    }
-    return {
-      bytes: bytes.byteLength,
-      mtimeMs: info.mtimeMs,
-      digest: createHash('sha256').update(bytes).digest('hex'),
-    }
+export const look = (path: string): Effect.Effect<FileObservation | undefined, never, FileSystem> =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem
+    return yield* fileSystem.observe(path)
   })
 
 /** A file this session may not change because somebody else has been there. */
@@ -84,7 +68,7 @@ export const guardWrite = (
   observed: ObservedFiles,
   sessionId: string,
   path: string,
-): Effect.Effect<void, ToolError> =>
+): Effect.Effect<void, ToolError, FileSystem> =>
   Effect.gen(function* () {
     const current = yield* look(path)
     if (current === undefined) return
@@ -108,7 +92,7 @@ export const guardEdit = (
   observed: ObservedFiles,
   sessionId: string,
   path: string,
-): Effect.Effect<void, ToolError> =>
+): Effect.Effect<void, ToolError, FileSystem> =>
   Effect.gen(function* () {
     const seen = observed.seen(sessionId, path)
     if (seen === undefined) {

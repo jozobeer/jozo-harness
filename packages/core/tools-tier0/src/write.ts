@@ -1,14 +1,13 @@
 import { dirname } from 'node:path'
-import { mkdir } from 'node:fs/promises'
 import { noneSandbox, type ApprovalShape, type SandboxShape } from '@jozo-harness/safety'
 import { Schema, Effect } from 'effect'
+import { FileSystem, withFileSystem, type FileSystemShape } from '@jozo-harness/filesystem'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
 import { deniedFor, escalates, escalationFields, modeOfCall } from './escalation.ts'
 import { guardWrite, look, type ObservedFiles } from './observed-files.ts'
 import { resolveInside } from './workspace.ts'
 import { normalizeNewlines, readForEdit } from './text.ts'
 import { writeDiffs } from './diff.ts'
-import { stageFile } from './atomic.ts'
 
 const Parameters = Schema.Struct({
   path: Schema.String.annotate({
@@ -31,6 +30,7 @@ export interface WriteValue {
  * refusal happens before anything on disk is touched.
  */
 export const makeWriteTool = (
+  fileSystem: FileSystemShape,
   observed: ObservedFiles,
   sandbox: SandboxShape = noneSandbox,
   approval?: ApprovalShape,
@@ -52,41 +52,58 @@ export const makeWriteTool = (
       ],
     },
     execute: (args, context) =>
-      Effect.gen(function* () {
-        const mode = yield* modeOfCall({
-          args: args,
-          callId: context.callId,
-          tool: 'write',
-          subject: 'operation',
-          sandbox,
-          approval,
-        })
-        const path = yield* resolveInside(context.cwd, args.path, mode).pipe(
-          Effect.mapError((error) => deniedFor(error.message, mode, 'operation', canEscalate)),
-        )
-        yield* guardWrite(observed, context.sessionId, path)
-        // Read the old text only for the diff: a file that cannot be read as
-        // text (binary, gone) still gets written, just without a diff.
-        const before = yield* readForEdit(path).pipe(
-          Effect.map((read) => read.text),
-          Effect.orElseSucceed(() => undefined),
-        )
-        const content = normalizeNewlines(args.content)
-        yield* Effect.tryPromise({
-          try: () => mkdir(dirname(path), { recursive: true }),
-          catch: () => new ToolError({ code: 'execution', message: 'cannot write ' + path }),
-        })
-        const staged = yield* stageFile(path, content)
-        // The bytes are already staged, but nothing has replaced the file yet:
-        // re-check after staging so a change during the diff read still refuses.
-        yield* guardWrite(observed, context.sessionId, path).pipe(
-          Effect.onError(() => staged.discard),
-        )
-        yield* staged.commit
-        const written = yield* look(path)
-        if (written !== undefined) observed.observe(context.sessionId, path, written)
-        for (const diff of writeDiffs(path, before, content)) context.changes?.record(diff)
-        return { path, bytes: new TextEncoder().encode(content).length }
-      }),
+      withFileSystem(
+        fileSystem,
+        Effect.gen(function* () {
+          const mode = yield* modeOfCall({
+            args: args,
+            callId: context.callId,
+            tool: 'write',
+            subject: 'operation',
+            sandbox,
+            approval,
+          })
+          const path = yield* resolveInside(fileSystem, context.cwd, args.path, mode).pipe(
+            Effect.mapError((error) => deniedFor(error.message, mode, 'operation', canEscalate)),
+          )
+          yield* guardWrite(observed, context.sessionId, path)
+          // Read the old text only for the diff: a file that cannot be read as
+          // text (binary, gone) still gets written, just without a diff.
+          const before = yield* readForEdit(path).pipe(
+            Effect.map((read) => read.text),
+            Effect.orElseSucceed(() => undefined),
+          )
+          const content = normalizeNewlines(args.content)
+          const disk = yield* FileSystem
+          yield* disk
+            .mkdirp(dirname(path))
+            .pipe(
+              Effect.mapError(
+                () => new ToolError({ code: 'execution', message: 'cannot write ' + path }),
+              ),
+            )
+          const staged = yield* disk
+            .stage(path, content)
+            .pipe(
+              Effect.mapError(
+                () => new ToolError({ code: 'execution', message: 'cannot write ' + path }),
+              ),
+            )
+          // The bytes are already staged, but nothing has replaced the file yet:
+          // re-check after staging so a change during the diff read still refuses.
+          yield* guardWrite(observed, context.sessionId, path).pipe(
+            Effect.onError(() => staged.discard),
+          )
+          yield* staged.commit.pipe(
+            Effect.mapError(
+              () => new ToolError({ code: 'execution', message: 'cannot write ' + path }),
+            ),
+          )
+          const written = yield* look(path)
+          if (written !== undefined) observed.observe(context.sessionId, path, written)
+          for (const diff of writeDiffs(path, before, content)) context.changes?.record(diff)
+          return { path, bytes: new TextEncoder().encode(content).length }
+        }),
+      ),
   }
 }

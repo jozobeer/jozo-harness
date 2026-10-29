@@ -15,12 +15,13 @@ export * from './worktree.ts'
 export * from './managed-env.ts'
 
 import { noneSandbox, type ApprovalShape, type SandboxShape } from '@jozo-harness/safety'
+import type { FileSystemShape } from '@jozo-harness/filesystem'
 import type { ToolDefinition } from '@jozo-harness/tools'
 import { makeReadTool } from './read.ts'
 import { makeWriteTool } from './write.ts'
 import { makeEditTool } from './edit.ts'
-import { globTool } from './glob.ts'
-import { grepTool } from './grep.ts'
+import { makeGlobTool } from './glob.ts'
+import { makeGrepTool } from './grep.ts'
 import { makeBashTool, type TimeoutJobs } from './bash.ts'
 import type { ShellSessions } from './shells.ts'
 import type { ManagedEnv } from './managed-env.ts'
@@ -32,6 +33,7 @@ import { makeWorktreeTool, type WorktreeHost } from './worktree.ts'
  * seam it escalates through. Without a seam the escalation arguments are refused.
  */
 export const tier0Tools = (
+  fileSystem: FileSystemShape,
   sandbox: SandboxShape = noneSandbox,
   observed: ObservedFiles = makeObservedFiles(),
   approval?: ApprovalShape,
@@ -46,11 +48,11 @@ export const tier0Tools = (
   /** The wait a bash call gets when it names none, read per call so a run can change it. */
   defaultTimeoutMs?: () => number | undefined,
 ): ReadonlyArray<ToolDefinition<any, any>> => [
-  makeReadTool(observed),
-  makeWriteTool(observed, sandbox, approval),
-  makeEditTool(observed, sandbox, approval),
-  globTool,
-  grepTool,
+  makeReadTool(fileSystem, observed),
+  makeWriteTool(fileSystem, observed, sandbox, approval),
+  makeEditTool(fileSystem, observed, sandbox, approval),
+  makeGlobTool(fileSystem),
+  makeGrepTool(fileSystem),
   makeBashTool(
     sandbox,
     approval,

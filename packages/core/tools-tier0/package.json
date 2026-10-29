@@ -4,6 +4,7 @@
   "type": "module",
   "exports": "./src/index.ts",
   "dependencies": {
+    "@jozo-harness/filesystem": "workspace:*",
     "@jozo-harness/kernel": "workspace:*",
     "@jozo-harness/process": "workspace:*",
     "@jozo-harness/safety": "workspace:*",

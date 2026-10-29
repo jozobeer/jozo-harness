@@ -1,7 +1,6 @@
-import { readFile, readdir, stat } from 'node:fs/promises'
-import type { Dirent } from 'node:fs'
 import { join, matchesGlob } from 'node:path'
 import { Effect } from 'effect'
+import { FileSystem, type DirEntry } from '@jozo-harness/filesystem'
 
 /** Path order, the tie-break of every ordering. */
 export const comparePaths = (left: string, right: string): number =>
@@ -52,15 +51,18 @@ const parseRule = (line: string): IgnoreRule | undefined => {
 /** The ignore files one workspace may carry, read in the order they win. */
 const IGNORE_FILES = ['.gitignore', '.ignore'] as const
 
-const textIfPresent = (path: string): Effect.Effect<ReadonlyArray<string>> =>
-  Effect.promise(() =>
-    readFile(path, 'utf8')
-      .then((text) => text.split('\n'))
-      .catch(() => []),
-  )
+const textIfPresent = (path: string): Effect.Effect<ReadonlyArray<string>, never, FileSystem> =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem
+    const bytes = yield* fileSystem.readBytes(path).pipe(Effect.orElseSucceed(() => undefined))
+    if (bytes === undefined) return []
+    return new TextDecoder().decode(bytes).split('\n')
+  })
 
 /** The rules the workspace root states; nested ignore files are not read. */
-export const readIgnoreRules = (cwd: string): Effect.Effect<ReadonlyArray<IgnoreRule>> =>
+export const readIgnoreRules = (
+  cwd: string,
+): Effect.Effect<ReadonlyArray<IgnoreRule>, never, FileSystem> =>
   Effect.gen(function* () {
     const rules: Array<IgnoreRule> = []
     for (const name of IGNORE_FILES) {
@@ -121,13 +123,13 @@ interface Walk {
   readonly found: Array<string>
 }
 
-const readEntries = (directory: string) =>
-  Effect.promise(() =>
-    readdir(directory, { withFileTypes: true }).then(
-      (entries) => entries,
-      () => [],
-    ),
-  )
+const readEntries = (
+  directory: string,
+): Effect.Effect<ReadonlyArray<DirEntry>, never, FileSystem> =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem
+    return yield* fileSystem.readdir(directory)
+  })
 
 const skipDirectory = (walk: Walk, name: string, relative: string): boolean =>
   IGNORED_DIRECTORIES.has(name) || walk.ignored.ignores(relative, true)
@@ -144,17 +146,17 @@ const takeEntry = (
   walk: Walk,
   directory: string,
   prefix: string,
-  entry: Dirent,
-): Effect.Effect<void> =>
+  entry: DirEntry,
+): Effect.Effect<void, never, FileSystem> =>
   Effect.gen(function* () {
     const relative = relativeOf(prefix, entry.name)
-    if (entry.isDirectory()) {
+    if (entry.isDirectory) {
       if (!skipDirectory(walk, entry.name, relative)) {
         yield* collectFrom(walk, join(directory, entry.name), relative)
       }
       return
     }
-    if (entry.isFile() && acceptsFile(walk, relative)) walk.found.push(relative)
+    if (entry.isFile && acceptsFile(walk, relative)) walk.found.push(relative)
   })
 
 /**
@@ -162,7 +164,11 @@ const takeEntry = (
  * `.github` or `.agents` makes the model conclude a file does not exist. Only
  * the directories in IGNORED_DIRECTORIES stay out.
  */
-const collectFrom = (walk: Walk, directory: string, prefix: string): Effect.Effect<void> =>
+const collectFrom = (
+  walk: Walk,
+  directory: string,
+  prefix: string,
+): Effect.Effect<void, never, FileSystem> =>
   Effect.gen(function* () {
     for (const entry of yield* readEntries(directory)) {
       if (walk.found.length >= walk.limit) return
@@ -174,22 +180,27 @@ const collectFrom = (walk: Walk, directory: string, prefix: string): Effect.Effe
 const withTimes = (
   cwd: string,
   paths: ReadonlyArray<string>,
-): Effect.Effect<ReadonlyArray<{ readonly path: string; readonly mtimeMs: number }>> =>
-  Effect.promise(() =>
-    Promise.all(
-      paths.map(async (path) => {
-        const info = await stat(join(cwd, path)).catch(() => undefined)
-        return { path, mtimeMs: info?.mtimeMs ?? 0 }
-      }),
-    ),
-  )
+): Effect.Effect<
+  ReadonlyArray<{ readonly path: string; readonly mtimeMs: number }>,
+  never,
+  FileSystem
+> =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem
+    const timed = new Array<{ readonly path: string; readonly mtimeMs: number }>()
+    for (const path of paths) {
+      const info = yield* fileSystem.stat(join(cwd, path))
+      timed.push({ path, mtimeMs: info?.mtimeMs ?? 0 })
+    }
+    return timed
+  })
 
 /** The collected paths in the requested order, with the path breaking every tie. */
 export const orderPaths = (
   cwd: string,
   paths: ReadonlyArray<string>,
   order: WalkOrder,
-): Effect.Effect<ReadonlyArray<string>> =>
+): Effect.Effect<ReadonlyArray<string>, never, FileSystem> =>
   order === 'path'
     ? Effect.succeed([...paths].sort(comparePaths))
     : Effect.map(withTimes(cwd, paths), (timed) =>
@@ -206,7 +217,9 @@ export const orderPaths = (
  * exclude is never walked, so its contents cost nothing; dot-entries other than
  * the ignored directories are walked; the walk stops at `limit`.
  */
-export const walkFiles = (request: WalkRequest): Effect.Effect<ReadonlyArray<string>> =>
+export const walkFiles = (
+  request: WalkRequest,
+): Effect.Effect<ReadonlyArray<string>, never, FileSystem> =>
   Effect.gen(function* () {
     const walk: Walk = {
       limit: request.limit,

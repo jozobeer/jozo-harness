@@ -1,10 +1,11 @@
 import { Effect } from 'effect'
 import { describe, expect, test } from 'vitest'
+import { nodeFileSystem } from '@jozo-harness/filesystem/node'
 import { tier0Tools } from '../src/index.ts'
 
 describe('tier0Tools', () => {
   test('adds the worktree tool when the session can move to one', () => {
-    const tools = tier0Tools(undefined, undefined, undefined, undefined, {
+    const tools = tier0Tools(nodeFileSystem, undefined, undefined, undefined, undefined, {
       rootOf: () => '/work',
       change: () => Effect.void,
     })
@@ -13,7 +14,7 @@ describe('tier0Tools', () => {
   })
 
   test('lists the six tools', () => {
-    const tools = tier0Tools()
+    const tools = tier0Tools(nodeFileSystem)
 
     expect(tools.map((tool) => tool.name)).toEqual([
       'read',
@@ -26,7 +27,7 @@ describe('tier0Tools', () => {
   })
 
   test('the sandbox the caller passes is the one bash uses', async () => {
-    const tools = tier0Tools({
+    const tools = tier0Tools(nodeFileSystem, {
       name: 'test',
       confines: true,
       mode: 'workspace-write',

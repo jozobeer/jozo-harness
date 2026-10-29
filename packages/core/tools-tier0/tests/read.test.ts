@@ -2,6 +2,7 @@ import { HooksLive } from '@jozo-harness/kernel'
 import { Tools, toolsLayer, type ToolError, type ToolExecutionResult } from '@jozo-harness/tools'
 import { Context, Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
+import { nodeFileSystem } from '@jozo-harness/filesystem/node'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -25,7 +26,7 @@ const call = (
     Effect.gen(function* () {
       const context = yield* Layer.build(Layer.provideMerge(toolsLayer, HooksLive))
       const tools = Context.get(context, Tools)
-      yield* tools.register(makeReadTool(makeObservedFiles()))
+      yield* tools.register(makeReadTool(nodeFileSystem, makeObservedFiles()))
       return yield* tools.call({
         callId: 'c1',
         tool: 'read',
