@@ -242,6 +242,8 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
     watched,
     start: () => undefined,
     stop: () => undefined,
+    translateReasoning: (_target, _language, reply) =>
+      reply({ kind: 'failed', reason: 'a preview cannot translate' }),
     setDraft: (text) => setState((now) => withDraft(now, text)),
     submit: () => setState((now) => withQuotes(withDraft(now, ''), [])),
     attach: () => undefined,

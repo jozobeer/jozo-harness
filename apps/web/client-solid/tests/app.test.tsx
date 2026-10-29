@@ -86,6 +86,11 @@ type Call =
   | { readonly kind: 'pane'; readonly pane: Pane | undefined }
   | { readonly kind: 'command'; readonly command: UiCommand }
   | { readonly kind: 'sendTo'; readonly sessionId: string; readonly command: UiCommand }
+  | {
+      readonly kind: 'translateReasoning'
+      readonly target: number
+      readonly language: string
+    }
   | { readonly kind: 'model'; readonly model: string }
   | { readonly kind: 'chooseModel'; readonly model: string }
   | { readonly kind: 'chooseEffort'; readonly effort: string }
@@ -166,6 +171,10 @@ const makeStore = (
       update((current) => withSelection(current, text))
     },
     send: (command) => calls.push({ kind: 'command', command }),
+    translateReasoning: (target, language, reply) => {
+      calls.push({ kind: 'translateReasoning', target, language })
+      reply({ kind: 'translated' })
+    },
     moveTo: (id, cwd) => calls.push({ kind: 'moveTo', id, cwd }),
     chooseTheme: (theme) => update((current) => withTheme(current, theme)),
     chooseFontFamily: (family) => {
@@ -272,6 +281,66 @@ const dialogOf = (): HTMLElement => {
 }
 
 describe('the Solid page', () => {
+  test('a reasoning translation reads under the original it leaves in place', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const { store } = makeStore({
+      conversation: { ...emptyConversation, blocks: [{ kind: 'user', text: 'hello' }] },
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'agent/inbox/claimed', { message: { text: 'hello', source: 'user' } }),
+        at(3, 'step/start', { step: 1 }),
+        at(4, 'assistant/message', {
+          content: [
+            { type: 'reasoning', text: 'read it first' },
+            { type: 'text', text: 'Reading.' },
+          ],
+        }),
+        at(5, 'reasoning/translation', {
+          target: 4,
+          language: 'ja',
+          text: 'まず読みます。',
+          provider: 'stub',
+          model: 'stub',
+        }),
+        at(6, 'step/end', { step: 1 }),
+        at(7, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      ]),
+    })
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    expect(container.querySelector('.step-thought')?.textContent).toContain('read it first')
+    expect(container.querySelector('.step-translation-label')?.textContent).toBe('translation')
+    expect(container.querySelector('.step-translation')?.textContent).toContain('まず読みます。')
+    expect(container.querySelector('.step-translate')).toBeNull()
+  })
+
+  test('asking to translate a reasoning sends its message seq and the page language', () => {
+    const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+    const { store, calls } = makeStore({
+      conversation: { ...emptyConversation, blocks: [{ kind: 'user', text: 'hello' }] },
+      trace: traceOf([
+        at(1, 'turn/start', { turn: 1 }),
+        at(2, 'agent/inbox/claimed', { message: { text: 'hello', source: 'user' } }),
+        at(3, 'step/start', { step: 1 }),
+        at(4, 'assistant/message', {
+          content: [
+            { type: 'reasoning', text: 'read it first' },
+            { type: 'text', text: 'Reading.' },
+          ],
+        }),
+        at(5, 'step/end', { step: 1 }),
+        at(6, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      ]),
+    })
+
+    const { container } = render(() => <Conversation store={store} />)
+
+    fireEvent.click(container.querySelector('.step-translate') as Element)
+
+    expect(calls).toContainEqual({ kind: 'translateReasoning', target: 4, language: 'en' })
+  })
+
   test('the board marks how each session ended, green until the reader has seen it', () => {
     const ended = (outcome: string, failure?: object) =>
       [
