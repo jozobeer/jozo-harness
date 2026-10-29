@@ -445,6 +445,42 @@ importers:
         specifier: 4.0.3
         version: 4.0.3
 
+  packages/core/runtime-browser:
+    dependencies:
+      '@jozo-harness/agent':
+        specifier: workspace:*
+        version: link:../agent
+      '@jozo-harness/agent-loop':
+        specifier: workspace:*
+        version: link:../agent-loop
+      '@jozo-harness/filesystem':
+        specifier: workspace:*
+        version: link:../filesystem
+      '@jozo-harness/kernel':
+        specifier: workspace:*
+        version: link:../../kernel/kernel
+      '@jozo-harness/llm':
+        specifier: workspace:*
+        version: link:../../llm/llm
+      '@jozo-harness/llm-deepseek':
+        specifier: workspace:*
+        version: link:../../llm/llm-deepseek
+      '@jozo-harness/session':
+        specifier: workspace:*
+        version: link:../session
+      '@jozo-harness/system-prompt':
+        specifier: workspace:*
+        version: link:../system-prompt
+      '@jozo-harness/tools':
+        specifier: workspace:*
+        version: link:../tools
+      '@jozo-harness/tools-tier0':
+        specifier: workspace:*
+        version: link:../tools-tier0
+      effect:
+        specifier: 4.0.3
+        version: 4.0.3
+
   packages/core/safety:
     dependencies:
       '@jozo-harness/kernel':
