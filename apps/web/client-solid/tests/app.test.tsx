@@ -5873,6 +5873,21 @@ describe('proposal cards under an answer', () => {
     expect(commands(calls)).toEqual([{ kind: 'answer', id: 'c1/q1', answer: 'postgres' }])
   })
 
+  test('a question the composer still holds is drawn there, not twice under the answer', () => {
+    const { store } = makeStore({
+      conversation: {
+        ...emptyConversation,
+        ask: { id: 'c1/q1', question: 'Which database?', options: ['sqlite', 'postgres'] },
+        blocks: [{ kind: 'user', text: 'choose the store' }],
+      },
+      // The turn is still asking, so it has no end yet.
+      trace: traceOf(proposalTrace().slice(0, -1)),
+    })
+    const { container } = render(() => <Conversation store={store} />)
+
+    expect(container.querySelector('.proposal-card')).toBeNull()
+  })
+
   test('with the cards turned off the answer keeps the shape it had before', () => {
     const { store } = withProposal()
     const { container } = render(() => (

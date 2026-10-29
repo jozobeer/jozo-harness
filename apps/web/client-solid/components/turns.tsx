@@ -306,10 +306,17 @@ const Plans = (props: { turn: TraceTurn; store: SessionStore }) => (
  */
 const Proposals = (props: { turn: TraceTurn; store: SessionStore }) => {
   const cards = useProposalCards()
+  // A question the composer is still asking is answered there; the transcript
+  // takes it over once the turn ends and no composer card holds it.
+  const openAsk = () => props.store.state().conversation.ask?.id ?? ''
   return (
     <Show when={cards.cards() === 'shown'}>
       <Index each={props.turn.proposals}>
-        {(proposal) => <ProposalCard proposal={proposal()} store={props.store} />}
+        {(proposal) => (
+          <Show when={proposal().id !== openAsk()}>
+            <ProposalCard proposal={proposal()} store={props.store} />
+          </Show>
+        )}
       </Index>
     </Show>
   )
