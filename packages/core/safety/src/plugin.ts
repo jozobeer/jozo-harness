@@ -8,7 +8,14 @@ import {
   seatbeltWarning,
   type SeatbeltProbeResult,
 } from './seatbelt.ts'
-import { bwrapSandbox, bwrapUnavailableMessage, probeBwrap } from './linux.ts'
+import {
+  bwrapSandbox,
+  bwrapUnavailableMessage,
+  landlockSandbox,
+  probeBwrap,
+  probeLandlock,
+  type LandlockProbe,
+} from './linux.ts'
 import { Ask } from './ask.ts'
 import { askServiceLayer } from './ask.ts'
 import { Policy, type PolicyShape } from './policy-service.ts'
@@ -45,6 +52,13 @@ export type SandboxDecision =
       readonly name: 'none' | 'seatbelt' | 'bwrap'
       readonly enforcement?: SandboxEnforcement
     }
+  | {
+      readonly _tag: 'available'
+      readonly name: 'landlock'
+      readonly enforcement: SandboxEnforcement
+      /** The helper the probe proved, so the wrapper runs the binary it tested. */
+      readonly helper: string
+    }
   | { readonly _tag: 'unavailable'; readonly message: string }
 
 const unavailablePlatformMessage = (platform: string): string =>
@@ -70,25 +84,36 @@ const seatbeltDecision = (platform: string): SandboxDecision =>
     ? { _tag: 'available', name: 'seatbelt', enforcement: 'full' }
     : { _tag: 'unavailable', message: backendUnavailableMessage('seatbelt', platform) }
 
-const bwrapDecision = (platform: string, bwrapUsable: () => boolean): SandboxDecision => {
+const bwrapDecision = (
+  platform: string,
+  bwrapUsable: () => boolean,
+  landlockUsable: LandlockProbe,
+): SandboxDecision => {
   if (platform !== 'linux') {
     return { _tag: 'unavailable', message: backendUnavailableMessage('bwrap', platform) }
   }
-  return bwrapUsable()
-    ? { _tag: 'available', name: 'bwrap', enforcement: 'full' }
-    : { _tag: 'unavailable', message: bwrapUnavailableMessage(platform) }
+  if (bwrapUsable()) return { _tag: 'available', name: 'bwrap', enforcement: 'full' }
+  // A kernel with Landlock still confines writes without a user namespace, so the
+  // fallback is a real boundary rather than a quieter way to run unrestricted.
+  const helper = landlockUsable()
+  return helper === undefined
+    ? { _tag: 'unavailable', message: bwrapUnavailableMessage(platform) }
+    : { _tag: 'available', name: 'landlock', enforcement: 'full', helper }
 }
 
 /**
  * The backend a profile actually gets. `auto` (the default) takes the native
  * one, and an explicit name that this platform cannot run fails rather than
  * quietly running unrestricted. On Linux, bwrap has to pass its probe because an
- * installed bwrap that cannot create namespaces would fail every command.
+ * installed bwrap that cannot create namespaces would fail every command; when it
+ * does not, the Landlock helper gets the same job: the write boundary a profile
+ * asked for still holds without a user namespace.
  */
 export const decideSandbox = (
   config: SafetyConfig,
   platform: string,
   bwrapUsable: () => boolean,
+  landlockUsable: LandlockProbe = () => undefined,
 ): SandboxDecision => {
   const setting = config.sandbox ?? 'auto'
   const backend = setting === 'auto' ? nativeBackend(platform) : setting
@@ -96,7 +121,9 @@ export const decideSandbox = (
     return { _tag: 'unavailable', message: unavailablePlatformMessage(platform) }
   }
   if (backend === 'none') return { _tag: 'available', name: 'none' }
-  return backend === 'seatbelt' ? seatbeltDecision(platform) : bwrapDecision(platform, bwrapUsable)
+  return backend === 'seatbelt'
+    ? seatbeltDecision(platform)
+    : bwrapDecision(platform, bwrapUsable, landlockUsable)
 }
 
 /**
@@ -126,6 +153,18 @@ const underSeatbelt = (config: SafetyConfig, decision: SandboxDecision): boolean
 const REFUSED_SEATBELT = '; the seatbelt cannot be applied here, so commands are refused'
 
 /**
+ * What a refused file effect looks like under this backend. Landlock answers with a
+ * plain EACCES that no stderr signature can tell apart from an ordinary permission
+ * failure, so its line does not promise the marker the other backends print.
+ */
+const denialHint = (backend: string, mode: SandboxMode): string =>
+  backend === 'landlock'
+    ? 'a write outside its roots fails with permission denied'
+    : 'a file effect the sandbox refuses comes back as [sandbox: file access denied under ' +
+      mode +
+      ' mode]'
+
+/**
  * The sandbox line the runtime context shows. A refused seatbelt cannot wrap a
  * command, so the line ends with that reason instead of letting the model read
  * the refusal as a file denial; an applied or missing binary keeps the wording
@@ -152,11 +191,23 @@ export const sandboxContextText = (
       backend +
       '; enforcement: ' +
       enforcement +
-      '; commands run confined; a file effect the sandbox refuses comes back as [sandbox: file access denied under ' +
-      mode +
-      ' mode])'
+      '; commands run confined; ' +
+      denialHint(backend, mode) +
+      ')'
     : 'sandbox: none (commands run without a sandbox)'
   return refused ? line + REFUSED_SEATBELT : line
+}
+
+const providerOf = (
+  decision: Extract<SandboxDecision, { _tag: 'available' }>,
+  mode: SandboxMode,
+  writableRoots: ReadonlyArray<string>,
+): SandboxShape => {
+  if (decision.name === 'seatbelt') return seatbeltSandbox({ mode, writableRoots })
+  if (decision.name === 'landlock') {
+    return landlockSandbox({ mode, writableRoots, helper: decision.helper })
+  }
+  return bwrapSandbox({ mode, writableRoots })
 }
 
 const sandboxOf = (
@@ -168,10 +219,7 @@ const sandboxOf = (
   // A run without a backend is unconfined whatever the preset says, so its mode
   // stays full access; there is no boundary for a switch to widen or narrow.
   if (decision.name === 'none') return noneSandbox
-  const provider =
-    decision.name === 'seatbelt'
-      ? seatbeltSandbox({ mode: permission.mode(), writableRoots })
-      : bwrapSandbox({ mode: permission.mode(), writableRoots })
+  const provider = providerOf(decision, permission.mode(), writableRoots)
   return sandboxWithPermission(provider, permission)
 }
 
@@ -200,8 +248,9 @@ export const sandboxLayerFor = (
   config: SafetyConfig,
   platform: string,
   bwrapUsable: () => boolean = probeBwrap,
+  landlockUsable: LandlockProbe = probeLandlock,
 ): Layer.Layer<Sandbox, PluginError> =>
-  layerForDecision(config, decideSandbox(config, platform, bwrapUsable)).pipe(
+  layerForDecision(config, decideSandbox(config, platform, bwrapUsable, landlockUsable)).pipe(
     Layer.provide(permissionLayer(config.preset)),
   )
 
@@ -256,7 +305,7 @@ export const safetyPlugin: Plugin<
   provides: [Policy, Sandbox, AutoReview, Permission],
   requires: [SystemPrompt],
   layer: (config) => {
-    const decision = decideSandbox(config, process.platform, probeBwrap)
+    const decision = decideSandbox(config, process.platform, probeBwrap, probeLandlock)
     // One probe per build: every runtime context and every wrapped command share it.
     const probe = underSeatbelt(config, decision) ? probeSeatbelt() : undefined
     // The holder is an effect, not a captured value: building the same layer for a

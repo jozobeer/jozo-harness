@@ -1,7 +1,21 @@
+import { spawnSync } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Effect } from 'effect'
-import { describe, expect, test } from 'vitest'
-import { bwrapArgs, bwrapSandbox, commandRuns, probeBwrap } from '../src/index.ts'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import {
+  bwrapArgs,
+  bwrapSandbox,
+  commandRuns,
+  LANDLOCK_HELPER,
+  landlockArgs,
+  landlockCandidates,
+  landlockSandbox,
+  probeBwrap,
+  probeLandlock,
+} from '../src/index.ts'
 
 describe('bwrapArgs', () => {
   test('makes the host root read-only and gives the command its own /dev and /proc', () => {
@@ -155,5 +169,197 @@ describe('bwrapSandbox', () => {
     const wrapped = await Effect.runPromise(sandbox.wrap({ argv: ['echo', 'hi'], cwd: '/work' }))
 
     expect(wrapped.denialSignatures).toEqual(['read-only file system'])
+  })
+})
+
+describe('landlockArgs', () => {
+  test('names each writable root once', () => {
+    expect(landlockArgs(['/work', '/work', '/tmp/out'])).toEqual([
+      '--writable-root',
+      '/work',
+      '--writable-root',
+      '/tmp/out',
+    ])
+  })
+})
+
+describe('probeLandlock', () => {
+  test('takes the first candidate that applies a ruleset', () => {
+    const calls: string[][] = []
+    const helper = probeLandlock(
+      (argv) => {
+        calls.push([...argv])
+        return argv[0] === '/opt/landlock-run'
+      },
+      ['/missing/landlock-run', '/opt/landlock-run', '/later/landlock-run'],
+    )
+
+    expect(helper).toBe('/opt/landlock-run')
+    expect(calls).toEqual([
+      ['/missing/landlock-run', '--probe'],
+      ['/opt/landlock-run', '--probe'],
+    ])
+  })
+
+  test('a helper that cannot apply a ruleset is not usable', () => {
+    expect(probeLandlock(() => false, ['/opt/landlock-run'])).toBeUndefined()
+  })
+
+  test('looks on PATH first and then in the two cargo build directories', () => {
+    const candidates = landlockCandidates()
+
+    expect(candidates[0]).toBe(LANDLOCK_HELPER)
+    expect(candidates[1]?.endsWith(join('target', 'release', 'landlock-run'))).toBe(true)
+    expect(candidates[2]?.endsWith(join('target', 'debug', 'landlock-run'))).toBe(true)
+  })
+})
+
+describe('landlockSandbox', () => {
+  test('wraps argv with the helper and keeps the cwd', async () => {
+    const sandbox = landlockSandbox({
+      mode: 'workspace-write',
+      writableRoots: [],
+      helper: '/opt/landlock-run',
+    })
+    const wrapped = await Effect.runPromise(sandbox.wrap({ argv: ['echo', 'hi'], cwd: '/work' }))
+
+    expect(sandbox.name).toBe('landlock')
+    expect(sandbox.confines).toBe(true)
+    expect(sandbox.enforcement).toBe('full')
+    expect(wrapped.argv.slice(0, 2)).toEqual(['/opt/landlock-run', '--writable-root'])
+    expect(wrapped.argv).toContain('/work')
+    expect(wrapped.argv).toContain(tmpdir())
+    expect(wrapped.argv.slice(-3)).toEqual(['--', 'echo', 'hi'])
+    expect(wrapped.cwd).toBe('/work')
+    expect(wrapped.denialSignatures).toEqual([])
+  })
+
+  test('read-only names only the roots the profile asked for', async () => {
+    const sandbox = landlockSandbox({
+      mode: 'read-only',
+      writableRoots: ['/work/out'],
+      helper: '/opt/landlock-run',
+    })
+    const wrapped = await Effect.runPromise(
+      sandbox.wrap({ argv: ['bash', '-c', 'echo hi'], cwd: '/work/project' }),
+    )
+
+    expect(wrapped.argv).toContain('/work/out')
+    expect(wrapped.argv).not.toContain('/work/project')
+    expect(wrapped.argv).not.toContain(tmpdir())
+  })
+
+  test('danger-full-access runs the command with no helper', async () => {
+    const sandbox = landlockSandbox({
+      mode: 'danger-full-access',
+      writableRoots: ['/work'],
+      helper: '/opt/landlock-run',
+    })
+    const wrapped = await Effect.runPromise(sandbox.wrap({ argv: ['echo', 'hi'], cwd: '/work' }))
+
+    expect(wrapped).toEqual({
+      argv: ['echo', 'hi'],
+      cwd: '/work',
+      mode: 'danger-full-access',
+      denialSignatures: [],
+    })
+  })
+})
+
+const repoRoot = fileURLToPath(new URL('../../../../', import.meta.url))
+
+/** Where `cargo build` leaves the helper, unless CARGO_TARGET_DIR moves it. */
+const helperBinary = join(
+  process.env['CARGO_TARGET_DIR'] ?? join(repoRoot, 'target'),
+  'debug',
+  'landlock-run',
+)
+
+/**
+ * Landlock is a Linux LSM, so the helper and these tests only run there. macOS
+ * confines commands with the seatbelt and covers that backend in its own tests;
+ * skipping here is not a way to hide a macOS failure.
+ */
+describe.skipIf(process.platform !== 'linux')('landlock helper on Linux', () => {
+  let scratch = ''
+
+  beforeAll(() => {
+    const built = spawnSync('cargo', ['build', '--bin', 'landlock-run'], {
+      cwd: repoRoot,
+      stdio: 'inherit',
+    })
+    expect(built.status).toBe(0)
+    scratch = mkdtempSync(join(repoRoot, '.landlock-test-'))
+  }, 120_000)
+
+  afterAll(() => {
+    rmSync(scratch, { recursive: true, force: true })
+  })
+
+  const run = async (
+    mode: 'workspace-write' | 'read-only',
+    cwd: string,
+    argv: ReadonlyArray<string>,
+  ) => {
+    const sandbox = landlockSandbox({ mode, writableRoots: [], helper: helperBinary })
+    const wrapped = await Effect.runPromise(sandbox.wrap({ argv, cwd }))
+    const [file, ...args] = wrapped.argv
+    return spawnSync(file ?? '', args, {
+      cwd: wrapped.cwd,
+      encoding: 'utf8',
+      env: { ...process.env, LC_ALL: 'C' },
+    })
+  }
+
+  test('writes a file under the cwd and under the temp dir', async () => {
+    const cwd = mkdtempSync(join(scratch, 'inside-'))
+    const temp = mkdtempSync(join(tmpdir(), 'jzh-landlock-'))
+
+    const inCwd = await run('workspace-write', cwd, ['bash', '-c', 'printf hi > made.txt'])
+    const inTemp = await run('workspace-write', cwd, [
+      'bash',
+      '-c',
+      'printf hi > "$1/made.txt"',
+      'bash',
+      temp,
+    ])
+
+    expect(inCwd.status).toBe(0)
+    expect(readFileSync(join(cwd, 'made.txt'), 'utf8')).toBe('hi')
+    expect(inTemp.status).toBe(0)
+    expect(readFileSync(join(temp, 'made.txt'), 'utf8')).toBe('hi')
+    rmSync(temp, { recursive: true, force: true })
+  })
+
+  test('refuses a write outside the cwd and the temp dir', async () => {
+    const cwd = mkdtempSync(join(scratch, 'cwd-'))
+    const outside = mkdtempSync(join(scratch, 'outside-'))
+    const target = join(outside, 'escaped.txt')
+
+    const result = await run('workspace-write', cwd, [
+      'bash',
+      '-c',
+      'printf hi > "$1"',
+      'bash',
+      target,
+    ])
+
+    expect(result.status).not.toBe(0)
+    expect(existsSync(target)).toBe(false)
+    expect(String(result.stderr).toLowerCase()).toContain('permission denied')
+  })
+
+  test('read-only writes nowhere, not even in the cwd', async () => {
+    const cwd = mkdtempSync(join(scratch, 'readonly-'))
+
+    const result = await run('read-only', cwd, ['bash', '-c', 'printf hi > made.txt'])
+
+    expect(result.status).not.toBe(0)
+    expect(existsSync(join(cwd, 'made.txt'))).toBe(false)
+  })
+
+  test('the probe accepts the built helper and refuses a path that is not there', () => {
+    expect(probeLandlock(commandRuns, [helperBinary])).toBe(helperBinary)
+    expect(probeLandlock(commandRuns, [join(scratch, 'no-such-helper')])).toBeUndefined()
   })
 })
