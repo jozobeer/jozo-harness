@@ -1,0 +1,11 @@
+[package]
+name = "landlock-run"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Applies Landlock's write rules and then execs the command it is given"
+
+# The crate talks to Linux syscalls, so the workspace checks it out on macOS too
+# only as the stub main that says the helper does not apply there.
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4.7"
