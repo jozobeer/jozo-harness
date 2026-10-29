@@ -16,8 +16,9 @@ describe('browser worker dependencies', () => {
     const protocol = await read('worker-protocol.ts')
     const host = await read('worker-host.ts')
     const client = await read('worker-client.ts')
+    const entry = await read('worker.ts')
 
-    // The protocol, the host, and the page client are the new Worker surface.
+    // The protocol, the host, the page client, and the scope entry are the new Worker surface.
     // None of them may reach a builtin: the workspace, the log, and the model
     // transport arrive as values, which is what lets a test run them under a
     // fake worker and a page run them without a disk.
@@ -25,6 +26,7 @@ describe('browser worker dependencies', () => {
       ...staticImports(protocol),
       ...staticImports(host),
       ...staticImports(client),
+      ...staticImports(entry),
     ]
     expect(specifiers.filter((specifier) => specifier.startsWith('node:'))).toEqual([])
     expect(specifiers).not.toContain('@jozo-harness/process')

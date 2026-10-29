@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'vitest'
+import { startBrowserWorker } from '../src/worker.ts'
 import { parseWorkerIncoming, parseWorkerOutgoing } from '../src/worker-protocol.ts'
 import { clientOf, resultText, stubTransport, textTurn, toolCallTurn } from './worker-fixtures.ts'
+import type { WorkerOutgoing } from '../src/worker-protocol.ts'
 
 describe('browser worker', () => {
   test('streams the turn events and resolves with the assistant answer', async () => {
@@ -93,6 +95,39 @@ describe('browser worker', () => {
     expect(parseWorkerOutgoing({ kind: 'done' })).toBeUndefined()
     expect(parseWorkerOutgoing({ kind: 'error', message: 3 })).toBeUndefined()
     expect(parseWorkerOutgoing({ kind: 'event', event: {} })).toBeUndefined()
+  })
+
+  test('starts the protocol on the scope the worker was given', async () => {
+    const posted: WorkerOutgoing[] = []
+    let listener: ((event: { readonly data: unknown }) => void) | undefined
+    let finish: (() => void) | undefined
+    const finished = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const host = startBrowserWorker(
+      {
+        postMessage: (message) => {
+          posted.push(message)
+          if (message.kind !== 'event') finish?.()
+        },
+        addEventListener: (_type, next) => {
+          listener = next
+        },
+      },
+      {
+        route: 'stub/model',
+        baseUrl: 'https://model.test/anthropic',
+        apiKey: () => 'test-key',
+        transport: stubTransport([textTurn('Hi from the scope.')]),
+      },
+    )
+
+    listener?.({ data: { kind: 'prompt', text: 'say hi' } })
+    await finished
+    await host.close()
+
+    expect(posted.at(-1)).toEqual({ kind: 'done', text: 'Hi from the scope.' })
+    expect(posted.filter((message) => message.kind === 'event').length).toBeGreaterThan(0)
   })
 
   test('refuses a prompt after the worker has been closed', async () => {
