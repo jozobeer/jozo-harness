@@ -68,15 +68,28 @@
 
 **保留。** 委譲（subagent 系）と goal / schedule は、置き場が決まれば Worker の中で回せる。今回の受け入れ条件には要らないので、issue の残件に回す。
 
+## 入れたもの（スライス 1）
+
+`packages/core/filesystem` を足した。中身は口と 2 つの実装である。
+
+- `src/index.ts`: `FileSystemShape`（`readBytes` / `stat` / `readdir` / `mkdirp` / `stage` / `observe` / `lstat`）と、`Context.Service` の `FileSystem`、`withFileSystem`。`lstat` だけ同期なのは、パスの封じ込めがファイルを開く前に走るため。
+- `src/node.ts`: ディスクの実装。`atomic.ts` の temp + fsync + rename と `observed-files.ts` の SHA-256 がそのまま移った。
+- `src/memory.ts`: プロセス内の実装。ファイルは `Map`、mtime は書き込みごとの通し番号、digest は短いハッシュ。閉じれば消える。
+
+`read` / `write` / `edit` / `glob` / `grep` は `yield* FileSystem` で口を取り、`withFileSystem` で呼び出し口に実装を差す。`ToolDefinition` の `execute` は `R = never` のままなので、pipeline もフックも変えていない。`resolveInside` は `lstat` だけを受け取る形にした（bash と worktree は Node の実装を渡す）。
+
 ## 検証
 
-- メモリ実装で read → write → glob → grep の 1 往復をテストする。
-- `pnpm run check` を通す。coverage の床（lines 93% / functions 92%）は下げない。
+- `packages/core/tools-tier0/tests/memory-file-system.test.ts`: メモリの workspace で write → read → glob → grep を 1 往復。別のインスタンスからは見えないこと、初期ファイルを読めることも見る。
+- `vp test packages/core/tools-tier0`: 18 ファイル 139 テストが通る（メモリ実装を足す前と同じ数に 3 を足した）。
+- `pnpm run check`: fmt / lint / typecheck / doc gate / duplication / complexity / cargo / coverage を通す。閾値は動かさない。
 
 ## 残件
 
-- スライス 1（FileSystem Service とメモリ実装）の実装と検証。
-- Worker へのパッケージング（`pnpm run build:web` とは別の工程）。
-- モデルへの `fetch` 経路と CORS の扱い。
+- Worker へのパッケージング（`pnpm run build:web` とは別の工程）。Effect とツールを 1 つの bundle にまとめる。
+- モデルへの `fetch` 経路と CORS の扱い。`packages/llm/llm/src/proxy.ts` は `node:http`/`https`/`tls` のまま。
+- `node:path` の差し替え。`matchesGlob` は Node 22 以降にしか無く、ブラウザには無い。パスの正規化は今も Node の関数である。
+- ripgrep の口。`grep` / `glob` は `defaultRipgrep` を import しており、その module は `node:fs` と `@jozo-harness/process` を読む。ブラウザでは `ripgrepAt(undefined)` を渡して walker に落とすが、import 自体は残る。
 - セッションログのメモリ実装と、閉じたときに消えることの確認。
+- Worker の中でツール一覧を組む口（`tier0Tools` は今も Node の plugin から `nodeFileSystem` を渡している）。
 - 受け入れ条件 1（ブラウザだけで 1 turn）を実際に確かめる手順の用意。
