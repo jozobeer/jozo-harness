@@ -65,6 +65,7 @@ import {
   type Preset,
   type SessionError,
   type TokenBudget,
+  translateReasoning as translateReasoningText,
 } from '@jozo-harness/session'
 import {
   Tier0Tools,
@@ -218,6 +219,7 @@ import {
   type InitialSession,
   type OpenSession,
   type PublicOrigin,
+  type ReasoningTranslationView,
   type ReadyUrls,
   type RunStateView,
   type SessionFactory,
@@ -1852,6 +1854,7 @@ const sessionFactoryOf = (
         messageSubagent: (childId: string, message: string) =>
           messageSubagentOf(built.runtime.agents, agent.id, childId, message),
         busy: () => busyOf(agent, built.runtime.jobs, built.runtime.agents.childrenOf(agent.id)),
+        translateReasoning: built.runtime.translateReasoning,
         deliver: (schedule: Schedule) =>
           fireSchedule(agent, schedule, () => scheduleStoreOf(options).now()).pipe(Effect.as(true)),
         adoptSchedules: () =>
@@ -2140,6 +2143,7 @@ const openSessionOf = (
     messageSubagent: (childId: string, message: string) =>
       messageSubagentOf(agents, agent.id, childId, message),
     busy: () => busyOf(agent, jobs, agents.childrenOf(agent.id)),
+    translateReasoning: runtime.translateReasoning,
     deliver: (schedule) =>
       fireSchedule(agent, schedule, () => schedules.now()).pipe(Effect.as(true)),
     adoptSchedules: () => schedules.adoptLegacy(agent.session.id, agent.session.events()),
@@ -2220,6 +2224,11 @@ interface SessionRuntime {
   readonly budget: TokenBudget
   /** The live permission holder this session's tools and page read; absent without a safety row. */
   readonly permission?: PermissionShape
+  /** Translates one logged reasoning through this session's route; the result is a log event. */
+  readonly translateReasoning: (
+    target: number,
+    language: string,
+  ) => Effect.Effect<ReasoningTranslationView>
   readonly layer: Layer.Layer<any, PluginError, never>
 }
 
@@ -2519,7 +2528,29 @@ const buildSession = (
     // whatever address the server bound. A session without a page adds nothing.
     yield* installGuiContext(prompt, gui)
     // What the provider takes for an effort is the adapter's to say; a page only offers it.
-    const efforts = Context.get(context, Llm).capabilities.reasoningEffort ?? []
+    const llm = Context.get(context, Llm)
+    const efforts = llm.capabilities.reasoningEffort ?? []
+    // The page translates one logged reasoning on demand. One adapter call, no
+    // retries: a failure leaves the log as it was and the page shows the original.
+    const translateReasoning = (
+      target: number,
+      language: string,
+    ): Effect.Effect<ReasoningTranslationView> =>
+      translateReasoningText(agent.session, llm, {
+        target,
+        language,
+        provider: providerOfRoute(agent.options.route),
+        model: modelOfRoute(agent.options.route),
+      }).pipe(
+        Effect.match({
+          onFailure: (error) => ({ kind: 'failed' as const, reason: error.message }),
+          onSuccess: (translation) => ({
+            kind: 'translated' as const,
+            language: translation.language,
+            text: translation.text,
+          }),
+        }),
+      )
     // The loop measured the request against this budget; reading the same values
     // here lets /status and the page report the line compaction would fire on.
     const loopRow = rows.find((row) => row.name === '@jozo-harness/agent-loop')
@@ -2649,6 +2680,7 @@ const buildSession = (
         spillTokens,
         budget,
         ...permissionOption(permission),
+        translateReasoning,
         layer,
       },
     } satisfies BuiltSession

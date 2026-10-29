@@ -763,6 +763,33 @@ export const OpenInAppRpc = Rpc.make('openInApp', {
   error: Schema.String,
 })
 
+/** What one reasoning translation answered: the translated words, or why none came. */
+export const ReasoningTranslationViewSchema = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal('translated'),
+    language: Schema.String,
+    text: Schema.String,
+  }),
+  Schema.Struct({ kind: Schema.Literal('failed'), reason: Schema.String }),
+])
+
+export type ReasoningTranslationView = typeof ReasoningTranslationViewSchema.Type
+
+/**
+ * Translates one assistant message's reasoning into the page's language. The
+ * answer is logged as its own event; the original message is never rewritten.
+ * The blank id names no session, as every other per-session call does.
+ */
+export const TranslateReasoningRpc = Rpc.make('translateReasoning', {
+  payload: Schema.Struct({
+    sessionId: Schema.String,
+    target: Schema.Int,
+    language: Schema.String,
+  }),
+  success: ReasoningTranslationViewSchema,
+  error: Schema.String,
+})
+
 export const UiRpcs = RpcGroup.make(
   SessionsRpc,
   OpenRpc,
@@ -801,6 +828,7 @@ export const UiRpcs = RpcGroup.make(
   SetEffortRpc,
   RunSettingsRpc,
   SaveRunSettingsRpc,
+  TranslateReasoningRpc,
 )
 
 /**

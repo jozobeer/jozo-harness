@@ -5,6 +5,7 @@ import { Deferred, Effect, Exit, Scope } from 'effect'
 import type {
   CommandView,
   JobDetailView,
+  ReasoningTranslationView,
   RunStateView,
   SessionSummary,
   SubagentMessageView,
@@ -49,6 +50,14 @@ export interface OpenSession {
   readonly setComposition: (
     tools: ReadonlyArray<string>,
   ) => Effect.Effect<SessionComposition, WebError>
+  /**
+   * Translates one assistant message's reasoning and logs the result as its own
+   * event. Absent on a run that cannot reach a model; the page then says so.
+   */
+  readonly translateReasoning?: (
+    target: number,
+    language: string,
+  ) => Effect.Effect<ReasoningTranslationView, WebError>
   /** Whether the session still owns running work: a turn, a job, or a child agent. */
   readonly busy: () => boolean
   /** Hands one due schedule to the session it belongs to; false when it could not. */
