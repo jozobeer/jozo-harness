@@ -29,6 +29,8 @@ import {
   withBlank,
   withBranch,
   withCommands,
+  withComposition,
+  withCompositionProblem,
   withConnection,
   withDeletedPage,
   withDraft,
@@ -247,6 +249,13 @@ type PanelAsk =
   | { readonly kind: 'setModel'; readonly model: string }
   | { readonly kind: 'runSettings' }
   | { readonly kind: 'saveRunSettings'; readonly input: RunSettingsInput }
+  | { readonly kind: 'composition'; readonly sessionId: string }
+  | {
+      readonly kind: 'applyComposition'
+      readonly sessionId: string
+      readonly tools: ReadonlyArray<string>
+    }
+  | { readonly kind: 'saveDefaultComposition'; readonly tools: ReadonlyArray<string> }
   | { readonly kind: 'job'; readonly id: string }
   | { readonly kind: 'stopJob'; readonly id: string }
   | { readonly kind: 'stopSubagent'; readonly id: string }
@@ -285,6 +294,22 @@ type SettingsAsk = Extract<
       | 'setModel'
       | 'runSettings'
       | 'saveRunSettings'
+      | 'composition'
+      | 'applyComposition'
+      | 'saveDefaultComposition'
+  }
+>
+
+/** The settings asks that read or write one value, rather than a list of models or files. */
+type EditAsk = Extract<
+  SettingsAsk,
+  {
+    kind:
+      | 'runSettings'
+      | 'saveRunSettings'
+      | 'composition'
+      | 'applyComposition'
+      | 'saveDefaultComposition'
   }
 >
 
@@ -318,7 +343,10 @@ const isSettingsAsk = (asked: PanelAsk): asked is SettingsAsk =>
   asked.kind === 'chooseModel' ||
   asked.kind === 'setModel' ||
   asked.kind === 'runSettings' ||
-  asked.kind === 'saveRunSettings'
+  asked.kind === 'saveRunSettings' ||
+  asked.kind === 'composition' ||
+  asked.kind === 'applyComposition' ||
+  asked.kind === 'saveDefaultComposition'
 
 const isRunAsk = (asked: PanelAsk): asked is RunAsk =>
   asked.kind === 'job' ||
@@ -440,6 +468,15 @@ export interface SessionStore {
   readonly askRunSettings: () => void
   /** Validates and writes every editable value in one save. */
   readonly saveRunSettings: (input: RunSettingsInput) => void
+  /** Reads what the open session runs with and the default a new one starts from. */
+  readonly askComposition: () => void
+  /**
+   * Chooses the tools the open session's next turn offers. The set is previewed
+   * first, and a tool this run cannot offer leaves the log untouched.
+   */
+  readonly applyComposition: (tools: ReadonlyArray<string>) => void
+  /** Writes the tools a new session starts from into the settings file. */
+  readonly saveDefaultComposition: (tools: ReadonlyArray<string>) => void
   /** Renames, pins, archives, or deletes one session through its row menu. */
   readonly act: (sessionId: string, action: SessionAction) => void
   /** Copies one session's log into a new one, and opens it. */
@@ -1033,18 +1070,104 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     /** Writes every editable value in one save; a refusal names the field and keeps the form. */
     const saveEditable = (input: RunSettingsInput) => applyEditable(client.saveRunSettings(input))
 
+    /** Runs one composition ask, saying a refusal in the composition hint. */
+    const compositionAnswer = <A, R>(ask: Effect.Effect<A, unknown, R>) =>
+      ask.pipe(
+        Effect.catchCause((cause) =>
+          Effect.sync(() => update((now) => withCompositionProblem(now, causeText(cause)))),
+        ),
+      )
+
+    /** The composition read answers; a late one never lands on another session. */
+    const answerComposition = (asked: { readonly sessionId: string }) =>
+      compositionAnswer(
+        Effect.gen(function* () {
+          const view = yield* client.composition({ sessionId: asked.sessionId })
+          yield* Effect.sync(() =>
+            update((now) => (now.sessionId === asked.sessionId ? withComposition(now, view) : now)),
+          )
+        }),
+      )
+
+    /**
+     * Previews the set before writing it: a tool this run cannot offer is named,
+     * and the log stays as it was. Only a set the preview calls writable reaches
+     * the session, so the page never records a choice that would not take effect.
+     */
+    const applyComposition = (asked: {
+      readonly sessionId: string
+      readonly tools: ReadonlyArray<string>
+    }) =>
+      compositionAnswer(
+        Effect.gen(function* () {
+          const change = yield* client.previewComposition({
+            sessionId: asked.sessionId,
+            tools: [...asked.tools],
+          })
+          if (!change.writable) {
+            yield* Effect.sync(() =>
+              update((now) =>
+                withCompositionProblem(
+                  now,
+                  'this run cannot offer ' + change.missing.join(', ') + '; nothing was written',
+                ),
+              ),
+            )
+            return
+          }
+          const view = yield* client.setComposition({
+            sessionId: asked.sessionId,
+            tools: [...asked.tools],
+          })
+          yield* Effect.sync(() =>
+            update((now) => (now.sessionId === asked.sessionId ? withComposition(now, view) : now)),
+          )
+        }),
+      )
+
+    /** Writes the default through the settings file, then reads the new composition. */
+    const saveDefaultComposition = (asked: { readonly tools: ReadonlyArray<string> }) =>
+      compositionAnswer(
+        Effect.gen(function* () {
+          yield* client.saveDefaultComposition({ tools: [...asked.tools] })
+          const sessionId = state().sessionId
+          if (sessionId === '') return
+          const view = yield* client.composition({ sessionId })
+          yield* Effect.sync(() =>
+            update((now) => (now.sessionId === sessionId ? withComposition(now, view) : now)),
+          )
+        }),
+      )
+
+    /** The asks that read or write one value the settings pane keeps. */
+    const answerEditAsk = (asked: EditAsk) => {
+      switch (asked.kind) {
+        case 'runSettings':
+          return readEditable()
+        case 'saveRunSettings':
+          return saveEditable(asked.input)
+        case 'composition':
+          return answerComposition(asked)
+        case 'applyComposition':
+          return applyComposition(asked)
+        case 'saveDefaultComposition':
+          return saveDefaultComposition(asked)
+      }
+    }
+
     const answerSettingsAsk = (asked: SettingsAsk) => {
       if (asked.kind === 'models') return answerModels()
       if (asked.kind === 'commands') return answerCommands(asked)
       if (asked.kind === 'files') return answerFiles(asked)
-      if (asked.kind === 'runSettings') return readEditable()
-      if (asked.kind === 'saveRunSettings') return saveEditable(asked.input)
-      return Effect.gen(function* () {
-        // Only the sheet asks for the settings file to keep the pick; the seat's
-        // pick is the choice of this run alone.
-        yield* client.setModel({ model: asked.model, remember: asked.kind === 'setModel' })
-        yield* readRunChoice()
-      })
+      if (asked.kind === 'chooseModel' || asked.kind === 'setModel') {
+        return Effect.gen(function* () {
+          // Only the sheet asks for the settings file to keep the pick; the seat's
+          // pick is the choice of this run alone.
+          yield* client.setModel({ model: asked.model, remember: asked.kind === 'setModel' })
+          yield* readRunChoice()
+        })
+      }
+      return answerEditAsk(asked)
     }
 
     /** The run asks: one job's output, or stopping a job or a child agent. */
@@ -1496,6 +1619,17 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     askRunSettings: () => Queue.offerUnsafe(panelAsks, { kind: 'runSettings' }),
     saveRunSettings: (input: RunSettingsInput) =>
       Queue.offerUnsafe(panelAsks, { kind: 'saveRunSettings', input }),
+    askComposition: () => {
+      const sessionId = state().sessionId
+      if (sessionId !== '') Queue.offerUnsafe(panelAsks, { kind: 'composition', sessionId })
+    },
+    applyComposition: (tools) => {
+      const sessionId = state().sessionId
+      if (sessionId === '') return
+      Queue.offerUnsafe(panelAsks, { kind: 'applyComposition', sessionId, tools })
+    },
+    saveDefaultComposition: (tools) =>
+      Queue.offerUnsafe(panelAsks, { kind: 'saveDefaultComposition', tools }),
     act: (sessionId, action) =>
       Queue.offerUnsafe(panelAsks, { kind: 'sessionAction', sessionId, action }),
     fork: (sessionId) => Queue.offerUnsafe(panelAsks, { kind: 'fork', sessionId }),

@@ -3,10 +3,12 @@ import { agentPlugin } from '@jozo-harness/agent'
 import { agentLoopPlugin } from '@jozo-harness/agent-loop'
 import { kernelPlugin, type Plugin } from '@jozo-harness/kernel'
 import { Llm, type LlmAdapter, type StreamChunk } from '@jozo-harness/llm'
+import { askPlugin, safetyPlugin } from '@jozo-harness/safety'
 import { sessionPlugin, type AssistantMessageData } from '@jozo-harness/session'
 import { jsonlSessions, sessionJsonlPlugin } from '@jozo-harness/session-jsonl'
 import { systemPromptPlugin } from '@jozo-harness/system-prompt'
 import { toolsPlugin } from '@jozo-harness/tools'
+import { tier0Plugin } from '@jozo-harness/tools-tier0'
 import { Deferred, Effect, Layer, Schema, Stream, type Scope } from 'effect'
 import { RpcClient, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
@@ -30,6 +32,9 @@ const calls: Array<{ readonly provider: string; readonly model: string }> = []
 /** The text each request carried, so a test can read what the provider was told. */
 const seen: Array<string> = []
 
+/** The tools each request offered the model, so a test can read what a composition left. */
+const toolNames: Array<ReadonlyArray<string>> = []
+
 const stubLlm: Plugin<{}, Llm, never> = {
   name: 'stub-llm',
   config: Schema.Struct({}),
@@ -46,6 +51,7 @@ const stubLlm: Plugin<{}, Llm, never> = {
       },
       stream: (request) => {
         calls.push({ provider: request.provider, model: request.model })
+        toolNames.push((request.tools ?? []).map((tool) => tool.name))
         seen.push(
           request.messages
             .flatMap((message) =>
@@ -89,6 +95,56 @@ const plugins: ReadonlyArray<Plugin<any, any, any>> = [
   sessionPlugin,
   toolsPlugin,
   systemPromptPlugin,
+  stubLlm,
+  agentPlugin,
+  agentLoopPlugin,
+]
+
+/**
+ * The rows a page's composition is chosen from. The Tier 0 tools give the page
+ * something to add and take away, and the safety row is the boundary they run in.
+ */
+const composableProfile = (root: string): string =>
+  [
+    'name: test',
+    'plugins:',
+    '  - id: kernel',
+    "    name: '@jozo-harness/kernel'",
+    '  - id: sessions',
+    "    name: '@jozo-harness/session'",
+    '  - id: session-jsonl',
+    "    name: '@jozo-harness/session-jsonl'",
+    '    config:',
+    '      root: ' + root,
+    '  - id: tools',
+    "    name: '@jozo-harness/tools'",
+    '  - id: system-prompt',
+    "    name: '@jozo-harness/system-prompt'",
+    '  - id: safety',
+    "    name: '@jozo-harness/safety'",
+    '    config:',
+    '      preset: workspace-write',
+    '  - id: ask',
+    "    name: '@jozo-harness/ask'",
+    '  - id: tier0',
+    "    name: '@jozo-harness/tools-tier0'",
+    '  - id: llm',
+    '    name: stub-llm',
+    '  - id: agent',
+    "    name: '@jozo-harness/agent'",
+    '  - id: agent-loop',
+    "    name: '@jozo-harness/agent-loop'",
+  ].join('\n')
+
+const composablePlugins: ReadonlyArray<Plugin<any, any, any>> = [
+  kernelPlugin,
+  sessionJsonlPlugin,
+  sessionPlugin,
+  toolsPlugin,
+  systemPromptPlugin,
+  safetyPlugin,
+  askPlugin,
+  tier0Plugin,
   stubLlm,
   agentPlugin,
   agentLoopPlugin,
@@ -138,7 +194,15 @@ describe('the browser UI through the command', () => {
    * hands it the socket a page would use. A resumed run starts on that session.
    */
   const withPage = <A, E>(
-    place: { readonly root: string; readonly workspace: string; readonly resume?: string },
+    place: {
+      readonly root: string
+      readonly workspace: string
+      readonly resume?: string
+      /** The profile document to serve, for a page that composes from more rows. */
+      readonly profileText?: string
+      /** The plugins those rows name, when they differ from the plain profile's. */
+      readonly pluginSet?: ReadonlyArray<Plugin<any, any, any>>
+    },
     body: (wsUrl: string) => Effect.Effect<A, E, Scope.Scope>,
   ): Effect.Effect<A, E> =>
     Effect.scoped(
@@ -147,8 +211,8 @@ describe('the browser UI through the command', () => {
         const stop = yield* Deferred.make<void>()
         yield* Effect.forkScoped(
           runCommand({
-            profiles: [profile(place.root)],
-            plugins,
+            profiles: [place.profileText ?? profile(place.root)],
+            plugins: place.pluginSet ?? plugins,
             cwd: place.workspace,
             route: 'stub/model',
             ...(place.resume === undefined ? {} : { resume: place.resume }),
@@ -371,6 +435,287 @@ describe('the browser UI through the command', () => {
       { provider: 'stub', model: 'model' },
       { provider: 'stub', model: 'other' },
     ])
+  }, 30_000)
+
+  test('a page composes a session and the default the session it opens next starts from', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-composition-'))
+    const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-web-composition-ws-'))
+    const configHome = await mkdtemp(join(tmpdir(), 'jozo-harness-web-composition-config-'))
+    // `jzh config set tools` writes under XDG; the page and the test must agree on the file.
+    const previous = process.env.XDG_CONFIG_HOME
+    process.env.XDG_CONFIG_HOME = configHome
+    const before = toolNames.length
+
+    try {
+      const observed = await Effect.runPromise(
+        Effect.gen(function* () {
+          const first = yield* withPage(
+            {
+              root,
+              workspace,
+              profileText: composableProfile(root),
+              pluginSet: composablePlugins,
+            },
+            (wsUrl) =>
+              withoutServices(
+                Effect.gen(function* () {
+                  const client = yield* RpcClient.make(UiRpcs)
+                  const opened = yield* client.open({})
+                  // What the session runs with, and what a smaller set would take away.
+                  const held = yield* client.composition({ sessionId: opened.id })
+                  const preview = yield* client.previewComposition({
+                    sessionId: opened.id,
+                    tools: ['read', 'glob'],
+                  })
+                  const applied = yield* client.setComposition({
+                    sessionId: opened.id,
+                    tools: ['read', 'glob'],
+                  })
+                  // The turn after the choice is the one that reads the smaller set.
+                  const answered = yield* Deferred.make<void>()
+                  yield* Effect.forkScoped(
+                    client.events({ sessionId: opened.id }).pipe(
+                      Stream.runForEach((event) =>
+                        Effect.gen(function* () {
+                          if (event.kind !== 'session') return
+                          if (event.event.type !== 'assistant/message') return
+                          yield* Deferred.succeed(answered, undefined)
+                        }),
+                      ),
+                    ),
+                  )
+                  yield* client.command({
+                    sessionId: opened.id,
+                    command: { kind: 'submit', text: 'read the tree' },
+                  })
+                  yield* Deferred.await(answered)
+                  // The default is a separate write, into the file a human also edits.
+                  const saved = yield* client.saveDefaultComposition({ tools: ['read', 'grep'] })
+                  const next = yield* client.open({})
+                  const born = yield* client.composition({ sessionId: next.id })
+                  return { opened, held, preview, applied, saved, born }
+                }).pipe(clientLayers(wsUrl)),
+              ),
+          )
+          // A resumed run builds its boot session a different way, and still answers for it.
+          const resumed = yield* withPage(
+            {
+              root,
+              workspace,
+              resume: first.opened.id,
+              profileText: composableProfile(root),
+              pluginSet: composablePlugins,
+            },
+            (wsUrl) =>
+              withoutServices(
+                Effect.gen(function* () {
+                  const client = yield* RpcClient.make(UiRpcs)
+                  const listed = yield* client.sessions()
+                  const held = yield* client.composition({ sessionId: listed.initial })
+                  const applied = yield* client.setComposition({
+                    sessionId: listed.initial,
+                    tools: ['bash'],
+                  })
+                  return { listed, held, applied }
+                }).pipe(clientLayers(wsUrl)),
+              ),
+          )
+          return { first, resumed }
+        }),
+      )
+
+      const asked = toolNames.slice(before)
+      // Before anything is chosen the page offers every tool the rows registered.
+      expect(observed.first.held.profiles).toEqual(['test'])
+      expect(observed.first.held.selected).toEqual(observed.first.held.offered)
+      expect(observed.first.held.offered).toEqual(expect.arrayContaining(['read', 'glob', 'bash']))
+      // The preview names what the set would remove, and writes nothing.
+      expect(observed.first.preview.missing).toEqual([])
+      expect(observed.first.preview.writable).toBe(true)
+      expect(observed.first.preview.removed).toContain('bash')
+      expect(observed.first.preview.removed).not.toContain('read')
+      // The write is recorded, and the turn after it asks for only those tools.
+      expect(observed.first.applied.selected).toEqual(['read', 'glob'])
+      expect(asked).toEqual([['read', 'glob']])
+      // The default lands in the same key `jzh config set tools` writes.
+      expect(observed.first.saved).toBe(true)
+      const settings = await readFile(join(configHome, 'jzh', 'config.yaml'), 'utf8')
+      expect(settings).toContain('tools:\n  - read\n  - grep')
+      // A session the page opens after the save starts from the default...
+      expect(observed.first.born.selected).toEqual(['read', 'grep'])
+      // ...while a run that resumes a session keeps the set its own log recorded.
+      expect(observed.resumed.listed.initial).toBe(observed.first.opened.id)
+      expect(observed.resumed.held.selected).toEqual(['read', 'glob'])
+      expect(observed.resumed.applied.selected).toEqual(['bash'])
+    } finally {
+      if (previous === undefined) delete process.env.XDG_CONFIG_HOME
+      else process.env.XDG_CONFIG_HOME = previous
+      await rm(root, { recursive: true, force: true })
+      await rm(workspace, { recursive: true, force: true })
+      await rm(configHome, { recursive: true, force: true })
+    }
+  }, 60_000)
+
+  test('a settings file that does not parse is reported while a session still opens', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-bad-settings-'))
+    const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-web-bad-settings-ws-'))
+    const configHome = await mkdtemp(join(tmpdir(), 'jozo-harness-web-bad-settings-config-'))
+    await mkdir(join(configHome, 'jzh'), { recursive: true })
+    await writeFile(join(configHome, 'jzh', 'config.yaml'), 'model: [unclosed\n')
+    const previous = process.env.XDG_CONFIG_HOME
+    process.env.XDG_CONFIG_HOME = configHome
+
+    try {
+      const observed = await Effect.runPromise(
+        withPage(
+          {
+            root,
+            workspace,
+            profileText: composableProfile(root),
+            pluginSet: composablePlugins,
+          },
+          (wsUrl) =>
+            withoutServices(
+              Effect.gen(function* () {
+                const client = yield* RpcClient.make(UiRpcs)
+                // A default that cannot be read leaves the new session with every tool...
+                const opened = yield* client.open({})
+                // ...and the read that needed it says what the file said.
+                const composed = yield* client
+                  .composition({ sessionId: opened.id })
+                  .pipe(Effect.catch((message) => Effect.succeed(message)))
+                return { opened, composed }
+              }).pipe(clientLayers(wsUrl)),
+            ),
+        ),
+      )
+
+      expect(observed.opened.id).not.toBe('')
+      expect(observed.composed).toContain('settings are not valid YAML')
+    } finally {
+      if (previous === undefined) delete process.env.XDG_CONFIG_HOME
+      else process.env.XDG_CONFIG_HOME = previous
+      await rm(root, { recursive: true, force: true })
+      await rm(workspace, { recursive: true, force: true })
+      await rm(configHome, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  test('a default the settings file refuses comes back as the message it wrote', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-unwritable-'))
+    const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-web-unwritable-ws-'))
+    // A file where the settings directory would go: the write cannot make its parent.
+    const blocked = join(workspace, 'blocked-home')
+    await writeFile(blocked, 'a file, not a directory\n')
+    const previous = process.env.XDG_CONFIG_HOME
+    process.env.XDG_CONFIG_HOME = blocked
+
+    try {
+      const observed = await Effect.runPromise(
+        withPage(
+          {
+            root,
+            workspace,
+            profileText: composableProfile(root),
+            pluginSet: composablePlugins,
+          },
+          (wsUrl) =>
+            withoutServices(
+              Effect.gen(function* () {
+                const client = yield* RpcClient.make(UiRpcs)
+                const opened = yield* client.open({})
+                // A file that is not there is no settings, so the read still answers.
+                const held = yield* client.composition({ sessionId: opened.id })
+                const saved = yield* client
+                  .saveDefaultComposition({ tools: ['read'] })
+                  .pipe(Effect.catch((message) => Effect.succeed(message)))
+                return { held, saved }
+              }).pipe(clientLayers(wsUrl)),
+            ),
+        ),
+      )
+
+      expect(observed.held.offered).toContain('read')
+      // The refusal is the line the writer printed, with the path it could not write.
+      expect(observed.saved).toContain('cannot write')
+      expect(observed.saved).toContain(join(blocked, 'jzh', 'config.yaml'))
+    } finally {
+      if (previous === undefined) delete process.env.XDG_CONFIG_HOME
+      else process.env.XDG_CONFIG_HOME = previous
+      await rm(root, { recursive: true, force: true })
+      await rm(workspace, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  test('the page reads the run settings and saves the ones that differ from the defaults', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-run-settings-'))
+    const workspace = await mkdtemp(join(tmpdir(), 'jozo-harness-web-run-settings-ws-'))
+    const configHome = await mkdtemp(join(tmpdir(), 'jozo-harness-web-run-settings-config-'))
+    const previous = process.env.XDG_CONFIG_HOME
+    process.env.XDG_CONFIG_HOME = configHome
+    const path = join(configHome, 'jzh', 'config.yaml')
+
+    try {
+      const observed = await Effect.runPromise(
+        withPage(
+          {
+            root,
+            workspace,
+            profileText: composableProfile(root),
+            pluginSet: composablePlugins,
+          },
+          (wsUrl) =>
+            withoutServices(
+              Effect.gen(function* () {
+                const client = yield* RpcClient.make(UiRpcs)
+                yield* client.open({})
+                const held = yield* client.runSettings()
+                const written = yield* client.saveRunSettings({
+                  search: '',
+                  apiKeyRef: '',
+                  bashTimeoutMs: 60000,
+                  maxParallelToolCalls: 4,
+                  subagentDepth: held.subagentDepth.value,
+                  delegateTools: [],
+                })
+                const before = yield* Effect.promise(() => readFile(path, 'utf8'))
+                // A field the file cannot take is refused before anything is written.
+                const refused = yield* client
+                  .saveRunSettings({
+                    search: '',
+                    apiKeyRef: '',
+                    bashTimeoutMs: 0,
+                    maxParallelToolCalls: 4,
+                    subagentDepth: held.subagentDepth.value,
+                    delegateTools: [],
+                  })
+                  .pipe(Effect.catch((message) => Effect.succeed(message)))
+                const after = yield* Effect.promise(() => readFile(path, 'utf8'))
+                return { held, written, before, refused, after }
+              }).pipe(clientLayers(wsUrl)),
+            ),
+        ),
+      )
+
+      // The first read resolves every limit the run would use...
+      expect(observed.held.bashTimeoutMs.value).toBe(120_000)
+      expect(observed.held.maxParallelToolCalls.value).toBeGreaterThan(0)
+      // ...and a save writes only what differs from the defaults.
+      expect(observed.written.bashTimeoutMs.value).toBe(60_000)
+      expect(observed.written.maxParallelToolCalls.value).toBe(4)
+      expect(observed.before).toContain('timeoutMs: 60000')
+      expect(observed.before).toContain('maxParallelToolCalls: 4')
+      // A refused save names the field and leaves the file as it was.
+      expect(observed.refused).toContain('bashTimeoutMs:')
+      expect(observed.refused).toContain('between 1 and')
+      expect(observed.after).toBe(observed.before)
+    } finally {
+      if (previous === undefined) delete process.env.XDG_CONFIG_HOME
+      else process.env.XDG_CONFIG_HOME = previous
+      await rm(root, { recursive: true, force: true })
+      await rm(workspace, { recursive: true, force: true })
+      await rm(configHome, { recursive: true, force: true })
+    }
   }, 30_000)
 
   test('a page deletes the session a resumed run opened, log and all', async () => {

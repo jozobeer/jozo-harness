@@ -204,6 +204,31 @@ describe('jzh config', () => {
     })
   })
 
+  test('sets the tools a new session starts from as one comma-separated list', async () => {
+    await withHome(async (env, path) => {
+      const sink = collector()
+
+      const code = await runConfig(['set', 'tools', 'read, bash,grep'], sink.io, env)
+
+      expect(sink.errs.join('')).toBe('')
+      expect(code).toBe(0)
+      expect(readFileSync(path, 'utf8')).toContain('tools:\n  - read\n  - bash\n  - grep')
+      const settings = await Effect.runPromise(loadConfigFile(path))
+      expect(settings.tools).toEqual(['read', 'bash', 'grep'])
+    })
+  })
+
+  test('refuses a tool set with no names', async () => {
+    await withHome(async (env) => {
+      const sink = collector()
+
+      const code = await runConfig(['set', 'tools', ' , '], sink.io, env)
+
+      expect(code).toBe(2)
+      expect(sink.errs.join('')).toContain('tools needs at least one name')
+    })
+  })
+
   test('refuses a key the settings file does not take', async () => {
     await withHome(async (env) => {
       const sink = collector()
@@ -212,7 +237,7 @@ describe('jzh config', () => {
 
       expect(code).toBe(2)
       expect(sink.errs.join('')).toContain(
-        'model, effort, profile, port, search, deepseekToolsBaseUrl, skills, plugins',
+        'model, effort, profile, port, search, deepseekToolsBaseUrl, skills, tools, plugins',
       )
     })
   })

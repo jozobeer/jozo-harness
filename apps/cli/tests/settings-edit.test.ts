@@ -32,6 +32,27 @@ describe('settings edits', () => {
     expect(edited.text).toBe('# my settings\nmodel: new/y\nprofile: repl\n')
   })
 
+  test('writes a whole list under its key, replacing the one already there', async () => {
+    const edited = await applied('model: a/b\ntools:\n  - read\n  - bash\n', {
+      kind: 'set-list',
+      key: 'tools',
+      items: ['read', 'grep'],
+    })
+
+    expect(edited.text).toBe('model: a/b\ntools:\n  - read\n  - grep\n')
+    expect(edited.changed).toBe(true)
+  })
+
+  test('drops the key when the list is empty', async () => {
+    const edited = await applied('model: a/b\ntools:\n  - read\n', {
+      kind: 'set-list',
+      key: 'tools',
+      items: [],
+    })
+
+    expect(edited.text).toBe('model: a/b\n')
+  })
+
   test('adds the first directory as a block', async () => {
     const edited = await applied('model: a/b\n', { kind: 'add-skill', dir: '~/skills' })
 

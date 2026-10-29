@@ -1,10 +1,15 @@
 import { describe, expect, test } from 'vitest'
 import {
+  compositionPlan,
+  compositionWritable,
   currentPreset,
   describePreset,
+  effectivePreset,
   presetChange,
   presetProblem,
   presetResumable,
+  presetTools,
+  presetWithTools,
   type SessionEvent,
 } from '../src/index.ts'
 
@@ -16,6 +21,12 @@ const selected = (
   profiles: ReadonlyArray<string>,
   tools: ReadonlyArray<string>,
 ): SessionEvent => event(seq, 'preset/selected', { profiles, tools })
+
+const chosen = (
+  seq: number,
+  profiles: ReadonlyArray<string>,
+  tools: ReadonlyArray<string>,
+): SessionEvent => event(seq, 'composition/selected', { profiles, tools })
 
 const CODE = ['read', 'write', 'edit', 'glob', 'grep', 'bash']
 
@@ -86,6 +97,66 @@ describe('the composition a session was started with', () => {
         { profiles: ['headless'], tools: [...CODE] },
       ),
     ).toBeUndefined()
+  })
+
+  test('the next step is offered only the tools a human last chose', () => {
+    const offered = ['read', 'write', 'bash', 'grep']
+    const events = [chosen(1, ['headless'], ['read', 'bash'])]
+
+    expect(
+      presetTools(
+        events,
+        offered.map((name) => ({ name })),
+      ),
+    ).toEqual([{ name: 'read' }, { name: 'bash' }])
+  })
+
+  test('what the build recorded does not narrow the request, so a row wired mid-run stays usable', () => {
+    const events = [selected(1, ['headless'], ['read'])]
+
+    expect(presetTools(events, [{ name: 'read' }, { name: 'bash' }])).toEqual([
+      { name: 'read' },
+      { name: 'bash' },
+    ])
+  })
+
+  test('a session that never chose a set is offered every tool', () => {
+    expect(presetTools([], [{ name: 'read' }, { name: 'bash' }])).toEqual([
+      { name: 'read' },
+      { name: 'bash' },
+    ])
+  })
+
+  test('a human choice outranks the build record, and the build record stands until one is made', () => {
+    const built = selected(1, ['headless'], ['read', 'bash'])
+    const human = chosen(2, ['headless'], ['read'])
+
+    expect(effectivePreset([built])).toEqual({ profiles: ['headless'], tools: ['read', 'bash'] })
+    expect(effectivePreset([built, human])).toEqual({ profiles: ['headless'], tools: ['read'] })
+    // A session whose log holds neither is offered every tool, with no profile rows to name.
+    expect(effectivePreset([])).toBeUndefined()
+  })
+
+  test('a chosen set keeps the profile rows it was started with', () => {
+    expect(
+      presetWithTools({ profiles: ['headless', 'base'], tools: ['read'] }, ['read', 'grep']),
+    ).toEqual({ profiles: ['headless', 'base'], tools: ['read', 'grep'] })
+  })
+
+  test('a tool this run does not offer is named before anything is written', () => {
+    const plan = compositionPlan(['read', 'bash'], ['read', 'write'], ['read', 'bash', 'edit'])
+
+    expect(plan).toEqual({ missing: ['edit'], added: ['bash'], removed: ['write'] })
+    expect(compositionWritable(plan)).toBe(false)
+  })
+
+  test('a set every chosen tool can supply is writable', () => {
+    const plan = compositionPlan(['read', 'bash', 'grep'], ['read', 'bash'], ['read', 'grep'])
+
+    expect(plan.missing).toEqual([])
+    expect(compositionWritable(plan)).toBe(true)
+    expect(plan.added).toEqual(['grep'])
+    expect(plan.removed).toEqual(['bash'])
   })
 
   test('a composition reads like something a human would say', () => {

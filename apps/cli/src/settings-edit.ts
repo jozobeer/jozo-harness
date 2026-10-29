@@ -9,6 +9,7 @@ export type SettingsEdit =
       /** A number is written bare, since the key reads it as a number. */
       readonly value: string | number
     }
+  | { readonly kind: 'set-list'; readonly key: string; readonly items: ReadonlyArray<string> }
   | { readonly kind: 'add-skill'; readonly dir: string }
   | { readonly kind: 'remove-skill'; readonly dir: string }
   | { readonly kind: 'add-row'; readonly id: string; readonly name: string }
@@ -314,31 +315,71 @@ const removeRowKey = (
   return Effect.succeed(at === -1 ? [...lines] : without(lines, at))
 }
 
-const apply = (
+/** Replaces a whole top-level list, comments under the old one included. */
+const setList = (
   lines: ReadonlyArray<string>,
-  edit: SettingsEdit,
+  key: string,
+  items: ReadonlyArray<string>,
+): Array<string> => {
+  const written =
+    items.length === 0 ? [] : [key + ':', ...items.map((item) => '  - ' + scalar(item))]
+  const block = blockOf(lines, key)
+  if (block === undefined) return [...lines, ...written]
+  const end = lastHeld(lines, block.keyAt, block.end) + 1
+  return [...lines.slice(0, block.keyAt), ...written, ...lines.slice(end)]
+}
+
+type KeyEdit = Extract<SettingsEdit, { kind: 'set-scalar' | 'set-list' | 'remove-scalar' }>
+type RowEdit = Extract<
+  SettingsEdit,
+  { kind: 'add-row' | 'set-row' | 'remove-row' | 'remove-row-key' }
+>
+/** The edits that only touch a top-level key, or the block under it. */
+const applyKeyEdit = (
+  lines: ReadonlyArray<string>,
+  edit: KeyEdit,
+): Effect.Effect<Array<string>, EditError> => {
+  if (edit.kind === 'set-scalar') {
+    const written = edit.key + ': ' + scalarText(edit.value)
+    const at = lines.findIndex((line) => new RegExp('^' + edit.key + '\\s*:').test(line))
+    return Effect.succeed(at === -1 ? [...lines, written] : replaceAt(lines, at, written))
+  }
+  if (edit.kind === 'set-list') return Effect.succeed(setList(lines, edit.key, edit.items))
+  return removeScalar(lines, edit.key)
+}
+
+/** The edits that add, change, or drop one plugin row. */
+const applyRowEdit = (
+  lines: ReadonlyArray<string>,
+  edit: RowEdit,
 ): Effect.Effect<Array<string>, EditError> => {
   switch (edit.kind) {
-    case 'set-scalar': {
-      const written = edit.key + ': ' + scalarText(edit.value)
-      const at = lines.findIndex((line) => new RegExp('^' + edit.key + '\\s*:').test(line))
-      return Effect.succeed(at === -1 ? [...lines, written] : replaceAt(lines, at, written))
-    }
-    case 'add-skill':
-      return addSkill(lines, edit.dir)
-    case 'remove-skill':
-      return removeSkill(lines, edit.dir)
     case 'add-row':
       return addRow(lines, edit.id, edit.name)
     case 'set-row':
       return setRow(lines, edit)
     case 'remove-row':
       return removeRow(lines, edit.id)
-    case 'remove-scalar':
-      return removeScalar(lines, edit.key)
     case 'remove-row-key':
       return removeRowKey(lines, edit.id, edit.key)
   }
+}
+
+const apply = (
+  lines: ReadonlyArray<string>,
+  edit: SettingsEdit,
+): Effect.Effect<Array<string>, EditError> => {
+  if (edit.kind === 'add-skill') return addSkill(lines, edit.dir)
+  if (edit.kind === 'remove-skill') return removeSkill(lines, edit.dir)
+  if (
+    edit.kind === 'add-row' ||
+    edit.kind === 'set-row' ||
+    edit.kind === 'remove-row' ||
+    edit.kind === 'remove-row-key'
+  ) {
+    return applyRowEdit(lines, edit)
+  }
+  return applyKeyEdit(lines, edit)
 }
 
 /** Applies one edit to the settings text; the caller writes the result when it changed. */

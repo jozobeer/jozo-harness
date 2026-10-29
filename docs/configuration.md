@@ -26,6 +26,7 @@ plugin ごとの config キー、フラグ、環境変数の一覧は `jzh --dum
 | `search` | `brave` / `deepseek` / `exa` / `perplexity` | `web_search` の provider。未設定は `BRAVE_API_KEY` があるときだけ brave。`deepseek` は `DEEPSEEK_API_KEY` を DeepSeek Search API に、`exa` は `EXA_API_KEY` を `https://api.exa.ai/search` に、`perplexity` は `PERPLEXITY_API_KEY` を chat completions に送る。選んだ provider のキーが無いときは、最初の呼び出しが欠けている変数名を返し、他の provider へ落ちない |
 | `deepseekToolsBaseUrl` | URL | DeepSeek Search / Fetch API の base。既定は `https://api.deepseek.com/v1/tools`。provider は `/search` を足す |
 | `skills` | 文字列の配列 | `<name>/SKILL.md` を持つディレクトリを追加する。```/x``` は展開する |
+| `tools` | 文字列の配列 | 新しいセッションが最初にモデルへ出す tool の組。未設定なら行が登録した tool をすべて出す。走っているセッションの組は変えない（画面の構成エディタがログに書く） |
 | `plugins` | 行の配列 | 層3として重なる |
 | `webhooks` | webhook 規則の配列 | 外部イベントからセッションを起こす経路。未設定なら `/hooks/` 以下はすべて 404（既定で無効） |
 
@@ -233,6 +234,7 @@ plugins:
 | 書き方 | 効果 |
 |---|---|
 | `jzh config set model <provider/model>` | `model` を書く。`effort` と `profile` も同じ形 |
+| `jzh config set tools <a,b,c>` | 新しいセッションの既定の tool を、カンマ区切りの1引数で書く |
 | `jzh config set plugins.<id>.<key> <value>` | その行のキーを書く。同梱 profile の行を指すと差分の行を作る。`disabled` は行の項目として書く |
 | `jzh config add skills <dir>` | `skills` にディレクトリを足す |
 | `jzh config add plugins <name>` | 行を足す。`id` は名前から作り（`@jozo-harness/mcp` → `mcp`）、`--id` で決められる |

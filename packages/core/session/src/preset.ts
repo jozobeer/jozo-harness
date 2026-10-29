@@ -14,20 +14,25 @@ export interface Preset {
 declare module './events.ts' {
   interface SessionEventMap {
     'preset/selected': Preset
+    /** The set a human picked for this session; the build's own record is above. */
+    'composition/selected': Preset
   }
 }
 
+const presetSchema = Schema.Struct({
+  profiles: Schema.Array(Schema.String),
+  tools: Schema.Array(Schema.String),
+})
+
 /** Schemas for the session events this module adds. */
 export const presetEventSchemas: SessionEventSchemaMap = new Map<string, Schema.Schema<unknown>>([
-  [
-    'preset/selected',
-    Schema.Struct({ profiles: Schema.Array(Schema.String), tools: Schema.Array(Schema.String) }),
-  ],
+  ['preset/selected', presetSchema],
+  ['composition/selected', presetSchema],
 ])
 
 registerSessionEventSchemas(presetEventSchemas)
-// Which tools a session was given is the harness's business, not the model's.
-registerLogOnlySessionEvents(['preset/selected'])
+// Which tools a session is offered is the harness's business, not the model's.
+registerLogOnlySessionEvents(['preset/selected', 'composition/selected'])
 
 /** The composition this session recorded, or nothing when it never recorded one. */
 export const currentPreset = (events: ReadonlyArray<SessionEvent>): Preset | undefined => {
@@ -71,6 +76,67 @@ export const presetChange = (recorded: Preset, current: Preset): PresetChange | 
   const added = difference(current.tools, recorded.tools)
   if (!profilesChanged && gone.length === 0 && added.length === 0) return undefined
   return { profilesChanged, gone, added }
+}
+
+/**
+ * The composition after a human picked a tool set. The profiles stay what the
+ * session was built from; only what the model is offered changes.
+ */
+export const presetWithTools = (preset: Preset, tools: ReadonlyArray<string>): Preset => ({
+  profiles: preset.profiles,
+  tools: [...tools],
+})
+
+/** What choosing one tool set against the set in effect would take. */
+export interface CompositionPlan {
+  /** Asked for, but this run cannot offer it, so the set cannot be written. */
+  readonly missing: ReadonlyArray<string>
+  /** Offered now, not in the set. */
+  readonly added: ReadonlyArray<string>
+  /** In the set, not asked for now. */
+  readonly removed: ReadonlyArray<string>
+}
+
+/** The difference a choice would make, computed before anything is written. */
+export const compositionPlan = (
+  offered: ReadonlyArray<string>,
+  current: ReadonlyArray<string>,
+  wanted: ReadonlyArray<string>,
+): CompositionPlan => ({
+  missing: sorted(wanted.filter((name) => !offered.includes(name))),
+  added: difference(wanted, current).filter((name) => offered.includes(name)),
+  removed: difference(current, wanted),
+})
+
+/** Whether a set may be written as it is: a tool this run cannot offer is no choice. */
+export const compositionWritable = (plan: CompositionPlan): boolean => plan.missing.length === 0
+
+/** The set a human last picked for this session, or nothing when they picked none. */
+export const selectedPreset = (events: ReadonlyArray<SessionEvent>): Preset | undefined => {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type === 'composition/selected') return event.data
+  }
+  return undefined
+}
+
+/** The set in effect for this session: the human's choice outranks the build's record. */
+export const effectivePreset = (events: ReadonlyArray<SessionEvent>): Preset | undefined =>
+  selectedPreset(events) ?? currentPreset(events)
+
+/**
+ * The tools the newest record offers the model, or every tool when no human
+ * chose a set. A build's own record does not narrow the request: a row wired
+ * mid-run adds tools the session never recorded, and those stay usable. A
+ * human's choice does narrow it, from the next step on, while the layers behind
+ * the run stay as they were built.
+ */
+export const presetTools = <A extends { readonly name: string }>(
+  events: ReadonlyArray<SessionEvent>,
+  tools: ReadonlyArray<A>,
+): ReadonlyArray<A> => {
+  const chosen = selectedPreset(events)
+  return chosen === undefined ? tools : tools.filter((tool) => chosen.tools.includes(tool.name))
 }
 
 /**

@@ -19,7 +19,7 @@ export interface ConfigIo {
 
 const USAGE =
   'jzh config                       the settings file, its keys, and their values\n' +
-  'jzh config set K V               write one value (model, effort, profile, port, plugins.<id>.<key>)\n' +
+  'jzh config set K V               write one value (model, effort, profile, port, tools, plugins.<id>.<key>)\n' +
   'jzh config add skills <dir>      add a directory the skill tool reads\n' +
   'jzh config add plugins <name>    add a plugin row (--id names the row)\n' +
   'jzh config remove skills <dir>   drop a directory\n' +
@@ -38,6 +38,11 @@ const SCALAR_KEYS: ReadonlyArray<string> = [
 
 /** Keys the file holds as numbers, so an edit writes 4310 rather than '4310'. */
 const NUMBER_KEYS: ReadonlyArray<string> = ['port']
+/**
+ * Keys whose value is one line of comma-separated names. `tools` is the default
+ * composition of a new session, so a page and a human write the same key.
+ */
+const LIST_VALUE_KEYS: ReadonlyArray<string> = ['tools']
 const LIST_KEYS: ReadonlyArray<string> = ['skills']
 const KNOWN_KEYS: ReadonlyArray<string> = SETTINGS_KEYS.map((note) => note.name)
 
@@ -361,14 +366,35 @@ const setRowValue = async (
   })
 }
 
-const setValue = async (
-  argv: ReadonlyArray<string>,
+/** Writes a key whose value is one comma-separated list, such as the default tools. */
+const setListValue = async (
+  key: string,
+  value: string,
   io: ConfigIo,
   paths: ConfigPaths,
 ): Promise<number> => {
-  const [key = '', value = ''] = argv
-  if (key === '' || value === '') return usage(io)
-  if (key.startsWith('plugins.')) return await setRowValue(key, value, io, paths)
+  const items = value
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item !== '')
+  if (items.length === 0) return refused(io, key + ' needs at least one name')
+  return await applyAndReport({
+    io,
+    paths,
+    edit: { kind: 'set-list', key, items },
+    key,
+    unchanged: key + ' is already ' + items.join(', ') + ' in ' + paths.config,
+    changed: (block) => 'wrote ' + key + ' in ' + paths.config + '\n' + block,
+  })
+}
+
+/** Writes one scalar key, refusing a key or a value the file does not take. */
+const setScalarValue = async (
+  key: string,
+  value: string,
+  io: ConfigIo,
+  paths: ConfigPaths,
+): Promise<number> => {
   if (LIST_KEYS.includes(key)) {
     return refused(io, key + ' holds a list; jzh config add ' + key + ' <dir>')
   }
@@ -386,6 +412,18 @@ const setValue = async (
     unchanged: key + ' is already ' + value + ' in ' + paths.config,
     changed: (block) => 'wrote ' + key + ' in ' + paths.config + '\n' + block,
   })
+}
+
+const setValue = async (
+  argv: ReadonlyArray<string>,
+  io: ConfigIo,
+  paths: ConfigPaths,
+): Promise<number> => {
+  const [key = '', value = ''] = argv
+  if (key === '' || value === '') return usage(io)
+  if (key.startsWith('plugins.')) return await setRowValue(key, value, io, paths)
+  if (LIST_VALUE_KEYS.includes(key)) return await setListValue(key, value, io, paths)
+  return await setScalarValue(key, value, io, paths)
 }
 
 /** `~` is the shell's, not YAML's, so the check expands it the way a shell would. */

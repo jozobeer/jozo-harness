@@ -22,7 +22,9 @@ const reply = (text: string): ReadonlyArray<StreamChunk> => [
   { type: 'finish', kind: 'stop' },
 ]
 
-const stubLlm = (): Plugin<{}, Llm, never> => ({
+const stubLlm = (
+  observe: (tools: ReadonlyArray<string>) => void = () => undefined,
+): Plugin<{}, Llm, never> => ({
   name: 'stub-llm',
   config: Schema.Struct({}),
   provides: [Llm],
@@ -36,7 +38,10 @@ const stubLlm = (): Plugin<{}, Llm, never> => ({
         images: 'none',
         promptCacheControl: false,
       },
-      stream: () => Stream.fromIterable(reply('ok')),
+      stream: (request) => {
+        observe((request.tools ?? []).map((tool) => tool.name))
+        return Stream.fromIterable(reply('ok'))
+      },
     } satisfies LlmAdapter),
 })
 
@@ -74,7 +79,10 @@ const profile = (root: string, name: string, withTier1: boolean): string =>
     "    name: '@jozo-harness/agent-loop'",
   ].join('\n')
 
-const plugins = (withTier1: boolean): ReadonlyArray<Plugin<any, any, any>> => [
+const plugins = (
+  withTier1: boolean,
+  observe: (tools: ReadonlyArray<string>) => void = () => undefined,
+): ReadonlyArray<Plugin<any, any, any>> => [
   kernelPlugin,
   sessionJsonlPlugin,
   sessionPlugin,
@@ -84,19 +92,20 @@ const plugins = (withTier1: boolean): ReadonlyArray<Plugin<any, any, any>> => [
   askPlugin,
   tier0Plugin,
   ...(withTier1 ? [tier1Plugin] : []),
-  stubLlm(),
+  stubLlm(observe),
   agentPlugin,
   agentLoopPlugin,
 ]
 
 const run = (
   options: Partial<CommandOptions> & { readonly profile: string; readonly tier1: boolean },
+  observe: (tools: ReadonlyArray<string>) => void = () => undefined,
 ): Promise<{ readonly code: number; readonly stderr: string }> => {
   const errs: Array<string> = []
   return Effect.runPromise(
     runCommand({
       profiles: [options.profile],
-      plugins: plugins(options.tier1),
+      plugins: plugins(options.tier1, observe),
       cwd: '/tmp',
       route: 'stub/model',
       stdout: () => undefined,
@@ -162,6 +171,43 @@ describe('the composition a session was started with', () => {
     expect(
       after4.flatMap((event) => (event.type === 'preset/selected' ? [event.data.profiles] : [])),
     ).toEqual([['full'], ['small']])
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('a new session starts from the saved default, and only that set reaches the model', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-composition-default-'))
+    const full = profile(root, 'full', true)
+    const seen: Array<ReadonlyArray<string>> = []
+
+    // A page saved the set a new session starts from; this is the settings file
+    // `jzh config set tools read,grep` writes.
+    const first = await run(
+      { profile: full, tier1: true, task: 'first', settings: { tools: ['read', 'grep'] } },
+      (tools) => seen.push(tools),
+    )
+    expect(first.code).toBe(0)
+    const id = (await Effect.runPromise(jsonlSessions({ root }).list()))[0]?.id ?? ''
+    const after = await sessionOf(root, id)
+    const chosen = after.flatMap((event) =>
+      event.type === 'composition/selected' ? [event.data.tools] : [],
+    )
+
+    expect(chosen).toEqual([['read', 'grep']])
+    // The request carries the chosen set, not every tool the rows registered.
+    expect(seen).toEqual([['read', 'grep']])
+
+    // A resumed session keeps its own set even when the default has changed since.
+    const seenAgain: Array<ReadonlyArray<string>> = []
+    const second = await run(
+      { profile: full, tier1: true, resume: id, task: 'second', settings: { tools: ['bash'] } },
+      (tools) => seenAgain.push(tools),
+    )
+    const kept = await sessionOf(root, id)
+
+    expect(second.code).toBe(0)
+    expect(seenAgain).toEqual([['read', 'grep']])
+    expect(kept.filter((event) => event.type === 'composition/selected')).toHaveLength(1)
 
     await rm(root, { recursive: true, force: true })
   })

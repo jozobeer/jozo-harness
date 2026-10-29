@@ -128,6 +128,20 @@ describe('parseConfigText', () => {
     expect(config).toEqual({})
   })
 
+  test('a path that cannot be read stops the read and names the path', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'jozo-harness-settings-unreadable-'))
+
+    const failed = await Effect.runPromise(
+      Effect.match(loadConfigFile(directory), {
+        onFailure: (error) => error.code + ': ' + error.message,
+        onSuccess: () => 'loaded',
+      }),
+    )
+
+    expect(failed).toContain('config: cannot read ' + directory)
+    await rm(directory, { recursive: true, force: true })
+  })
+
   test('an empty file, or one with only comments, is no settings', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'jozo-harness-settings-empty-'))
     const path = join(directory, 'config.yaml')

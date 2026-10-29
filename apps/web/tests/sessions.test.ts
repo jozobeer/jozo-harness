@@ -78,6 +78,9 @@ const makeFactory = (): Fake => {
           return {
             summary: summaryOf(made),
             host: hostOf(),
+            composition: () => ({ profiles: [], selected: [], offered: [] }),
+            setComposition: () =>
+              Effect.fail(new WebError({ message: 'the test session writes no composition' })),
             commands: () => [],
             runState: runStateOf,
             jobOutput,
@@ -114,6 +117,9 @@ const jobOutput = (): Effect.Effect<JobDetailView, WebError> =>
 const sessionFor = (id: string): OpenSession => ({
   summary: summaryOf(id),
   host: hostOf(),
+  composition: () => ({ profiles: [], selected: [], offered: [] }),
+  setComposition: () =>
+    Effect.fail(new WebError({ message: 'the test session writes no composition' })),
   commands: () => [],
   runState: runStateOf,
   jobOutput,
@@ -127,6 +133,9 @@ const initial = (id: string): InitialSession => ({
   session: {
     summary: summaryOf(id),
     host: hostOf(),
+    composition: () => ({ profiles: [], selected: [], offered: [] }),
+    setComposition: () =>
+      Effect.fail(new WebError({ message: 'the test session writes no composition' })),
     commands: () => [],
     runState: runStateOf,
     jobOutput,

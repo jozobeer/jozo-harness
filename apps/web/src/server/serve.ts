@@ -14,6 +14,7 @@ import {
 } from '@jozo-harness/tools-tier1'
 import { sendCommand, type SessionError, type SessionEvent } from '@jozo-harness/ui-protocol'
 import { attachmentRootOf, saveAttachment } from '@jozo-harness/session/attachment-store'
+import { compositionPlan, compositionWritable } from '@jozo-harness/session'
 import { UiRpcs, type CommandView, type SessionHit } from '../shared/rpc.ts'
 import {
   authCookie,
@@ -39,6 +40,7 @@ import type { WebError } from './errors.ts'
 import {
   makeSessionRegistry,
   type InitialSession,
+  type OpenSession,
   type SessionFactory,
   type SessionRegistry,
 } from './sessions.ts'
@@ -129,6 +131,15 @@ export interface ServeWebOptions {
   readonly onReady: (urls: ReadyUrls) => void
   /** Completes to stop the server, as SIGINT does. */
   readonly interrupt?: Effect.Effect<void>
+}
+
+/** The session a request names, or a refusal the page shows as it is. */
+const sessionNamed = (
+  registry: SessionRegistry,
+  sessionId: string,
+): Effect.Effect<OpenSession, string> => {
+  const session = registry.sessionOf(sessionId)
+  return session === undefined ? Effect.fail('the session is not open') : Effect.succeed(session)
 }
 
 const handlersOf = (
@@ -424,6 +435,53 @@ const handlersOf = (
       ),
     setEffort: ({ effort }) =>
       settings.setEffort(effort).pipe(
+        Effect.as(true),
+        Effect.mapError((error) => error.message),
+      ),
+    composition: ({ sessionId }) =>
+      Effect.gen(function* () {
+        const session = yield* sessionNamed(registry, sessionId)
+        const inEffect = session.composition()
+        const defaults = yield* settings.defaultTools()
+        return {
+          profiles: inEffect.profiles,
+          selected: inEffect.selected,
+          offered: inEffect.offered,
+          ...(defaults.tools === undefined ? {} : { defaultTools: [...defaults.tools] }),
+          settingsPath: defaults.settingsPath,
+        }
+      }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
+    previewComposition: ({ sessionId, tools }) =>
+      Effect.gen(function* () {
+        const session = yield* sessionNamed(registry, sessionId)
+        const inEffect = session.composition()
+        const plan = compositionPlan(inEffect.offered, inEffect.selected, tools)
+        return { ...plan, writable: compositionWritable(plan) }
+      }),
+    setComposition: ({ sessionId, tools }) =>
+      Effect.gen(function* () {
+        const session = yield* sessionNamed(registry, sessionId)
+        // The page previews before writing, and this check keeps a direct call
+        // from recording a set the run cannot honour.
+        const before = session.composition()
+        const plan = compositionPlan(before.offered, before.selected, tools)
+        if (!compositionWritable(plan)) {
+          return yield* Effect.fail(
+            'this run cannot offer ' + plan.missing.join(', ') + '; nothing was written',
+          )
+        }
+        const inEffect = yield* session.setComposition(tools)
+        const defaults = yield* settings.defaultTools()
+        return {
+          profiles: inEffect.profiles,
+          selected: inEffect.selected,
+          offered: inEffect.offered,
+          ...(defaults.tools === undefined ? {} : { defaultTools: [...defaults.tools] }),
+          settingsPath: defaults.settingsPath,
+        }
+      }).pipe(Effect.mapError((error) => (typeof error === 'string' ? error : error.message))),
+    saveDefaultComposition: ({ tools }) =>
+      settings.saveDefaultTools(tools).pipe(
         Effect.as(true),
         Effect.mapError((error) => error.message),
       ),

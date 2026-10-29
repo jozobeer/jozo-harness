@@ -134,6 +134,16 @@ export const SETTINGS_KEYS: ReadonlyArray<SettingsNote> = [
     items: (settings) => settings?.skills ?? [],
   },
   {
+    name: 'tools',
+    summary: 'the tools a new session is offered; unset offers every tool the rows register',
+    value: (settings) =>
+      settings?.tools === undefined
+        ? 'not set, so every tool the rows register'
+        : settings.tools.join(', '),
+    example: ['tools:', '  - read', '  - edit', '  - bash'],
+    items: (settings) => settings?.tools ?? [],
+  },
+  {
     name: 'plugins',
     summary: 'rows merged by id, between the profile and --patch',
     value: (settings) => countOr('not set', settings?.plugins?.length, 'row', 'rows'),

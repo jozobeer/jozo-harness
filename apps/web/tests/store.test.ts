@@ -311,6 +311,9 @@ const makeHost = (id: string, cwd = '/work'): FakeHost => {
 const openOf = (host: FakeHost): OpenSession => ({
   summary: host.summary,
   host: host.host,
+  composition: () => ({ profiles: [], selected: ['read'], offered: ['read'] }),
+  setComposition: () =>
+    Effect.fail(new WebError({ message: 'the test session writes no composition' })),
   commands: () => [],
   runState: host.runState,
   jobOutput: host.jobOutput,
@@ -377,6 +380,8 @@ const makeSettings = (): FakeSettings => {
           effort = next
         }),
       editable: () => Effect.succeed(editable()),
+      defaultTools: () => Effect.succeed({ tools: undefined, settingsPath: '/work/settings.yml' }),
+      saveDefaultTools: () => Effect.void,
       saveEditable: (input) =>
         input.bashTimeoutMs === 0
           ? Effect.fail(new WebError({ message: 'bashTimeoutMs: a whole number is required' }))

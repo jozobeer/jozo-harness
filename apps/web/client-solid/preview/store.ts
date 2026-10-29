@@ -339,6 +339,9 @@ export const createPreviewStore = (now = Date.now()): SessionStore => {
       setState((now) => withSettings(now, settings))
     },
     setModel: () => undefined,
+    askComposition: () => undefined,
+    applyComposition: () => undefined,
+    saveDefaultComposition: () => undefined,
     askRunSettings: () => undefined,
     saveRunSettings: (input) =>
       setState((now) => ({

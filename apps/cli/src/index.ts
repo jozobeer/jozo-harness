@@ -44,16 +44,22 @@ import {
   registerAgentsMd,
   type AgentsMdOptions,
   type RuntimeContextSubject,
+  type SystemPromptShape,
 } from '@jozo-harness/system-prompt'
 import { ToolError, type ToolDefinition, type ToolExecution } from '@jozo-harness/tools'
 import { Tools, type ToolRegistry } from '@jozo-harness/tools'
 import {
+  compositionPlan,
+  compositionWritable,
   currentPreset,
   DEFAULT_COMPACT_MAX_BYTES,
+  effectivePreset,
   makeCommands,
   presetChange,
   presetProblem,
   presetResumable,
+  presetWithTools,
+  selectedPreset,
   usageViewOf,
   type CommandsShape,
   type Preset,
@@ -1471,6 +1477,87 @@ const applyPreset = (
     return presetProblem(recorded, composition)
   })
 
+/** What one session runs with now: the rows it was built from and the set in effect. */
+interface CompositionInEffect {
+  readonly profiles: ReadonlyArray<string>
+  readonly selected: ReadonlyArray<string>
+  readonly offered: ReadonlyArray<string>
+}
+
+const compositionInEffect = (agent: Agent, registry: ToolRegistry): CompositionInEffect => {
+  const events = agent.session.events()
+  const offered = registry.schemas().map((schema) => schema.name)
+  return {
+    profiles: currentPreset(events)?.profiles ?? [],
+    selected: effectivePreset(events)?.tools ?? offered,
+    offered,
+  }
+}
+
+/**
+ * Records the set a human picked for one open session. Nothing is written while
+ * the set names a tool this run cannot offer; the refusal says which ones. The
+ * layers stay as they were built, so the next step reads the smaller set and the
+ * tools behind the history keep running.
+ */
+const changeComposition = (
+  agent: Agent,
+  registry: ToolRegistry,
+  tools: ReadonlyArray<string>,
+): Effect.Effect<CompositionInEffect, WebError> =>
+  Effect.gen(function* () {
+    const offered = registry.schemas().map((schema) => schema.name)
+    const inEffect = compositionInEffect(agent, registry)
+    const plan = compositionPlan(offered, inEffect.selected, tools)
+    if (!compositionWritable(plan)) {
+      return yield* Effect.fail(
+        new WebError({
+          message: 'this run cannot offer ' + plan.missing.join(', ') + '; the set was not written',
+        }),
+      )
+    }
+    const chosen = [...new Set(tools)].filter((name) => offered.includes(name))
+    const profiles = currentPreset(agent.session.events())?.profiles ?? []
+    yield* agent.session.append(
+      'composition/selected',
+      presetWithTools({ profiles, tools: inEffect.selected }, chosen),
+    )
+    return compositionInEffect(agent, registry)
+  }).pipe(
+    Effect.mapError((error) =>
+      error instanceof WebError ? error : new WebError({ message: messageOf(error) }),
+    ),
+  )
+
+/** Tells the model where the page lives, when this session is served by one. */
+const installGuiContext = (prompt: SystemPromptShape, gui: GuiEndpoint | undefined) =>
+  gui === undefined || !prompt.devContext
+    ? Effect.void
+    : prompt.context(guiContextEntry(() => gui.url))
+
+/**
+ * Records the default a page saved as a new session's first composition. A
+ * resumed or forked session keeps the set its own log already carries, because
+ * that was the human's choice under whatever default was in effect then.
+ */
+const seedDefaultComposition = (
+  agent: Agent,
+  composition: Preset,
+  resume: SessionId | undefined,
+  defaultTools: ReadonlyArray<string> | undefined,
+): Effect.Effect<void, SessionError> =>
+  Effect.gen(function* () {
+    if (resume !== undefined || defaultTools === undefined) return
+    if (selectedPreset(agent.session.events()) !== undefined) return
+    yield* agent.session.append(
+      'composition/selected',
+      presetWithTools(
+        composition,
+        composition.tools.filter((name) => defaultTools.includes(name)),
+      ),
+    )
+  })
+
 /** A UI runs the session itself instead of streaming into the caller's terminal. */
 const ownsTheScreen = (work: Work): boolean => work.kind === 'tui' || work.kind === 'web'
 
@@ -1647,6 +1734,34 @@ const settingsPortOf = (
       live.search = searchFromEnv(process.env, after.inputs.settings)
       return view
     }),
+  // The default belongs to sessions that do not exist yet, so it is read from the
+  // file as it is now rather than from the settings this run loaded at start.
+  defaultTools: () =>
+    Effect.gen(function* () {
+      const path = options.settingsPath ?? configPaths().config
+      const settings = yield* loadConfigFile(path).pipe(
+        Effect.mapError((error) => new WebError({ message: messageOf(error) })),
+      )
+      return { tools: settings.tools, settingsPath: path }
+    }),
+  saveDefaultTools: (tools) =>
+    Effect.tryPromise({
+      try: async () => {
+        let said = ''
+        const code = await runConfig(['set', 'tools', tools.join(',')], {
+          stdout: () => undefined,
+          stderr: (text) => {
+            said += text
+          },
+        })
+        if (code !== 0) {
+          throw new Error(
+            said.trim() === '' ? 'the settings file refused the tool set' : said.trim(),
+          )
+        }
+      },
+      catch: (cause) => new WebError({ message: messageOf(cause) }),
+    }),
 })
 
 /** The address this run serves. The port is known only once the listeners are up. */
@@ -1678,6 +1793,11 @@ const sessionFactoryOf = (
       // effort since.
       // The rows and layer are read per open: a save may have added a row or
       // changed a limit, and the next session should start from the new wiring.
+      // A default saved while the page is open is read here, so a session opened
+      // after the save starts from it without restarting the run.
+      const saved = yield* loadConfigFile(options.settingsPath ?? configPaths().config).pipe(
+        Effect.orElseSucceed((): JozoHarnessConfig => ({})),
+      )
       const built = yield* buildSession(
         options,
         facts.rows,
@@ -1694,6 +1814,7 @@ const sessionFactoryOf = (
         gui,
         live,
         seed,
+        saved.tools ?? options.settings?.tools,
       )
       if (built.kind === 'refused') {
         return yield* Effect.fail(new WebError({ message: built.message }))
@@ -1707,6 +1828,9 @@ const sessionFactoryOf = (
       return {
         summary: summaryOf(agent),
         host: ui,
+        composition: () => compositionInEffect(agent, built.runtime.tools),
+        setComposition: (tools: ReadonlyArray<string>) =>
+          changeComposition(agent, built.runtime.tools, tools),
         commands: () => commandViewsOf(built.runtime.commands, built.runtime.skillCatalog()),
         runState: () =>
           runStateOf(
@@ -1996,6 +2120,9 @@ const openSessionOf = (
   return {
     summary: summaryOf(agent),
     host: ui,
+    composition: () => compositionInEffect(agent, runtime.tools),
+    setComposition: (tools: ReadonlyArray<string>) =>
+      changeComposition(agent, runtime.tools, tools),
     commands: () => commandViewsOf(runtime.commands, runtime.skillCatalog()),
     runState: () =>
       runStateOf(
@@ -2070,6 +2197,8 @@ const answerersOf = (
 interface SessionRuntime {
   readonly agent: Agent
   readonly ui: UiHost | undefined
+  /** What this run can offer the session; a composition change is chosen from it. */
+  readonly tools: ToolRegistry
   readonly commands: CommandsShape
   /** The store this session lives in: a UI that lists sessions reads the same one. */
   readonly listSessions: () => Effect.Effect<ReadonlyArray<SessionSummary>, SessionError>
@@ -2347,6 +2476,8 @@ const buildSession = (
   live?: LiveRunSettings,
   /** Events a new session starts from, e.g. a fork of another log. */
   seed?: ReadonlyArray<SessionEvent>,
+  /** The tools a new session starts with; absent offers every tool the rows register. */
+  defaultTools?: ReadonlyArray<string>,
 ) =>
   Effect.gen(function* () {
     const liveSettings = live ?? liveSettingsOf(options, rows)
@@ -2386,9 +2517,7 @@ const buildSession = (
     )
     // The page's URL is a user context, so the system prompt keeps the same bytes
     // whatever address the server bound. A session without a page adds nothing.
-    if (gui !== undefined && prompt.devContext) {
-      yield* prompt.context(guiContextEntry(() => gui.url))
-    }
+    yield* installGuiContext(prompt, gui)
     // What the provider takes for an effort is the adapter's to say; a page only offers it.
     const efforts = Context.get(context, Llm).capabilities.reasoningEffort ?? []
     // The loop measured the request against this budget; reading the same values
@@ -2490,6 +2619,12 @@ const buildSession = (
       ...wiringOf(plugins),
     })
 
+    yield* seedDefaultComposition(
+      agent,
+      composition,
+      resume,
+      defaultTools ?? options.settings?.tools,
+    )
     // A session keeps the composition it was started with: the tools behind its
     // history are not something a later run may swap out without being told to.
     const problem = yield* applyPreset(agent, composition, options.allowPresetChange === true)
@@ -2500,6 +2635,7 @@ const buildSession = (
       runtime: {
         agent,
         ui,
+        tools: Context.get(context, Tools),
         commands,
         listSessions: () => Context.get(context, Sessions).list(),
         jobs,
