@@ -66,6 +66,12 @@ plugins:
 
 設定シートの `model` は「これから開くセッション」に効く。選んで `Use for new sessions` を押すと、そのあと開くセッションはそのモデルで始まり、同時に設定ファイルにも書かれるので次の run も同じモデルで始まる。すでに開いているセッションのモデルは、そのときには変わらない（下の「モデルを選ぶ」で変える）。
 
+### サーバー無しでブラウザだけで動かす
+
+ページの URL に `?runtime=browser` を足すと、jzh のサーバーにセッションを作らず、そのタブの Worker の中だけで 1 turn を回す。ワークスペースもログも memory にあり、タブを閉じる（Worker を terminate する）と消える。既定の `jzh web` はこの指定が無い限り今までどおりサーバーのセッションを使う。
+
+モデルは `route`（例: `deepseek/deepseek-chat`）と `baseUrl` を同じ URL の query で指定し、API key は sessionStorage の `jzh.browser.apiKey` に置く。key は URL に出さず、Worker の最初のメッセージだけで渡す。
+
 ### UI の言語を切り替える
 
 設定シートの `language` で `English` と `日本語` を選ぶ。選ぶとシェルと会話の固定文言、設定シート、右ペインのタブと使用量、トレースの見出しがその言語になり、`localStorage` の `jzh.locale` に残るので再読込しても同じ言語で開く。まだ選んでいなければブラウザの `navigator.languages` のうち対応する言語を使い、どれも無ければ英語で開く。
