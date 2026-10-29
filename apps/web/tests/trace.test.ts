@@ -394,6 +394,22 @@ describe('the trace', () => {
     expect(turn?.proposals[0]?.answer).toBe('no')
   })
 
+  test('a later question of a batch lands on the turn that asked it, not on the newest turn', () => {
+    const [asked, later] = traceOf([
+      event('turn/start', { turn: 1 }, 10),
+      event('step/start', { step: 1 }, 11),
+      event('tool/call', { callId: 'c1', name: 'ask_user', arguments: '{}', summary: '' }, 12),
+      event('interaction/ask/requested', { id: 'c1/q1', question: 'First?', options: ['a'] }, 13),
+      event('turn/end', { turn: 1, reason: { kind: 'completed' } }, 14),
+      event('turn/start', { turn: 2 }, 20),
+      event('step/start', { step: 1 }, 21),
+      event('interaction/ask/requested', { id: 'c1/q2', question: 'Second?', options: ['b'] }, 22),
+    ])
+
+    expect(asked?.proposals.map((proposal) => proposal.id)).toEqual(['c1/q1', 'c1/q2'])
+    expect(later?.proposals).toEqual([])
+  })
+
   test('an answer for a question this trace never saw changes nothing', () => {
     const [turn] = traceOf([
       event('turn/start', { turn: 1 }, 10),

@@ -2230,6 +2230,21 @@ details[open] > summary.tool-head .tool-state::after {
   background: var(--bg-raise);
 }
 
+/* The head names the card; the question and its choices follow as the answer's offer. */
+#conversation .proposal-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: 6px;
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+#conversation .proposal-title {
+  color: var(--text);
+  font-weight: 600;
+}
+
 /* A question stays where it was asked, as a ring on the spine; the card below answers it. */
 #conversation .block.ask {
   padding: 0 0 0 var(--spine-gap);

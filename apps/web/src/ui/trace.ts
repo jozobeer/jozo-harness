@@ -462,10 +462,20 @@ const proposalOf = (event: UiSessionEvent): TraceProposal => ({
   answer: undefined,
 })
 
+/** The turn whose tool call put the question, named by the id the host gives the ask. */
+const turnOfAsk = (turns: ReadonlyArray<TraceTurn>, id: string): number =>
+  turns.findIndex((turn) =>
+    turn.steps.some((step) =>
+      step.tools.some((tool) => tool.callId === id || id.startsWith(tool.callId + '/')),
+    ),
+  )
+
 /**
  * A question stays with the call that asked it and on the turn, so a card below
- * the answer can still take a choice after the turn ended. The log keeps one
- * offer per id; a repeated event does not draw the card twice.
+ * the answer can still take a choice after the turn ended. A batch asks one
+ * question at a time, so its later questions land on the turn that called it,
+ * not only on whatever turn is newest. The log keeps one offer per id; a
+ * repeated event does not draw the card twice.
  */
 const askedHuman = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => {
   const id = textOf(event.data, 'id')
@@ -476,10 +486,14 @@ const askedHuman = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => {
     ask: { question, options: stringsOf(fieldOf(event.data, 'options')), answer: '' },
   }))
   const proposal = proposalOf(event)
-  return inLastTurn(asked, (turn) =>
-    turn.proposals.some((kept) => kept.id === id)
-      ? turn
-      : { ...turn, proposals: [...turn.proposals, proposal] },
+  // A question no call owns (a plugin's own ask) still belongs to the newest turn.
+  const askedIn = turnOfAsk(asked, id)
+  const at = askedIn < 0 ? asked.length - 1 : askedIn
+  if (at < 0) return asked
+  return asked.map((turn, index) =>
+    index === at && !turn.proposals.some((kept) => kept.id === id)
+      ? { ...turn, proposals: [...turn.proposals, proposal] }
+      : turn,
   )
 }
 
