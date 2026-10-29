@@ -60,6 +60,8 @@ const SHAPES = {
     ring(10.5, 11.5, 1.7),
   ],
   turns: () => [line('M6 4h7.5M6 8h7.5M6 12h7.5'), dot(3, 4, 1), dot(3, 8, 1), dot(3, 12, 1)],
+  // A list without marks: the log reads the events themselves, not their state.
+  log: () => line('M3 4h10M3 8h10M3 12h6'),
   close: () => line('M4 4l8 8M12 4l-8 8'),
   read: () => line(PAGE + 'M9 2v3h3M6 8.5h4M6 11h3'),
   write: () => line(PAGE + 'M9 2v3h3M8 7.5v4.5M5.8 9.8h4.4'),

@@ -12,6 +12,7 @@ import {
 import { maskSecrets } from '../../src/ui/secret.ts'
 import { WORKFLOW_TOOL } from '../../src/ui/workflow.ts'
 import { Linkify } from './linkify.tsx'
+import { LogButton } from './log-button.tsx'
 import { Markdown } from './markdown.tsx'
 import { PlanCard } from './plan-card.tsx'
 import { ProposalCard } from './proposal-card.tsx'
@@ -145,7 +146,7 @@ const resultPreviewOf = (output: string): string =>
  * line shows and whether it starts open, never the call the log recorded: a
  * compact line keeps the name, and the result waits one fold away.
  */
-const Tool = (props: { tool: TraceTool }) => {
+const Tool = (props: { tool: TraceTool; store: SessionStore }) => {
   const { density } = useToolDensity()
   const compact = (): boolean => density() === 'compact'
   const richer = (): boolean => density() === 'detailed' || density() === 'verbose'
@@ -158,6 +159,7 @@ const Tool = (props: { tool: TraceTool }) => {
       <summary class="tool-line">
         <Icon name={toolIconOf(props.tool.name)} class="tool-icon" />
         <span class="tool-name">{props.tool.name}</span>
+        <LogButton store={props.store} target={{ kind: 'call', id: props.tool.callId }} />
         <Show when={!compact()}>
           <span class="tool-summary">
             <Show
@@ -222,7 +224,7 @@ const skillNameOf = (args: string): string => {
  * A skill load reads as its own card: the name, where it was read from, and what
  * it is for stay on the folded line; the instructions wait inside.
  */
-const Skill = (props: { tool: TraceTool }) => {
+const Skill = (props: { tool: TraceTool; store: SessionStore }) => {
   const t = useTranslate()
   const { density } = useToolDensity()
   const compact = (): boolean => density() === 'compact'
@@ -235,6 +237,7 @@ const Skill = (props: { tool: TraceTool }) => {
       <summary class="tool-line">
         <Icon name="skill" class="tool-icon" />
         <span class="skill-label">{t('turn.skill')}</span>
+        <LogButton store={props.store} target={{ kind: 'call', id: props.tool.callId }} />
         <span class="skill-what">
           <span class="skill-name">{skillNameOf(props.tool.args)}</span>
           <Show when={!compact()}>
@@ -276,12 +279,15 @@ const Call = (props: { tool: TraceTool; store: SessionStore }) => (
   <Show
     when={props.tool.name === 'skill'}
     fallback={
-      <Show when={props.tool.name === WORKFLOW_TOOL} fallback={<Tool tool={props.tool} />}>
+      <Show
+        when={props.tool.name === WORKFLOW_TOOL}
+        fallback={<Tool tool={props.tool} store={props.store} />}
+      >
         <WorkflowCard tool={props.tool} store={props.store} />
       </Show>
     }
   >
-    <Skill tool={props.tool} />
+    <Skill tool={props.tool} store={props.store} />
   </Show>
 )
 
@@ -295,7 +301,11 @@ const Plans = (props: { turn: TraceTurn; store: SessionStore }) => (
       (tool) => tool.name === PLAN_TOOL && planOf(tool) !== undefined,
     )}
   >
-    {(tool) => <PlanCard tool={tool()} store={props.store} />}
+    {(tool) => (
+      <div class="call" data-call-id={tool().callId}>
+        <PlanCard tool={tool()} store={props.store} />
+      </div>
+    )}
   </Index>
 )
 
@@ -324,8 +334,14 @@ const Proposals = (props: { turn: TraceTurn; store: SessionStore }) => {
 
 /** A call the log wrote outside any turn: its card stands alone because no turn holds it. */
 const Load = (props: { turn: TraceTurn; store: SessionStore }) => (
-  <article class="block load">
-    <Index each={toolsOf(props.turn)}>{(tool) => <Call tool={tool()} store={props.store} />}</Index>
+  <article class="block load" data-turn="0">
+    <Index each={toolsOf(props.turn)}>
+      {(tool) => (
+        <div class="call" data-call-id={tool().callId}>
+          <Call tool={tool()} store={props.store} />
+        </div>
+      )}
+    </Index>
   </article>
 )
 
@@ -334,7 +350,7 @@ const Load = (props: { turn: TraceTurn; store: SessionStore }) => (
  * for, what the model said, and its calls. A failed translation leaves the
  * reasoning as the log recorded it and says why it could not be translated.
  */
-const Step = (props: { step: TraceStep; last: boolean; store: SessionStore }) => {
+const Step = (props: { turn: number; step: TraceStep; last: boolean; store: SessionStore }) => {
   const t = useTranslate()
   const { locale } = useLocaleChoice()
   const [translating, setTranslating] = createSignal(false)
@@ -351,7 +367,7 @@ const Step = (props: { step: TraceStep; last: boolean; store: SessionStore }) =>
   }
 
   return (
-    <li class="step">
+    <li class="step" data-turn={String(props.turn)} data-step={String(props.step.step)}>
       <Show when={props.step.reasoning !== ''}>
         <div class="step-thought">
           <Linkify text={plainText(props.step.reasoning)} />
@@ -382,7 +398,9 @@ const Step = (props: { step: TraceStep; last: boolean; store: SessionStore }) =>
       <Index each={props.step.tools}>
         {(tool) => (
           <Show when={tool().name !== PLAN_TOOL}>
-            <Call tool={tool()} store={props.store} />
+            <div class="call" data-call-id={tool().callId}>
+              <Call tool={tool()} store={props.store} />
+            </div>
           </Show>
         )}
       </Index>
@@ -619,7 +637,10 @@ const Turn = (props: { turn: TraceTurn; live: string; now: number; store: Sessio
   const t = useTranslate()
   const running = () => props.turn.endedAt === undefined
   return (
-    <article class={'block turn' + (running() ? ' running' : '')}>
+    <article
+      class={'block turn' + (running() ? ' running' : '')}
+      data-turn={String(props.turn.turn)}
+    >
       <Ask turn={props.turn} />
       <Plans turn={props.turn} store={props.store} />
       <Show when={props.turn.steps.length > 0 || running()}>
@@ -633,6 +654,7 @@ const Turn = (props: { turn: TraceTurn; live: string; now: number; store: Sessio
             <Index each={props.turn.steps}>
               {(step, index) => (
                 <Step
+                  turn={props.turn.turn}
                   step={step()}
                   last={index === props.turn.steps.length - 1 && !running()}
                   store={props.store}

@@ -38,6 +38,7 @@ import { Markdown } from './markdown.tsx'
 import { PLAN_VERDICTS } from './plan-card.tsx'
 import { Review } from './review.tsx'
 import { Inspector } from './inspector.tsx'
+import { SessionLog } from './session-log.tsx'
 import { Button } from './ui/button.tsx'
 import { Icon, type IconName } from './ui/icon.tsx'
 import { GoalMark, roundsOf } from './ui/goal-mark.tsx'
@@ -1726,6 +1727,7 @@ const PANES: Readonly<Record<PanelTab, { readonly label: MessageKey; readonly ic
   run: { label: 'pane.run', icon: 'run' },
   settings: { label: 'pane.settings', icon: 'settings' },
   trajectory: { label: 'pane.turns', icon: 'turns' },
+  log: { label: 'pane.log', icon: 'log' },
 }
 
 type Tab = PanelTab
@@ -1738,7 +1740,11 @@ const ofKind = <K extends Pane['kind']>(
   pane?.kind === kind ? (pane as Extract<Pane, { kind: K }>) : undefined
 
 /** What a tab opens: the changes pane starts on no file in particular. */
-const paneFor = (kind: Tab): Pane => (kind === 'changes' ? { kind, path: undefined } : { kind })
+const paneFor = (kind: Tab): Pane => {
+  if (kind === 'changes') return { kind, path: undefined }
+  if (kind === 'log') return { kind, seq: undefined }
+  return { kind }
+}
 
 /** The right column: what the session runs toward, is set to, did, or one job. */
 export const ContextPane = (props: { store: SessionStore }) => {
@@ -1876,6 +1882,9 @@ export const ContextPane = (props: { store: SessionStore }) => {
           </Match>
           <Match when={body()?.kind === 'browser'}>
             <BrowserPane browser={browser} />
+          </Match>
+          <Match when={ofKind(body(), 'log')}>
+            {(log) => <SessionLog store={props.store} seq={log().seq} />}
           </Match>
           <Match when={ofKind(body(), 'inspect')}>
             {(inspect) => (

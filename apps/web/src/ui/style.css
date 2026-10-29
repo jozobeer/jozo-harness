@@ -413,6 +413,14 @@ body {
   overflow: hidden;
 }
 
+/* The log reads its own scroll, so the body hands it the whole height. */
+.context-body:has(> .session-log) {
+  display: flex;
+  flex: 1;
+  padding: 0;
+  overflow: hidden;
+}
+
 .browser {
   display: flex;
   flex: 1;

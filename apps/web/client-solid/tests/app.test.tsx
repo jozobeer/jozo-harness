@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render } from '@solidjs/testing-library'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { createRoot, createSignal } from 'solid-js'
-import type { SubmitMode, UiCommand } from '@jozo-harness/ui-protocol'
+import type { SubmitMode, UiCommand, UiSessionEvent } from '@jozo-harness/ui-protocol'
 import { emptyConversation } from '@jozo-harness/ui-view'
 import {
   initialState,
@@ -44,6 +44,7 @@ import type {
   WorkspacePreview,
 } from '../../src/shared/rpc.ts'
 import { traceOf } from '../../src/ui/trace.ts'
+import { emptyLog, logAfter } from '../../src/ui/log.ts'
 import {
   RAIL_COLLAPSED_KEY,
   RAIL_KEY,
@@ -228,6 +229,9 @@ const makeStore = (
   }
   return { store, calls, browses, setState: update }
 }
+
+/** The log inspector's reading of the events a page applied. */
+const logged = (...events: ReadonlyArray<UiSessionEvent>) => events.reduce(logAfter, emptyLog)
 
 /** A run state with only the todos a composer test names; the rest stays empty. */
 const runWith = (todos: RunStateView['todos']): RunStateView => ({
@@ -1616,6 +1620,7 @@ describe('the Solid page', () => {
       'run',
       'settings',
       'trajectory',
+      'log',
     ])
   })
 
@@ -1633,6 +1638,7 @@ describe('the Solid page', () => {
       'run',
       'settings',
       'trajectory',
+      'log',
     ])
     const kept = JSON.parse(localStorage.getItem(PANEL_ORDER_KEY) ?? '{}') as {
       order: Array<string>
@@ -1649,6 +1655,7 @@ describe('the Solid page', () => {
       'run',
       'settings',
       'trajectory',
+      'log',
     ])
   })
 
@@ -1659,7 +1666,14 @@ describe('the Solid page', () => {
     const { container } = render(() => <ContextPane store={store} />)
     fireEvent.click(container.querySelector('[data-panel-hide="files"]') as Element)
 
-    expect(tabIds(container)).toEqual(['changes', 'browser', 'run', 'settings', 'trajectory'])
+    expect(tabIds(container)).toEqual([
+      'changes',
+      'browser',
+      'run',
+      'settings',
+      'trajectory',
+      'log',
+    ])
     const show = container.querySelector('[data-panel-show="files"]')
     expect(show?.textContent).toBe('show')
 
@@ -1670,6 +1684,7 @@ describe('the Solid page', () => {
       'run',
       'settings',
       'trajectory',
+      'log',
       'files',
     ])
   })
@@ -1688,7 +1703,7 @@ describe('the Solid page', () => {
       PANEL_ORDER_KEY,
       JSON.stringify({
         order: ['run'],
-        hidden: ['changes', 'files', 'browser', 'settings', 'trajectory'],
+        hidden: ['changes', 'files', 'browser', 'settings', 'trajectory', 'log'],
       }),
     )
     const { store } = makeStore({ pane: { kind: 'settings' } })
@@ -1718,6 +1733,7 @@ describe('the Solid page', () => {
       'run',
       'settings',
       'trajectory',
+      'log',
     ])
     // The moved button keeps the focus, so a second press moves the same tab.
     expect(document.activeElement?.id).toBe('changes')
@@ -1731,7 +1747,165 @@ describe('the Solid page', () => {
       'run',
       'settings',
       'trajectory',
+      'log',
     ])
+  })
+
+  test('the log pane lists every event by seq and type and reads the chosen body', () => {
+    const events: ReadonlyArray<UiSessionEvent> = [
+      { seq: 1, time: 1_000, type: 'session/header', data: { cwd: '/work' } },
+      { seq: 2, time: 2_000, type: 'turn/start', data: { turn: 1 } },
+      {
+        seq: 3,
+        time: 3_000,
+        type: 'tool/call',
+        data: { callId: 'call-1', name: 'read', arguments: '{"path":"a"}' },
+      },
+    ]
+    const { store, calls } = makeStore({
+      pane: { kind: 'log', seq: 3 },
+      log: logged(...events),
+    })
+
+    const { container } = render(() => <ContextPane store={store} />)
+    const rows = [...container.querySelectorAll('.log-row')]
+
+    expect(rows).toHaveLength(3)
+    expect(rows[0]?.getAttribute('data-seq')).toBe('1')
+    expect(rows[0]?.textContent).toContain('session/header')
+    expect(rows[2]?.getAttribute('data-seq')).toBe('3')
+    expect(rows[2]?.textContent).toContain('tool/call')
+    expect(container.querySelector('.log-data')?.textContent).toContain('"callId": "call-1"')
+    expect(container.querySelector('.log-reveal')?.textContent).toContain('call-1')
+    expect(calls).toEqual([])
+  })
+
+  test('the log filter narrows the list by event type or by a key of the body', () => {
+    const events: ReadonlyArray<UiSessionEvent> = [
+      { seq: 1, time: 1_000, type: 'session/header', data: { cwd: '/work' } },
+      { seq: 2, time: 2_000, type: 'tool/call', data: { callId: 'call-1', name: 'read' } },
+    ]
+    const { store } = makeStore({
+      pane: { kind: 'log', seq: undefined },
+      log: logged(...events),
+    })
+
+    const { container } = render(() => <ContextPane store={store} />)
+    const filter = container.querySelector('.log-filter input') as HTMLInputElement
+    const seqs = (): ReadonlyArray<string | null> =>
+      [...container.querySelectorAll('.log-row')].map((row) => row.getAttribute('data-seq'))
+
+    fireEvent.input(filter, { target: { value: 'callId' } })
+    expect(seqs()).toEqual(['2'])
+
+    fireEvent.input(filter, { target: { value: 'session/' } })
+    expect(seqs()).toEqual(['1'])
+  })
+
+  test('an event sends the reader to the conversation node it grew, without touching the log', () => {
+    const events: ReadonlyArray<UiSessionEvent> = [
+      { seq: 1, time: 1_000, type: 'turn/start', data: { turn: 1 } },
+      { seq: 2, time: 2_000, type: 'step/start', data: { step: 1 } },
+      {
+        seq: 3,
+        time: 3_000,
+        type: 'tool/call',
+        data: { callId: 'call-1', name: 'bash', arguments: '{}' },
+      },
+    ]
+    const { store, calls } = makeStore({
+      pane: { kind: 'log', seq: 3 },
+      trace: traceOf(events),
+      log: logged(...events),
+      conversation: {
+        ...emptyConversation,
+        lastSeq: 3,
+        blocks: [{ kind: 'user', text: 'run it' }],
+      },
+    })
+
+    const { container } = render(() => <App store={store} lens="timeline" />)
+    fireEvent.click(container.querySelector('.log-reveal') as Element)
+
+    expect(container.querySelector('#main')?.getAttribute('data-lens')).toBe('answers')
+    expect(container.querySelector('[data-call-id="call-1"]')?.classList.contains('revealed')).toBe(
+      true,
+    )
+    expect(calls.filter((call) => call.kind === 'command' || call.kind === 'submit')).toEqual([])
+  })
+
+  test('a tool node opens the log event it grew from, without sending anything', () => {
+    const events: ReadonlyArray<UiSessionEvent> = [
+      { seq: 1, time: 1_000, type: 'turn/start', data: { turn: 1 } },
+      { seq: 2, time: 2_000, type: 'step/start', data: { step: 1 } },
+      {
+        seq: 3,
+        time: 3_000,
+        type: 'tool/call',
+        data: { callId: 'call-1', name: 'bash', arguments: '{}' },
+      },
+      {
+        seq: 4,
+        time: 4_000,
+        type: 'tool/result',
+        data: { callId: 'call-1', isError: false, content: [] },
+      },
+    ]
+    const { store, calls } = makeStore({
+      log: logged(...events),
+      trace: traceOf(events),
+      conversation: {
+        ...emptyConversation,
+        lastSeq: 4,
+        blocks: [{ kind: 'user', text: 'run it' }],
+      },
+    })
+
+    const { container } = render(() => <Conversation store={store} />)
+    fireEvent.click(container.querySelector('.log-mark') as Element)
+
+    expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'log', seq: 3 } })
+    expect(calls.filter((call) => call.kind === 'command' || call.kind === 'submit')).toEqual([])
+  })
+
+  test('a proposal card opens the offer event it drew', () => {
+    const events: ReadonlyArray<UiSessionEvent> = [
+      { seq: 1, time: 1_000, type: 'turn/start', data: { turn: 1 } },
+      { seq: 2, time: 2_000, type: 'step/start', data: { step: 1 } },
+      {
+        seq: 3,
+        time: 3_000,
+        type: 'tool/call',
+        data: { callId: 'call-1', name: 'ask_user_question', arguments: '{}' },
+      },
+      {
+        seq: 4,
+        time: 4_000,
+        type: 'tool/result',
+        data: { callId: 'call-1', isError: false, content: [] },
+      },
+      {
+        seq: 5,
+        time: 5_000,
+        type: 'interaction/ask/requested',
+        data: { id: 'call-1/q1', question: 'go?', options: ['yes', 'no'] },
+      },
+      { seq: 6, time: 6_000, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+    ]
+    const { store, calls } = makeStore({
+      log: logged(...events),
+      trace: traceOf(events),
+      conversation: {
+        ...emptyConversation,
+        lastSeq: 6,
+        blocks: [{ kind: 'user', text: 'run it' }],
+      },
+    })
+
+    const { container } = render(() => <Conversation store={store} />)
+    fireEvent.click(container.querySelector('.proposal-card .log-mark') as Element)
+
+    expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'log', seq: 5 } })
   })
 
   test('the todo dock takes no room when the session has no todo', () => {

@@ -16,6 +16,7 @@ import type {
 } from '../shared/rpc.ts'
 import { DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, type FontFamily, type FontSize } from './font.ts'
 import { DEFAULT_THEME, type Theme } from './theme.ts'
+import { emptyLog, logAfter, type LogState } from './log.ts'
 import { traceAfter, type TraceTurn } from './trace.ts'
 import { turnsAfter, type TurnView } from './trajectory.ts'
 
@@ -36,6 +37,7 @@ export type Pane =
   | { readonly kind: 'changes'; readonly path: string | undefined }
   | { readonly kind: 'files' }
   | { readonly kind: 'inspect'; readonly turn: number; readonly callId: string }
+  | { readonly kind: 'log'; readonly seq: number | undefined }
   | { readonly kind: 'run' }
   | { readonly kind: 'settings' }
   | { readonly kind: 'trajectory' }
@@ -101,6 +103,8 @@ export interface WebState {
   readonly run: RunStateView | undefined
   /** Every turn this session ran, folded one event at a time down to its steps and calls. */
   readonly trace: ReadonlyArray<TraceTurn>
+  /** Every event the page has applied, kept for the log inspector to read. */
+  readonly log: LogState
   /** The pages removed from this session here, which the log still names. */
   readonly deletedPages: ReadonlyArray<string>
 }
@@ -183,6 +187,7 @@ export const initialState: WebState = {
   turns: [],
   run: undefined,
   trace: [],
+  log: emptyLog,
   deletedPages: [],
 }
 
@@ -411,6 +416,7 @@ export const withBlank = (state: WebState): WebState => ({
   preview: undefined,
   turns: [],
   trace: [],
+  log: emptyLog,
 })
 
 /**
@@ -441,6 +447,7 @@ export const withSession = (state: WebState, summary: SessionSummary): WebState 
     preview: state.sessionId === summary.id ? state.preview : undefined,
     turns: [],
     trace: [],
+    log: emptyLog,
     deletedPages: [],
   }
 }
@@ -499,6 +506,7 @@ export const applyUiEvent = (state: WebState, event: UiEvent): WebState => {
     info: event.kind === 'session' ? infoAfter(state.info, event.event) : state.info,
     turns: fresh ? turnsAfter(state.turns, event.event) : state.turns,
     trace: fresh ? traceAfter(state.trace, event.event) : state.trace,
+    log: fresh ? logAfter(state.log, event.event) : state.log,
     conversation: applyEvent(state.conversation, event),
   }
 }
