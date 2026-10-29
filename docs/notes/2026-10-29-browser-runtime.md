@@ -116,13 +116,14 @@ Worker の中でスライス 2 の組み立てを回し、ページから 1 turn
 - `worker-protocol.ts`: `WorkerPrompt`（`{kind:'prompt', text}`）、`WorkerEvent`（`{kind:'event', event}`）、`WorkerDone`（`{kind:'done', text}`）、`WorkerError`（`{kind:'error', message}`）と、両方向の読み取り。Worker は何でも受け取るので、形はこの境界で決める。
 - `worker-host.ts`: `createBrowserWorkerHost`。runtime は Worker の寿命だけ 1 つ持ち、prompt は直列に回す。`session/event` をそのまま流し、`turn/end` の理由が `error` なら `WorkerError`、そうでなければ最後の assistant テキストで `WorkerDone` を返す。`close()` は scope を閉じ、メモリのワークスペースとログを捨てる。
 - `worker-client.ts`: `createBrowserWorkerClient`。Worker は `createWorker` で注入する（ページは本物、テストは偽物）。prompt は 1 本ずつ、event は `onEvent` に流し、done で解決し、error で棄却する。close は terminate。
+- `worker.ts`: `startBrowserWorker(scope, config)` が Worker の受け口である。`self` を直に読まず scope を引数に取るので、テストは偽の scope で同じ配線を回せる。transport の既定はページの `fetch`。
 - `browserRuntime` に `onEvent` を足した。`session/event` は emit 型のフックで、dispatcher はリスナーが返した Effect を実行しない。だからリスナーはその場で副作用を起こす。
 
 ### 検証
 
-- `packages/core/runtime-browser/tests/worker.test.ts`: 4 テスト。偽の Worker は本物の host を同じプロセスで動かし、メッセージの配線だけをテストが持つ。(a) prompt で event が流れて done のテキストで終わる、(b) write のツール呼び出しと結果がログに入る、(c) 同じ Worker ではワークスペースが残り、close の後に作った Worker では同じパスが読めない、(d) モデルが落ちたターンは error で返る。
+- `packages/core/runtime-browser/tests/worker.test.ts`: 7 テスト。偽の Worker は本物の host を同じプロセスで動かし、メッセージの配線だけをテストが持つ。(a) prompt で event が流れて done のテキストで終わる、(b) write のツール呼び出しと結果がログに入る、(c) 同じ Worker ではワークスペースが残り、close の後に作った Worker では同じパスが読めない、(d) モデルが落ちたターンは error で返る、(e) 不正なメッセージは捨てる、(f) close 後の prompt は拒む、(g) `startBrowserWorker` が scope のメッセージ口で event と done を返す。
 - `packages/core/runtime-browser/tests/worker-node-free.test.ts`: Worker の口（protocol / host / client）の静的 import に `node:` と `@jozo-harness/process` が無いことを固定する。
-- `pnpm run check`: 2442 passed / 7 skipped。coverage は lines 94.99% / functions 92.56%。complexity の最大は cognitive 7 / cyclomatic 10。閾値は動かしていない。
+- `pnpm run check`: 2443 passed / 7 skipped。coverage は lines 95.00% / functions 92.55%。complexity の最大は cognitive 7 / cyclomatic 10。閾値は動かしていない。
 
 ## 残件
 
