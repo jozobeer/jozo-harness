@@ -14,11 +14,13 @@ import { WORKFLOW_TOOL } from '../../src/ui/workflow.ts'
 import { Linkify } from './linkify.tsx'
 import { Markdown } from './markdown.tsx'
 import { PlanCard } from './plan-card.tsx'
+import { ProposalCard } from './proposal-card.tsx'
 import { WorkflowCard } from './workflow-card.tsx'
 import { EndMark } from './ui/end-mark.tsx'
 import { Icon, toolIconOf } from './ui/icon.tsx'
 import { Mug } from './ui/mug.tsx'
 import { useLocaleChoice, useTranslate } from '../i18n.ts'
+import { useProposalCards } from '../proposal-cards-choice.ts'
 import { useToolDensity } from '../tool-density-choice.ts'
 import { pagesIn, spanOf } from '../lib.ts'
 import { useSeen } from '../seen.ts'
@@ -296,6 +298,29 @@ const Plans = (props: { turn: TraceTurn; store: SessionStore }) => (
     {(tool) => <PlanCard tool={tool()} store={props.store} />}
   </Index>
 )
+
+/**
+ * The questions a turn asked with choices, drawn under its answer. The switch
+ * can leave them out: a reader who turns the cards off reads the answer exactly
+ * as before, and the log keeps every offer either way.
+ */
+const Proposals = (props: { turn: TraceTurn; store: SessionStore }) => {
+  const cards = useProposalCards()
+  // A question the composer is still asking is answered there; the transcript
+  // takes it over once the turn ends and no composer card holds it.
+  const openAsk = () => props.store.state().conversation.ask?.id ?? ''
+  return (
+    <Show when={cards.cards() === 'shown'}>
+      <Index each={props.turn.proposals}>
+        {(proposal) => (
+          <Show when={proposal().id !== openAsk()}>
+            <ProposalCard proposal={proposal()} store={props.store} />
+          </Show>
+        )}
+      </Index>
+    </Show>
+  )
+}
 
 /** A call the log wrote outside any turn: its card stands alone because no turn holds it. */
 const Load = (props: { turn: TraceTurn; store: SessionStore }) => (
@@ -626,6 +651,7 @@ const Turn = (props: { turn: TraceTurn; live: string; now: number; store: Sessio
           <Markdown text={props.live === '' ? props.turn.answer : props.live} class="body" />
         </div>
       </Show>
+      <Proposals turn={props.turn} store={props.store} />
       <Show when={props.turn.outcome !== '' && props.turn.outcome !== 'completed'}>
         <div class="notice warn">{t('turn.ended') + props.turn.outcome}</div>
       </Show>

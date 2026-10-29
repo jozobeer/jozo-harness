@@ -1023,6 +1023,8 @@ return review.text
 
 `- id: tier1` の `timeLimitMs` を設定すると、`time_limit_ms` を省いた呼び出しもその時間で保留になる。既定は無効で、回答があるまで待つ。単一の質問だけを聞く従来の `question` / `options` の形も受け付け、その結果は `{ id, question, answer }` のままである。この形は制限時間を使わないので、保留にしたいときは `questions` を使う。
 
+Web の回答の下には、この質問が選択肢つきの提案カードとして残る。選択肢を押すと答えは `answer` の経路で送られ、ターンが終わっていれば `ask_user call <call id>` の user メッセージとしてモデルに届く。カードは回答を表示したまま残り、別の選択肢を押せば最新の答えに置き換わる。選ばなかった質問も消えない。列ヘッダの「提案」を「隠す」にするとカードは描かれず、回答の形はカードを入れる前と同じになる。この設定は `jzh.proposal-cards` としてブラウザに残る。
+
 ## ツールの引数と戻り値の型を system prompt で見せる
 
 system prompt には、その step で見える tool の署名が 1 行ずつ出る。引数は必須と任意（`?`）を区別し、戻り値は tool の `output` schema から描く。plan mode や子 agent の制限で見えない tool は出ない。schema を型として読めない部分は `unknown` になる。

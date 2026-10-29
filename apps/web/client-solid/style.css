@@ -1689,13 +1689,24 @@
     font-size: var(--text-xs);
   }
 
-  .density-select {
+  .density-select,
+  .proposal-cards-select {
     padding: 1px 4px;
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
     background: none;
     color: var(--text);
     font: inherit;
+  }
+
+  /* The proposal switch sits beside the tool switch, with neither stretching the head. */
+  .proposal-cards {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: var(--s2);
+    color: var(--dim);
+    font-size: var(--text-xs);
   }
 
   .lens {

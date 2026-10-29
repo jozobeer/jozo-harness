@@ -54,6 +54,8 @@ import {
 import { PANEL_ORDER_KEY } from '../panel-order.ts'
 import { RECENT_FOLDED_KEY, RECENT_SHOWN_KEY } from '../recent.ts'
 import { LOCALE_KEY } from '../locale.ts'
+import { ProposalCardsContext } from '../proposal-cards-choice.ts'
+import { PROPOSAL_CARDS_KEY } from '../proposal-cards.ts'
 import { ToolDensityContext } from '../tool-density-choice.ts'
 import { TOOL_DENSITY_KEY, type ToolDensity } from '../tool-density.ts'
 import { SHORTCUTS, SHORTCUTS_KEY } from '../shortcuts.ts'
@@ -5801,5 +5803,119 @@ describe('the density of tool lines', () => {
     expect(next.container.querySelector('.tool-card')?.getAttribute('data-density')).toBe('verbose')
     // The density is a way of drawing the log, so choosing it sends nothing.
     expect(calls.filter((call) => call.kind === 'command' || call.kind === 'submit')).toEqual([])
+  })
+})
+
+describe('proposal cards under an answer', () => {
+  beforeEach(() => localStorage.clear())
+
+  const at = (seq: number, type: string, data: unknown) => ({ seq, time: seq * 1000, type, data })
+
+  /** One answer that ended with a question, and optionally the choice already taken. */
+  const proposalTrace = (answer?: string) => [
+    at(1, 'turn/start', { turn: 1 }),
+    at(2, 'agent/inbox/claimed', { message: { text: 'choose the store', source: 'user' } }),
+    at(3, 'step/start', { step: 1 }),
+    at(4, 'assistant/message', { content: [{ type: 'text', text: 'Pick one below.' }] }),
+    at(5, 'interaction/ask/requested', {
+      id: 'c1/q1',
+      question: 'Which database?',
+      options: ['sqlite', 'postgres'],
+    }),
+    ...(answer === undefined ? [] : [at(6, 'interaction/ask/answered', { id: 'c1/q1', answer })]),
+    at(7, 'step/end', { step: 1 }),
+    at(8, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+  ]
+
+  const withProposal = (answer?: string) =>
+    makeStore({
+      conversation: { ...emptyConversation, blocks: [{ kind: 'user', text: 'choose the store' }] },
+      trace: traceOf(proposalTrace(answer)),
+    })
+
+  /** The answers the page sent, in the order it sent them. */
+  const commands = (calls: ReadonlyArray<Call>): ReadonlyArray<UiCommand> =>
+    calls.flatMap((call) => (call.kind === 'command' ? [call.command] : []))
+
+  test('a question the model asked reads under the answer with the choices it offered', () => {
+    const { store } = withProposal()
+    const { container } = render(() => <Conversation store={store} />)
+    const card = container.querySelector('.proposal-card')
+
+    expect(container.querySelector('.answer')?.textContent).toBe('Pick one below.')
+    expect(card?.querySelector('.ask-question')?.textContent).toContain('Which database?')
+    expect(
+      [...(card?.querySelectorAll('[data-proposal-option]') ?? [])].map(
+        (option) => option.textContent,
+      ),
+    ).toEqual(['sqlite', 'postgres'])
+  })
+
+  test('choosing one answers that question instead of writing a new prompt', () => {
+    const { store, calls } = withProposal()
+    const { container } = render(() => <Conversation store={store} />)
+
+    fireEvent.click(container.querySelector('[data-proposal-option="postgres"]') as Element)
+
+    expect(commands(calls)).toEqual([{ kind: 'answer', id: 'c1/q1', answer: 'postgres' }])
+  })
+
+  test('an answered card shows the choice and lets the reader choose again', () => {
+    const { store, calls } = withProposal('sqlite')
+    const { container } = render(() => <Conversation store={store} />)
+
+    expect(
+      container.querySelector('[data-proposal-option="sqlite"]')?.getAttribute('aria-pressed'),
+    ).toBe('true')
+    expect(container.querySelector('.ask-answer')?.textContent).toBe('Chosen: sqlite')
+
+    fireEvent.click(container.querySelector('[data-proposal-option="postgres"]') as Element)
+    expect(commands(calls)).toEqual([{ kind: 'answer', id: 'c1/q1', answer: 'postgres' }])
+  })
+
+  test('a question the composer still holds is drawn there, not twice under the answer', () => {
+    const { store } = makeStore({
+      conversation: {
+        ...emptyConversation,
+        ask: { id: 'c1/q1', question: 'Which database?', options: ['sqlite', 'postgres'] },
+        blocks: [{ kind: 'user', text: 'choose the store' }],
+      },
+      // The turn is still asking, so it has no end yet.
+      trace: traceOf(proposalTrace().slice(0, -1)),
+    })
+    const { container } = render(() => <Conversation store={store} />)
+
+    expect(container.querySelector('.proposal-card')).toBeNull()
+  })
+
+  test('with the cards turned off the answer keeps the shape it had before', () => {
+    const { store } = withProposal()
+    const { container } = render(() => (
+      <ProposalCardsContext.Provider value={{ cards: () => 'hidden', choose: () => undefined }}>
+        <Conversation store={store} />
+      </ProposalCardsContext.Provider>
+    ))
+
+    expect(container.querySelector('.proposal-card')).toBeNull()
+    expect(container.querySelector('.answer')?.textContent).toBe('Pick one below.')
+  })
+
+  test('the switch hides the cards, and the choice survives a reload', () => {
+    const { store } = withProposal()
+    const first = render(() => <App store={store} />)
+
+    fireEvent.change(first.container.querySelector('.proposal-cards-select') as Element, {
+      target: { value: 'hidden' },
+    })
+
+    expect(localStorage.getItem(PROPOSAL_CARDS_KEY)).toBe('hidden')
+    expect(first.container.querySelector('.proposal-card')).toBeNull()
+
+    cleanup()
+    const next = render(() => <App store={store} />)
+    expect(
+      (next.container.querySelector('.proposal-cards-select') as HTMLSelectElement).value,
+    ).toBe('hidden')
+    expect(next.container.querySelector('.proposal-card')).toBeNull()
   })
 })
