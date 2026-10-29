@@ -339,6 +339,70 @@ describe('the trace', () => {
     expect(turn?.feedback).toBeUndefined()
   })
 
+  test('a question the model asked stays under its turn with the choices it offered', () => {
+    const [turn] = traceOf([
+      event('turn/start', { turn: 1 }, 10),
+      claim('choose the storage', 'user', 11),
+      event('step/start', { step: 1 }, 12),
+      event(
+        'interaction/ask/requested',
+        { id: 'c1/q1', question: 'Which database?', options: ['sqlite', 'postgres'] },
+        13,
+      ),
+      said(14, { type: 'text', text: 'Pick one below.' }),
+      event('step/end', { step: 1 }, 15),
+      event('turn/end', { turn: 1, reason: { kind: 'completed' } }, 16),
+    ])
+
+    expect(turn?.proposals).toEqual([
+      {
+        id: 'c1/q1',
+        question: 'Which database?',
+        options: ['sqlite', 'postgres'],
+        answer: undefined,
+      },
+    ])
+  })
+
+  test('an answer after the turn ended lands on the question it names', () => {
+    const [turn] = traceOf([
+      event('turn/start', { turn: 1 }, 10),
+      event(
+        'interaction/ask/requested',
+        { id: 'c1/q1', question: 'Keep it?', options: ['yes'] },
+        11,
+      ),
+      event('turn/end', { turn: 1, reason: { kind: 'completed' } }, 12),
+      event('interaction/ask/answered', { id: 'c1/q1', answer: 'yes' }, 20),
+    ])
+
+    expect(turn?.proposals[0]?.answer).toBe('yes')
+  })
+
+  test('choosing again replaces the shown answer, so the card keeps the latest decision', () => {
+    const [turn] = traceOf([
+      event('turn/start', { turn: 1 }, 10),
+      event(
+        'interaction/ask/requested',
+        { id: 'c1/q1', question: 'Keep it?', options: ['yes', 'no'] },
+        11,
+      ),
+      event('interaction/ask/answered', { id: 'c1/q1', answer: 'yes' }, 12),
+      event('interaction/ask/answered', { id: 'c1/q1', answer: 'no' }, 13),
+    ])
+
+    expect(turn?.proposals[0]?.answer).toBe('no')
+  })
+
+  test('an answer for a question this trace never saw changes nothing', () => {
+    const [turn] = traceOf([
+      event('turn/start', { turn: 1 }, 10),
+      event('interaction/ask/answered', { id: 'gone', answer: 'yes' }, 11),
+    ])
+
+    expect(turn?.proposals).toEqual([])
+  })
+
   test('only an edit or a write with a readable path names a file', () => {
     expect(writtenPath('edit', '{"path":"x.ts"}')).toBe('x.ts')
     expect(writtenPath('read', '{"path":"x.ts"}')).toBeUndefined()

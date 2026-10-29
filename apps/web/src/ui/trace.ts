@@ -54,6 +54,19 @@ export interface TraceTool {
   readonly ask: TraceAsk | undefined
 }
 
+/**
+ * A question the model put to the human with the choices it offered, kept
+ * under the turn that asked it. The ask events are already the proposal's log
+ * — question, choices, and answer — so a card adds no event of its own.
+ */
+export interface TraceProposal {
+  readonly id: string
+  readonly question: string
+  readonly options: ReadonlyArray<string>
+  /** The latest choice; undefined while the question waits. */
+  readonly answer: string | undefined
+}
+
 /** One translated reasoning, logged beside the message it translates. */
 export interface TraceTranslation {
   /** The language the reader asked for, as the page named it. */
@@ -108,6 +121,8 @@ export interface TraceTurn {
   readonly answerSeq: number
   /** The newest verdict on the answer; undefined until the human gives one. */
   readonly feedback: TraceFeedback | undefined
+  /** The questions the model asked this turn, with their choices and the latest answer. */
+  readonly proposals: ReadonlyArray<TraceProposal>
   readonly changed: ReadonlyArray<ChangedFile>
   /** True when the log wrote the call outside any turn, as a forced skill load does. */
   readonly standalone: boolean
@@ -217,6 +232,7 @@ const startTurn = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => [
     answer: '',
     answerSeq: 0,
     feedback: undefined,
+    proposals: [],
     changed: [],
     standalone: false,
   },
@@ -385,6 +401,7 @@ const standaloneTurn = (
     answer: '',
     answerSeq: 0,
     feedback: undefined,
+    proposals: [],
     changed: [],
     standalone: true,
   },
@@ -437,25 +454,53 @@ const inTool = (
     })),
   }))
 
-/** A question kept with the call that asked it, so its card can show what was chosen. */
+/** The offer as the turn keeps it: the newest answer is what the card shows. */
+const proposalOf = (event: UiSessionEvent): TraceProposal => ({
+  id: textOf(event.data, 'id'),
+  question: textOf(event.data, 'question'),
+  options: stringsOf(fieldOf(event.data, 'options')),
+  answer: undefined,
+})
+
+/**
+ * A question stays with the call that asked it and on the turn, so a card below
+ * the answer can still take a choice after the turn ended. The log keeps one
+ * offer per id; a repeated event does not draw the card twice.
+ */
 const askedHuman = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => {
   const id = textOf(event.data, 'id')
   const question = textOf(event.data, 'question')
   if (id === '' || question === '') return turns
-  return inTool(turns, id, (tool) => ({
+  const asked = inTool(turns, id, (tool) => ({
     ...tool,
     ask: { question, options: stringsOf(fieldOf(event.data, 'options')), answer: '' },
   }))
+  const proposal = proposalOf(event)
+  return inLastTurn(asked, (turn) =>
+    turn.proposals.some((kept) => kept.id === id)
+      ? turn
+      : { ...turn, proposals: [...turn.proposals, proposal] },
+  )
 }
 
-/** The answer lands on the call that asked; a call that asked nothing has none to take. */
+/**
+ * The answer lands on the call that asked and on its proposal. A later answer
+ * to the same question replaces the earlier one, because choosing again is how
+ * a reader revises a decision; the host sends each choice as a user message.
+ */
 const answeredHuman = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => {
   const id = textOf(event.data, 'id')
   const answer = textOf(event.data, 'answer')
   if (id === '' || answer === '') return turns
-  return inTool(turns, id, (tool) =>
+  const settled = inTool(turns, id, (tool) =>
     tool.ask === undefined ? tool : { ...tool, ask: { ...tool.ask, answer } },
   )
+  return settled.map((turn) => ({
+    ...turn,
+    proposals: turn.proposals.map((proposal) =>
+      proposal.id === id ? { ...proposal, answer } : proposal,
+    ),
+  }))
 }
 
 /**
