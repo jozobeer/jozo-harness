@@ -1,5 +1,6 @@
 import type { LlmTransport } from '@jozo-harness/llm'
 import type { SessionEvent } from '@jozo-harness/session'
+import { parseWorkerIncoming } from '../src/worker-protocol.ts'
 import { createBrowserWorkerClient, type WorkerLike } from '../src/worker-client.ts'
 import { createBrowserWorkerHost } from '../src/worker-host.ts'
 
@@ -88,7 +89,8 @@ export const fakeWorker = (transport: LlmTransport) => {
   let closing: Promise<void> = Promise.resolve()
   const worker: WorkerLike = {
     postMessage: (message) => {
-      void host.prompt(message.text)
+      const prompt = parseWorkerIncoming(message)
+      if (prompt !== undefined) void host.prompt(prompt.text)
     },
     addEventListener: (_type, listener) => {
       listeners.add(listener)

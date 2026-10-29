@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest'
+import { parseWorkerIncoming, parseWorkerOutgoing } from '../src/worker-protocol.ts'
 import { clientOf, resultText, stubTransport, textTurn, toolCallTurn } from './worker-fixtures.ts'
 
 describe('browser worker', () => {
@@ -79,5 +80,24 @@ describe('browser worker', () => {
 
     await expect(client.prompt('say hello')).rejects.toThrow('the model is unreachable')
     client.close()
+  })
+
+  test('drops messages that are not this protocol', () => {
+    expect(parseWorkerIncoming({ kind: 'prompt', text: 'hi' })).toEqual({
+      kind: 'prompt',
+      text: 'hi',
+    })
+    expect(parseWorkerIncoming({ kind: 'event' })).toBeUndefined()
+    expect(parseWorkerIncoming({ kind: 'prompt', text: 3 })).toBeUndefined()
+    expect(parseWorkerIncoming(undefined)).toBeUndefined()
+    expect(parseWorkerOutgoing({ kind: 'done' })).toBeUndefined()
+    expect(parseWorkerOutgoing({ kind: 'error', message: 3 })).toBeUndefined()
+    expect(parseWorkerOutgoing({ kind: 'event', event: {} })).toBeUndefined()
+  })
+
+  test('refuses a prompt after the worker has been closed', async () => {
+    const { client } = clientOf(stubTransport([]))
+    client.close()
+    await expect(client.prompt('say hello')).rejects.toThrow('the browser worker is closed')
   })
 })
