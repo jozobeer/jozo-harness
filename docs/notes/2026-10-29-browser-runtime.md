@@ -109,10 +109,25 @@
 - `packages/core/session/tests/memory-persistence.test.ts`: 4 テスト。作成 → 追記 → 再オープン、summary、missing、ストア間の分離。
 - `pnpm run check`: 2435 passed / 7 skipped。coverage は lines 94.99% / functions 92.51%。complexity の最大は cognitive 7 / cyclomatic 10。閾値は動かしていない。
 
+## 入れたもの（スライス 3: Worker）
+
+Worker の中でスライス 2 の組み立てを回し、ページから 1 turn を頼む口を足した。ページと Worker のあいだを行き来するメッセージは 4 種類だけである。
+
+- `worker-protocol.ts`: `WorkerPrompt`（`{kind:'prompt', text}`）、`WorkerEvent`（`{kind:'event', event}`）、`WorkerDone`（`{kind:'done', text}`）、`WorkerError`（`{kind:'error', message}`）と、両方向の読み取り。Worker は何でも受け取るので、形はこの境界で決める。
+- `worker-host.ts`: `createBrowserWorkerHost`。runtime は Worker の寿命だけ 1 つ持ち、prompt は直列に回す。`session/event` をそのまま流し、`turn/end` の理由が `error` なら `WorkerError`、そうでなければ最後の assistant テキストで `WorkerDone` を返す。`close()` は scope を閉じ、メモリのワークスペースとログを捨てる。
+- `worker-client.ts`: `createBrowserWorkerClient`。Worker は `createWorker` で注入する（ページは本物、テストは偽物）。prompt は 1 本ずつ、event は `onEvent` に流し、done で解決し、error で棄却する。close は terminate。
+- `browserRuntime` に `onEvent` を足した。`session/event` は emit 型のフックで、dispatcher はリスナーが返した Effect を実行しない。だからリスナーはその場で副作用を起こす。
+
+### 検証
+
+- `packages/core/runtime-browser/tests/worker.test.ts`: 4 テスト。偽の Worker は本物の host を同じプロセスで動かし、メッセージの配線だけをテストが持つ。(a) prompt で event が流れて done のテキストで終わる、(b) write のツール呼び出しと結果がログに入る、(c) 同じ Worker ではワークスペースが残り、close の後に作った Worker では同じパスが読めない、(d) モデルが落ちたターンは error で返る。
+- `packages/core/runtime-browser/tests/worker-node-free.test.ts`: Worker の口（protocol / host / client）の静的 import に `node:` と `@jozo-harness/process` が無いことを固定する。
+- `pnpm run check`: 2442 passed / 7 skipped。coverage は lines 94.99% / functions 92.56%。complexity の最大は cognitive 7 / cyclomatic 10。閾値は動かしていない。
+
 ## 残件
 
-- **Worker へのパッケージング**（`pnpm run build:web` とは別の工程）。`runtime-browser` を Worker の entry に束ね、Effect の Fiber を Worker の中で回す。
-- **UI の入口**。ページから runtime を作り、turn を送り、`session/event` を購読して描く口。今の Web の Node サーバ経路は既定のまま残す。
+- **Worker のパッケージングと実ブラウザ**。口と組み立ては入ったが、`runtime-browser` の import グラフは `node:path`（tools-tier0 の walk / workspace / glob / grep / write）、`node:fs`（ripgrep と tools の spill-store）、`node:os`（agent-loop の `tmpdir`）にまだ届く。ブラウザの bundler はこのグラフを load できないので、実ブラウザで 1 turn は通っていない。受け入れ条件 1 は未達。
+- **UI の入口**。Worker を Vite で束ねる工程、モデルの endpoint と鍵をページのどこから渡すか、既存の Node サーバ経路を既定のまま残す分岐が要る。今の `build:web` は client-solid の 1 本だけで、Worker の entry を持っていない。
 - **実ブラウザでの受け入れ確認**。Node 上のテストは「ディスクもプロセスも使わない組み立て」を固定するが、Worker とモデルへの実 fetch はまだ通していない。受け入れ条件 1 は未達。
 - **CORS と鍵**。`fetch` でモデルへ直接出るには、CORS を受けるサーバか、利用者の鍵をどこに置くかの決定が要る。`packages/llm/llm/src/proxy.ts` は `node:http`/`https`/`tls` のまま。
 - **`node:path` の差し替え**。tools-tier0 の `join` / `matchesGlob` は Node の関数で、ブラウザには無い。
