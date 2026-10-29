@@ -154,15 +154,10 @@ export const makeMemoryFileSystem = (
       return Effect.succeed<StagedFile>({ commit, discard: Effect.void })
     },
     observe: (path) => {
-      const key = normalized(path)
-      const file = files.get(key)
-      if (file === undefined) {
-        return Effect.succeed(
-          statOf(key)?.isFile === true
-            ? ({ bytes: 0, mtimeMs: 0, digest: 'unreadable' } satisfies Observation)
-            : undefined,
-        )
-      }
+      const file = files.get(normalized(path))
+      // A file held in memory is always readable, so the Node implementation's
+      // "exists but cannot be read" case has no answer here.
+      if (file === undefined) return Effect.succeed(undefined)
       return Effect.succeed({
         bytes: file.content.length,
         mtimeMs: file.mtimeMs,
