@@ -4,6 +4,7 @@ import { Context, Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
 import { SystemPrompt } from '@jozo-harness/system-prompt'
 import {
+  bwrapUnavailableMessage,
   Permission,
   Policy,
   Sandbox,
@@ -11,6 +12,7 @@ import {
   sandboxContextText,
   sandboxLayerFor,
   seatbeltStartupNotice,
+  type SandboxDecision,
   type SeatbeltProbeResult,
 } from '../src/index.ts'
 
@@ -248,6 +250,36 @@ describe('sandbox context line', () => {
     expect(applies).not.toContain('cannot be applied')
     expect(lineFor('missing')).toBe(applies)
   })
+
+  test('keeps the bwrap and seatbelt denial wording it had', () => {
+    const line = (backend: 'bwrap' | 'seatbelt'): string =>
+      'sandbox: workspace-write (backend: ' +
+      backend +
+      '; enforcement: full; commands run confined; a file effect the sandbox refuses comes back as [sandbox: file access denied under workspace-write mode])'
+    const bwrap: SandboxDecision = { _tag: 'available', name: 'bwrap', enforcement: 'full' }
+    const seatbelt: SandboxDecision = { _tag: 'available', name: 'seatbelt', enforcement: 'full' }
+    const config = { preset: 'workspace-write' } as const
+
+    expect(sandboxContextText(config, bwrap, undefined)).toBe(line('bwrap'))
+    expect(sandboxContextText(config, seatbelt, undefined)).toBe(line('seatbelt'))
+    expect(sandboxContextText(config, seatbelt, 'refused')).toBe(
+      line('seatbelt') + '; the seatbelt cannot be applied here, so commands are refused',
+    )
+  })
+
+  test('does not promise a denial marker under a backend that cannot print one', () => {
+    const landlock: SandboxDecision = {
+      _tag: 'available',
+      name: 'landlock',
+      enforcement: 'full',
+      helper: '/opt/landlock-run',
+    }
+    const line = sandboxContextText({ preset: 'workspace-write' }, landlock, undefined)
+
+    expect(line).toContain('backend: landlock')
+    expect(line).toContain('a write outside its roots fails with permission denied')
+    expect(line).not.toContain('[sandbox: file access denied')
+  })
 })
 
 describe('sandbox selection', () => {
@@ -266,12 +298,17 @@ describe('sandbox selection', () => {
     expect(sandbox.enforcement).toBe('full')
   })
 
-  test('auto without a usable bwrap stops instead of running loose', async () => {
+  test('auto without a usable bwrap or landlock keeps the bwrap failure', async () => {
     const failed = await Effect.runPromise(
       Effect.scoped(
         Effect.result(
           Layer.build(
-            sandboxLayerFor({ preset: 'workspace-write', sandbox: 'auto' }, 'linux', () => false),
+            sandboxLayerFor(
+              { preset: 'workspace-write', sandbox: 'auto' },
+              'linux',
+              () => false,
+              () => undefined,
+            ),
           ),
         ),
       ),
@@ -280,10 +317,29 @@ describe('sandbox selection', () => {
     expect(failed._tag).toBe('Failure')
     if (failed._tag === 'Failure') {
       const message = String(failed.failure)
-      expect(message).toContain('bwrap')
-      expect(message).toContain('landlock')
+      expect(message).toContain(bwrapUnavailableMessage('linux'))
       expect(message).toContain('sandbox: none')
     }
+  })
+
+  test('auto falls back to the landlock helper when bwrap cannot run', async () => {
+    const context = await Effect.runPromise(
+      Effect.scoped(
+        Layer.build(
+          sandboxLayerFor(
+            { preset: 'workspace-write', sandbox: 'auto' },
+            'linux',
+            () => false,
+            () => '/opt/landlock-run',
+          ),
+        ),
+      ),
+    )
+    const sandbox = Context.get(context, Sandbox)
+
+    expect(sandbox.name).toBe('landlock')
+    expect(sandbox.mode).toBe('workspace-write')
+    expect(sandbox.enforcement).toBe('full')
   })
 
   test('an explicit bwrap where it cannot run is refused instead of ignored', async () => {

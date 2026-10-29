@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { wrapForProvider, type SandboxShape } from './sandbox.ts'
 import type { SandboxMode } from './policy.ts'
 
@@ -88,5 +89,72 @@ export function bwrapSandbox(options: BwrapOptions): SandboxShape {
         DENIAL_SIGNATURES,
         (_mode, writableRoots) => ['bwrap', ...bwrapArgs(writableRoots), ...command.argv],
       ),
+  }
+}
+
+/** The helper the fallback runs; `cargo install --path crates/landlock-run` puts it on PATH. */
+export const LANDLOCK_HELPER = 'landlock-run'
+
+/**
+ * Where the fallback helper may live: the PATH name cargo install produces, then
+ * the binaries cargo leaves in a checkout. A candidate that is not there costs one
+ * failed spawn while probing and no error, so the list can name builds that do not
+ * exist on this machine.
+ */
+export function landlockCandidates(): ReadonlyArray<string> {
+  return [
+    LANDLOCK_HELPER,
+    fileURLToPath(new URL('../../../../target/release/landlock-run', import.meta.url)),
+    fileURLToPath(new URL('../../../../target/debug/landlock-run', import.meta.url)),
+  ]
+}
+
+/** A helper path that proved it can apply a ruleset, or undefined when none did. */
+export type LandlockProbe = () => string | undefined
+
+/**
+ * Picks the first helper that applies a ruleset. The helper's own `--probe` is the
+ * whole test: a kernel without Landlock refuses the ruleset, and a binary that was
+ * never built cannot be spawned at all.
+ */
+export function probeLandlock(
+  run: CommandProbe = commandRuns,
+  candidates: ReadonlyArray<string> = landlockCandidates(),
+): string | undefined {
+  return candidates.find((candidate) => run([candidate, '--probe']))
+}
+
+/**
+ * The arguments that name the roots a command may write. The helper skips a root
+ * that is not there, the same way `bwrapArgs` uses `--bind-try`.
+ */
+export function landlockArgs(writableRoots: ReadonlyArray<string>): ReadonlyArray<string> {
+  return [...new Set(writableRoots)].flatMap((root) => ['--writable-root', root])
+}
+
+export interface LandlockOptions extends BwrapOptions {
+  /** The path `probeLandlock` returned, so the wrapper runs the binary the probe tested. */
+  readonly helper: string
+}
+
+/**
+ * Wraps commands with the Landlock helper when bubblewrap cannot run. The kernel
+ * refuses a write with a plain EACCES, which shares no text with an ordinary
+ * failure, so no denial signature is claimed: a refusal reads as the command's own
+ * permission error instead of as a sandbox marker.
+ */
+export function landlockSandbox(options: LandlockOptions): SandboxShape {
+  return {
+    name: 'landlock',
+    confines: true,
+    enforcement: 'full',
+    mode: options.mode,
+    wrap: (command) =>
+      wrapForProvider(command, options.mode, options.writableRoots, [], (_mode, writableRoots) => [
+        options.helper,
+        ...landlockArgs(writableRoots),
+        '--',
+        ...command.argv,
+      ]),
   }
 }
