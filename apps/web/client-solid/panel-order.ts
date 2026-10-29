@@ -4,7 +4,15 @@ import { movedIn } from './order.ts'
 export const PANEL_ORDER_KEY = 'jzh.panel-order'
 
 /** The tabs the right pane draws, in the order they arrived in. */
-export const PANEL_KINDS = ['changes', 'files', 'browser', 'run', 'settings', 'trajectory'] as const
+export const PANEL_KINDS = [
+  'changes',
+  'files',
+  'browser',
+  'run',
+  'settings',
+  'trajectory',
+  'log',
+] as const
 
 export type PanelTab = (typeof PANEL_KINDS)[number]
 

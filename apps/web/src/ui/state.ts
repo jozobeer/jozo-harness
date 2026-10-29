@@ -37,6 +37,7 @@ export type Pane =
   | { readonly kind: 'changes'; readonly path: string | undefined }
   | { readonly kind: 'files' }
   | { readonly kind: 'inspect'; readonly turn: number; readonly callId: string }
+  | { readonly kind: 'log'; readonly seq: number | undefined }
   | { readonly kind: 'run' }
   | { readonly kind: 'settings' }
   | { readonly kind: 'trajectory' }
