@@ -1,4 +1,4 @@
-import { Llm, outboundFetch } from '@jozo-harness/llm'
+import { Llm, outboundFetch, type LlmTransport } from '@jozo-harness/llm'
 import type { Plugin } from '@jozo-harness/kernel'
 import { Layer, Schema } from 'effect'
 import { openAiAdapter } from './adapter.ts'
@@ -59,7 +59,7 @@ export const localOllamaModelName = (model: string): string => {
  * and the effort words the row (or the wire's own) declares.
  */
 export const makeLlmOpenAiPlugin = (
-  send: typeof fetch = outboundFetch,
+  send: LlmTransport = outboundFetch,
 ): Plugin<typeof llmOpenAiConfig.Type, Llm, never> => ({
   name: '@jozo-harness/llm-openai',
   config: llmOpenAiConfig,
@@ -78,7 +78,7 @@ export const makeLlmOpenAiPlugin = (
         // The daemon keeps cloud models under its own names, while the route
         // keeps the name the page and the settings use.
         ...(local ? { modelName: localOllamaModelName } : {}),
-        fetch: send,
+        transport: send,
         ...(config.headers === undefined ? {} : { headers: config.headers }),
         capabilities: {
           toolChoice: false,

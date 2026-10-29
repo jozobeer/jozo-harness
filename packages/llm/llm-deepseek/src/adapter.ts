@@ -1,10 +1,12 @@
 import {
   LlmFailure,
+  fetchTransport,
   type ContentBlock,
   type LlmAdapter,
   type LlmCapabilities,
   type LlmFailureCode,
   type LlmRequest,
+  type LlmTransport,
   type RequestMessage,
   type StreamChunk,
   type ToolSchema,
@@ -24,8 +26,8 @@ export interface DeepSeekMessagesOptions {
   readonly extensions?: Readonly<Record<string, unknown>>
   readonly headers?: Readonly<Record<string, string>>
   readonly capabilities: LlmCapabilities
-  /** Injected for tests. Defaults to the global fetch. */
-  readonly fetch?: typeof fetch
+  /** The one way this adapter reaches the provider. Defaults to the page's fetch. */
+  readonly transport?: LlmTransport
 }
 
 const DEFAULT_MAX_TOKENS = 8192
@@ -165,7 +167,7 @@ const messagesUrlOf = (baseUrl: string): string => {
  * adapter keeps the `/chat/completions` shape for endpoints that speak it.
  */
 export function deepSeekMessagesAdapter(options: DeepSeekMessagesOptions): LlmAdapter {
-  const send = options.fetch ?? fetch
+  const send = options.transport ?? fetchTransport
   const url = messagesUrlOf(options.baseUrl)
   const extensions = options.extensions ?? {}
 

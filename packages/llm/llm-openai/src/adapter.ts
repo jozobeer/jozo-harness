@@ -1,10 +1,12 @@
 import {
   LlmFailure,
+  fetchTransport,
   type ContentBlock,
   type LlmAdapter,
   type LlmCapabilities,
   type LlmFailureCode,
   type LlmRequest,
+  type LlmTransport,
   type RequestMessage,
   type StreamChunk,
 } from '@jozo-harness/llm'
@@ -26,8 +28,8 @@ export interface OpenAiAdapterOptions {
   readonly capabilities: LlmCapabilities
   /** Idle budget for one attempt. Defaults to five minutes. */
   readonly streamIdleTimeoutMs?: number
-  /** Injected for tests. Defaults to the global fetch. */
-  readonly fetch?: typeof fetch
+  /** The one way this adapter reaches the provider. Defaults to the page's fetch. */
+  readonly transport?: LlmTransport
 }
 
 const DEFAULT_IDLE_TIMEOUT_MS = 300_000
@@ -153,7 +155,7 @@ const readFailureOf = (cause: unknown, guard: IdleGuard): LlmFailure =>
  * provider finishes, and the idle timer restarts on every chunk.
  */
 export function openAiAdapter(options: OpenAiAdapterOptions): LlmAdapter {
-  const send = options.fetch ?? fetch
+  const send = options.transport ?? fetchTransport
   const timeout = options.streamIdleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS
   const url = `${options.baseUrl.replace(/\/$/, '')}/chat/completions`
   /** The route's model name as this endpoint reads it; the route's own when it names no rule. */

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { LlmFailure, type LlmRequest, type StreamChunk } from '@jozo-harness/llm'
+import { LlmFailure, type LlmRequest, type LlmTransport, type StreamChunk } from '@jozo-harness/llm'
 import { Effect, Stream } from 'effect'
 import { decodeMessagesStream, deepSeekMessagesAdapter } from '../src/index.ts'
 
@@ -32,7 +32,7 @@ const capabilities = {
 } as const
 
 const adapterWith = (
-  fetchImpl: typeof fetch,
+  fetchImpl: LlmTransport,
   options: {
     readonly maxTokens?: number
     readonly extensions?: Readonly<Record<string, unknown>>
@@ -42,7 +42,7 @@ const adapterWith = (
     baseUrl: 'https://api.deepseek.com/anthropic/v1',
     apiKey: () => 'key',
     capabilities,
-    fetch: fetchImpl,
+    transport: fetchImpl,
     ...options,
   })
 
@@ -53,14 +53,14 @@ const capture = (body = '') => {
   const send = ((url: string, init: RequestInit) => {
     seen.push({ url, headers: new Headers(init.headers), body: bodyOf(init) })
     return Promise.resolve(new Response(body, { status: 200 }))
-  }) as unknown as typeof fetch
+  }) as unknown as LlmTransport
   return { seen, send }
 }
 
 const sse = (events: ReadonlyArray<readonly [string, unknown]>): string =>
   events.map(([name, body]) => `event: ${name}\ndata: ${JSON.stringify(body)}\n\n`).join('')
 
-const collect = (send: typeof fetch, source: LlmRequest = request) =>
+const collect = (send: LlmTransport, source: LlmRequest = request) =>
   Effect.runPromise(Stream.runCollect(adapterWith(send).stream(source)))
 
 describe('deepSeekMessagesAdapter', () => {
@@ -111,7 +111,7 @@ describe('deepSeekMessagesAdapter', () => {
       baseUrl: 'https://api.deepseek.com/anthropic',
       apiKey: () => 'key',
       capabilities,
-      fetch: send,
+      transport: send,
     })
 
     await Effect.runPromise(Stream.runCollect(streaming.stream(request)))
@@ -265,7 +265,7 @@ describe('deepSeekMessagesAdapter', () => {
     const send = (() => {
       fetched += 1
       return Promise.resolve(new Response(''))
-    }) as unknown as typeof fetch
+    }) as unknown as LlmTransport
 
     const error = await Effect.runPromise(
       Effect.flip(
@@ -303,7 +303,7 @@ describe('deepSeekMessagesAdapter', () => {
 
   test('an HTTP rejection keeps the provider detail and its class', async () => {
     const send = (() =>
-      Promise.resolve(new Response('bad key', { status: 401 }))) as unknown as typeof fetch
+      Promise.resolve(new Response('bad key', { status: 401 }))) as unknown as LlmTransport
 
     const error = await Effect.runPromise(
       Effect.flip(Stream.runCollect(adapterWith(send).stream(request))),
