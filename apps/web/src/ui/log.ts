@@ -210,3 +210,22 @@ export const logAfter = (state: LogState, event: UiSessionEvent): LogState => {
     open,
   }
 }
+
+/**
+ * The seq of the event a call's card grew from. The call is the node's origin;
+ * a log that starts after it still names the result, which is the same card.
+ */
+export const seqOfCall = (log: LogState, callId: string): number | undefined => {
+  const call = log.events.find(
+    (event) => event.type === 'tool/call' && event.node?.callId === callId,
+  )
+  if (call !== undefined) return call.seq
+  return log.events.find((event) => event.type === 'tool/result' && event.node?.callId === callId)
+    ?.seq
+}
+
+/** The seq of the offer a proposal card grew from, named by the id the host gave it. */
+export const seqOfProposal = (log: LogState, id: string): number | undefined =>
+  log.events.find(
+    (event) => event.type === 'interaction/ask/requested' && textIn(event.data, 'id') === id,
+  )?.seq

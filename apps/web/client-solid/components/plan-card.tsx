@@ -5,6 +5,7 @@ import { useTranslate } from '../i18n.ts'
 import type { MessageKey } from '../locale.ts'
 import type { SessionStore } from '../store.ts'
 import { Markdown } from './markdown.tsx'
+import { LogButton } from './log-button.tsx'
 import { Button } from './ui/button.tsx'
 import { Icon } from './ui/icon.tsx'
 
@@ -32,6 +33,7 @@ export const PlanCard = (props: { tool: TraceTool; store: SessionStore }) => {
             <Icon name="plan" class="plan-icon" />
             <strong class="plan-title">{t('plan.title')}</strong>
             <span class="plan-verdict">{t(PLAN_VERDICTS[shown().verdict])}</span>
+            <LogButton store={props.store} target={{ kind: 'call', id: props.tool.callId }} />
             <button
               class="plan-open"
               type="button"

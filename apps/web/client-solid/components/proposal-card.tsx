@@ -3,6 +3,7 @@ import type { TraceProposal } from '../../src/ui/trace.ts'
 import { useTranslate } from '../i18n.ts'
 import type { SessionStore } from '../store.ts'
 import { Markdown } from './markdown.tsx'
+import { LogButton } from './log-button.tsx'
 import { Button } from './ui/button.tsx'
 import { Icon } from './ui/icon.tsx'
 
@@ -19,6 +20,7 @@ export const ProposalCard = (props: { proposal: TraceProposal; store: SessionSto
       <header class="proposal-head">
         <Icon name="ask" class="proposal-icon" />
         <strong class="proposal-title">{t('proposal.title')}</strong>
+        <LogButton store={props.store} target={{ kind: 'proposal', id: props.proposal.id }} />
       </header>
       <Markdown text={props.proposal.question} class="ask-question" />
       <Show when={props.proposal.options.length > 0}>

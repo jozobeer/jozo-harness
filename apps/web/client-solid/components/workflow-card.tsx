@@ -6,6 +6,7 @@ import { useTranslate, type Translate } from '../i18n.ts'
 import { spanOf } from '../lib.ts'
 import type { SessionStore } from '../store.ts'
 import { Linkify } from './linkify.tsx'
+import { LogButton } from './log-button.tsx'
 import { Icon } from './ui/icon.tsx'
 
 /** The children of the call, and how many of them failed. */
@@ -80,6 +81,7 @@ export const WorkflowCard = (props: { tool: TraceTool; store: SessionStore }) =>
       <summary class="workflow-line">
         <Icon name="subagent" class="workflow-icon" />
         <span class="workflow-title">{t('workflow.title')}</span>
+        <LogButton store={props.store} target={{ kind: 'call', id: props.tool.callId }} />
         <span class="workflow-count">{countLine(counts().children, t)}</span>
         <span class={'workflow-state ' + (counts().failed > 0 ? 'failed' : 'done')}>
           {stateOf(running(), counts().failed, t)}

@@ -12,6 +12,7 @@ import {
 import { maskSecrets } from '../../src/ui/secret.ts'
 import { WORKFLOW_TOOL } from '../../src/ui/workflow.ts'
 import { Linkify } from './linkify.tsx'
+import { LogButton } from './log-button.tsx'
 import { Markdown } from './markdown.tsx'
 import { PlanCard } from './plan-card.tsx'
 import { ProposalCard } from './proposal-card.tsx'
@@ -145,7 +146,7 @@ const resultPreviewOf = (output: string): string =>
  * line shows and whether it starts open, never the call the log recorded: a
  * compact line keeps the name, and the result waits one fold away.
  */
-const Tool = (props: { tool: TraceTool }) => {
+const Tool = (props: { tool: TraceTool; store: SessionStore }) => {
   const { density } = useToolDensity()
   const compact = (): boolean => density() === 'compact'
   const richer = (): boolean => density() === 'detailed' || density() === 'verbose'
@@ -158,6 +159,7 @@ const Tool = (props: { tool: TraceTool }) => {
       <summary class="tool-line">
         <Icon name={toolIconOf(props.tool.name)} class="tool-icon" />
         <span class="tool-name">{props.tool.name}</span>
+        <LogButton store={props.store} target={{ kind: 'call', id: props.tool.callId }} />
         <Show when={!compact()}>
           <span class="tool-summary">
             <Show
@@ -222,7 +224,7 @@ const skillNameOf = (args: string): string => {
  * A skill load reads as its own card: the name, where it was read from, and what
  * it is for stay on the folded line; the instructions wait inside.
  */
-const Skill = (props: { tool: TraceTool }) => {
+const Skill = (props: { tool: TraceTool; store: SessionStore }) => {
   const t = useTranslate()
   const { density } = useToolDensity()
   const compact = (): boolean => density() === 'compact'
@@ -235,6 +237,7 @@ const Skill = (props: { tool: TraceTool }) => {
       <summary class="tool-line">
         <Icon name="skill" class="tool-icon" />
         <span class="skill-label">{t('turn.skill')}</span>
+        <LogButton store={props.store} target={{ kind: 'call', id: props.tool.callId }} />
         <span class="skill-what">
           <span class="skill-name">{skillNameOf(props.tool.args)}</span>
           <Show when={!compact()}>
@@ -276,12 +279,15 @@ const Call = (props: { tool: TraceTool; store: SessionStore }) => (
   <Show
     when={props.tool.name === 'skill'}
     fallback={
-      <Show when={props.tool.name === WORKFLOW_TOOL} fallback={<Tool tool={props.tool} />}>
+      <Show
+        when={props.tool.name === WORKFLOW_TOOL}
+        fallback={<Tool tool={props.tool} store={props.store} />}
+      >
         <WorkflowCard tool={props.tool} store={props.store} />
       </Show>
     }
   >
-    <Skill tool={props.tool} />
+    <Skill tool={props.tool} store={props.store} />
   </Show>
 )
 

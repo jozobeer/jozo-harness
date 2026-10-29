@@ -1834,6 +1834,80 @@ describe('the Solid page', () => {
     expect(calls.filter((call) => call.kind === 'command' || call.kind === 'submit')).toEqual([])
   })
 
+  test('a tool node opens the log event it grew from, without sending anything', () => {
+    const events: ReadonlyArray<UiSessionEvent> = [
+      { seq: 1, time: 1_000, type: 'turn/start', data: { turn: 1 } },
+      { seq: 2, time: 2_000, type: 'step/start', data: { step: 1 } },
+      {
+        seq: 3,
+        time: 3_000,
+        type: 'tool/call',
+        data: { callId: 'call-1', name: 'bash', arguments: '{}' },
+      },
+      {
+        seq: 4,
+        time: 4_000,
+        type: 'tool/result',
+        data: { callId: 'call-1', isError: false, content: [] },
+      },
+    ]
+    const { store, calls } = makeStore({
+      log: logged(...events),
+      trace: traceOf(events),
+      conversation: {
+        ...emptyConversation,
+        lastSeq: 4,
+        blocks: [{ kind: 'user', text: 'run it' }],
+      },
+    })
+
+    const { container } = render(() => <Conversation store={store} />)
+    fireEvent.click(container.querySelector('.log-mark') as Element)
+
+    expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'log', seq: 3 } })
+    expect(calls.filter((call) => call.kind === 'command' || call.kind === 'submit')).toEqual([])
+  })
+
+  test('a proposal card opens the offer event it drew', () => {
+    const events: ReadonlyArray<UiSessionEvent> = [
+      { seq: 1, time: 1_000, type: 'turn/start', data: { turn: 1 } },
+      { seq: 2, time: 2_000, type: 'step/start', data: { step: 1 } },
+      {
+        seq: 3,
+        time: 3_000,
+        type: 'tool/call',
+        data: { callId: 'call-1', name: 'ask_user_question', arguments: '{}' },
+      },
+      {
+        seq: 4,
+        time: 4_000,
+        type: 'tool/result',
+        data: { callId: 'call-1', isError: false, content: [] },
+      },
+      {
+        seq: 5,
+        time: 5_000,
+        type: 'interaction/ask/requested',
+        data: { id: 'call-1/q1', question: 'go?', options: ['yes', 'no'] },
+      },
+      { seq: 6, time: 6_000, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+    ]
+    const { store, calls } = makeStore({
+      log: logged(...events),
+      trace: traceOf(events),
+      conversation: {
+        ...emptyConversation,
+        lastSeq: 6,
+        blocks: [{ kind: 'user', text: 'run it' }],
+      },
+    })
+
+    const { container } = render(() => <Conversation store={store} />)
+    fireEvent.click(container.querySelector('.proposal-card .log-mark') as Element)
+
+    expect(calls).toContainEqual({ kind: 'pane', pane: { kind: 'log', seq: 5 } })
+  })
+
   test('the todo dock takes no room when the session has no todo', () => {
     const { store } = makeStore({ run: runWith([]) })
 
