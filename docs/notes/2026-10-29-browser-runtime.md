@@ -84,6 +84,15 @@
 - `vp test packages/core/tools-tier0`: 18 ファイル 139 テストが通る（メモリ実装を足す前と同じ数に 3 を足した）。
 - `pnpm run check`: fmt / lint / typecheck / doc gate / duplication / complexity / cargo / coverage を通す。閾値は動かさない。
 
+## スライス 2 の計画
+
+1 turn をメモリの workspace で回すために、残件のうち 2 つを先に片付ける。
+
+- モデルへの通信を `LlmTransport` に寄せる。DeepSeek の adapter は transport 越しに SSE を読み、ブラウザの実装は `fetch`、テストはスタブを渡す。Node の既定は今の `outboundFetch`（プロキシを通す）にする。
+- セッションログを `SessionLog` の口に寄せる。JSONL は今のディスク実装をそのまま渡し、メモリ実装はイベントの配列を持つ。ブラウザの組み立てはメモリの実装を渡す。
+
+その上で `packages/core/runtime-browser` に、メモリの `FileSystem`・ツール・モデル transport・メモリのログを 1 か所で繋ぐ組み立てを置き、Node 上で 1 turn を回すテストを書く。
+
 ## 残件
 
 - Worker へのパッケージング（`pnpm run build:web` とは別の工程）。Effect とツールを 1 つの bundle にまとめる。
