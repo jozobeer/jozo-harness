@@ -28,6 +28,47 @@ const said = (time: number, ...content: ReadonlyArray<unknown>): UiSessionEvent 
   event('assistant/message', { content }, time)
 
 describe('the trace', () => {
+  test('a translation lands beside the reasoning it names and leaves that reasoning alone', () => {
+    const [turn] = traceOf([
+      event('turn/start', { turn: 1 }, 10),
+      claim('fix the ledger', 'user', 11),
+      event('step/start', { step: 1 }, 12),
+      said(13, { type: 'reasoning', text: 'read it first' }, { type: 'text', text: 'Reading.' }),
+      event(
+        'reasoning/translation',
+        { target: 13, language: 'ja', text: 'まず読みます。', provider: 'stub', model: 'stub' },
+        14,
+      ),
+      event('step/end', { step: 1 }, 15),
+      event('turn/end', { turn: 1, reason: { kind: 'completed' } }, 16),
+    ])
+
+    expect(turn?.steps[0]?.seq).toBe(13)
+    expect(turn?.steps[0]?.reasoning).toBe('read it first')
+    expect(turn?.steps[0]?.translation).toEqual({ language: 'ja', text: 'まず読みます。' })
+  })
+
+  test('a later translation of the same message replaces the earlier one', () => {
+    const [turn] = traceOf([
+      event('turn/start', { turn: 1 }, 10),
+      claim('fix the ledger', 'user', 11),
+      event('step/start', { step: 1 }, 12),
+      said(13, { type: 'reasoning', text: 'read it first' }),
+      event(
+        'reasoning/translation',
+        { target: 13, language: 'ja', text: 'まず読みます。', provider: 'stub', model: 'stub' },
+        14,
+      ),
+      event(
+        'reasoning/translation',
+        { target: 13, language: 'en', text: 'Read it first.', provider: 'stub', model: 'stub' },
+        15,
+      ),
+    ])
+
+    expect(turn?.steps[0]?.translation).toEqual({ language: 'en', text: 'Read it first.' })
+  })
+
   test('a passage quoted with the message stays on the turn as a quotation', () => {
     const [turn] = traceOf([
       event('turn/start', { turn: 1 }, 10),

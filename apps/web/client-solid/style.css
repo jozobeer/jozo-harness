@@ -434,14 +434,56 @@
     list-style: none;
   }
 
+  /* The reasoning is readable once the process is open; a translation sits under it. */
   .step-thought {
     margin: 0 0 2px;
-    overflow: hidden;
     color: var(--dim);
     font-size: var(--text-xs);
     font-style: italic;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .step-translate {
+    margin: 2px 0;
+    padding: 0;
+    color: var(--dim);
+    font: inherit;
+    font-size: var(--text-xs);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    background: 0 0;
+    border: 0;
+    cursor: pointer;
+  }
+
+  .step-translate:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  .step-translation {
+    margin: 4px 0 2px;
+    padding-left: var(--s2);
+    border-left: 1px solid var(--line);
+    color: var(--text);
+    font-size: var(--text-xs);
+    font-style: normal;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .step-translation-label {
+    display: block;
+    color: var(--dim);
+    font-size: var(--text-xs);
+  }
+
+  .step-translation-failed {
+    margin: 2px 0;
+    color: var(--warn);
+    font-size: var(--text-xs);
+    white-space: normal;
   }
 
   .step-said {

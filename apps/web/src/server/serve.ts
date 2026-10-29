@@ -259,6 +259,25 @@ const handlersOf = (
       const view = registry.stateOf(sessionId)
       return view === undefined ? Effect.fail('the session is not open') : Effect.succeed(view)
     },
+    translateReasoning: ({ sessionId, target, language }) => {
+      const session = registry.sessionOf(sessionId)
+      if (session === undefined) return Effect.fail('the session is not open')
+      const translate = session.translateReasoning
+      // A run whose profile wires no model can still show what is already logged.
+      if (translate === undefined) {
+        return Effect.succeed({
+          kind: 'failed' as const,
+          reason: 'this run cannot reach a model to translate reasoning',
+        })
+      }
+      // A failed translation is an answer the reasoning card shows inline, not a
+      // transport error that would hide the original behind the status strip.
+      return translate(target, language).pipe(
+        Effect.catch((error: WebError) =>
+          Effect.succeed({ kind: 'failed' as const, reason: error.message }),
+        ),
+      )
+    },
     scheduleCreate: (payload) =>
       Effect.gen(function* () {
         const session = registry.sessionOf(payload.sessionId)

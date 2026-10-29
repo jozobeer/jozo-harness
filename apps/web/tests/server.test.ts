@@ -699,6 +699,66 @@ const tick = (): UiEvent => ({
 })
 
 describe('the web transport', () => {
+  test('a page translates one reasoning, and a failure comes back with its reason', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-root-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const asked: Array<{ readonly target: number; readonly language: string }> = []
+    let offline = false
+    const withTranslation = {
+      ...web,
+      initial: {
+        ...web.initial,
+        translateReasoning: (target: number, language: string) => {
+          asked.push({ target, language })
+          return offline
+            ? Effect.fail(new WebError({ message: 'the provider is offline' }))
+            : Effect.succeed({ kind: 'translated' as const, language, text: 'まず読みます。' })
+        },
+      },
+    }
+    const settings = makeSettings()
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, withTranslation, settings)
+          const wsUrl = started.wsUrl
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const translated = yield* client.translateReasoning({
+              sessionId: 'a',
+              target: 4,
+              language: 'ja',
+            })
+            offline = true
+            const failed = yield* client.translateReasoning({
+              sessionId: 'a',
+              target: 4,
+              language: 'ja',
+            })
+            return { translated, failed }
+          }).pipe(clientLayers(wsUrl))
+          const answers = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return answers
+        }),
+      ),
+    )
+
+    expect(observed.translated).toEqual({
+      kind: 'translated',
+      language: 'ja',
+      text: 'まず読みます。',
+    })
+    expect(observed.failed).toEqual({ kind: 'failed', reason: 'the provider is offline' })
+    expect(asked).toEqual([
+      { target: 4, language: 'ja' },
+      { target: 4, language: 'ja' },
+    ])
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('a browser client speaks commands and events over one socket', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-root-'))
     const outside = await mkdtemp(join(tmpdir(), 'jozo-harness-web-outside-'))

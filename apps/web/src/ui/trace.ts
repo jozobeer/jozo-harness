@@ -54,12 +54,23 @@ export interface TraceTool {
   readonly ask: TraceAsk | undefined
 }
 
+/** One translated reasoning, logged beside the message it translates. */
+export interface TraceTranslation {
+  /** The language the reader asked for, as the page named it. */
+  readonly language: string
+  readonly text: string
+}
+
 /** One model call and the tools it asked for. */
 export interface TraceStep {
   readonly step: number
+  /** The seq of the assistant message this step recorded; 0 before one arrives. */
+  readonly seq: number
   readonly startedAt: number
   readonly endedAt: number | undefined
   readonly reasoning: string
+  /** The translation of `reasoning`, when the reader asked for one. */
+  readonly translation: TraceTranslation | undefined
   readonly text: string
   readonly tools: ReadonlyArray<TraceTool>
 }
@@ -271,9 +282,11 @@ const startStep = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) =>
       ...turn.steps,
       {
         step: numberOf(event.data, 'step'),
+        seq: 0,
         startedAt: event.time,
         endedAt: undefined,
         reasoning: '',
+        translation: undefined,
         text: '',
         tools: [],
       },
@@ -288,6 +301,7 @@ const assistantSaid = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) =
   const text = partsOf(content, 'text')
   const said = inLastStep(turns, (step) => ({
     ...step,
+    seq: event.seq,
     reasoning: partsOf(content, 'reasoning'),
     text,
   }))
@@ -359,9 +373,11 @@ const standaloneTurn = (
     steps: [
       {
         step: 0,
+        seq: 0,
         startedAt: event.time,
         endedAt: undefined,
         reasoning: '',
+        translation: undefined,
         text: '',
         tools: [tool],
       },
@@ -442,6 +458,25 @@ const answeredHuman = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) =
   )
 }
 
+/**
+ * A translation lands on the step whose assistant message it names. The original
+ * reasoning stays where the assistant message put it; a later translation of the
+ * same message replaces the earlier one, as the log folds newest last.
+ */
+const translated = (
+  turns: ReadonlyArray<TraceTurn>,
+  event: UiSessionEvent,
+): ReadonlyArray<TraceTurn> => {
+  const target = numberOf(event.data, 'target')
+  const text = textOf(event.data, 'text')
+  if (target === 0 || text === '') return turns
+  const translation: TraceTranslation = { language: textOf(event.data, 'language'), text }
+  return turns.map((turn) => ({
+    ...turn,
+    steps: turn.steps.map((step) => (step.seq === target ? { ...step, translation } : step)),
+  }))
+}
+
 type Fold = (turns: ReadonlyArray<TraceTurn>, event: UiSessionEvent) => ReadonlyArray<TraceTurn>
 
 /** The events the trace reads, by name: one lookup instead of a chain of tests. */
@@ -452,6 +487,7 @@ const FOLDS: Readonly<Record<string, Fold>> = {
   'step/start': startStep,
   'step/end': endStep,
   'assistant/message': assistantSaid,
+  'reasoning/translation': translated,
   'tool/call': callTool,
   'tool/result': settleTool,
   'interaction/ask/requested': askedHuman,

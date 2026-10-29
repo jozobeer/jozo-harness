@@ -18,7 +18,7 @@ import { WorkflowCard } from './workflow-card.tsx'
 import { EndMark } from './ui/end-mark.tsx'
 import { Icon, toolIconOf } from './ui/icon.tsx'
 import { Mug } from './ui/mug.tsx'
-import { useTranslate } from '../i18n.ts'
+import { useLocaleChoice, useTranslate } from '../i18n.ts'
 import { useToolDensity } from '../tool-density-choice.ts'
 import { pagesIn, spanOf } from '../lib.ts'
 import { useSeen } from '../seen.ts'
@@ -304,26 +304,66 @@ const Load = (props: { turn: TraceTurn; store: SessionStore }) => (
   </article>
 )
 
-/** One step of the process: a line of what the model thought, what it said, and its calls. */
-const Step = (props: { step: TraceStep; last: boolean; store: SessionStore }) => (
-  <li class="step">
-    <Show when={props.step.reasoning !== ''}>
-      <p class="step-thought">
-        <Linkify text={plainText(props.step.reasoning)} />
-      </p>
-    </Show>
-    <Show when={props.step.text !== '' && !props.last}>
-      <Markdown text={props.step.text} class="step-said" />
-    </Show>
-    <Index each={props.step.tools}>
-      {(tool) => (
-        <Show when={tool().name !== PLAN_TOOL}>
-          <Call tool={tool()} store={props.store} />
-        </Show>
-      )}
-    </Index>
-  </li>
-)
+/**
+ * One step of the process: the reasoning, its translation when one was asked
+ * for, what the model said, and its calls. A failed translation leaves the
+ * reasoning as the log recorded it and says why it could not be translated.
+ */
+const Step = (props: { step: TraceStep; last: boolean; store: SessionStore }) => {
+  const t = useTranslate()
+  const { locale } = useLocaleChoice()
+  const [translating, setTranslating] = createSignal(false)
+  const [failure, setFailure] = createSignal('')
+
+  const translate = (): void => {
+    if (translating() || props.step.seq === 0) return
+    setTranslating(true)
+    setFailure('')
+    props.store.translateReasoning(props.step.seq, locale(), (answer) => {
+      setTranslating(false)
+      if (answer.kind === 'failed') setFailure(answer.reason)
+    })
+  }
+
+  return (
+    <li class="step">
+      <Show when={props.step.reasoning !== ''}>
+        <div class="step-thought">
+          <Linkify text={plainText(props.step.reasoning)} />
+          <Show when={props.step.translation !== undefined}>
+            <p class="step-translation" lang={props.step.translation?.language}>
+              <span class="step-translation-label">{t('turn.translation')}</span>
+              <Linkify text={plainText(props.step.translation?.text ?? '')} />
+            </p>
+          </Show>
+          <Show when={props.step.translation === undefined}>
+            <button
+              type="button"
+              class="step-translate"
+              disabled={translating()}
+              onClick={translate}
+            >
+              {translating() ? t('turn.translating') : t('turn.translate')}
+            </button>
+          </Show>
+          <Show when={failure() !== ''}>
+            <p class="step-translation-failed">{t('turn.translateFailed') + failure()}</p>
+          </Show>
+        </div>
+      </Show>
+      <Show when={props.step.text !== '' && !props.last}>
+        <Markdown text={props.step.text} class="step-said" />
+      </Show>
+      <Index each={props.step.tools}>
+        {(tool) => (
+          <Show when={tool().name !== PLAN_TOOL}>
+            <Call tool={tool()} store={props.store} />
+          </Show>
+        )}
+      </Index>
+    </li>
+  )
+}
 
 const plural = (count: number, one: string, many: string): string =>
   String(count) + ' ' + (count === 1 ? one : many)

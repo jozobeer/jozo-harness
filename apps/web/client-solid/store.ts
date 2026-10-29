@@ -281,6 +281,13 @@ type PanelAsk =
       readonly data: string
       readonly reply: (answer: AttachAnswer) => void
     }
+  | {
+      readonly kind: 'translateReasoning'
+      readonly sessionId: string
+      readonly target: number
+      readonly language: string
+      readonly reply: (answer: TranslationAnswer) => void
+    }
 
 /** The panel asks that read or write what the page may offer to the next turn. */
 type SettingsAsk = Extract<
@@ -317,6 +324,11 @@ type EditAsk = Extract<
 export type AttachAnswer =
   | { readonly kind: 'stored'; readonly attachment: Attachment }
   | { readonly kind: 'refused'; readonly message: string }
+
+/** What one translation ask answered: it landed in the log, or why it did not. */
+export type TranslationAnswer =
+  | { readonly kind: 'translated' }
+  | { readonly kind: 'failed'; readonly reason: string }
 
 /** What the file tree asked the server: one folder to read, or every open one again. */
 type TreeAsk = { readonly kind: 'read'; readonly path: string } | { readonly kind: 'refresh' }
@@ -395,6 +407,15 @@ export interface SessionStore {
   readonly send: (command: UiCommand) => void
   /** Sends one command to a session that need not be the one on screen. */
   readonly sendTo: (sessionId: string, command: UiCommand) => void
+  /**
+   * Translates one reasoning into the page's language. The server logs the
+   * translation as its own event; the answer only says whether it landed.
+   */
+  readonly translateReasoning: (
+    target: number,
+    language: string,
+    reply: (answer: TranslationAnswer) => void,
+  ) => void
   /**
    * Reads a session, or stands on the blank page the first line fills when
    * undefined. A blank page starts its session in `cwd` when one is named.
@@ -1211,9 +1232,35 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
         Effect.asVoid,
       )
 
+    /**
+     * Asks the server to translate one reasoning. A failure is not a transport
+     * error: the card keeps the original and shows the reason it could not
+     * translate, so the answer comes back instead of landing in the strip.
+     */
+    const answerTranslate = (asked: Extract<PanelAsk, { kind: 'translateReasoning' }>) =>
+      client
+        .translateReasoning({
+          sessionId: asked.sessionId,
+          target: asked.target,
+          language: asked.language,
+        })
+        .pipe(
+          Effect.map((view): TranslationAnswer =>
+            view.kind === 'translated'
+              ? { kind: 'translated' }
+              : { kind: 'failed', reason: view.reason },
+          ),
+          Effect.catchCause((cause) =>
+            Effect.succeed<TranslationAnswer>({ kind: 'failed', reason: causeText(cause) }),
+          ),
+          Effect.tap((answer) => Effect.sync(() => asked.reply(answer))),
+          Effect.asVoid,
+        )
+
     /** Answers one panel ask; every answer is addressed to the session that asked. */
     const answerPanelAsk = (asked: PanelAsk) => {
       if (asked.kind === 'attach') return answerAttach(asked)
+      if (asked.kind === 'translateReasoning') return answerTranslate(asked)
       if (isSettingsAsk(asked)) return answerSettingsAsk(asked)
       if (asked.kind === 'sessionAction') return applySessionAction(asked)
       if (asked.kind === 'fork') return forkSession(asked.sessionId)
@@ -1538,6 +1585,20 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     setSelection: (text) =>
       update((now) => (now.selection === text ? now : withSelection(now, text))),
     send: (command) => sendTo(state().sessionId, command),
+    translateReasoning: (target, language, reply) => {
+      const sessionId = state().sessionId
+      if (sessionId === '') {
+        reply({ kind: 'failed', reason: 'there is no session to translate' })
+        return
+      }
+      Queue.offerUnsafe(panelAsks, {
+        kind: 'translateReasoning',
+        sessionId,
+        target,
+        language,
+        reply,
+      })
+    },
     sendTo,
     moveTo: (id, cwd) => {
       if (id === undefined) blankCwd = cwd
