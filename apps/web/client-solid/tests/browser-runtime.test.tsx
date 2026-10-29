@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@solidjs/testing-library'
 import type { SessionEvent } from '@jozo-harness/session'
 import { startBrowserWorker, type BrowserWorkerScope } from '@jozo-harness/runtime-browser/worker'
@@ -6,7 +6,15 @@ import {
   createBrowserWorkerClient,
   type WorkerLike,
 } from '@jozo-harness/runtime-browser/worker-client'
-import { BrowserRuntimePage } from '../runtime/page.tsx'
+import {
+  API_KEY_STORAGE_KEY,
+  DEFAULT_BASE_URL,
+  DEFAULT_ROUTE,
+  browserWorkerInitFrom,
+  parseBrowserWorkerInit,
+} from '../runtime/init.ts'
+import { runtimeModeFrom } from '../runtime/mode.ts'
+import { BrowserRuntimePage, pageWorker } from '../runtime/page.tsx'
 
 const sse = (events: ReadonlyArray<readonly [string, unknown]>): string =>
   events.map(([name, body]) => `event: ${name}\ndata: ${JSON.stringify(body)}\n\n`).join('')
@@ -176,5 +184,73 @@ describe('the page that runs the harness in a worker', () => {
 
     secondRender.unmount()
     await second.whenClosed()
+  })
+})
+
+describe('the browser runtime entry', () => {
+  test('opts in with ?runtime=browser and leaves the server page as the default', () => {
+    expect(runtimeModeFrom('?runtime=browser')).toBe('browser')
+    expect(runtimeModeFrom('?session=s-1&runtime=browser')).toBe('browser')
+    expect(runtimeModeFrom('')).toBe('server')
+    expect(runtimeModeFrom('?runtime=node')).toBe('server')
+  })
+
+  test('takes the model settings from the page and the key from session storage', () => {
+    const storage = { getItem: (key: string) => (key === API_KEY_STORAGE_KEY ? 'secret' : null) }
+
+    expect(browserWorkerInitFrom('?route=stub/model&baseUrl=https://model.test', storage)).toEqual({
+      kind: 'init',
+      route: 'stub/model',
+      baseUrl: 'https://model.test',
+      apiKey: 'secret',
+    })
+    expect(browserWorkerInitFrom('', storage)).toEqual({
+      kind: 'init',
+      route: DEFAULT_ROUTE,
+      baseUrl: DEFAULT_BASE_URL,
+      apiKey: 'secret',
+    })
+    expect(parseBrowserWorkerInit({ kind: 'init', route: 'r', baseUrl: 'b', apiKey: 'k' })).toEqual(
+      {
+        kind: 'init',
+        route: 'r',
+        baseUrl: 'b',
+        apiKey: 'k',
+      },
+    )
+    expect(parseBrowserWorkerInit({ kind: 'prompt', text: 'hi' })).toBeUndefined()
+    expect(parseBrowserWorkerInit({ kind: 'init', route: 1 })).toBeUndefined()
+  })
+
+  test('creates a module worker and posts the settings before any prompt', () => {
+    const made: Array<{ url: URL; options: WorkerOptions; messages: unknown[] }> = []
+    class StubWorker {
+      readonly messages: unknown[] = []
+      constructor(
+        readonly url: URL,
+        readonly options: WorkerOptions,
+      ) {
+        made.push(this)
+      }
+      postMessage(message: unknown): void {
+        this.messages.push(message)
+      }
+      addEventListener(): void {}
+      removeEventListener(): void {}
+      terminate(): void {}
+    }
+    vi.stubGlobal('Worker', StubWorker)
+    const init = browserWorkerInitFrom('?route=stub/model', {
+      getItem: () => null,
+    })
+
+    const worker = pageWorker(init)
+
+    expect(worker).toBeInstanceOf(StubWorker)
+    expect(made).toHaveLength(1)
+    expect(String(made[0]?.url)).toContain('worker-entry')
+    expect(made[0]?.options).toMatchObject({ type: 'module' })
+    expect(made[0]?.messages).toEqual([init])
+    vi.unstubAllGlobals()
   })
 })
