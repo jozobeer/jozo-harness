@@ -11,6 +11,16 @@ import type {
 } from '../shared/rpc.ts'
 import { WebError } from './errors.ts'
 
+/** The composition one session runs with, and every tool this run could offer it. */
+export interface SessionComposition {
+  /** The profile rows the session was built from. */
+  readonly profiles: ReadonlyArray<string>
+  /** The tools the next turn offers the model, as the log records them. */
+  readonly selected: ReadonlyArray<string>
+  /** Every tool this run can offer; a page chooses the set from these. */
+  readonly offered: ReadonlyArray<string>
+}
+
 /** One session the server can serve: the summary a page lists, and the UI face of its core. */
 export interface OpenSession {
   readonly summary: SessionSummary
@@ -30,6 +40,15 @@ export interface OpenSession {
     id: string,
     message: string,
   ) => Effect.Effect<SubagentMessageView, WebError>
+  /** What the session runs with now, without changing anything. */
+  readonly composition: () => SessionComposition
+  /**
+   * Records the chosen tool set in the session's log, so the next turn offers it.
+   * A tool this run cannot offer refuses the write and names it.
+   */
+  readonly setComposition: (
+    tools: ReadonlyArray<string>,
+  ) => Effect.Effect<SessionComposition, WebError>
   /** Whether the session still owns running work: a turn, a job, or a child agent. */
   readonly busy: () => boolean
   /** Hands one due schedule to the session it belongs to; false when it could not. */

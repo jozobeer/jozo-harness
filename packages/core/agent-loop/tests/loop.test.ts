@@ -403,6 +403,45 @@ describe('agent loop', () => {
     expect(stopping).toBe(0)
   })
 
+  test('offers the model only the tools the session chose, from the next turn on', async () => {
+    const tool = (
+      name: string,
+    ): ToolDefinition<{ readonly text: string }, { readonly text: string }> => ({
+      name,
+      description: name,
+      parameters: Schema.Struct({ text: Schema.String }),
+      output: {
+        schema: Schema.Struct({ text: Schema.String }),
+        render: (_args, value) => [{ type: 'text', text: value.text }],
+      },
+      execute: (args) => Effect.succeed({ text: args.text }),
+    })
+    const events = await scenario([chunks(textTurn('one')), chunks(textTurn('two'))], (ctx) =>
+      Effect.gen(function* () {
+        yield* ctx.tools.register(tool('read'))
+        yield* ctx.tools.register(tool('bash'))
+        const agent = yield* ctx.agents.create({ cwd: '/work', options: { route: 'fake/model' } })
+        yield* agent.followup({ text: 'first', source: 'user' })
+        yield* agent.whenIdle
+        // The page writes the chosen set between turns; the next request reads it.
+        yield* agent.session.append('composition/selected', {
+          profiles: ['headless'],
+          tools: ['read'],
+        })
+        yield* agent.followup({ text: 'second', source: 'user' })
+        yield* agent.whenIdle
+        return agent
+      }),
+    )
+
+    const headers = events.session
+      .events()
+      .flatMap((event) => (event.type === 'request/header' ? [event.data.tools] : []))
+      .map((tools) => tools.map((schema) => schema.name))
+
+    expect(headers).toEqual([['read', 'bash'], ['read']])
+  })
+
   test('executes a tool call and runs a second step with its result', async () => {
     const echo: ToolDefinition<{ readonly text: string }, { readonly text: string }> = {
       name: 'echo',

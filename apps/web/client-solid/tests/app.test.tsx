@@ -95,6 +95,9 @@ type Call =
   | { readonly kind: 'askCommands' }
   | { readonly kind: 'askRunSettings' }
   | { readonly kind: 'saveRunSettings'; readonly input: RunSettingsInput }
+  | { readonly kind: 'askComposition' }
+  | { readonly kind: 'applyComposition'; readonly tools: ReadonlyArray<string> }
+  | { readonly kind: 'saveDefaultComposition'; readonly tools: ReadonlyArray<string> }
   | { readonly kind: 'askFiles'; readonly query: string }
   | { readonly kind: 'act'; readonly sessionId: string; readonly action: SessionAction }
   | { readonly kind: 'fork'; readonly sessionId: string }
@@ -185,6 +188,9 @@ const makeStore = (
     askCommands: () => calls.push({ kind: 'askCommands' }),
     askRunSettings: () => calls.push({ kind: 'askRunSettings' }),
     saveRunSettings: (input) => calls.push({ kind: 'saveRunSettings', input }),
+    askComposition: () => calls.push({ kind: 'askComposition' }),
+    applyComposition: (tools) => calls.push({ kind: 'applyComposition', tools }),
+    saveDefaultComposition: (tools) => calls.push({ kind: 'saveDefaultComposition', tools }),
     askFiles: (query) => calls.push({ kind: 'askFiles', query }),
     setModel: (model) => calls.push({ kind: 'model', model }),
     chooseModel: (model) => calls.push({ kind: 'chooseModel', model }),
@@ -2546,6 +2552,44 @@ describe('the Solid page', () => {
         delegateTools: [{ name: 'codex', argv: ['codex', 'exec'] }],
       },
     })
+  })
+
+  test('the composition sheet applies a session set and saves the default as separate writes', () => {
+    const { store, calls } = makeStore({
+      pane: { kind: 'settings' },
+      sessionId: 'a',
+      composition: {
+        profiles: ['headless'],
+        selected: ['read'],
+        offered: ['read', 'bash'],
+        defaultTools: ['read'],
+        settingsPath: '/work/settings.yml',
+      },
+      settings: {
+        model: 'stub/model',
+        effort: '',
+        efforts: [],
+        settingsPath: '/work/settings.yml',
+        cwd: '/work',
+        sessionRoot: '/work/sessions',
+      },
+    })
+    const { container } = render(() => <ContextPane store={store} />)
+
+    // The session's own set is what the boxes start from.
+    expect((container.querySelector('#composition-tool-read') as HTMLInputElement).checked).toBe(
+      true,
+    )
+    expect((container.querySelector('#composition-tool-bash') as HTMLInputElement).checked).toBe(
+      false,
+    )
+    fireEvent.click(container.querySelector('#composition-tool-bash') as Element)
+    fireEvent.click(container.querySelector('#apply-composition') as Element)
+    fireEvent.click(container.querySelector('#save-composition') as Element)
+
+    expect(calls).toContainEqual({ kind: 'applyComposition', tools: ['read', 'bash'] })
+    expect(calls).toContainEqual({ kind: 'saveDefaultComposition', tools: ['read', 'bash'] })
+    expect(calls.filter((call) => call.kind === 'applyComposition')).toHaveLength(1)
   })
 
   test('a delegated tool line without argv is refused before the server is asked', () => {

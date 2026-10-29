@@ -15,6 +15,8 @@ export const ConfigFileSchema = Schema.Struct({
   search: Schema.optionalKey(Schema.Literals(['brave', 'deepseek', 'exa', 'perplexity'])),
   deepseekToolsBaseUrl: Schema.optionalKey(Schema.String),
   skills: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** The tools a new session is offered; absent offers every tool the rows register. */
+  tools: Schema.optionalKey(Schema.Array(Schema.String)),
   plugins: Schema.optionalKey(Schema.Array(PluginRowSchema)),
   /** The routes an external event may start a session on; absent means none. */
   webhooks: Schema.optionalKey(Schema.Array(WebhookRuleSchema)),
@@ -28,6 +30,7 @@ export interface JozoHarnessConfig {
   readonly search?: 'brave' | 'deepseek' | 'exa' | 'perplexity' | undefined
   readonly deepseekToolsBaseUrl?: string | undefined
   readonly skills?: ReadonlyArray<string> | undefined
+  readonly tools?: ReadonlyArray<string> | undefined
   readonly plugins?: ReadonlyArray<PluginRow> | undefined
   readonly webhooks?: ReadonlyArray<WebhookRule> | undefined
 }

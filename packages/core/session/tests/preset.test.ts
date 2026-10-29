@@ -21,6 +21,12 @@ const selected = (
   tools: ReadonlyArray<string>,
 ): SessionEvent => event(seq, 'preset/selected', { profiles, tools })
 
+const chosen = (
+  seq: number,
+  profiles: ReadonlyArray<string>,
+  tools: ReadonlyArray<string>,
+): SessionEvent => event(seq, 'composition/selected', { profiles, tools })
+
 const CODE = ['read', 'write', 'edit', 'glob', 'grep', 'bash']
 
 describe('the composition a session was started with', () => {
@@ -92,9 +98,9 @@ describe('the composition a session was started with', () => {
     ).toBeUndefined()
   })
 
-  test('the next step is offered only the tools the session last chose', () => {
+  test('the next step is offered only the tools a human last chose', () => {
     const offered = ['read', 'write', 'bash', 'grep']
-    const events = [selected(1, ['headless'], ['read', 'bash'])]
+    const events = [chosen(1, ['headless'], ['read', 'bash'])]
 
     expect(
       presetTools(
@@ -102,6 +108,15 @@ describe('the composition a session was started with', () => {
         offered.map((name) => ({ name })),
       ),
     ).toEqual([{ name: 'read' }, { name: 'bash' }])
+  })
+
+  test('what the build recorded does not narrow the request, so a row wired mid-run stays usable', () => {
+    const events = [selected(1, ['headless'], ['read'])]
+
+    expect(presetTools(events, [{ name: 'read' }, { name: 'bash' }])).toEqual([
+      { name: 'read' },
+      { name: 'bash' },
+    ])
   })
 
   test('a session that never chose a set is offered every tool', () => {

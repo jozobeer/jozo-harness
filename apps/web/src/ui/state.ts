@@ -2,6 +2,7 @@ import type { Attachment, Quote, UiEvent, UiSessionEvent } from '@jozo-harness/u
 import { applyEvent, emptyConversation, type Conversation } from '@jozo-harness/ui-view'
 import type {
   CommandView,
+  CompositionView,
   EditableSettingsView,
   JobDetailView,
   OpenAppsView,
@@ -74,6 +75,10 @@ export interface WebState {
   readonly editable: EditableSettingsView | undefined
   /** Why the last settings read or save failed; '' when nothing did. */
   readonly settingsProblem: string
+  /** What the open session runs with, and the default a new one starts from. */
+  readonly composition: CompositionView | undefined
+  /** Why the last composition read or write failed; '' when nothing did. */
+  readonly compositionProblem: string
   /** The provider's models, once the reader asked for them; undefined while nobody has. */
   readonly models: ReadonlyArray<string> | undefined
   /** What this session can be told, once the composer asked; undefined while nobody has. */
@@ -165,6 +170,8 @@ export const initialState: WebState = {
   settings: undefined,
   editable: undefined,
   settingsProblem: '',
+  composition: undefined,
+  compositionProblem: '',
   models: undefined,
   commands: undefined,
   files: undefined,
@@ -250,6 +257,18 @@ export const withEditable = (state: WebState, editable: EditableSettingsView): W
 export const withSettingsProblem = (state: WebState, problem: string): WebState => ({
   ...state,
   settingsProblem: problem,
+})
+
+export const withComposition = (state: WebState, composition: CompositionView): WebState => ({
+  ...state,
+  composition,
+  // A fresh answer settles whatever the last read or write said.
+  compositionProblem: '',
+})
+
+export const withCompositionProblem = (state: WebState, problem: string): WebState => ({
+  ...state,
+  compositionProblem: problem,
 })
 
 export const withModels = (state: WebState, models: ReadonlyArray<string>): WebState => ({

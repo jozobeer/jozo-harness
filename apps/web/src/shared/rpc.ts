@@ -670,6 +670,63 @@ export const SaveRunSettingsRpc = Rpc.make('saveRunSettings', {
 })
 
 /** One app a session's workspace can be handed to on the machine running the server. */
+/** The composition one session runs with, and what this run could offer it. */
+export const CompositionViewSchema = Schema.Struct({
+  /** The profile rows the session was built from. */
+  profiles: Schema.Array(Schema.String),
+  /** The tools the next turn offers the model. */
+  selected: Schema.Array(Schema.String),
+  /** Every tool this run can offer; a set is chosen from these. */
+  offered: Schema.Array(Schema.String),
+  /** What a new session starts from, from the settings file; absent means every tool. */
+  defaultTools: Schema.optionalKey(Schema.Array(Schema.String)),
+  settingsPath: Schema.String,
+})
+
+export type CompositionView = typeof CompositionViewSchema.Type
+
+/** What one choice would change, worked out before anything is written. */
+export const CompositionChangeSchema = Schema.Struct({
+  /** Chosen tools this run cannot offer; while any is here the set is not written. */
+  missing: Schema.Array(Schema.String),
+  added: Schema.Array(Schema.String),
+  removed: Schema.Array(Schema.String),
+  writable: Schema.Boolean,
+})
+
+export type CompositionChange = typeof CompositionChangeSchema.Type
+
+/** Reads one session's composition and the default a new session would start from. */
+export const CompositionRpc = Rpc.make('composition', {
+  payload: Schema.Struct({ sessionId: Schema.String }),
+  success: CompositionViewSchema,
+  error: Schema.String,
+})
+
+/** Names what a chosen set would add, remove, and miss, without writing anything. */
+export const PreviewCompositionRpc = Rpc.make('previewComposition', {
+  payload: Schema.Struct({ sessionId: Schema.String, tools: Schema.Array(Schema.String) }),
+  success: CompositionChangeSchema,
+  error: Schema.String,
+})
+
+/**
+ * Writes the chosen set into the session's log, so the next turn offers it. A
+ * tool this run cannot offer refuses the write and names the tool.
+ */
+export const SetCompositionRpc = Rpc.make('setComposition', {
+  payload: Schema.Struct({ sessionId: Schema.String, tools: Schema.Array(Schema.String) }),
+  success: CompositionViewSchema,
+  error: Schema.String,
+})
+
+/** Writes the tool set a new session starts from into the settings file. */
+export const SaveDefaultCompositionRpc = Rpc.make('saveDefaultComposition', {
+  payload: Schema.Struct({ tools: Schema.Array(Schema.String) }),
+  success: Schema.Boolean,
+  error: Schema.String,
+})
+
 export const OpenAppSchema = Schema.Struct({
   id: Schema.String,
   label: Schema.String,
@@ -727,6 +784,10 @@ export const UiRpcs = RpcGroup.make(
   OpenInAppRpc,
   AttachRpc,
   StateRpc,
+  CompositionRpc,
+  PreviewCompositionRpc,
+  SetCompositionRpc,
+  SaveDefaultCompositionRpc,
   ScheduleCreateRpc,
   SchedulePauseRpc,
   ScheduleDeleteRpc,

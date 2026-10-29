@@ -26,4 +26,14 @@ export interface SettingsPort {
    * A refusal names the field, so the page can point at it.
    */
   readonly saveEditable: (input: RunSettingsInput) => Effect.Effect<EditableSettingsView, WebError>
+  /** The tool set a new session starts from, as the settings file holds it now. */
+  readonly defaultTools: () => Effect.Effect<
+    { readonly tools: ReadonlyArray<string> | undefined; readonly settingsPath: string },
+    WebError
+  >
+  /**
+   * Writes the set a new session starts from through the settings file, the same
+   * one `jzh config set tools` writes. A session already open keeps its own set.
+   */
+  readonly saveDefaultTools: (tools: ReadonlyArray<string>) => Effect.Effect<void, WebError>
 }

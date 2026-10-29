@@ -262,7 +262,34 @@ interface FakeWeb {
   readonly seeds: Array<ReadonlyArray<SessionEvent> | undefined>
   /** The log a fork reads, as the store would hand it back. */
   readonly log: Array<SessionEvent>
+  /** The tool sets a page wrote to a session, by session id. */
+  readonly written: Map<string, ReadonlyArray<string>>
 }
+
+/** What one fake session runs with, after any set a page wrote to it. */
+const compositionOf = (
+  written: Map<string, ReadonlyArray<string>>,
+  id: string,
+): {
+  profiles: ReadonlyArray<string>
+  selected: ReadonlyArray<string>
+  offered: ReadonlyArray<string>
+} => ({
+  profiles: ['headless'],
+  selected: [...(written.get(id) ?? ['read'])],
+  offered: ['read', 'bash'],
+})
+
+/** Records one chosen set against a fake session, as the core would in its log. */
+const writeComposition = (
+  written: Map<string, ReadonlyArray<string>>,
+  id: string,
+  tools: ReadonlyArray<string>,
+) =>
+  Effect.sync(() => {
+    written.set(id, [...tools])
+    return compositionOf(written, id)
+  })
 
 /** The sessions one fake store holds: the boot one, plus whatever a page opens. */
 const makeWeb = (initialId: string, cwd = '/work', working = true): FakeWeb => {
@@ -270,6 +297,7 @@ const makeWeb = (initialId: string, cwd = '/work', working = true): FakeWeb => {
   const hosts = new Map<string, FakeHost>([[initialId, first]])
   const closed: Array<string> = []
   const seeds: Array<ReadonlyArray<SessionEvent> | undefined> = []
+  const written = new Map<string, ReadonlyArray<string>>()
   const log: Array<SessionEvent> = [
     { seq: 1, time: 1, type: 'user/message', data: { text: 'first ask', source: 'user' } },
     { seq: 2, time: 2, type: 'user/message', data: { text: 'second ask', source: 'user' } },
@@ -279,9 +307,12 @@ const makeWeb = (initialId: string, cwd = '/work', working = true): FakeWeb => {
     closed,
     seeds,
     log,
+    written,
     initial: {
       summary: first.summary,
       host: first.host,
+      composition: () => compositionOf(written, initialId),
+      setComposition: (tools) => writeComposition(written, initialId, tools),
       commands: first.commandList,
       runState: first.runState,
       jobOutput: first.jobOutput,
@@ -306,6 +337,8 @@ const makeWeb = (initialId: string, cwd = '/work', working = true): FakeWeb => {
             return {
               summary: known.summary,
               host: known.host,
+              composition: () => compositionOf(written, made),
+              setComposition: (tools) => writeComposition(written, made, tools),
               commands: known.commandList,
               runState: known.runState,
               jobOutput: known.jobOutput,
@@ -320,6 +353,8 @@ const makeWeb = (initialId: string, cwd = '/work', working = true): FakeWeb => {
           return {
             summary: fresh.summary,
             host: fresh.host,
+            composition: () => compositionOf(written, made),
+            setComposition: (tools) => writeComposition(written, made, tools),
             commands: fresh.commandList,
             runState: fresh.runState,
             jobOutput: fresh.jobOutput,
@@ -472,10 +507,17 @@ const settingsView: SettingsView = {
 }
 
 /** A settings file the page may read and write, kept only in memory. */
-const makeSettings = (): { readonly port: SettingsPort; readonly wrote: Array<string> } => {
+const makeSettings = (): {
+  readonly port: SettingsPort
+  readonly wrote: Array<string>
+  /** Every default tool set the page saved, in the order it saved them. */
+  readonly defaults: Array<ReadonlyArray<string>>
+} => {
   const wrote: Array<string> = []
+  const defaults: Array<ReadonlyArray<string>> = []
   return {
     wrote,
+    defaults,
     port: {
       read: () => Effect.succeed(settingsView),
       models: () => Effect.succeed(['stub/model', 'stub/other']),
@@ -504,6 +546,12 @@ const makeSettings = (): { readonly port: SettingsPort; readonly wrote: Array<st
           maxParallelToolCalls: { value: 10, source: 'the default' },
           subagentDepth: { value: 1, source: 'the default' },
           delegateTools: [],
+        }),
+      defaultTools: () =>
+        Effect.succeed({ tools: undefined, settingsPath: settingsView.settingsPath }),
+      saveDefaultTools: (tools) =>
+        Effect.sync(() => {
+          defaults.push([...tools])
         }),
     },
   }
@@ -2605,6 +2653,60 @@ describe('the web transport', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('a composition is previewed before it is written, and a tool this run lacks stops the write', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-composition-'))
+    await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
+    const web = makeWeb('a')
+    const settings = makeSettings()
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const view = yield* client.composition({ sessionId: 'a' })
+            const preview = yield* client.previewComposition({
+              sessionId: 'a',
+              tools: ['read', 'edit'],
+            })
+            const refused = yield* client
+              .setComposition({ sessionId: 'a', tools: ['read', 'edit'] })
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
+            const saved = yield* client.saveDefaultComposition({ tools: ['read'] })
+            // The refused write above left the session's log as it was.
+            const afterRefused = web.written.get('a')
+            const applied = yield* client.setComposition({
+              sessionId: 'a',
+              tools: ['read', 'bash'],
+            })
+            return { view, preview, refused, saved, afterRefused, applied }
+          }).pipe(clientLayers(started.wsUrl))
+          const result = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    expect(observed.view.offered).toEqual(['read', 'bash'])
+    // The preview names the tool the run cannot offer, and nothing is written yet.
+    expect(observed.preview).toEqual({
+      missing: ['edit'],
+      added: [],
+      removed: [],
+      writable: false,
+    })
+    expect(observed.refused).toBe('this run cannot offer edit; nothing was written')
+    expect(observed.afterRefused).toBeUndefined()
+    // The default is a separate write, through the settings file.
+    expect(observed.saved).toBe(true)
+    expect(settings.defaults).toEqual([['read']])
+    expect(observed.applied.selected).toEqual(['read', 'bash'])
+    expect(web.written.get('a')).toEqual(['read', 'bash'])
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('the page asks a session what it is working toward', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-state-'))
     await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
@@ -2787,12 +2889,14 @@ describe('the web transport', () => {
       setEffort: () => Effect.fail(new WebError({ message: 'no writing here' })),
       editable: () => Effect.fail(new WebError({ message: 'no settings here' })),
       saveEditable: () => Effect.fail(new WebError({ message: 'no writing here' })),
+      defaultTools: () => Effect.fail(new WebError({ message: 'no settings here' })),
+      saveDefaultTools: () => Effect.fail(new WebError({ message: 'no writing here' })),
     }
 
     const observed = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const started = yield* start(root, web, { port: failing, wrote: [] })
+          const started = yield* start(root, web, { port: failing, wrote: [], defaults: [] })
           const wsUrl = started.wsUrl
           const useClient = Effect.gen(function* () {
             const client = yield* RpcClient.make(UiRpcs)

@@ -1,6 +1,7 @@
 import { For, Match, Show, Switch, createEffect, createSignal, onCleanup, onMount } from 'solid-js'
 import type { ConversationBlock } from '@jozo-harness/ui-view'
 import type {
+  CompositionView,
   DelegateToolView,
   EditableSettingsView,
   PluginCatalogView,
@@ -1349,6 +1350,93 @@ const familyLabel: Record<FontFamily, MessageKey> = {
   mono: 'settings.font.mono',
 }
 
+/**
+ * The composition a session runs with: the tools its next turn offers, chosen
+ * from what this run can offer. Applying a set previews it first, so a tool this
+ * run cannot offer is named and the log stays as it was; saving a default is a
+ * separate write, through the settings file, and never changes the open session.
+ */
+const CompositionSettings = (props: { store: SessionStore }) => {
+  const t = useTranslate()
+  const [chosen, setChosen] = createSignal<ReadonlyArray<string>>([])
+  let loaded: CompositionView | undefined
+
+  onMount(() => {
+    if (props.store.state().composition === undefined) props.store.askComposition()
+  })
+  createEffect(() => {
+    const view = props.store.state().composition
+    if (view === undefined || view === loaded) return
+    loaded = view
+    setChosen(view.selected)
+  })
+
+  const toggle = (name: string): void => {
+    setChosen((current) =>
+      current.includes(name) ? current.filter((tool) => tool !== name) : [...current, name],
+    )
+  }
+
+  return (
+    <Show
+      when={props.store.state().sessionId !== ''}
+      fallback={<div class="card-hint">{t('composition.noSession')}</div>}
+    >
+      <span class="pane-label">{t('composition.title')}</span>
+      <Show
+        when={props.store.state().composition}
+        fallback={<div class="card-hint">{t('composition.reading')}</div>}
+      >
+        {(view) => (
+          <div class="settings-form" id="composition-settings">
+            <span class="settings-field">
+              <span>{t('composition.tools')}</span>
+              <For each={view().offered}>
+                {(name) => (
+                  <label class="settings-field">
+                    <input
+                      id={'composition-tool-' + name}
+                      type="checkbox"
+                      checked={chosen().includes(name)}
+                      onChange={() => toggle(name)}
+                    />
+                    <span>{name}</span>
+                  </label>
+                )}
+              </For>
+            </span>
+            <Show when={props.store.state().compositionProblem !== ''}>
+              <div class="card-hint">{props.store.state().compositionProblem}</div>
+            </Show>
+            <div class="panel-actions">
+              <Button
+                id="apply-composition"
+                variant="primary"
+                type="button"
+                onClick={() => props.store.applyComposition(chosen())}
+              >
+                {t('composition.apply')}
+              </Button>
+              <Button
+                id="save-composition"
+                type="button"
+                onClick={() => props.store.saveDefaultComposition(chosen())}
+              >
+                {t('composition.saveDefault')}
+              </Button>
+            </div>
+            <div class="card-hint">
+              {view().defaultTools === undefined
+                ? t('composition.noDefault')
+                : t('composition.default') + ': ' + (view().defaultTools ?? []).join(', ')}
+            </div>
+          </div>
+        )}
+      </Show>
+    </Show>
+  )
+}
+
 const Settings = (props: {
   store: SessionStore
   settings: SettingsView | undefined
@@ -1535,6 +1623,7 @@ const Settings = (props: {
         )}
       </Show>
       <EditableSettings store={props.store} />
+      <CompositionSettings store={props.store} />
       <Share />
     </>
   )
