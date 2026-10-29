@@ -6,6 +6,8 @@ import {
   initialState,
   withBranch,
   withCommands,
+  withComposition,
+  withCompositionProblem,
   withConnection,
   withDeletedPage,
   withDraft,
@@ -215,6 +217,27 @@ describe('the browser state', () => {
     // None of the moves names the conversation or the trace, so both stay as they were.
     expect(state.conversation).toBe(initialState.conversation)
     expect(state.trace).toBe(initialState.trace)
+  })
+
+  test('a fresh composition settles the last problem, and a problem leaves the set on screen', () => {
+    const composition = {
+      profiles: ['headless'],
+      selected: ['read'],
+      offered: ['read', 'bash'],
+      defaultTools: ['read'],
+      settingsPath: '/home/.config/jzh/config.yml',
+    }
+    const failed = withCompositionProblem(initialState, 'the session is not open')
+    const shown = withComposition(failed, composition)
+
+    expect(failed.compositionProblem).toBe('the session is not open')
+    expect(shown.composition).toEqual(composition)
+    // A fresh answer settles whatever the last read or write said...
+    expect(shown.compositionProblem).toBe('')
+    // ...while a refused write keeps the set the page already showed.
+    const refused = withCompositionProblem(shown, 'this run cannot offer edit')
+    expect(refused.composition).toEqual(composition)
+    expect(refused.compositionProblem).toBe('this run cannot offer edit')
   })
 
   test('a page the server no longer holds leaves the run pane once', () => {

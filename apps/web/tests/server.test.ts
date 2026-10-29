@@ -2909,7 +2909,19 @@ describe('the web transport', () => {
             const models = yield* client
               .models()
               .pipe(Effect.catch((message) => Effect.succeed(message)))
-            return { stopped, settings, models }
+            const effort = yield* client
+              .setEffort({ effort: 'high' })
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
+            const runSettings = yield* client
+              .runSettings()
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
+            const composition = yield* client
+              .composition({ sessionId: 'a' })
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
+            const saved = yield* client
+              .saveDefaultComposition({ tools: ['read'] })
+              .pipe(Effect.catch((message) => Effect.succeed(message)))
+            return { stopped, settings, models, effort, runSettings, composition, saved }
           }).pipe(clientLayers(wsUrl))
           const result = yield* withoutServices(useClient)
           yield* Deferred.succeed(started.stop, undefined)
@@ -2921,6 +2933,11 @@ describe('the web transport', () => {
     expect(observed.stopped).toBe('no such job')
     expect(observed.settings).toBe('no settings here')
     expect(observed.models).toBe('no models here')
+    // Every write and every read the settings sheet asks for reports what the file said.
+    expect(observed.effort).toBe('no writing here')
+    expect(observed.runSettings).toBe('no settings here')
+    expect(observed.composition).toBe('no settings here')
+    expect(observed.saved).toBe('no writing here')
     await rm(root, { recursive: true, force: true })
   })
 

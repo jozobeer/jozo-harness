@@ -4,6 +4,7 @@ import {
   compositionWritable,
   currentPreset,
   describePreset,
+  effectivePreset,
   presetChange,
   presetProblem,
   presetResumable,
@@ -124,6 +125,16 @@ describe('the composition a session was started with', () => {
       { name: 'read' },
       { name: 'bash' },
     ])
+  })
+
+  test('a human choice outranks the build record, and the build record stands until one is made', () => {
+    const built = selected(1, ['headless'], ['read', 'bash'])
+    const human = chosen(2, ['headless'], ['read'])
+
+    expect(effectivePreset([built])).toEqual({ profiles: ['headless'], tools: ['read', 'bash'] })
+    expect(effectivePreset([built, human])).toEqual({ profiles: ['headless'], tools: ['read'] })
+    // A session whose log holds neither is offered every tool, with no profile rows to name.
+    expect(effectivePreset([])).toBeUndefined()
   })
 
   test('a chosen set keeps the profile rows it was started with', () => {
