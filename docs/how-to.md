@@ -928,7 +928,7 @@ plugins:
 
 ## コマンドを sandbox の外で走らせる
 
-`@jozo-harness/safety` の `sandbox` は既定で `auto` である。macOS では `seatbelt`（`sandbox-exec`）、Linux では `bwrap`（bubblewrap）が走る。コマンドは自分が走るディレクトリと一時ディレクトリにだけ書ける。それ以外の場所に書こうとすると macOS では `Operation not permitted`、Linux では `Read-only file system` になる。読み取りは制限せず、`/dev/null` への書き込みは許可する。
+`@jozo-harness/safety` の `sandbox` は既定で `auto` である。macOS では `seatbelt`（`sandbox-exec`）、Linux では `bwrap`（bubblewrap）が走る。Linux で bwrap が使えないときは `landlock-run` が Landlock で同じ境界を張る。コマンドは自分が走るディレクトリと一時ディレクトリにだけ書ける。それ以外の場所に書こうとすると macOS では `Operation not permitted`、bwrap では `Read-only file system`、Landlock では `Permission denied` になる。読み取りは制限せず、`/dev/null` への書き込みは許可する。
 
 ```yaml
   - id: safety
@@ -940,7 +940,7 @@ plugins:
         - ~/work/shared
 ```
 
-`auto` で sandbox が使えないとき、または明示した backend がその platform で動かないときは、無制限に切り替えず起動が失敗する。Linux では `bwrap` の probe が通らない（未導入、user namespace を作れない）場合も起動が失敗する。
+`auto` で sandbox が使えないとき、または明示した backend がその platform で動かないときは、無制限に切り替えず起動が失敗する。Linux では `bwrap` の probe が通らない（未導入、user namespace を作れない）とき、`landlock-run` の probe が通れば Landlock に落ちる。どちらも通らないときは起動が失敗する。
 
 Ubuntu 23.10 以降は AppArmor が非特権の user namespace を拒むので、bubblewrap を入れただけでは probe が通らない。bwrap に user namespace を許す profile を置く（CI も同じ手順を踏む）。
 
@@ -952,6 +952,16 @@ printf '%s\n' 'abi <abi/4.0>,' 'include <tunables/global>' \
 sudo apparmor_parser -r /etc/apparmor.d/bwrap
 bwrap --ro-bind / / --dev /dev --proc /proc --unshare-pid true && echo ok
 ```
+
+bwrap を入れられないホストでは、Landlock の helper を入れると書き込みだけを cwd と一時ディレクトリに閉じられる。
+
+```sh
+cargo install --path crates/landlock-run   # PATH に landlock-run が入る
+cargo build -p landlock-run                # checkout なら target/debug も探す
+landlock-run --probe && echo ok
+```
+
+helper は読み取りを制限せず、書き込みだけを閉じる。`--probe` は ruleset を適用してすぐ終わるので、カーネルが Landlock を受け付けるかどうかをそのまま確かめられる。
 
 ## PowerShell でコマンドを走らせる
 
