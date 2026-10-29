@@ -7,6 +7,7 @@
     "test": "vp test",
     "test:coverage": "vp test --coverage",
     "coverage:gate": "node scripts/coverage-gate.ts",
+    "bundle:check": "node scripts/browser-bundle-check.ts",
     "doc:gate": "node scripts/doc-gate.ts",
     "duplication": "node scripts/duplication-gate.ts",
     "ab": "node scripts/ab/run.ts",
@@ -14,7 +15,7 @@
     "fmt": "vp fmt",
     "fmt:check": "vp fmt --check",
     "complexity": "cccc --top-cognitive 10 --table --exclude '**/dist/**' apps packages",
-    "check:static": "vp check && vp run lint && vp run typecheck && vp run doc:gate && vp run duplication && vp run complexity && vp run rust:check",
+    "check:static": "vp check && vp run lint && vp run typecheck && vp run doc:gate && vp run duplication && vp run complexity && vp run rust:check && vp run bundle:check",
     "check": "vp run check:static && vp -C apps/web/client-solid test && vp run coverage:gate",
     "prepare": "git config core.hooksPath .githooks",
     "build:web": "vp -C apps/web/client-solid build"
