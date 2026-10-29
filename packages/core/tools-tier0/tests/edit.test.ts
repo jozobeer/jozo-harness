@@ -8,6 +8,7 @@ import {
 } from '@jozo-harness/tools'
 import { Context, Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
+import { nodeFileSystem } from '@jozo-harness/filesystem/node'
 import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -22,8 +23,8 @@ const writeFileDeep = async (path: string, text: string | Uint8Array): Promise<v
 const makeSession = (cwd: string) => {
   const observed = makeObservedFiles()
   const list: ReadonlyArray<ToolDefinition<any, any>> = [
-    makeReadTool(observed),
-    makeEditTool(observed),
+    makeReadTool(nodeFileSystem, observed),
+    makeEditTool(nodeFileSystem, observed),
   ]
   return (
     name: string,

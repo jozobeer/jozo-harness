@@ -1,0 +1,13 @@
+{
+  "name": "@jozo-harness/filesystem",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./memory": "./src/memory.ts",
+    "./node": "./src/node.ts"
+  },
+  "dependencies": {
+    "effect": "4.0.3"
+  }
+}

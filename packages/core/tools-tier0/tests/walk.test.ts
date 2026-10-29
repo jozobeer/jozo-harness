@@ -3,7 +3,22 @@ import { describe, expect, test } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { isBinary, makeIgnoredPaths, readIgnoreRules, walkFiles } from '../src/index.ts'
+import { withFileSystem } from '@jozo-harness/filesystem'
+import { nodeFileSystem } from '@jozo-harness/filesystem/node'
+import {
+  isBinary,
+  makeIgnoredPaths,
+  readIgnoreRules,
+  walkFiles,
+  type WalkRequest,
+} from '../src/index.ts'
+
+/** The walk against the disk, which is what every Node caller runs. */
+const walkOnDisk = (request: WalkRequest): Effect.Effect<ReadonlyArray<string>> =>
+  withFileSystem(nodeFileSystem, walkFiles(request))
+
+/** The ignore rules against the disk, for the same reason. */
+const rulesOnDisk = (cwd: string) => withFileSystem(nodeFileSystem, readIgnoreRules(cwd))
 /** Writes a file, making the directories above it, because the file may not be there yet. */
 const writeFileDeep = async (path: string, text: string | Uint8Array): Promise<void> => {
   await mkdir(dirname(path), { recursive: true })
@@ -24,7 +39,7 @@ describe('walkFiles', () => {
     await write(dir, '.git/config')
     await write(dir, '.hidden/file.txt')
 
-    const found = await Effect.runPromise(walkFiles({ cwd: dir, limit: 100 }))
+    const found = await Effect.runPromise(walkOnDisk({ cwd: dir, limit: 100 }))
 
     expect(found).toEqual(['.hidden/file.txt', 'src/a.ts'])
     await rm(dir, { recursive: true, force: true })
@@ -38,7 +53,7 @@ describe('walkFiles', () => {
     await write(dir, 'keep.log')
     await write(dir, 'src/a.ts')
 
-    const found = await Effect.runPromise(walkFiles({ cwd: dir, limit: 100 }))
+    const found = await Effect.runPromise(walkOnDisk({ cwd: dir, limit: 100 }))
 
     expect(found).toEqual(['.gitignore', 'keep.log', 'src/a.ts'])
     await rm(dir, { recursive: true, force: true })
@@ -52,7 +67,7 @@ describe('walkFiles', () => {
     await write(dir, 'elsewhere/generated/b.ts')
     await write(dir, 'note.tmp')
 
-    const found = await Effect.runPromise(walkFiles({ cwd: dir, limit: 100 }))
+    const found = await Effect.runPromise(walkOnDisk({ cwd: dir, limit: 100 }))
 
     expect(found).toEqual(['.ignore', 'elsewhere/generated/b.ts', 'src/kept.ts'])
     await rm(dir, { recursive: true, force: true })
@@ -64,7 +79,7 @@ describe('walkFiles', () => {
     await write(dir, 'src/sub/b.ts')
     await write(dir, 'other/c.ts')
 
-    const found = await Effect.runPromise(walkFiles({ cwd: dir, limit: 100, start: 'src' }))
+    const found = await Effect.runPromise(walkOnDisk({ cwd: dir, limit: 100, start: 'src' }))
 
     expect(found).toEqual(['src/a.ts', 'src/sub/b.ts'])
     await rm(dir, { recursive: true, force: true })
@@ -74,7 +89,7 @@ describe('walkFiles', () => {
     const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-walk-'))
     for (let index = 0; index < 5; index += 1) await write(dir, 'f' + String(index) + '.txt')
 
-    const found = await Effect.runPromise(walkFiles({ cwd: dir, limit: 2 }))
+    const found = await Effect.runPromise(walkOnDisk({ cwd: dir, limit: 2 }))
 
     expect(found).toHaveLength(2)
     await rm(dir, { recursive: true, force: true })
@@ -101,7 +116,7 @@ describe('the ignore rules themselves', () => {
   test('a missing ignore file is no rules at all', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-walk-'))
 
-    expect(await Effect.runPromise(readIgnoreRules(dir))).toEqual([])
+    expect(await Effect.runPromise(rulesOnDisk(dir))).toEqual([])
     await rm(dir, { recursive: true, force: true })
   })
 })

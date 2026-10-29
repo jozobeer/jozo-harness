@@ -1,5 +1,6 @@
 import { noneSandbox, type ApprovalShape, type SandboxShape } from '@jozo-harness/safety'
 import { Schema, Effect } from 'effect'
+import { FileSystem, withFileSystem, type FileSystemShape } from '@jozo-harness/filesystem'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
 import { deniedFor, escalates, escalationFields, modeOfCall } from './escalation.ts'
 import { guardEdit, look, type ObservedFiles } from './observed-files.ts'
@@ -7,7 +8,6 @@ import { readForEdit, restoreLineEndings } from './text.ts'
 import { changedLines } from './present.ts'
 import { resolveInside } from './workspace.ts'
 import { editDiffs } from './diff.ts'
-import { stageFile } from './atomic.ts'
 
 const Parameters = Schema.Struct({
   path: Schema.String.annotate({
@@ -64,6 +64,7 @@ const refuseEmptyOldString = (oldString: string): Effect.Effect<void, ToolError>
  * written, so a failed edit leaves it exactly as it was.
  */
 export const makeEditTool = (
+  fileSystem: FileSystemShape,
   observed: ObservedFiles,
   sandbox: SandboxShape = noneSandbox,
   approval?: ApprovalShape,
@@ -88,54 +89,68 @@ export const makeEditTool = (
       ],
     },
     execute: (args, context) =>
-      Effect.gen(function* () {
-        yield* refuseEmptyOldString(args.oldString)
-        const mode = yield* modeOfCall({
-          args: args,
-          callId: context.callId,
-          tool: 'edit',
-          subject: 'operation',
-          sandbox,
-          approval,
-        })
-        const path = yield* resolveInside(context.cwd, args.path, mode).pipe(
-          Effect.mapError((error) => deniedFor(error.message, mode, 'operation', canEscalate)),
-        )
-        yield* guardEdit(observed, context.sessionId, path)
-        const source = yield* readForEdit(path)
-        const found = countOf(source.text, args.oldString)
-        if (found === 0) {
-          return yield* Effect.fail(
-            new ToolError({ code: 'execution', message: 'no match for the old text in ' + path }),
+      withFileSystem(
+        fileSystem,
+        Effect.gen(function* () {
+          yield* refuseEmptyOldString(args.oldString)
+          const mode = yield* modeOfCall({
+            args: args,
+            callId: context.callId,
+            tool: 'edit',
+            subject: 'operation',
+            sandbox,
+            approval,
+          })
+          const path = yield* resolveInside(fileSystem, context.cwd, args.path, mode).pipe(
+            Effect.mapError((error) => deniedFor(error.message, mode, 'operation', canEscalate)),
           )
-        }
-        const all = args.all === true
-        if (found > 1 && !all) {
-          return yield* Effect.fail(
-            new ToolError({
-              code: 'execution',
-              message: String(found) + ' matches in ' + path + '; pass all to replace every one',
-            }),
+          yield* guardEdit(observed, context.sessionId, path)
+          const source = yield* readForEdit(path)
+          const found = countOf(source.text, args.oldString)
+          if (found === 0) {
+            return yield* Effect.fail(
+              new ToolError({ code: 'execution', message: 'no match for the old text in ' + path }),
+            )
+          }
+          const all = args.all === true
+          if (found > 1 && !all) {
+            return yield* Effect.fail(
+              new ToolError({
+                code: 'execution',
+                message: String(found) + ' matches in ' + path + '; pass all to replace every one',
+              }),
+            )
+          }
+          // A function replacement is copied literally. A string replacement would
+          // expand $$, $&, $', and $`, so a price or a shell snippet would rewrite the file.
+          const updated = all
+            ? source.text.split(args.oldString).join(args.newString)
+            : source.text.replace(args.oldString, () => args.newString)
+          const disk = yield* FileSystem
+          const staged = yield* disk
+            .stage(path, restoreLineEndings(updated, source.lineEndings))
+            .pipe(
+              Effect.mapError(
+                () => new ToolError({ code: 'execution', message: 'cannot write ' + path }),
+              ),
+            )
+          // Staging the replacement does not touch the file, so a change that landed
+          // during the read-modify-write is caught here and the staged copy is dropped.
+          yield* guardEdit(observed, context.sessionId, path).pipe(
+            Effect.onError(() => staged.discard),
           )
-        }
-        // A function replacement is copied literally. A string replacement would
-        // expand $$, $&, $', and $`, so a price or a shell snippet would rewrite the file.
-        const updated = all
-          ? source.text.split(args.oldString).join(args.newString)
-          : source.text.replace(args.oldString, () => args.newString)
-        const staged = yield* stageFile(path, restoreLineEndings(updated, source.lineEndings))
-        // Staging the replacement does not touch the file, so a change that landed
-        // during the read-modify-write is caught here and the staged copy is dropped.
-        yield* guardEdit(observed, context.sessionId, path).pipe(
-          Effect.onError(() => staged.discard),
-        )
-        yield* staged.commit
-        const written = yield* look(path)
-        if (written !== undefined) observed.observe(context.sessionId, path, written)
-        for (const diff of editDiffs(path, source.text, args.oldString, args.newString)) {
-          context.changes?.record(diff)
-        }
-        return { path, replacements: all ? found : 1 }
-      }),
+          yield* staged.commit.pipe(
+            Effect.mapError(
+              () => new ToolError({ code: 'execution', message: 'cannot write ' + path }),
+            ),
+          )
+          const written = yield* look(path)
+          if (written !== undefined) observed.observe(context.sessionId, path, written)
+          for (const diff of editDiffs(path, source.text, args.oldString, args.newString)) {
+            context.changes?.record(diff)
+          }
+          return { path, replacements: all ? found : 1 }
+        }),
+      ),
   }
 }

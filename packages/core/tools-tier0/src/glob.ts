@@ -1,5 +1,6 @@
 import { matchesGlob } from 'node:path'
 import { Schema, Effect } from 'effect'
+import { withFileSystem, type FileSystemShape } from '@jozo-harness/filesystem'
 import { ToolError, writeSpill, type ToolDefinition } from '@jozo-harness/tools'
 import { takePage } from './page.ts'
 import { fallbackNote, defaultRipgrep, listWithRipgrep, type Ripgrep } from './ripgrep.ts'
@@ -77,6 +78,7 @@ const renderGlob = (
  * without it says why it fell back to the walker.
  */
 export const makeGlobTool = (
+  fileSystem: FileSystemShape,
   ripgrep: Ripgrep = defaultRipgrep,
 ): ToolDefinition<GlobArgs, GlobValue> => ({
   name: 'glob',
@@ -96,51 +98,52 @@ export const makeGlobTool = (
     render: (_args, value) => renderGlob(value),
   },
   execute: (args, context) =>
-    Effect.gen(function* () {
-      const page = args.limit ?? GLOB_PAGE_PATHS
-      if (page < 1) {
-        return yield* Effect.fail(
-          new ToolError({ code: 'invalid-arguments', message: 'limit starts at 1' }),
-        )
-      }
-      const start = yield* resolveSearchStart(context.cwd, args.path)
-      // One path past the collection cap is enough to know the search was stopped.
-      const listing = yield* Effect.promise(() =>
-        listWithRipgrep(
-          {
-            cwd: context.cwd,
-            start,
-            limit: GLOB_MAX_PATHS + 1,
-            accept: (path) => matchesGlob(path, args.pattern),
-          },
-          ripgrep,
-        ),
-      )
-      const found =
-        listing.fallback === undefined
-          ? yield* orderPaths(context.cwd, listing.files, 'modified')
-          : yield* walkFiles({
+    withFileSystem(
+      fileSystem,
+      Effect.gen(function* () {
+        const page = args.limit ?? GLOB_PAGE_PATHS
+        if (page < 1) {
+          return yield* Effect.fail(
+            new ToolError({ code: 'invalid-arguments', message: 'limit starts at 1' }),
+          )
+        }
+        const start = yield* resolveSearchStart(fileSystem, context.cwd, args.path)
+        // One path past the collection cap is enough to know the search was stopped.
+        const listing = yield* Effect.promise(() =>
+          listWithRipgrep(
+            {
               cwd: context.cwd,
-              limit: GLOB_MAX_PATHS + 1,
-              pattern: args.pattern,
-              order: 'modified',
               start,
-            })
-      const complete = found.slice(0, GLOB_MAX_PATHS)
-      const shown = takePage(complete, page, (path) => path)
-      const fallback = listing.fallback === undefined ? {} : { fallback: listing.fallback }
-      if (found.length <= shown.length) {
-        return { files: shown, seen: found.length, truncated: false, ...fallback }
-      }
-      const locator = yield* writeSpill(context, 'glob', complete.join('\n'))
-      return {
-        files: shown,
-        seen: found.length,
-        truncated: true,
-        ...(locator === undefined ? {} : { locator }),
-        ...fallback,
-      }
-    }),
+              limit: GLOB_MAX_PATHS + 1,
+              accept: (path) => matchesGlob(path, args.pattern),
+            },
+            ripgrep,
+          ),
+        )
+        const found =
+          listing.fallback === undefined
+            ? yield* orderPaths(context.cwd, listing.files, 'modified')
+            : yield* walkFiles({
+                cwd: context.cwd,
+                limit: GLOB_MAX_PATHS + 1,
+                pattern: args.pattern,
+                order: 'modified',
+                start,
+              })
+        const complete = found.slice(0, GLOB_MAX_PATHS)
+        const shown = takePage(complete, page, (path) => path)
+        const fallback = listing.fallback === undefined ? {} : { fallback: listing.fallback }
+        if (found.length <= shown.length) {
+          return { files: shown, seen: found.length, truncated: false, ...fallback }
+        }
+        const locator = yield* writeSpill(context, 'glob', complete.join('\n'))
+        return {
+          files: shown,
+          seen: found.length,
+          truncated: true,
+          ...(locator === undefined ? {} : { locator }),
+          ...fallback,
+        }
+      }),
+    ),
 })
-
-export const globTool: ToolDefinition<GlobArgs, GlobValue> = makeGlobTool()

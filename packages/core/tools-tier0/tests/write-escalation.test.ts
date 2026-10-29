@@ -18,6 +18,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { nodeFileSystem } from '@jozo-harness/filesystem/node'
 import { tier0Tools } from '../src/index.ts'
 
 /** A sandbox that confines writes to the mode's roots, like seatbelt does. */
@@ -70,7 +71,9 @@ const toolNamed = (
   approval: ApprovalShape | undefined,
   name: string,
 ): ToolDefinition<any, any> => {
-  const tool = tier0Tools(sandbox, undefined, approval).find((candidate) => candidate.name === name)
+  const tool = tier0Tools(nodeFileSystem, sandbox, undefined, approval).find(
+    (candidate) => candidate.name === name,
+  )
   if (tool === undefined) throw new Error('no tool named ' + name)
   return tool
 }

@@ -2,6 +2,7 @@ import { PluginError, type Plugin } from '@jozo-harness/kernel'
 import { Sandbox, type ApprovalShape } from '@jozo-harness/safety'
 import { Context, Effect, Layer, Schema } from 'effect'
 import type { ToolDefinition } from '@jozo-harness/tools'
+import { nodeFileSystem } from '@jozo-harness/filesystem/node'
 import { BASH_MAX_TIMEOUT_MS, type TimeoutJobs } from './bash.ts'
 import { managedEnv } from './managed-env.ts'
 import type { ShellSessions } from './shells.ts'
@@ -62,6 +63,7 @@ export const tier0Plugin: Plugin<
         })
         return (approval, jobs, worktree, sessions, defaultTimeoutMs) =>
           tier0Tools(
+            nodeFileSystem,
             sandbox,
             undefined,
             approval,

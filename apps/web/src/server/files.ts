@@ -2,6 +2,8 @@ import { readdir, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { Dirent } from 'node:fs'
 import { Effect } from 'effect'
+import { withFileSystem } from '@jozo-harness/filesystem'
+import { nodeFileSystem } from '@jozo-harness/filesystem/node'
 import {
   IGNORED_DIRECTORIES,
   type IgnoredPaths,
@@ -62,7 +64,7 @@ export const searchWorkspaceFiles = (
   Effect.gen(function* () {
     const word = query.trim().toLowerCase()
     if (word === '') return []
-    const walked = yield* walkFiles({ cwd, limit: WALK_LIMIT })
+    const walked = yield* withFileSystem(nodeFileSystem, walkFiles({ cwd, limit: WALK_LIMIT }))
     return walked
       .filter((path) => path.toLowerCase().includes(word))
       .map((path) => ({ path, rank: rankOf(path, word) }))
@@ -184,7 +186,7 @@ export const listWorkspaceDirectory = (
       try: () => readdir(folder, { withFileTypes: true }),
       catch: () => new Error('cannot read this folder'),
     })
-    const ignored = makeIgnoredPaths(yield* readIgnoreRules(root))
+    const ignored = makeIgnoredPaths(yield* withFileSystem(nodeFileSystem, readIgnoreRules(root)))
     const found = yield* Effect.forEach(
       dirents,
       (dirent) => entryOf(root, folder, relativeOf(path, dirent.name), dirent, ignored),

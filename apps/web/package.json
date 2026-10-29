@@ -7,6 +7,7 @@
     "build": "vp -C client-solid build"
   },
   "dependencies": {
+    "@jozo-harness/filesystem": "workspace:*",
     "@jozo-harness/session": "workspace:*",
     "@jozo-harness/tools-tier0": "workspace:*",
     "@jozo-harness/tools-tier1": "workspace:*",

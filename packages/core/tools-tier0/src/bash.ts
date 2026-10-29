@@ -14,6 +14,7 @@ import {
   type SandboxMode,
   type SandboxShape,
 } from '@jozo-harness/safety'
+import { nodeFileSystem } from '@jozo-harness/filesystem/node'
 import { spawn, type Child } from '@jozo-harness/process'
 import { escalates, escalationFields, modeOfCall } from './escalation.ts'
 import {
@@ -479,7 +480,9 @@ export const makeBashTool = (
           )
         }
         const cwd =
-          args.cwd === undefined ? context.cwd : yield* resolveInside(context.cwd, args.cwd)
+          args.cwd === undefined
+            ? context.cwd
+            : yield* resolveInside(nodeFileSystem, context.cwd, args.cwd)
         const refused = reusedSessionRefusal(
           sessions,
           args.session,

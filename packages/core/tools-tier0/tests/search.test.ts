@@ -11,15 +11,13 @@ import { describe, expect, test } from 'vitest'
 import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import {
-  findRipgrep,
-  globTool,
-  grepTool,
-  makeGlobTool,
-  makeGrepTool,
-  ripgrepAt,
-  type Ripgrep,
-} from '../src/index.ts'
+import { findRipgrep, makeGlobTool, makeGrepTool, ripgrepAt, type Ripgrep } from '../src/index.ts'
+import { nodeFileSystem } from '@jozo-harness/filesystem/node'
+
+/** The tools as a Node run builds them: the disk underneath, ripgrep on PATH. */
+const globTool = makeGlobTool(nodeFileSystem)
+const grepTool = makeGrepTool(nodeFileSystem)
+
 /** Writes a file, making the directories above it, because the file may not be there yet. */
 const writeFileDeep = async (path: string, text: string | Uint8Array): Promise<void> => {
   await mkdir(dirname(path), { recursive: true })
@@ -344,7 +342,7 @@ describe('ripgrep search', () => {
       }),
       JSON.stringify({ type: 'end', data: { path: { text: 'a.ts' }, binary_offset: null } }),
     ]
-    const tool = makeGrepTool(fakeRipgrep('/fake/rg', { stdout: lines }))
+    const tool = makeGrepTool(nodeFileSystem, fakeRipgrep('/fake/rg', { stdout: lines }))
 
     const result = await Effect.runPromise(call(tool, { pattern: 'needle' }, tmpdir()))
 
@@ -357,8 +355,8 @@ describe('ripgrep search', () => {
 
   test('a run without ripgrep falls back to the walker and says why', async () => {
     const dir = await workspace()
-    const glob = makeGlobTool(fakeRipgrep(undefined))
-    const grep = makeGrepTool(fakeRipgrep(undefined))
+    const glob = makeGlobTool(nodeFileSystem, fakeRipgrep(undefined))
+    const grep = makeGrepTool(nodeFileSystem, fakeRipgrep(undefined))
 
     const listed = await Effect.runPromise(call(glob, { pattern: '**/*.ts' }, dir))
     expect(listed?.value).toMatchObject({
@@ -384,6 +382,7 @@ describe('ripgrep search', () => {
   test('a failing ripgrep run falls back with its reason', async () => {
     const dir = await workspace()
     const tool = makeGrepTool(
+      nodeFileSystem,
       fakeRipgrep('/fake/rg', { exitCode: 2, stderr: 'cannot read the tree' }),
     )
 
@@ -399,9 +398,15 @@ describe('ripgrep search', () => {
   test('asks ripgrep to honour ignore rules instead of disabling them', async () => {
     const calls: Array<ReadonlyArray<string>> = []
     const rg = fakeRipgrep('/fake/rg', { stdout: ['sub/kept.ts', ''] }, calls)
-    await Effect.runPromise(call(makeGlobTool(rg), { pattern: '**/*.ts', path: 'sub' }, tmpdir()))
     await Effect.runPromise(
-      call(makeGrepTool(rg), { pattern: 'needle', include: '**/*.ts', path: 'sub' }, tmpdir()),
+      call(makeGlobTool(nodeFileSystem, rg), { pattern: '**/*.ts', path: 'sub' }, tmpdir()),
+    )
+    await Effect.runPromise(
+      call(
+        makeGrepTool(nodeFileSystem, rg),
+        { pattern: 'needle', include: '**/*.ts', path: 'sub' },
+        tmpdir(),
+      ),
     )
 
     expect(calls).toHaveLength(2)
@@ -419,7 +424,7 @@ describe('ripgrep search', () => {
   })
 
   test('a search that found nothing does not fall back', async () => {
-    const tool = makeGrepTool(fakeRipgrep('/fake/rg', { exitCode: 1 }))
+    const tool = makeGrepTool(nodeFileSystem, fakeRipgrep('/fake/rg', { exitCode: 1 }))
 
     const result = await Effect.runPromise(call(tool, { pattern: 'needle' }, tmpdir()))
 
@@ -457,7 +462,9 @@ describe('ripgrep search', () => {
       },
     }
 
-    const result = await Effect.runPromise(call(makeGrepTool(broken), { pattern: 'needle' }, dir))
+    const result = await Effect.runPromise(
+      call(makeGrepTool(nodeFileSystem, broken), { pattern: 'needle' }, dir),
+    )
 
     expect(result?.value).toMatchObject({ fallback: 'failed: boom', seen: 1 })
     await rm(dir, { recursive: true, force: true })

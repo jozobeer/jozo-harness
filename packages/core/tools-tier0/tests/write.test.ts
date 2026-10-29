@@ -9,6 +9,7 @@ import {
 } from '@jozo-harness/tools'
 import { Context, Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
+import { nodeFileSystem } from '@jozo-harness/filesystem/node'
 import {
   chmod,
   mkdir,
@@ -42,9 +43,9 @@ const confined: SandboxShape = {
 const makeSession = (cwd: string, sandbox: SandboxShape = noneSandbox) => {
   const observed = makeObservedFiles()
   const list: ReadonlyArray<ToolDefinition<any, any>> = [
-    makeReadTool(observed),
-    makeWriteTool(observed, sandbox),
-    makeEditTool(observed, sandbox),
+    makeReadTool(nodeFileSystem, observed),
+    makeWriteTool(nodeFileSystem, observed, sandbox),
+    makeEditTool(nodeFileSystem, observed, sandbox),
   ]
   return (
     name: string,
