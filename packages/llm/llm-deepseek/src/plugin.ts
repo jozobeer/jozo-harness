@@ -1,4 +1,4 @@
-import { Llm, outboundFetch } from '@jozo-harness/llm'
+import { Llm, outboundFetch, type LlmTransport } from '@jozo-harness/llm'
 import type { Plugin } from '@jozo-harness/kernel'
 import { Layer, Schema } from 'effect'
 import { deepSeekMessagesAdapter } from './adapter.ts'
@@ -29,7 +29,7 @@ export const llmDeepSeekConfig = Schema.Struct({
  * never inferred from a URL, so switching the route is always explicit.
  */
 export const makeLlmDeepSeekPlugin = (
-  send: typeof fetch = outboundFetch,
+  send: LlmTransport = outboundFetch,
 ): Plugin<typeof llmDeepSeekConfig.Type, Llm, never> => ({
   name: '@jozo-harness/llm-deepseek',
   config: llmDeepSeekConfig,
@@ -41,7 +41,7 @@ export const makeLlmDeepSeekPlugin = (
       deepSeekMessagesAdapter({
         baseUrl: config.baseUrl,
         apiKey: () => process.env[config.apiKeyEnv],
-        fetch: send,
+        transport: send,
         ...(config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens }),
         ...(config.extensions === undefined ? {} : { extensions: config.extensions }),
         ...(config.headers === undefined ? {} : { headers: config.headers }),

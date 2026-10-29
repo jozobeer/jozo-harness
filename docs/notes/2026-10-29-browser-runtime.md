@@ -84,12 +84,40 @@
 - `vp test packages/core/tools-tier0`: 18 ファイル 139 テストが通る（メモリ実装を足す前と同じ数に 3 を足した）。
 - `pnpm run check`: fmt / lint / typecheck / doc gate / duplication / complexity / cargo / coverage を通す。閾値は動かさない。
 
+## 入れたもの（スライス 2）
+
+### モデルの口
+
+`packages/llm/llm/src/transport.ts` に `LlmTransport` を置いた。形は `fetch` と同じで、1 回の呼び出しが 1 attempt。DeepSeek と OpenAI 互換の adapter は `transport` だけを見る。plugin の既定は Node のプロキシを通す `outboundFetch`、ブラウザは `fetch`、テストは `Response` を返すスタブである。adapter のテストは `transport` を渡す形に変え、82 テストがそのまま通る。
+
+### ログの口
+
+`SessionPersistence` はもともと口で、`session-jsonl` がディスク側だった。`packages/core/session/src/memory-persistence.ts` にメモリ側を足した。`create` / `open` / `read` / `stat` / `list` と sink を Map で満たし、一覧の名前は `titleOf` で出す。ストアが消えればログも消える。
+
+### 組み立て
+
+`packages/core/runtime-browser` が 1 か所の組み立てである。
+
+- `browserRuntime(options)`: メモリの `FileSystem`、`browserTools`（read / write / edit / glob / grep）、DeepSeek adapter を transport 越しに、メモリの `SessionPersistence` を `sessionsLayer` に、`agentLoopEffect` と `agentsLayer` に繋ぐ。タイトル生成は既定で off（ページに余分なモデル呼び出しを置かない）。spill は `maxSpillTokens` を上限にして起こさない（spill はまだ Node の fs に書く）。
+- `runBrowserTurn(options, text)`: 1 turn を回し、終了時に agent を dispose して scope を閉じ、イベント・ツール一覧・ログのストアを返す。
+- `browserTools` は `tools-tier0` の `./browser`。bash と worktree を一覧に入れない。glob と grep には `ripgrepAt(undefined)` を渡して walker に落とす。
+- ripgrep の PATH 探索を初回利用まで遅らせた。import しただけで PATH を stat しない。
+
+## 検証
+
+- `packages/core/runtime-browser/tests/browser-turn.test.ts`: 3 テスト。スタブ transport が tool call と本文の 2 応答を返し、(a) `tool/call` → `tool/result` がログに並び、(b) workspace の cwd がホストに存在せず（`existsSync` が false）、読んだ内容はメモリの初期ファイルで、(c) ツール一覧が read / write / edit / glob / grep だけで bash と run_code を含まず、(d) 閉じた後も `persistence.open` と `list` で同じログが読めることを見る。
+- `packages/core/session/tests/memory-persistence.test.ts`: 4 テスト。作成 → 追記 → 再オープン、summary、missing、ストア間の分離。
+- `pnpm run check`: 2435 passed / 7 skipped。coverage は lines 94.99% / functions 92.51%。complexity の最大は cognitive 7 / cyclomatic 10。閾値は動かしていない。
+
 ## 残件
 
-- Worker へのパッケージング（`pnpm run build:web` とは別の工程）。Effect とツールを 1 つの bundle にまとめる。
-- モデルへの `fetch` 経路と CORS の扱い。`packages/llm/llm/src/proxy.ts` は `node:http`/`https`/`tls` のまま。
-- `node:path` の差し替え。`matchesGlob` は Node 22 以降にしか無く、ブラウザには無い。パスの正規化は今も Node の関数である。
-- ripgrep の口。`grep` / `glob` は `defaultRipgrep` を import しており、その module は `node:fs` と `@jozo-harness/process` を読む。ブラウザでは `ripgrepAt(undefined)` を渡して walker に落とすが、import 自体は残る。
-- セッションログのメモリ実装と、閉じたときに消えることの確認。
-- Worker の中でツール一覧を組む口（`tier0Tools` は今も Node の plugin から `nodeFileSystem` を渡している）。
-- 受け入れ条件 1（ブラウザだけで 1 turn）を実際に確かめる手順の用意。
+- **Worker へのパッケージング**（`pnpm run build:web` とは別の工程）。`runtime-browser` を Worker の entry に束ね、Effect の Fiber を Worker の中で回す。
+- **UI の入口**。ページから runtime を作り、turn を送り、`session/event` を購読して描く口。今の Web の Node サーバ経路は既定のまま残す。
+- **実ブラウザでの受け入れ確認**。Node 上のテストは「ディスクもプロセスも使わない組み立て」を固定するが、Worker とモデルへの実 fetch はまだ通していない。受け入れ条件 1 は未達。
+- **CORS と鍵**。`fetch` でモデルへ直接出るには、CORS を受けるサーバか、利用者の鍵をどこに置くかの決定が要る。`packages/llm/llm/src/proxy.ts` は `node:http`/`https`/`tls` のまま。
+- **`node:path` の差し替え**。tools-tier0 の `join` / `matchesGlob` は Node の関数で、ブラウザには無い。
+- **ripgrep の import**。`grep` / `glob` は `ripgrep.ts` を読み、その module は `node:fs` と `@jozo-harness/process` を import する。呼び出しは walker に落ちるが、bundle には残る。
+- **spill の置き場**。`agent-loop` の spill writer は `node:fs` に書く。ブラウザの組み立ては spill を起こさない設定だが、`FileSystem` 越しにする必要がある。
+- **`agent-loop` の Node import**。`node:os` の `tmpdir`（spill の既定 root）と `node:path` の `join`、`node:crypto` の `randomUUID` が残る。
+- **まだ出していないツール**。web_fetch / web_search（fetch と CORS）、read_image、skill / artifact / session_search / session_trace、present / todo などの UI 系、bash / job / worktree / subagent / goal / schedule。
+- **メモリログの限界**。圧縮・ロック・再開をしないので、ページを閉じると消える（受け入れ条件 2 の性質として意図している）。セッション検索と添付は未対応。

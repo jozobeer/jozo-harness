@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { kernelPlugin, loadProfile } from '@jozo-harness/kernel'
-import { Llm, type LlmAdapter, type LlmRequest } from '@jozo-harness/llm'
+import { Llm, type LlmAdapter, type LlmRequest, type LlmTransport } from '@jozo-harness/llm'
 import {
   llmOpenAiPlugin,
   localOllamaModelName,
@@ -57,7 +57,7 @@ describe('llmOpenAiPlugin', () => {
       bodies.push(typeof init?.body === 'string' ? init.body : '')
       headers.push(new Headers(init?.headers))
       return Promise.resolve(new Response('data: [DONE]\n\n', { status: 200 }))
-    }) as unknown as typeof fetch
+    }) as unknown as LlmTransport
     return { bodies, headers, urls, send }
   }
 

@@ -1,0 +1,19 @@
+{
+  "name": "@jozo-harness/runtime-browser",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@jozo-harness/agent": "workspace:*",
+    "@jozo-harness/agent-loop": "workspace:*",
+    "@jozo-harness/filesystem": "workspace:*",
+    "@jozo-harness/kernel": "workspace:*",
+    "@jozo-harness/llm": "workspace:*",
+    "@jozo-harness/llm-deepseek": "workspace:*",
+    "@jozo-harness/session": "workspace:*",
+    "@jozo-harness/system-prompt": "workspace:*",
+    "@jozo-harness/tools": "workspace:*",
+    "@jozo-harness/tools-tier0": "workspace:*",
+    "effect": "4.0.3"
+  }
+}

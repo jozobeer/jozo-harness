@@ -176,9 +176,25 @@ export const ripgrepAt = (executable: string | undefined): Ripgrep => ({
       : runWith(executable, argv, cwd, onLine),
 })
 
-const located = findRipgrep()
+// Located on first use rather than at import: a page that passes its own
+// ripgrep (or none) must not stat every PATH entry just to load the tools.
+let located: string | undefined | null = null
+const locate = (): string | undefined => {
+  if (located === null) located = findRipgrep()
+  return located
+}
 
-export const defaultRipgrep: Ripgrep = ripgrepAt(located)
+export const defaultRipgrep: Ripgrep = {
+  get executable() {
+    return locate()
+  },
+  run: (argv, cwd, onLine) => {
+    const executable = locate()
+    return executable === undefined
+      ? Promise.resolve({ exitCode: 127, stderr: 'rg is not on PATH', stopped: false })
+      : runWith(executable, argv, cwd, onLine)
+  },
+}
 
 /** The note a result carries when the built-in walker stood in for ripgrep. */
 export const fallbackNote = (reason: string): string =>

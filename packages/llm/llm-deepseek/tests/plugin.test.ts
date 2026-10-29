@@ -1,14 +1,14 @@
 import { createServer } from 'node:http'
 import { describe, expect, test, vi } from 'vitest'
 import { kernelPlugin, loadProfile } from '@jozo-harness/kernel'
-import { Llm, type LlmAdapter, type LlmRequest } from '@jozo-harness/llm'
+import { Llm, type LlmAdapter, type LlmRequest, type LlmTransport } from '@jozo-harness/llm'
 import { llmDeepSeekPlugin, makeLlmDeepSeekPlugin } from '@jozo-harness/llm-deepseek'
 import { Context, Effect, Layer, Stream } from 'effect'
 
 describe('llmDeepSeekPlugin', () => {
   const adapterWith = async (
     config: Readonly<Record<string, unknown>>,
-    send?: typeof fetch,
+    send?: LlmTransport,
   ): Promise<LlmAdapter> =>
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -114,7 +114,7 @@ describe('llmDeepSeekPlugin', () => {
       bodies.push(typeof init.body === 'string' ? init.body : '')
       headers.push(new Headers(init.headers))
       return Promise.resolve(new Response('', { status: 200 }))
-    }) as unknown as typeof fetch
+    }) as unknown as LlmTransport
     try {
       const adapter = await adapterWith(
         { apiKeyEnv: keyEnv, extensions: { thinking: { type: 'enabled' } } },

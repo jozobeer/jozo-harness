@@ -2,7 +2,10 @@
   "name": "@jozo-harness/tools-tier0",
   "private": true,
   "type": "module",
-  "exports": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./browser": "./src/browser.ts"
+  },
   "dependencies": {
     "@jozo-harness/filesystem": "workspace:*",
     "@jozo-harness/kernel": "workspace:*",

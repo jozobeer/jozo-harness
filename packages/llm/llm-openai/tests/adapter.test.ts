@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { describe, expect, test } from 'vitest'
-import { LlmFailure, type LlmRequest, type StreamChunk } from '@jozo-harness/llm'
+import { LlmFailure, type LlmRequest, type LlmTransport, type StreamChunk } from '@jozo-harness/llm'
 import { Effect, Fiber, Stream } from 'effect'
 import { openAiAdapter } from '../src/index.ts'
 
@@ -30,7 +30,7 @@ const adapter = (response: Response) =>
       images: 'none',
       promptCacheControl: false,
     },
-    fetch: (() => Promise.resolve(response)) as unknown as typeof fetch,
+    transport: (() => Promise.resolve(response)) as unknown as LlmTransport,
   })
 
 /** The body a request sent, read back as the JSON text the adapter wrote. */
@@ -45,7 +45,7 @@ const encoder = new TextEncoder()
 const sseLine = (payload: string): Uint8Array => encoder.encode(`data: ${payload}\n\n`)
 
 /** An adapter whose fetch is the test's own, with the capabilities every case shares. */
-const adapterWith = (fetchImpl: typeof fetch, streamIdleTimeoutMs?: number) =>
+const adapterWith = (fetchImpl: LlmTransport, streamIdleTimeoutMs?: number) =>
   openAiAdapter({
     baseUrl: 'https://example.test/v1',
     apiKey: () => 'key',
@@ -56,7 +56,7 @@ const adapterWith = (fetchImpl: typeof fetch, streamIdleTimeoutMs?: number) =>
       promptCacheControl: false,
     },
     ...(streamIdleTimeoutMs === undefined ? {} : { streamIdleTimeoutMs }),
-    fetch: fetchImpl,
+    transport: fetchImpl,
   })
 
 describe('openAiAdapter', () => {
@@ -75,11 +75,11 @@ describe('openAiAdapter', () => {
         images: 'none',
         promptCacheControl: false,
       },
-      fetch: ((url: string, init: RequestInit) => {
+      transport: ((url: string, init: RequestInit) => {
         bodies.push(String(url))
         bodies.push(bodyOf(init))
         return Promise.resolve(new Response(fixture, { status: 200 }))
-      }) as unknown as typeof fetch,
+      }) as unknown as LlmTransport,
     })
 
     const chunks = await Effect.runPromise(Stream.runCollect(streaming.stream(request)))
@@ -104,10 +104,10 @@ describe('openAiAdapter', () => {
         images: 'none',
         promptCacheControl: false,
       },
-      fetch: ((_url: string, init: RequestInit) => {
+      transport: ((_url: string, init: RequestInit) => {
         bodies.push(bodyOf(init))
         return Promise.resolve(new Response('data: [DONE]\n\n', { status: 200 }))
-      }) as unknown as typeof fetch,
+      }) as unknown as LlmTransport,
     })
 
     await Effect.runPromise(Stream.runCollect(streaming.stream(request)))
@@ -157,10 +157,10 @@ describe('openAiAdapter', () => {
         images: 'none',
         promptCacheControl: false,
       },
-      fetch: ((_url: string, init: RequestInit) => {
+      transport: ((_url: string, init: RequestInit) => {
         bodies.push(bodyOf(init))
         return Promise.resolve(new Response(fixture, { status: 200 }))
-      }) as unknown as typeof fetch,
+      }) as unknown as LlmTransport,
     })
 
     // The runner writes the field the provider reads; the adapter changes nothing.
@@ -192,10 +192,10 @@ describe('openAiAdapter', () => {
         images: 'none',
         promptCacheControl: false,
       },
-      fetch: ((_url: string, init: RequestInit) => {
+      transport: ((_url: string, init: RequestInit) => {
         headers.push(new Headers(init.headers))
         return Promise.resolve(new Response(fixture, { status: 200 }))
-      }) as unknown as typeof fetch,
+      }) as unknown as LlmTransport,
     })
 
     const chunks = await Effect.runPromise(Stream.runCollect(streaming.stream(request)))
@@ -219,10 +219,10 @@ describe('openAiAdapter', () => {
         images: 'none',
         promptCacheControl: false,
       },
-      fetch: ((_url: string, init: RequestInit) => {
+      transport: ((_url: string, init: RequestInit) => {
         headers.push(new Headers(init.headers))
         return Promise.resolve(new Response('data: [DONE]\n\n', { status: 200 }))
-      }) as unknown as typeof fetch,
+      }) as unknown as LlmTransport,
     })
 
     await Effect.runPromise(Stream.runCollect(streaming.stream(request)))
@@ -243,7 +243,7 @@ describe('openAiAdapter', () => {
         images: 'none',
         promptCacheControl: false,
       },
-      fetch: (() => Promise.reject(new Error('must not be called'))) as unknown as typeof fetch,
+      transport: (() => Promise.reject(new Error('must not be called'))) as unknown as LlmTransport,
     })
 
     const error = await Effect.runPromise(Effect.flip(Stream.runCollect(streaming.stream(request))))
@@ -314,7 +314,7 @@ describe('openAiAdapter', () => {
         images: 'none',
         promptCacheControl: false,
       },
-      fetch: (() => Promise.reject(new Error('offline'))) as unknown as typeof fetch,
+      transport: (() => Promise.reject(new Error('offline'))) as unknown as LlmTransport,
     })
     const error = await Effect.runPromise(Effect.flip(Stream.runCollect(failing.stream(request))))
     expect(error.code).toBe('TRANSPORT')
@@ -331,10 +331,10 @@ describe('openAiAdapter', () => {
         images: 'none',
         promptCacheControl: false,
       },
-      fetch: (() => {
+      transport: (() => {
         fetched += 1
         return Promise.resolve(new Response(''))
-      }) as unknown as typeof fetch,
+      }) as unknown as LlmTransport,
     })
     const withImage: LlmRequest = {
       ...request,
@@ -367,7 +367,7 @@ describe('openAiAdapter', () => {
         images: 'none',
         promptCacheControl: false,
       },
-      fetch: (() =>
+      transport: (() =>
         Promise.resolve(
           new Response(
             new ReadableStream<Uint8Array>({
@@ -377,7 +377,7 @@ describe('openAiAdapter', () => {
             }),
             { status: 200 },
           ),
-        )) as unknown as typeof fetch,
+        )) as unknown as LlmTransport,
     })
 
     const error = await Effect.runPromise(Effect.flip(Stream.runCollect(streaming.stream(request))))
@@ -396,12 +396,12 @@ describe('openAiAdapter', () => {
         images: 'none',
         promptCacheControl: false,
       },
-      fetch: (() =>
+      transport: (() =>
         Promise.resolve({
           ok: false,
           status: 503,
           text: () => Promise.reject(new Error('body gone')),
-        })) as unknown as typeof fetch,
+        })) as unknown as LlmTransport,
     })
 
     const error = await Effect.runPromise(Effect.flip(Stream.runCollect(streaming.stream(request))))
@@ -423,7 +423,7 @@ describe('openAiAdapter', () => {
     })
     const enqueue = (payload: string) => controller?.enqueue(sseLine(payload))
     const respond = (() =>
-      Promise.resolve(new Response(body, { status: 200 }))) as unknown as typeof fetch
+      Promise.resolve(new Response(body, { status: 200 }))) as unknown as LlmTransport
 
     const arrivedEarly = await Effect.runPromise(
       Effect.scoped(
@@ -494,7 +494,7 @@ describe('openAiAdapter', () => {
           { status: 200 },
         ),
       )
-    }) as unknown as typeof fetch
+    }) as unknown as LlmTransport
 
     const chunks = await Effect.runPromise(
       Stream.runCollect(adapterWith(send, 200).stream(request)),
@@ -520,7 +520,7 @@ describe('openAiAdapter', () => {
           }),
           { status: 200 },
         ),
-      )) as unknown as typeof fetch
+      )) as unknown as LlmTransport
 
     const error = await Effect.runPromise(
       Effect.flip(Stream.runCollect(adapterWith(stalled, 40).stream(request))),
@@ -538,7 +538,7 @@ describe('openAiAdapter', () => {
           () => reject(init.signal?.reason ?? new Error('aborted')),
           { once: true },
         )
-      })) as unknown as typeof fetch
+      })) as unknown as LlmTransport
 
     const error = await Effect.runPromise(
       Effect.flip(Stream.runCollect(adapterWith(hanging, 40).stream(request))),
@@ -550,7 +550,7 @@ describe('openAiAdapter', () => {
 
   test('a response without a body fails as a TRANSPORT error', async () => {
     const bodyless = (() =>
-      Promise.resolve({ ok: true, status: 200, body: null })) as unknown as typeof fetch
+      Promise.resolve({ ok: true, status: 200, body: null })) as unknown as LlmTransport
 
     const error = await Effect.runPromise(
       Effect.flip(Stream.runCollect(adapterWith(bodyless).stream(request))),
