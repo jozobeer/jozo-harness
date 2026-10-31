@@ -1,3 +1,6 @@
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { HooksLive } from '@jozo-harness/kernel'
 import { type Child } from '@jozo-harness/process'
 import type { SandboxShape } from '@jozo-harness/safety'
@@ -302,6 +305,51 @@ describe('managed environment', () => {
     const log = writes.join('')
     expect(log).toContain('JZH_TOKEN')
     expect(log).not.toContain('s3cret-value')
+  })
+
+  test('a confined command sees the call PATH but the helper is not taken from it', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jzh-bash-path-'))
+    const bin = join(root, 'bin')
+    const marker = join(root, 'hijacked')
+    mkdirSync(bin)
+    // A bash planted on the call's PATH. The helper lookup must ignore that PATH
+    // and run the script with the real bash, which never writes the marker.
+    writeFileSync(join(bin, 'bash'), '#!/bin/sh\nprintf hijacked > ' + marker + '\n')
+    chmodSync(join(bin, 'bash'), 0o755)
+    const sandbox: SandboxShape = {
+      name: 'bwrap',
+      confines: true,
+      mode: 'workspace-write',
+      wrap: (command) =>
+        Effect.succeed({
+          argv: [...command.argv],
+          cwd: command.cwd,
+          mode: command.mode ?? 'workspace-write',
+          denialSignatures: [],
+        }),
+    }
+    try {
+      const result = await Effect.runPromise(
+        call(
+          makeBashTool(sandbox),
+          { command: 'printf %s "$PATH"', env: { PATH: bin, LD_PRELOAD: 'planted.so' } },
+          '/tmp',
+        ),
+      )
+
+      expect(existsSync(marker)).toBe(false)
+      expect(result?.value).toMatchObject({ stdout: bin })
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('an unconfined command receives the call env directly', async () => {
+    const result = await Effect.runPromise(
+      call(makeBashTool(), { command: 'printf %s "$FOO"', env: { FOO: 'bar' } }, '/tmp'),
+    )
+
+    expect(result?.value).toMatchObject({ stdout: 'bar' })
   })
 
   test('refuses a call env name a shell cannot carry', async () => {

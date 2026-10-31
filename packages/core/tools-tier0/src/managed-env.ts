@@ -48,6 +48,33 @@ export const childEnvironment = (
 }
 
 /**
+ * True for a name that selects the program about to be exec'd, or a library it
+ * loads before main. A sandbox helper is that program: the call must not choose it.
+ */
+export const unsafeForWrapper = (name: string): boolean =>
+  name === 'PATH' || name.startsWith('LD_') || name.startsWith('DYLD_')
+
+/**
+ * The environment a sandbox helper may be exec'd with. The call's PATH and
+ * dynamic-linker variables are restored to the process values, because they
+ * would otherwise choose the helper or its libraries before any confinement.
+ * The shell applies the call's own values after the helper has confined it.
+ */
+export const wrapperEnvironment = (
+  environment: NodeJS.ProcessEnv,
+  requested: ManagedEnv,
+): NodeJS.ProcessEnv => {
+  const next: NodeJS.ProcessEnv = { ...environment }
+  for (const name of Object.keys(requested)) {
+    if (!unsafeForWrapper(name)) continue
+    const trusted = process.env[name]
+    if (trusted === undefined) delete next[name]
+    else next[name] = trusted
+  }
+  return next
+}
+
+/**
  * Validates one profile's env map. A name outside the reserved prefix, or one
  * that a shell would split, is a configuration error rather than a variable.
  */

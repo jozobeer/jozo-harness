@@ -13,7 +13,15 @@ import {
   type ToolExecutionResult,
 } from '@jozo-harness/tools'
 import { Context, Effect, Layer } from 'effect'
-import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, test } from 'vitest'
@@ -147,6 +155,36 @@ describe('bash session', () => {
 
     expect(await gone(shellPid)).toBe(true)
     expect(await gone(sleeperPid)).toBe(true)
+  })
+
+  test('a confined session sees the call PATH but the shell is not taken from it', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jzh-session-path-'))
+    const bin = join(root, 'bin')
+    const marker = join(root, 'hijacked')
+    mkdirSync(bin)
+    // The live shell is exec'd before any command, so a bash on the call's PATH
+    // would replace it and write the marker before the command could run.
+    writeFileSync(join(bin, 'bash'), '#!/bin/sh\nprintf hijacked > ' + marker + '\n')
+    chmodSync(join(bin, 'bash'), 0o755)
+    const sessions = makeShellSessions()
+    const tool = makeBashTool(preserving(), undefined, undefined, undefined, sessions)
+    try {
+      const result = valueOf(
+        await Effect.runPromise(
+          call(tool, {
+            command: 'printf %s "$PATH"',
+            session: 'work',
+            env: { PATH: bin, LD_PRELOAD: 'planted.so' },
+          }),
+        ),
+      )
+
+      expect(existsSync(marker)).toBe(false)
+      expect(result.stdout).toBe(bin)
+    } finally {
+      sessions.closeAll()
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   test('a session started with a wider mode does not run a later confined command', async () => {
