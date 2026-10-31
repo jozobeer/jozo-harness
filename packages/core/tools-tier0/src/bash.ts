@@ -27,7 +27,13 @@ import {
 } from './shells.ts'
 import { resolveInside } from './workspace.ts'
 import { exitSummaryOf } from './present.ts'
-import { childEnvironment, logManagedEnv, type ManagedEnv } from './managed-env.ts'
+import {
+  childEnvironment,
+  logManagedEnv,
+  unsafeForWrapper,
+  wrapperEnvironment,
+  type ManagedEnv,
+} from './managed-env.ts'
 
 /** A command that has not finished by then is promoted to a job, or killed when there is none. */
 export const BASH_DEFAULT_TIMEOUT_MS = 120_000
@@ -368,6 +374,41 @@ const sessionCommand = (
 }
 
 /**
+ * Puts PATH and loader variables into the script. They must not be in the
+ * environment of the helper that execs this script, or the call chooses the
+ * helper and its libraries before the sandbox exists.
+ */
+const prefixUnsafeEnv = (shell: ShellName, command: string, requested: ManagedEnv): string => {
+  const lines = Object.entries(requested)
+    .filter(([name]) => unsafeForWrapper(name))
+    .map(([name, value]) => assignment(shell, name, value))
+  return lines.length === 0 ? command : lines.join('\n') + '\n' + command
+}
+
+/**
+ * The argv and the environment of one spawn. A confining mode keeps the call's
+ * PATH and loader variables out of the helper's exec and puts them in the script.
+ */
+const prepareLaunch = (
+  shell: ShellName,
+  command: string,
+  session: string | undefined,
+  requested: ManagedEnv,
+  managed: ManagedEnv,
+  sandbox: SandboxShape,
+  mode: SandboxMode,
+): { readonly argv: ReadonlyArray<string>; readonly environment: NodeJS.ProcessEnv } => {
+  const guard = sandbox.confines && mode !== 'danger-full-access'
+  const script =
+    guard && session === undefined ? prefixUnsafeEnv(shell, command, requested) : command
+  const inherited = childEnvironment(managed, requested)
+  return {
+    argv: session === undefined ? shellArgv(shell, script) : sessionArgv(shell),
+    environment: guard ? wrapperEnvironment(inherited, requested) : inherited,
+  }
+}
+
+/**
  * Runs the command in a live session. A timeout ends that shell: a command still
  * running when the call returns would write into the next call's output.
  */
@@ -501,9 +542,18 @@ export const makeBashTool = (
         })
         // A named session keeps one shell alive, so the sandbox wraps the shell
         // rather than the one command it would otherwise run and exit with.
+        const launch = prepareLaunch(
+          shell,
+          args.command,
+          args.session,
+          requested,
+          managed,
+          sandbox,
+          mode,
+        )
         const wrapped = yield* sandbox
           .wrap({
-            argv: args.session === undefined ? shellArgv(shell, args.command) : sessionArgv(shell),
+            argv: launch.argv,
             cwd,
             mode,
           })
@@ -517,7 +567,7 @@ export const makeBashTool = (
         const timeoutMs = waitOf(args.timeoutMs, defaultTimeoutMs)
         // The mode is known only after approval, so a standing mode the live shell
         // was not spawned with is refused here, before the command is written.
-        const environment = childEnvironment(managed, requested)
+        const environment = launch.environment
         logManagedEnv(environment)
         const session = yield* adoptSession(
           sessions,

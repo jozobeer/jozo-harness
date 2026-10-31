@@ -5,6 +5,7 @@ import {
   managedEnv,
   managedEnvOf,
   managedNamesOf,
+  wrapperEnvironment,
 } from '../src/managed-env.ts'
 
 describe('managed environment registry', () => {
@@ -47,6 +48,33 @@ describe('managed environment registry', () => {
       expect(environment.JZH_AMBIENT).toBeUndefined()
     } finally {
       delete process.env.JZH_AMBIENT
+    }
+  })
+
+  test('restores PATH and loader variables before a sandbox helper is execd', () => {
+    const trustedPath = process.env.PATH
+    const previous = process.env.LD_PRELOAD
+    process.env.LD_PRELOAD = 'trusted.so'
+    try {
+      const inherited = childEnvironment(
+        { JZH_PROFILE: 'base' },
+        { PATH: '/tmp/planted', LD_PRELOAD: 'planted.so', FOO: 'kept', DYLD_INSERT_LIBRARIES: 'x' },
+      )
+      const wrapped = wrapperEnvironment(inherited, {
+        PATH: '/tmp/planted',
+        LD_PRELOAD: 'planted.so',
+        FOO: 'kept',
+        DYLD_INSERT_LIBRARIES: 'x',
+      })
+
+      expect(wrapped.PATH).toBe(trustedPath)
+      expect(wrapped.LD_PRELOAD).toBe('trusted.so')
+      expect(wrapped.DYLD_INSERT_LIBRARIES).toBeUndefined()
+      expect(wrapped.FOO).toBe('kept')
+      expect(wrapped.JZH_PROFILE).toBe('base')
+    } finally {
+      if (previous === undefined) delete process.env.LD_PRELOAD
+      else process.env.LD_PRELOAD = previous
     }
   })
 

@@ -638,6 +638,8 @@ plugins:
 
 bash、背景ジョブ、run_code の子はこの値を持つ。モデルが呼び出しの `env` で同じ名前を渡しても、ここに書いた値が勝つ。子を起動する前に、値ではなく名前の一覧を stderr に `[managed env] ...` として出す。
 
+呼び出しの `env` はコマンドのシェルに届く。`PATH` と `LD_*` / `DYLD_*` は sandbox の helper を exec する環境には載せず、helper が閉じ込めたあとのシェルで代入する。helper の実行ファイルと、それが読むライブラリは、モデルが渡した値では決まらない。
+
 値は設定のリテラルだけを書く。`secrets.env` や `.env` から読むことはない。API キーのような秘密はこのレジストリに載せず、`jzh auth add` か従来の secrets の経路に置く。
 
 ## Ollama の local daemon 経由で prompt cache を効かせる
