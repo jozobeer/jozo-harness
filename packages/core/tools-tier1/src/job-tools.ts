@@ -1,5 +1,8 @@
+import { nodeFileSystem } from '@jozo-harness/filesystem/node'
+import type { SandboxShape } from '@jozo-harness/safety'
+import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
+import { resolveInside } from '@jozo-harness/tools-tier0'
 import { Schema, Effect } from 'effect'
-import type { ToolDefinition } from '@jozo-harness/tools'
 import type { JobsShape } from './jobs.ts'
 
 const StartParameters = Schema.Struct({
@@ -40,13 +43,21 @@ export const jobOutputWaitMs = (args: { wait?: boolean; timeoutMs?: number }): n
     ? 0
     : Math.min(args.timeoutMs ?? JOB_OUTPUT_DEFAULT_WAIT_MS, JOB_OUTPUT_MAX_WAIT_MS)
 
-/** Starts a command in the background, so long work can overlap with the turn. */
+/** The shell a background command runs in, before the sandbox wraps it. */
+const jobArgv = (command: string): ReadonlyArray<string> => ['bash', '-c', command]
+
+/**
+ * Starts a command in the background, so long work can overlap with the turn.
+ * The command goes through the same sandbox as bash: a bare shell would write
+ * anywhere the preset says a command cannot.
+ */
 export const makeJobStartTool = (
   jobs: JobsShape,
+  sandbox?: SandboxShape,
 ): ToolDefinition<{ command: string; cwd?: string }, { id: string; command: string }> => ({
   name: 'job_start',
   description:
-    'Starts a command in the background and returns its job id. Use it for a command that outlives one call, then read it with job_output.',
+    'Starts a command in the background and returns its job id. Use it for a command that outlives one call, then read it with job_output. The command runs in the same sandbox as bash, and cwd must stay inside the workspace.',
   parameters: StartParameters,
   output: {
     schema: Schema.Struct({ id: Schema.String, command: Schema.String }),
@@ -55,9 +66,30 @@ export const makeJobStartTool = (
     ],
   },
   execute: (args, context) =>
-    jobs
-      .start(args.command, args.cwd ?? context.cwd)
-      .pipe(Effect.map((job) => ({ id: job.id, command: job.command }))),
+    Effect.gen(function* () {
+      // The same boundary bash uses for its directory: outside the workspace, or
+      // through a link, the path would become a writable root of the sandbox.
+      const cwd =
+        args.cwd === undefined
+          ? context.cwd
+          : yield* resolveInside(nodeFileSystem, context.cwd, args.cwd)
+      const launched =
+        sandbox !== undefined && sandbox.confines
+          ? yield* sandbox
+              .wrap({ argv: jobArgv(args.command), cwd })
+              .pipe(
+                Effect.mapError(
+                  (error) =>
+                    new ToolError({ code: 'execution', message: 'sandbox: ' + error.message }),
+                ),
+              )
+          : undefined
+      const job =
+        launched === undefined
+          ? yield* jobs.start(args.command, cwd)
+          : yield* jobs.start(args.command, launched.cwd, launched.argv)
+      return { id: job.id, command: job.command }
+    }),
 })
 
 /** Reads what a background job has produced since the previous read, waiting for more if asked. */
@@ -151,8 +183,12 @@ export const makeJobListTool = (
 })
 
 /** The background job tools over one registry the caller owns. */
-export const jobTools = (jobs: JobsShape): ReadonlyArray<ToolDefinition<any, any>> => [
-  makeJobStartTool(jobs),
+export const jobTools = (
+  jobs: JobsShape,
+  /** The run's sandbox. Absent leaves a background command unconfined, as a run with no boundary does. */
+  sandbox?: SandboxShape,
+): ReadonlyArray<ToolDefinition<any, any>> => [
+  makeJobStartTool(jobs, sandbox),
   makeJobOutputTool(jobs),
   makeJobKillTool(jobs),
   makeJobListTool(jobs),

@@ -1,8 +1,12 @@
 import { HooksLive } from '@jozo-harness/kernel'
+import { noneSandbox, type SandboxShape } from '@jozo-harness/safety'
 import { Tools, toolsLayer } from '@jozo-harness/tools'
 import { Context, Effect, Layer } from 'effect'
+import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, test } from 'vitest'
-import { jobTools, makeJobs } from '../src/index.ts'
+import { jobTools, makeJobStartTool, makeJobs, type JobsShape } from '../src/index.ts'
 import { makeBashTool } from '../../tools-tier0/src/bash.ts'
 
 /** The id a job_start call returned, or the failure the test should not hide. */
@@ -172,5 +176,108 @@ describe('job tools', () => {
     ])
     expect(JSON.stringify(observed.content)).toContain(observed.slowId + ' running: sleep 5')
     expect(JSON.stringify(observed.content)).toContain(observed.fastId + ' finished: echo done')
+  })
+})
+
+interface RecordedLaunch {
+  readonly command: string
+  readonly cwd: string
+  readonly argv?: ReadonlyArray<string>
+}
+
+/** A registry that records what job_start asked to spawn and starts nothing. */
+const recordingJobs = (launches: Array<RecordedLaunch>): JobsShape => ({
+  start: (command, cwd, argv) =>
+    Effect.sync(() => {
+      launches.push(argv === undefined ? { command, cwd } : { command, cwd, argv })
+      return { id: 'job-aabbccdd', command, startedAt: 0, running: true, output: '' }
+    }),
+  promote: () => Effect.die('unused'),
+  read: () => Effect.die('unused'),
+  snapshot: () => Effect.die('unused'),
+  kill: () => Effect.die('unused'),
+  list: () => [],
+})
+
+/** A sandbox that prefixes the helper the way a real one would, and records the call. */
+const confiningSandbox = (): SandboxShape => ({
+  name: 'fake',
+  confines: true,
+  enforcement: 'full',
+  mode: 'workspace-write',
+  wrap: (command) =>
+    Effect.succeed({
+      argv: ['sandbox-helper', '--', ...command.argv],
+      cwd: command.cwd,
+      mode: 'workspace-write',
+      denialSignatures: ['denied'],
+    }),
+})
+
+const failureMessage = (result: { readonly _tag: string; readonly failure?: unknown }): string =>
+  result._tag === 'Failure'
+    ? String((result.failure as { message?: string }).message)
+    : 'no failure'
+
+describe('job_start confinement', () => {
+  test('runs the command through the sandbox instead of a bare shell', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-job-start-'))
+    const inside = join(root, 'src')
+    await mkdir(inside)
+    try {
+      const launches: Array<RecordedLaunch> = []
+      const tool = makeJobStartTool(recordingJobs(launches), confiningSandbox())
+      const value = await Effect.runPromise(
+        tool.execute(
+          { command: 'echo confined', cwd: 'src' },
+          { sessionId: 's1', cwd: root, callId: 'c1' },
+        ),
+      )
+      expect(value).toEqual({ id: 'job-aabbccdd', command: 'echo confined' })
+      expect(launches).toEqual([
+        {
+          command: 'echo confined',
+          cwd: inside,
+          argv: ['sandbox-helper', '--', 'bash', '-c', 'echo confined'],
+        },
+      ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('refuses a directory outside the workspace and one reached through a link', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'jozo-harness-job-start-'))
+    const root = join(base, 'work')
+    const outside = join(base, 'outside')
+    await mkdir(root)
+    await mkdir(outside)
+    await symlink(outside, join(root, 'out'))
+    try {
+      const launches: Array<RecordedLaunch> = []
+      const tool = makeJobStartTool(recordingJobs(launches), confiningSandbox())
+      const context = { sessionId: 's1', cwd: root, callId: 'c1' }
+      const escaped = await Effect.runPromise(
+        Effect.result(tool.execute({ command: 'echo out', cwd: outside }, context)),
+      )
+      const linked = await Effect.runPromise(
+        Effect.result(tool.execute({ command: 'echo out', cwd: 'out' }, context)),
+      )
+      expect(failureMessage(escaped)).toContain('escapes the workspace')
+      expect(failureMessage(linked)).toContain('goes through a link')
+      expect(launches).toEqual([])
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
+  })
+
+  test('a run with no sandbox still starts the shell', async () => {
+    const launches: Array<RecordedLaunch> = []
+    const tool = makeJobStartTool(recordingJobs(launches), noneSandbox)
+    const value = await Effect.runPromise(
+      tool.execute({ command: 'echo plain' }, { sessionId: 's1', cwd: '/tmp', callId: 'c1' }),
+    )
+    expect(value.command).toBe('echo plain')
+    expect(launches).toEqual([{ command: 'echo plain', cwd: '/tmp' }])
   })
 })
