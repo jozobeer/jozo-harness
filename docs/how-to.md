@@ -934,7 +934,7 @@ plugins:
 
 ## コマンドを sandbox の外で走らせる
 
-`@jozo-harness/safety` の `sandbox` は既定で `auto` である。macOS では `seatbelt`（`sandbox-exec`）、Linux では `bwrap`（bubblewrap）が走る。Linux で bwrap が使えないときは `landlock-run` が Landlock で同じ境界を張る。コマンドは自分が走るディレクトリと一時ディレクトリにだけ書ける。それ以外の場所に書こうとすると macOS では `Operation not permitted`、bwrap では `Read-only file system`、Landlock では `Permission denied` になる。読み取りは制限せず、`/dev/null` への書き込みは許可する。
+`@jozo-harness/safety` の `sandbox` は既定で `auto` である。macOS では `seatbelt`（`sandbox-exec`）、Linux では `bwrap`（bubblewrap）が走る。Linux で bwrap が使えないときは `landlock-run` が Landlock で同じ境界を張る。コマンドは自分が走るディレクトリと一時ディレクトリにだけ書ける。それ以外の場所に書こうとすると macOS では `Operation not permitted`、bwrap では `Read-only file system`、Landlock では `Permission denied` になる。読み取りは制限せず、`/dev/null` への書き込みは許可する。`job_start` の背景コマンドも `bash` と同じ sandbox を通る。`cwd` はワークスペースの外や、外を指すリンクを指せない。
 
 ```yaml
   - id: safety

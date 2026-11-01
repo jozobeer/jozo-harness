@@ -78,6 +78,22 @@ describe('jobs', () => {
     expect(output).toContain('nonlogin')
   })
 
+  test('spawns the argv it is given instead of bash -c of the command text', async () => {
+    const output = await Effect.runPromise(
+      Effect.gen(function* () {
+        const jobs = yield* makeJobs()
+        const running = yield* jobs.start('echo not-this', '/tmp', ['bash', '-c', 'echo from-argv'])
+        yield* Effect.sleep('200 millis')
+        const read = yield* jobs.read(running.id, { waitMs: 5_000 })
+        yield* jobs.kill(running.id)
+        return read.output
+      }),
+    )
+
+    expect(output).toContain('from-argv')
+    expect(output).not.toContain('not-this')
+  })
+
   test('a later read returns only what the job produced since the previous read', async () => {
     const observed = await Effect.runPromise(
       Effect.gen(function* () {

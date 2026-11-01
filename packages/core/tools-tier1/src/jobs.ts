@@ -54,8 +54,16 @@ export interface JobsOptions {
 }
 
 export interface JobsShape {
-  /** Starts a command in the background and returns its handle. */
-  readonly start: (command: string, cwd: string) => Effect.Effect<Job, ToolError>
+  /**
+   * Starts a command in the background and returns its handle. `argv`, when
+   * present, is what gets spawned: a sandbox hands over the wrapped helper so
+   * the confinement is the process that starts, not a shell beside it.
+   */
+  readonly start: (
+    command: string,
+    cwd: string,
+    argv?: ReadonlyArray<string>,
+  ) => Effect.Effect<Job, ToolError>
   /** Takes over a child a timed-out call already spawned, so its work is not lost. */
   readonly promote: (command: string, child: Child, cwd?: string) => Effect.Effect<Job, ToolError>
   /** Reads what the job produced since the previous read, waiting up to `waitMs` for more. */
@@ -181,7 +189,7 @@ export const makeJobs = (options: JobsOptions = {}): Effect.Effect<JobsShape> =>
     }
 
     return {
-      start: (command, cwd) =>
+      start: (command, cwd, argv) =>
         Effect.sync(() => {
           const environment = options.env
           if (environment !== undefined) {
@@ -193,7 +201,7 @@ export const makeJobs = (options: JobsOptions = {}): Effect.Effect<JobsShape> =>
           return register(
             command,
             cwd,
-            spawn(['bash', '-c', command], {
+            spawn([...(argv ?? ['bash', '-c', command])], {
               cwd,
               ...(environment === undefined ? {} : { env: environment }),
               stdout: 'pipe',

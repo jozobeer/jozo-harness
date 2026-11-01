@@ -636,7 +636,7 @@ const tier1ToolList = (
   // A session opened while search is on keeps the tool, and reads the provider the
   // run holds when the call is made, so changing the provider does not need a reload.
   if (live.search !== undefined) list.push(makeWebSearchTool(() => live.search))
-  for (const tool of jobTools(jobs)) list.push(tool)
+  for (const tool of jobTools(jobs, sandbox)) list.push(tool)
   list.push(makeScheduleTool(scheduleHostOf(agent, scheduleStoreOf(options))))
   list.push(
     makeGoalTool({
