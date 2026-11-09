@@ -1,4 +1,5 @@
-import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { lstatSync } from 'node:fs'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { Schema, Effect } from 'effect'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
 
@@ -21,13 +22,32 @@ export interface WorkingDirectoryHost {
   readonly change: (cwd: string) => Effect.Effect<void, ToolError>
 }
 
+/**
+ * The first component below the root that is a link, if any. A missing component
+ * is new work, not a link. Later tools treat the path this call records as their
+ * workspace root and do not inspect that root, so a link here would be followed
+ * out of the workspace by write, edit, and the sandbox's writable directory.
+ */
+const linkBelow = (root: string, inside: string): string | undefined => {
+  // The root itself is the workspace, so only components below it can be a link.
+  if (inside === '') return undefined
+  let walk = root
+  for (const part of inside.split(sep)) {
+    walk = join(walk, part)
+    const info = lstatSync(walk, { throwIfNoEntry: false })
+    if (info === undefined) return undefined
+    if (info.isSymbolicLink()) return walk
+  }
+  return undefined
+}
+
 /** Moves the working directory, as long as it stays inside the workspace. */
 export const makeWorkingDirectoryTool = (
   host: WorkingDirectoryHost,
 ): ToolDefinition<WorkingDirectoryArgs, WorkingDirectoryValue> => ({
   name: 'working_directory',
   description:
-    'Moves the working directory inside the workspace for the tools that follow. Use it instead of chaining cd into every bash command.',
+    'Moves the working directory inside the workspace for the tools that follow. Use it instead of chaining cd into every bash command. A path that goes through a symbolic link is refused; name the directory the link points to.',
   parameters: Parameters,
   output: {
     schema: Schema.Struct({ cwd: Schema.String }),
@@ -43,6 +63,21 @@ export const makeWorkingDirectoryTool = (
       if (escapes) {
         return yield* Effect.fail(
           new ToolError({ code: 'denied', message: 'path escapes the workspace: ' + args.path }),
+        )
+      }
+      // The same rule as every other write path: a link is not inside just because
+      // its spelling is. Name the directory it points to, which is checked again.
+      const linked = linkBelow(resolve(root), inside)
+      if (linked !== undefined) {
+        return yield* Effect.fail(
+          new ToolError({
+            code: 'denied',
+            message:
+              args.path +
+              ' goes through a link: ' +
+              linked +
+              '; name the directory it points to instead',
+          }),
         )
       }
       yield* host.change(target)
