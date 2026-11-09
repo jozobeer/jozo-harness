@@ -8,6 +8,8 @@ import {
 } from '@jozo-harness/tools'
 import { Context, Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
+import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { makeWorkingDirectoryTool } from '../src/index.ts'
 
@@ -99,5 +101,38 @@ describe('working_directory tool', () => {
 
     expect(result?.isError).toBe(false)
     expect(moved).toEqual([join('/', 'tree', 'sub')])
+  })
+
+  test('moves into a real directory and refuses one reached through a link', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'jozo-harness-cwd-'))
+    const root = join(base, 'work')
+    const outside = join(base, 'outside')
+    const inside = join(root, 'inside')
+    await mkdir(root)
+    await mkdir(outside)
+    await mkdir(inside)
+    await symlink(outside, join(root, 'out'))
+    await symlink(inside, join(root, 'in'))
+    const moved: Array<string> = []
+    const tool = makeWorkingDirectoryTool({
+      root: () => root,
+      change: (cwd) => Effect.sync(() => void moved.push(cwd)),
+    })
+    try {
+      const allowed = await Effect.runPromise(call(tool, { path: 'inside' }, root))
+      const throughOut = await Effect.runPromise(call(tool, { path: 'out' }, root))
+      const underOut = await Effect.runPromise(call(tool, { path: 'out/nested' }, root))
+      const throughIn = await Effect.runPromise(call(tool, { path: join(root, 'in') }, root))
+
+      expect(allowed?.isError).toBe(false)
+      expect(moved).toEqual([inside])
+      expect(throughOut?.isError).toBe(true)
+      expect(JSON.stringify(throughOut?.content)).toContain('goes through a link')
+      expect(underOut?.isError).toBe(true)
+      expect(throughIn?.isError).toBe(true)
+      expect(moved).toEqual([inside])
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
   })
 })
