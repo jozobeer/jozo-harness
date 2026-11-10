@@ -1,4 +1,12 @@
+import { execFileSync } from 'node:child_process'
+import { lookup } from 'node:dns/promises'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http'
+import { createServer as createSecureServer, type Server as SecureServer } from 'node:https'
+import { connect as connectTcp, isIP, type Server as NetServer } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import tls from 'node:tls'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { bypassesProxy, outboundFetch, proxyFor, readProxySettings } from '../src/index.ts'
 
@@ -251,4 +259,144 @@ describe('outbound fetch', () => {
     expect(proxy.connects).toEqual(['api.example.com:443'])
     await proxy.stop()
   })
+
+  test('sends the https request through the CONNECT tunnel', async () => {
+    // This process can also dial the upstream directly, so a 200 does not prove the proxy carried it.
+    const carried = await fetchThroughTunnel(undefined, '/hello', {
+      method: 'POST',
+      body: 'payload',
+    })
+
+    expect(carried.body).toBe('through the tunnel')
+    expect(carried.throughProxy).toBe(true)
+  })
+
+  test('sends an https request for an IP address through the CONNECT tunnel', async () => {
+    const carried = await fetchThroughTunnel('127.0.0.1', '/')
+
+    expect(carried.body).toBe('through the tunnel')
+    expect(carried.throughProxy).toBe(true)
+  })
+
+  test('rejects a tunnel whose certificate does not verify', async () => {
+    const tunnel = await startTunnel()
+    vi.stubEnv('HTTPS_PROXY', tunnel.proxyOrigin)
+
+    await expect(outboundFetch(tunnel.target + '/')).rejects.toThrow(/certificate/)
+    await tunnel.stop()
+  })
 })
+
+/** The self-signed upstream is only for this test, so TLS verification has to be off. */
+const trustTestCertificate = (): (() => void) => {
+  const connect = tls.connect.bind(tls)
+  const spy = vi
+    .spyOn(tls, 'connect')
+    .mockImplementation(((options: tls.ConnectionOptions) =>
+      connect({ ...options, rejectUnauthorized: false })) as typeof tls.connect)
+  return () => spy.mockRestore()
+}
+
+const fetchThroughTunnel = async (
+  hostname: string | undefined,
+  path: string,
+  init?: RequestInit,
+): Promise<{ body: string; throughProxy: boolean }> => {
+  const tunnel = hostname === undefined ? await startTunnel() : await startTunnel(hostname)
+  const restore = trustTestCertificate()
+  vi.stubEnv('HTTPS_PROXY', tunnel.proxyOrigin)
+  try {
+    const response = await outboundFetch(tunnel.target + path, init)
+    return { body: await response.text(), throughProxy: tunnel.httpArrivedThroughProxy() }
+  } finally {
+    restore()
+    await tunnel.stop()
+  }
+}
+
+/** An https upstream and a proxy that forwards CONNECT to it. */
+const startTunnel = async (
+  hostname = 'localhost',
+): Promise<{
+  target: string
+  proxyOrigin: string
+  httpArrivedThroughProxy: () => boolean
+  stop: () => Promise<void>
+}> => {
+  const directory = mkdtempSync(join(tmpdir(), 'jzh-proxy-'))
+  const keyPath = join(directory, 'key.pem')
+  const certPath = join(directory, 'cert.pem')
+  execFileSync(
+    'openssl',
+    [
+      'req',
+      '-x509',
+      '-newkey',
+      'rsa:2048',
+      '-keyout',
+      keyPath,
+      '-out',
+      certPath,
+      '-days',
+      '1',
+      '-nodes',
+      '-subj',
+      '/CN=127.0.0.1',
+    ],
+    { stdio: 'pipe' },
+  )
+  const proxyPorts = new Set<number>()
+  const opened: { destroy(): void }[] = []
+  let httpPeer: number | undefined
+  const address = isIP(hostname) === 0 ? (await lookup(hostname)).address : hostname
+  const upstream = createSecureServer(
+    { key: readFileSync(keyPath), cert: readFileSync(certPath) },
+    (incoming, response) => {
+      httpPeer = incoming.socket.remotePort
+      response.end('through the tunnel')
+    },
+  )
+  const upstreamPort = await listenOn(upstream, address)
+  const proxy = createServer()
+  proxy.on('connect', (_request, client, head) => {
+    const target = connectTcp(upstreamPort, address, () => {
+      const port = target.localPort
+      if (port !== undefined) proxyPorts.add(port)
+      client.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+      if (head.length > 0) target.write(head)
+      client.pipe(target)
+      target.pipe(client)
+    })
+    // closeAllConnections does not see a socket that CONNECT has detached.
+    opened.push(client, target)
+    client.on('error', () => target.destroy())
+    client.on('close', () => target.destroy())
+    target.on('error', () => client.destroy())
+    target.on('close', () => client.destroy())
+  })
+  const proxyPort = await listenOn(proxy)
+  return {
+    target: 'https://' + hostname + ':' + String(upstreamPort),
+    proxyOrigin: 'http://127.0.0.1:' + String(proxyPort),
+    httpArrivedThroughProxy: () => httpPeer !== undefined && proxyPorts.has(httpPeer),
+    stop: () => {
+      for (const socket of opened) socket.destroy()
+      return Promise.all([closeServer(upstream), closeServer(proxy)]).then(() => undefined)
+    },
+  }
+}
+
+const listenOn = (server: NetServer, host = '127.0.0.1'): Promise<number> =>
+  new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, host, () => {
+      const address = server.address()
+      resolve(typeof address === 'object' && address !== null ? address.port : 0)
+    })
+  })
+
+const closeServer = (server: Server | SecureServer): Promise<void> =>
+  new Promise((resolve) => {
+    server.closeAllConnections()
+    server.close(() => resolve())
+  })

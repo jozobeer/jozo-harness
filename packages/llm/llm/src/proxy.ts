@@ -10,6 +10,8 @@
  */
 import http from 'node:http'
 import https from 'node:https'
+import net from 'node:net'
+import type { Duplex } from 'node:stream'
 import tls from 'node:tls'
 
 /** The proxy variables a launching environment may carry. */
@@ -211,10 +213,37 @@ const tunnelTo = (proxy: URL, target: URL): Promise<tls.TLSSocket> =>
         )
         return
       }
-      resolve(tls.connect({ socket, servername: target.hostname }))
+      // A throw from tls.connect would escape this handler and never settle the promise.
+      openTls(socket, target.hostname).then(resolve, reject)
     })
     request.once('error', reject)
     request.end()
+  })
+
+/** TLS options for a CONNECT socket. An IP host cannot be a server name. */
+const tunnelTlsOptions = (socket: Duplex, hostname: string): tls.ConnectionOptions =>
+  net.isIP(hostname) === 0 ? { socket, servername: hostname } : { socket }
+
+/** TLS on the tunnel. A synchronous throw must reject, not escape the connect handler. */
+const openTls = (socket: Duplex, hostname: string): Promise<tls.TLSSocket> =>
+  new Promise((resolve, reject) => {
+    let secured: tls.TLSSocket
+    try {
+      secured = tls.connect(tunnelTlsOptions(socket, hostname))
+    } catch (error) {
+      socket.destroy()
+      reject(error instanceof Error ? error : new Error(String(error)))
+      return
+    }
+    const fail = (error: Error) => {
+      secured.destroy()
+      reject(error)
+    }
+    secured.once('error', fail)
+    secured.once('secureConnect', () => {
+      secured.removeListener('error', fail)
+      resolve(secured)
+    })
   })
 
 /** Sends one https target over the tunnel the proxy opened. */
@@ -232,14 +261,23 @@ const sendOverTunnel = async (
         method: init?.method ?? 'GET',
         path: target.pathname + target.search,
         headers: headersOf(init, target.host),
-        // The tunnel is already TLS, so hand the socket over instead of wrapping it again.
+        // The tunnel socket is already TLS. A default agent ignores createConnection and dials the target directly.
         createConnection: () => socket,
-        agent: false,
         ...(init?.signal === null || init?.signal === undefined ? {} : { signal: init.signal }),
       },
-      (incoming) => resolve(responseOf(incoming)),
+      (incoming) => {
+        // Node leaves a socket from createConnection open, so close it after the body is delivered.
+        incoming.once('end', () => {
+          queueMicrotask(() => socket.destroy())
+        })
+        incoming.once('error', () => socket.destroy())
+        resolve(responseOf(incoming))
+      },
     )
-    request.once('error', reject)
+    request.once('error', (error) => {
+      socket.destroy()
+      reject(error)
+    })
     request.end(bodyOf(init))
   })
 }
