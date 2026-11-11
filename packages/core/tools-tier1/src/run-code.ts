@@ -545,11 +545,25 @@ const runSession = async (
   }
 }
 
+/** The mode and directory a child was spawned under. Both are fixed for its life. */
+const confinementOf = (sandbox: SandboxShape | undefined, cwd: string): string =>
+  (sandbox === undefined ? 'unconfined' : sandbox.mode) + '\0' + cwd
+
+interface HeldChild {
+  readonly worker: SessionWorker
+  readonly confinement: string
+}
+
 /** The children one tool keeps, keyed by session and runtime. */
 export interface RunCodeSessions {
-  /** The child for this session and runtime, started on first use. */
+  /**
+   * The child for this session and runtime, started on first use under
+   * `confinement`. A live child from another confinement is ended first: it
+   * still has the sandbox and directory it was spawned with.
+   */
   readonly open: (
     key: string,
+    confinement: string,
     start: () => Effect.Effect<SessionWorker, ToolError>,
   ) => Effect.Effect<SessionWorker, ToolError>
   /** Ends and forgets the child of a session; the next call starts a fresh one. */
@@ -560,27 +574,35 @@ export interface RunCodeSessions {
 
 /** The pool a tool owns when no surrounding scope does; `closeAll` is its end. */
 const makeSessionPool = (): RunCodeSessions => {
-  const held = new Map<string, SessionWorker>()
+  const held = new Map<string, HeldChild>()
   const closeAll = (): Effect.Effect<void> =>
     Effect.sync(() => {
-      for (const worker of held.values()) worker.kill()
+      for (const entry of held.values()) entry.worker.kill()
       held.clear()
     })
   return {
-    open: (key, start) =>
+    open: (key, confinement, start) =>
       Effect.suspend(() => {
         const existing = held.get(key)
-        if (existing !== undefined) return Effect.succeed(existing)
+        if (existing !== undefined && existing.confinement === confinement) {
+          return Effect.succeed(existing.worker)
+        }
+        // Drop the old child before starting the new one, so a failed spawn
+        // cannot fall back to a process the new boundary does not allow.
+        if (existing !== undefined) {
+          held.delete(key)
+          existing.worker.kill()
+        }
         return Effect.map(start(), (worker) => {
-          held.set(key, worker)
+          held.set(key, { worker, confinement })
           return worker
         })
       }),
     discard: (key) =>
       Effect.sync(() => {
-        const worker = held.get(key)
+        const entry = held.get(key)
         held.delete(key)
-        worker?.kill()
+        entry?.worker.kill()
       }),
     closeAll,
   }
@@ -624,7 +646,7 @@ export const makeRunCodeTool = (host: RunCodeHost): RunCodeTool => {
   return {
     name: 'run_code',
     description:
-      'Runs a program you write and returns its output. The code is the body of an async function: call another tool as `await tools.name(args)` and the call reaches the same policy and sandbox as a direct call. Return the value the next step should read; console.log lines are returned too. The program is TypeScript: type annotations, `as`, and `satisfies` are removed before it runs, and a program whose types cannot be removed fails instead of running as broken JavaScript. The child lives as long as the session, so values you put on `globalThis` are still there on the next call; a program still running at the timeout is ended, and the next call starts a fresh child. With runtime python the code is a script that calls tools.name(...) and prints its output.',
+      'Runs a program you write and returns its output. The code is the body of an async function: call another tool as `await tools.name(args)` and the call reaches the same policy and sandbox as a direct call. Return the value the next step should read; console.log lines are returned too. The program is TypeScript: type annotations, `as`, and `satisfies` are removed before it runs, and a program whose types cannot be removed fails instead of running as broken JavaScript. The child lives as long as the session, so values you put on `globalThis` are still there on the next call, until the sandbox mode or working directory changes: that ends the child, and the next program starts inside the new boundary. A program still running at the timeout is ended, and the next call starts a fresh child. With runtime python the code is a script that calls tools.name(...) and prints its output.',
     parameters: Parameters,
     output: {
       schema: Output,
@@ -654,7 +676,7 @@ export const makeRunCodeTool = (host: RunCodeHost): RunCodeTool => {
           .tools()
           .map((declaration) => declaration.name)
           .filter((name) => name !== 'run_code')
-        const worker = yield* sessions.open(key, () =>
+        const worker = yield* sessions.open(key, confinementOf(host.sandbox, context.cwd), () =>
           Effect.gen(function* () {
             const base = { argv: childArgv(runtime), cwd: context.cwd }
             const wrapped =

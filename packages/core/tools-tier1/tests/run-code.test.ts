@@ -1,6 +1,6 @@
 import { HooksLive } from '@jozo-harness/kernel'
 import type { ContentBlock } from '@jozo-harness/llm'
-import { makeAsk, type SandboxShape } from '@jozo-harness/safety'
+import { makeAsk, type SandboxMode, type SandboxShape } from '@jozo-harness/safety'
 import {
   decodeSessionEvent,
   makeSession,
@@ -15,6 +15,9 @@ import {
   type ToolExecutionResult,
 } from '@jozo-harness/tools'
 import { Context, Effect, Layer, Schema } from 'effect'
+import { mkdtempSync, realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, test } from 'vitest'
 import { tier1Tools } from '../src/index.ts'
 import {
@@ -501,6 +504,61 @@ describe('run_code', () => {
     expect(outcomes[0]?.isError).toBe(false)
     expect(outcomes[1]?.isError).toBe(false)
     expect(textOf(outcomes[1]?.content ?? [])).toContain('return: 42')
+  })
+
+  test('a sandbox mode change replaces the child before the next program runs', async () => {
+    let mode: SandboxMode = 'workspace-write'
+    const seen: Array<SandboxMode | undefined> = []
+    const sandbox: SandboxShape = {
+      name: 'probe',
+      confines: true,
+      get mode() {
+        return mode
+      },
+      wrap: (command) => {
+        seen.push(command.mode)
+        return Effect.succeed({
+          argv: command.argv,
+          cwd: command.cwd,
+          mode: command.mode ?? mode,
+          denialSignatures: [],
+        })
+      },
+    }
+    const tool = makeRunCodeTool(host(() => Effect.succeed(ok('unused', {})), sandbox))
+    try {
+      await Effect.runPromise(tool.execute({ code: 'globalThis.marker = 1' }, context))
+      const kept = await Effect.runPromise(
+        tool.execute({ code: 'return globalThis.marker' }, context),
+      )
+      expect(kept.output).toContain('return: 1')
+      expect(seen).toEqual(['workspace-write'])
+      mode = 'read-only'
+      const next = await Effect.runPromise(
+        tool.execute({ code: 'return typeof globalThis.marker' }, context),
+      )
+      expect(seen).toEqual(['workspace-write', 'read-only'])
+      expect(next.output).toContain('return: "undefined"')
+    } finally {
+      await Effect.runPromise(tool.closeSessions())
+    }
+  })
+
+  test('a different working directory replaces the child', async () => {
+    const tool = makeRunCodeTool(host(() => Effect.succeed(ok('unused', {}))))
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'jzh-run-code-')))
+    try {
+      await Effect.runPromise(tool.execute({ code: 'globalThis.marker = 1' }, context))
+      const next = await Effect.runPromise(
+        tool.execute(
+          { code: 'return [typeof globalThis.marker, process.cwd()]' },
+          { ...context, cwd },
+        ),
+      )
+      expect(next.output).toContain('return: ["undefined",' + JSON.stringify(cwd) + ']')
+    } finally {
+      await Effect.runPromise(tool.closeSessions())
+    }
   })
 
   test('a program in another session does not see the values of the first', async () => {

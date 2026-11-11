@@ -1069,7 +1069,7 @@ tier1 行がある run では、モデルに `run_code` が渡る。モデルは
 
 実行はセッションごとの子プロセスで、bash と同じ sandbox の下で走る。中の tool 呼び出しも、直接呼んだときと同じ policy と承認を通る。auto の審査だけは外側の `run_code` 呼び出しで 1 回行い、中の呼び出しでは繰り返さない。戻るのは node なら `return` と `console.log`、python なら `print` だけで、途中の tool の結果は会話に入らない。python の呼び出しは同期で、1 本ずつ順に走る。
 
-- 記憶: node の子はセッションが閉じるまで残る。プログラムが `globalThis` に置いた値は、同じセッションの次の `run_code` から読める。python も同じ子の中で名前空間を保つので、前のプログラムの変数が残る。別のセッションや子 agent は別の子を持つ。セッションが閉じると子は終了し、値は消える。
+- 記憶: node の子はセッションが閉じるまで残る。プログラムが `globalThis` に置いた値は、同じセッションの次の `run_code` から読める。python も同じ子の中で名前空間を保つので、前のプログラムの変数が残る。別のセッションや子 agent は別の子を持つ。sandbox のモードか作業ディレクトリが変わった次の呼び出しは、古い子を捨てて新しい境界で子を起こす。前の `globalThis` や python の名前は残らない。セッションが閉じると子は終了し、値は消える。
 - 打ち切り: 30 秒（`RUN_CODE_TIMEOUT_MS`）と 16,000 文字（`RUN_CODE_OUTPUT_LIMIT`）。切ったときは結果に印が付く。時間切れになった子は捨てるので、次の呼び出しは新しい子で始まり、固まったプログラムの `globalThis` は残らない。
 - 型: コードは TypeScript として渡せる。型注釈・`as`・`satisfies`・`interface` は実行前に `node:module` の `stripTypeScriptTypes` で外す。外せない構文（`enum`・`namespace` など）は、壊れた JavaScript として走らせず、`invalid-arguments` として理由を返す。
 - python は run に python3 があるときだけ使える。無ければ `unavailable` になる。
