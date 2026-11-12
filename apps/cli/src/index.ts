@@ -570,9 +570,13 @@ const installTier1 = (
     }
   })
 
+/** The optional sandbox key, absent when the run has no boundary to pass on. */
+const sandboxOption = (sandbox: SandboxShape | undefined) =>
+  sandbox === undefined ? {} : { sandbox }
+
 /** The workflow tool over the run's sandbox, keeping the optional key absent when unconfined. */
 const workflowToolFor = (agents: AgentsShape, route: string, sandbox: SandboxShape | undefined) =>
-  makeWorkflowTool({ agents, route, ...(sandbox === undefined ? {} : { sandbox }) })
+  makeWorkflowTool({ agents, route, ...sandboxOption(sandbox) })
 
 /** The run's host store; a build without one is a wiring mistake, not a user error. */
 const scheduleStoreOf = (options: CommandOptions): ScheduleStore => {
@@ -680,6 +684,7 @@ const tier1ToolList = (
         outputs,
         maxDepth: () => live.subagentDepth,
         ...(routes === undefined ? {} : { routes }),
+        ...sandboxOption(sandbox),
       }),
       makeStructuredOutputTool(outputs),
       ...agentTools(agents),

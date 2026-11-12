@@ -625,6 +625,9 @@ importers:
       '@jozo-harness/agent-loop':
         specifier: workspace:*
         version: link:../agent-loop
+      '@jozo-harness/filesystem':
+        specifier: workspace:*
+        version: link:../filesystem
       '@jozo-harness/kernel':
         specifier: workspace:*
         version: link:../../kernel/kernel
@@ -643,6 +646,9 @@ importers:
       '@jozo-harness/tools':
         specifier: workspace:*
         version: link:../tools
+      '@jozo-harness/tools-tier0':
+        specifier: workspace:*
+        version: link:../tools-tier0
       effect:
         specifier: 4.0.3
         version: 4.0.3

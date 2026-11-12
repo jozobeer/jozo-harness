@@ -1,6 +1,6 @@
 import type { Agent, AgentsShape } from '@jozo-harness/agent'
 import { HooksLive } from '@jozo-harness/kernel'
-import { SandboxError, type SandboxShape } from '@jozo-harness/safety'
+import { noneSandbox, SandboxError, type SandboxShape } from '@jozo-harness/safety'
 import type { SessionEvent } from '@jozo-harness/session'
 import {
   Tools,
@@ -134,6 +134,64 @@ describe('the workflow tool', () => {
       'a: one\nb: two\n\nchild sessions:\na: done [child session: child-1]\nb: done [child session: child-2]',
     )
     expect(started.sort()).toEqual(['first job', 'second job'])
+  })
+
+  test('starts a task in a directory inside the workspace', async () => {
+    const started: Array<string> = []
+    const created: NonNullable<FakeAgentsOptions['created']> = []
+    const agents = fakeAgents({ 'first job': 'one' }, started, { created })
+
+    const result = await Effect.runPromise(
+      call(
+        makeWorkflowTool({ agents, route: 'stub/model' }),
+        { tasks: [{ id: 'a', task: 'first job', cwd: 'nested' }] },
+        '/work',
+      ),
+    )
+
+    expect(result?.isError).toBe(false)
+    expect(created.map((child) => child.cwd)).toEqual(['/work/nested'])
+  })
+
+  test('refuses every task when one cwd leaves the workspace, before any child starts', async () => {
+    const started: Array<string> = []
+    const created: NonNullable<FakeAgentsOptions['created']> = []
+    const agents = fakeAgents({ 'first job': 'one', 'second job': 'two' }, started, { created })
+
+    const result = await Effect.runPromise(
+      call(
+        makeWorkflowTool({ agents, route: 'stub/model' }),
+        {
+          tasks: [
+            { id: 'a', task: 'first job', cwd: 'nested' },
+            { id: 'b', task: 'second job', cwd: '/elsewhere' },
+          ],
+        },
+        '/work',
+      ),
+    )
+
+    expect(result?.isError).toBe(true)
+    expect(textOf(result)).toContain('path escapes the workspace')
+    expect(started).toEqual([])
+    expect(created).toEqual([])
+  })
+
+  test('danger-full-access lets a task name a cwd outside the workspace', async () => {
+    const started: Array<string> = []
+    const created: NonNullable<FakeAgentsOptions['created']> = []
+    const agents = fakeAgents({ 'first job': 'one' }, started, { created })
+
+    const result = await Effect.runPromise(
+      call(
+        makeWorkflowTool({ agents, route: 'stub/model', sandbox: noneSandbox }),
+        { tasks: [{ id: 'a', task: 'first job', cwd: '/elsewhere' }] },
+        '/work',
+      ),
+    )
+
+    expect(result?.isError).toBe(false)
+    expect(created.map((child) => child.cwd)).toEqual(['/elsewhere'])
   })
 
   test('an item that cannot be read as its expectation becomes null, and the rest live', async () => {
@@ -312,6 +370,24 @@ describe('the workflow script', () => {
     expect(created).toEqual([
       { cwd: process.cwd(), options: { route: 'stub/model' }, parent: 's1', seed: [] },
     ])
+  })
+
+  test('a script spawn outside the workspace starts no child', async () => {
+    const started: Array<string> = []
+    const created: NonNullable<FakeAgentsOptions['created']> = []
+    const agents = fakeAgents({ 'first job': 'answer' }, started, { created })
+
+    const result = await Effect.runPromise(
+      call(makeWorkflowTool({ agents, route: 'stub/model' }), {
+        script: "await workflow.spawn('first job', { cwd: '/elsewhere' })",
+      }),
+    )
+
+    expect(result?.isError).toBe(false)
+    expect(result?.value).toMatchObject({ ok: false, stage: 'spawn 1' })
+    expect(reasonOf(result)).toContain('path escapes the workspace')
+    expect(started).toEqual([])
+    expect(created).toEqual([])
   })
 
   test('fails a script that outlives the deadline at the timeout stage', async () => {

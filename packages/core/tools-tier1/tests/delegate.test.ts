@@ -142,7 +142,7 @@ describe('delegate tool', () => {
     }))
 
     const { value, error } = await delegate(
-      { command: 'codex', task: 'summarize', cwd: '/elsewhere' },
+      { command: 'codex', task: 'summarize', cwd: 'nested' },
       host,
       allowed,
       sandbox,
@@ -150,7 +150,7 @@ describe('delegate tool', () => {
 
     expect(error).toBeUndefined()
     expect(seen.argv).toEqual(['codex', 'exec', '--full-auto', 'summarize'])
-    expect(seen.cwd).toBe('/elsewhere')
+    expect(seen.cwd).toBe('/work/nested')
     expect(value).toEqual({
       command: 'codex',
       text: 'done\n',
@@ -159,6 +159,57 @@ describe('delegate tool', () => {
       truncated: false,
       stderrTruncated: false,
     })
+  })
+
+  test('refuses a cwd outside the workspace before the sandbox or the CLI runs', async () => {
+    let ran = 0
+    let wrapped = 0
+    const sandbox: SandboxShape = {
+      ...noneSandbox,
+      name: 'recording',
+      confines: true,
+      mode: 'workspace-write',
+      wrap: (command) =>
+        Effect.sync(() => {
+          wrapped += 1
+          return {
+            argv: command.argv,
+            cwd: command.cwd,
+            mode: 'workspace-write',
+            denialSignatures: [],
+          }
+        }),
+    }
+    const host = hostOf(['codex'], async () => {
+      ran += 1
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    const { value, error } = await delegate(
+      { command: 'codex', task: 'summarize', cwd: '/elsewhere' },
+      host,
+      allowed,
+      sandbox,
+    )
+
+    expect(value).toBeUndefined()
+    expect(error?.code).toBe('denied')
+    expect(error?.message).toContain('path escapes the workspace')
+    expect(ran).toBe(0)
+    expect(wrapped).toBe(0)
+  })
+
+  test('danger-full-access runs in a cwd outside the workspace', async () => {
+    const seen: { cwd?: string } = {}
+    const host = hostOf(['codex'], async (command) => {
+      seen.cwd = command.cwd
+      return { exitCode: 0, stdout: 'ok', stderr: '' }
+    })
+
+    const { error } = await delegate({ command: 'codex', task: 't', cwd: '/elsewhere' }, host)
+
+    expect(error).toBeUndefined()
+    expect(seen.cwd).toBe('/elsewhere')
   })
 
   test('takes the run working directory when cwd is left out, as subagent does', async () => {

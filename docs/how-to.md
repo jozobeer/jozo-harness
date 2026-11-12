@@ -325,7 +325,7 @@ plugins:
 このリポジトリの失敗しているテストを、codex に直させて。
 ```
 
-モデルは `delegate` を `command`（設定の `name`）、`task`、任意の `cwd` で呼ぶ。`task` と `cwd` は `subagent` と同じ意味で、`cwd` を省くと run の作業ディレクトリになる。`subagent` の `model` / `context` / `preset` はプロセス内の子だけの引数なので、外部 CLI には渡さない。実行される argv は設定の `argv` に `task` を最後の引数として足したもので、設定に無い名前は `invalid-arguments` になる。CLI が PATH に無ければ `unavailable` と探したコマンド名を返し、コマンドは run の sandbox を通した子プロセスで走る。stdout は最大 100,000 文字、stderr は最大 10,000 文字で切り、結果には終了コードと両方の stream が入るので、セッションログから子の入出力を辿れる。終了コードが 0 でない、signal で死んだ、起動できない、timeout したときは、その呼び出しだけが失敗として返り、turn は落ちない。既定の profile に入れないのは、全セッションの tool 一覧を太らせないためである。
+モデルは `delegate` を `command`（設定の `name`）、`task`、任意の `cwd` で呼ぶ。`task` と `cwd` は `subagent` と同じ意味で、`cwd` を省くと run の作業ディレクトリになる。作業ディレクトリの外、または外へ抜けるシンボリックリンクは `denied` になり、CLI は起動しない。`danger-full-access` のときだけ外を指せる。`subagent` の `model` / `context` / `preset` はプロセス内の子だけの引数なので、外部 CLI には渡さない。実行される argv は設定の `argv` に `task` を最後の引数として足したもので、設定に無い名前は `invalid-arguments` になる。CLI が PATH に無ければ `unavailable` と探したコマンド名を返し、コマンドは run の sandbox を通した子プロセスで走る。stdout は最大 100,000 文字、stderr は最大 10,000 文字で切り、結果には終了コードと両方の stream が入るので、セッションログから子の入出力を辿れる。終了コードが 0 でない、signal で死んだ、起動できない、timeout したときは、その呼び出しだけが失敗として返り、turn は落ちない。既定の profile に入れないのは、全セッションの tool 一覧を太らせないためである。
 
 ### モデルに同梱のランタイムを渡す
 
@@ -1006,6 +1006,8 @@ team update id=task-2 state=done revision=1   # task-1 が未完了なら拒否
 
 権限は roster の内側だけで分かれる。spawn・create・owner の割当・blockedBy の変更は Lead だけが呼べる。teammate は自分の task を進めて完了でき、peer に send し、inbox と板を読める。Lead 専用の操作を teammate が呼ぶと、何を代わりにすればよいかを添えた `denied` で拒否される。
 
+`subagent` の `cwd` を渡すと子はそのディレクトリで始まる。既定は親の作業ディレクトリである。外のパスと、外へ抜けるシンボリックリンクは `denied` になり、子は起きない。`danger-full-access` のときだけ外を指せる。子の `write` / `edit` とその sandbox は開始ディレクトリを境界にするためである。
+
 子を 1 つだけ使うときは `subagent` で足りる。`model` で別の route（`provider/model`）を走らせられるが、その run が設定に置いている route に限る。候補はその run の既定 route と、`agent-loop` 行の `models` が値を持つモデル名（既定 route が provider を持つなら `<provider>/<model>` の形も）である。一覧に無い route は子を起こす前に `invalid-arguments` で拒否する。`context=fresh` で親の履歴を渡さず、`task` を省くと起こしたまま idle で残せる（あとから `send_message` で仕事を渡す）。
 
 `jzh web` の Run ペインの `subagents` は、その session が起こした子を live の順に並べる。行を押すと子の session を開く。`depth n/m` は親から何段下かと、その run が許す深さの上限で、`may delegate` が付く子はさらに子を起こせる。行の下の入力欄は `send_message` と同じ経路で子へメッセージを渡す。idle の子はその場で新しい turn を始め、動いている子は次の step の境目で読む。`stop` は動いている子にだけ出る。
@@ -1024,7 +1026,7 @@ return review.text
 ```
 
 - `tasks` と `script` はどちらか一方だけ。両方渡すと `invalid-arguments` になる。
-- `spawn(task, { label, cwd })` は `{ sessionId, text, tools }` を返す。`tools` は子が使った tool の名前と結果の 1 行要約である。
+- `spawn(task, { label, cwd })` は `{ sessionId, text, tools }` を返す。`tools` は子が使った tool の名前と結果の 1 行要約である。`cwd` は `subagent` と同じ境界で、外ならその spawn は失敗し、子は起きない。tasks の `cwd` が外なら呼び出し全体が `denied` になる。
 - 子は `subagent` と同じ経路で起こす。同じ route と同じ sandbox・承認を通る。
 - スクリプト自身は `run_code` と同じ sandbox の子プロセスで走る。fs や process には直接触れない。
 - 失敗は tool の失敗ではなく結果になる。例外は `stage: script`、子が起動できない・メッセージを取らない・turn が error で終わる場合は `stage: spawn N`、deadline は `stage: timeout`、起動数が `maxChildren` を超えた場合は `stage: spawn N` として、`ok: false` と `reason` が返る。
