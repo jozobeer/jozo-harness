@@ -2,6 +2,7 @@ import { Context, Effect, Layer, Schema } from 'effect'
 import type { Plugin } from '@jozo-harness/kernel'
 import { noneSandbox, type SandboxShape } from '@jozo-harness/safety'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
+import { confineCwd } from './confine-cwd.ts'
 import { messageOf, programExists, reasonOf, runProcess, type CommandResult } from './program.ts'
 
 const Parameters = Schema.Struct({
@@ -11,7 +12,8 @@ const Parameters = Schema.Struct({
   task: Schema.String.annotate({ description: 'The task for that agent, as one prompt.' }),
   cwd: Schema.optionalKey(
     Schema.String.annotate({
-      description: 'The directory the agent works in. Defaults to the run working directory.',
+      description:
+        'The directory the agent works in. Defaults to the run working directory. Outside the workspace, or through a link that leaves it, is refused unless the run is in danger-full-access.',
     }),
   ),
 })
@@ -189,7 +191,7 @@ export const makeDelegateTool = (
           }),
         )
       }
-      const cwd = args.cwd ?? exec.cwd
+      const cwd = yield* confineCwd(exec.cwd, args.cwd, sandbox)
       const confined = yield* sandbox.wrap({ argv, cwd }).pipe(
         Effect.mapError(
           (error) =>

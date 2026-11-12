@@ -1,4 +1,5 @@
 import type { Agent, AgentsShape } from '@jozo-harness/agent'
+import { noneSandbox } from '@jozo-harness/safety'
 import { HooksLive } from '@jozo-harness/kernel'
 import type { SessionEvent } from '@jozo-harness/session'
 import {
@@ -129,9 +130,27 @@ describe('subagent tool', () => {
     ])
   })
 
-  test('takes the cwd it is given', async () => {
+  test('starts the child in a directory inside the workspace', async () => {
     const seen: Array<Created> = []
     await Effect.runPromise(
+      call(
+        makeSubagentTool({
+          agents: fakeAgents(seen, 'ok'),
+          route: 'stub/model',
+        }),
+        {
+          task: 'go',
+          cwd: '/work/sub',
+        },
+      ),
+    )
+
+    expect(seen[0]?.cwd).toBe('/work/sub')
+  })
+
+  test('refuses a cwd outside the workspace before a child starts', async () => {
+    const seen: Array<Created> = []
+    const result = await Effect.runPromise(
       call(
         makeSubagentTool({
           agents: fakeAgents(seen, 'ok'),
@@ -144,6 +163,28 @@ describe('subagent tool', () => {
       ),
     )
 
+    expect(result?.isError).toBe(true)
+    expect(JSON.stringify(result?.content)).toContain('path escapes the workspace')
+    expect(seen).toEqual([])
+  })
+
+  test('danger-full-access starts a child outside the workspace', async () => {
+    const seen: Array<Created> = []
+    const result = await Effect.runPromise(
+      call(
+        makeSubagentTool({
+          agents: fakeAgents(seen, 'ok'),
+          route: 'stub/model',
+          sandbox: noneSandbox,
+        }),
+        {
+          task: 'go',
+          cwd: '/elsewhere',
+        },
+      ),
+    )
+
+    expect(result?.isError).toBe(false)
     expect(seen[0]?.cwd).toBe('/elsewhere')
   })
 

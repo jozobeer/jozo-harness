@@ -2,6 +2,7 @@ import { Schema, Effect } from 'effect'
 import type { AgentsShape } from '@jozo-harness/agent'
 import { forkSeed, type JsonValue } from '@jozo-harness/session'
 import { childAnswerOf } from './child-answer.ts'
+import { confineCwd } from './confine-cwd.ts'
 import { delegationRefusal, eventsOfAgent } from './delegation.ts'
 import {
   runWorkflowScript,
@@ -22,7 +23,8 @@ const TaskSchema = Schema.Struct({
   }),
   cwd: Schema.optionalKey(
     Schema.String.annotate({
-      description: 'The directory the child starts in. Defaults to this working directory.',
+      description:
+        'The directory the child starts in. Defaults to this working directory. Outside the workspace, or through a link that leaves it, is refused unless the run is in danger-full-access.',
     }),
   ),
   expect: Schema.optionalKey(
@@ -95,6 +97,23 @@ const parseAnswer = (id: string, answer: string, sessionId: string): WorkflowIte
   }
 }
 
+/**
+ * The directory each task may start in. Checked before any child starts, so
+ * one escape cannot race a sibling that was already running.
+ */
+const directoriesOf = (
+  tasks: ReadonlyArray<WorkflowTask>,
+  root: string,
+  sandbox: WorkflowHost['sandbox'],
+): Effect.Effect<ReadonlyArray<{ readonly task: WorkflowTask; readonly cwd: string }>, ToolError> =>
+  Effect.gen(function* () {
+    const placed: Array<{ readonly task: WorkflowTask; readonly cwd: string }> = []
+    for (const task of tasks) {
+      placed.push({ task, cwd: yield* confineCwd(root, task.cwd, sandbox) })
+    }
+    return placed
+  })
+
 /** Runs one task in its own child and reads the answer the way the task asked for it. */
 const runTask = (
   host: WorkflowHost,
@@ -106,7 +125,7 @@ const runTask = (
     // Both ways a child can fail to start are this item's failure, not the run's.
     const child = yield* host.agents
       .create({
-        cwd: task.cwd ?? cwd,
+        cwd,
         options: { route: host.route },
         seed: forkSeed(eventsOfAgent(host.agents, parent)),
         parent,
@@ -290,11 +309,12 @@ export const makeWorkflowTool = (
       if (tasks.length === 0) {
         return yield* Effect.fail(invalid('a workflow needs at least one task'))
       }
+      const placed = yield* directoriesOf(tasks, context.cwd, host.sandbox)
       const concurrency = Math.max(args.concurrency ?? WORKFLOW_CONCURRENCY, 1)
       // Each item decides its own fate; one failing child never fails the call.
       return yield* Effect.forEach(
-        tasks,
-        (task) => runTask(host, task, context.cwd, context.sessionId),
+        placed,
+        ({ task, cwd }) => runTask(host, task, cwd, context.sessionId),
         { concurrency },
       )
     }),

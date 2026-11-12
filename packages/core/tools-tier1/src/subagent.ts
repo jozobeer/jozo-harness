@@ -1,5 +1,7 @@
+import type { SandboxShape } from '@jozo-harness/safety'
 import { forkSeed } from '@jozo-harness/session'
 import { childAnswerOf } from './child-answer.ts'
+import { confineCwd } from './confine-cwd.ts'
 import type { StructuredOutputs } from './structured-output.ts'
 import {
   DELEGATION_MAX_DEPTH,
@@ -20,7 +22,8 @@ const Parameters = Schema.Struct({
   ),
   cwd: Schema.optionalKey(
     Schema.String.annotate({
-      description: 'The directory the child starts in. Defaults to this working directory.',
+      description:
+        'The directory the child starts in. Defaults to this working directory. Outside the workspace, or through a link that leaves it, is refused unless the run is in danger-full-access.',
     }),
   ),
   model: Schema.optionalKey(
@@ -131,6 +134,12 @@ export interface SubagentHost {
    * call after a change sees it; absent keeps the default.
    */
   readonly maxDepth?: DepthLimit
+  /**
+   * The run's sandbox. Its mode is read per call, so a permission change is
+   * seen. Absent is confined like workspace-write: a host that forgot the
+   * sandbox must not widen the workspace by starting a child elsewhere.
+   */
+  readonly sandbox?: SandboxShape
 }
 
 /** The preset a child runs under: the allowed one it was given, or the host's default. */
@@ -152,13 +161,14 @@ const presetFor = (
 const startChild = (
   agents: AgentsShape,
   args: SubagentArgs,
-  context: { readonly sessionId: string; readonly cwd: string },
+  context: { readonly sessionId: string },
   route: string,
   preset: string | undefined,
+  cwd: string,
 ): Effect.Effect<Agent, ToolError> =>
   agents
     .create({
-      cwd: args.cwd ?? context.cwd,
+      cwd,
       options: { route, ...(preset === undefined ? {} : { preset }) },
       seed: args.context === 'fresh' ? [] : forkSeed(eventsOfAgent(agents, context.sessionId)),
       parent: context.sessionId,
@@ -286,7 +296,8 @@ export const makeSubagentTool = (
         const outputs = host.outputs
         const unhonoured = structuredRefusal(args, outputs)
         if (unhonoured !== undefined) return yield* Effect.fail(unhonoured)
-        const child = yield* startChild(agents, args, context, route, preset)
+        const cwd = yield* confineCwd(context.cwd, args.cwd, host.sandbox)
+        const child = yield* startChild(agents, args, context, route, preset, cwd)
         const refusedReport = expectReport(outputs, args.outputSchema, child.id)
         if (refusedReport !== undefined) return yield* Effect.fail(refusedReport)
         if (args.task === undefined) return { sessionId: child.id, text: '' }

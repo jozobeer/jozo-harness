@@ -1,11 +1,13 @@
-import type { AgentsShape, CreateAgentOptions } from '@jozo-harness/agent'
+import type { Agent, AgentsShape, CreateAgentOptions } from '@jozo-harness/agent'
 import type { SandboxShape } from '@jozo-harness/safety'
 import { forkSeed, type JsonValue, type SessionEvent } from '@jozo-harness/session'
 import { createInterface } from 'node:readline'
 import { Readable } from 'node:stream'
 import { spawn, type Child } from '@jozo-harness/process'
+import { ToolError } from '@jozo-harness/tools'
 import { Effect } from 'effect'
 import { childAnswerOf } from './child-answer.ts'
+import { confineCwd } from './confine-cwd.ts'
 import { eventsOfAgent } from './delegation.ts'
 
 /**
@@ -250,15 +252,37 @@ const labelOf = (call: ScriptCall): string =>
 
 /** How one spawn starts its child: the same arguments subagent uses. */
 const createOf = (
-  call: ScriptCall,
   host: WorkflowScriptHost,
   context: WorkflowScriptContext,
+  cwd: string,
 ): CreateAgentOptions => ({
-  cwd: typeof call.args.cwd === 'string' ? call.args.cwd : context.cwd,
+  cwd,
   options: { route: host.route },
   seed: forkSeed(eventsOfAgent(host.agents, context.sessionId)),
   parent: context.sessionId,
 })
+
+/**
+ * The child one spawn asked for, after its directory is confined. A path
+ * outside the workspace fails the spawn before an agent exists, because that
+ * directory would become the child's write root.
+ */
+const startChild = (
+  call: ScriptCall,
+  host: WorkflowScriptHost,
+  context: WorkflowScriptContext,
+): Effect.Effect<Agent, ToolError> =>
+  Effect.gen(function* () {
+    const asked = typeof call.args.cwd === 'string' ? call.args.cwd : undefined
+    const cwd = yield* confineCwd(context.cwd, asked, host.sandbox)
+    return yield* host.agents
+      .create(createOf(host, context, cwd))
+      .pipe(
+        Effect.mapError(
+          () => new ToolError({ code: 'execution', message: 'cannot start a child agent' }),
+        ),
+      )
+  })
 
 /** Writes one child into the run, so the result can name it and where it ran. */
 const recordSpawn = (
@@ -310,13 +334,19 @@ const answerSpawn = async (
   const stage = stageOf(count.children + 1, call.args.label)
   const task = typeof call.args.task === 'string' ? call.args.task : ''
   count.children += 1
-  const created = await Effect.runPromise(
-    host.agents.create(createOf(call, host, context)).pipe(Effect.orElseSucceed(() => undefined)),
+  const opened = await Effect.runPromise(
+    startChild(call, host, context).pipe(
+      Effect.match({
+        onFailure: (error) => ({ ok: false as const, reason: error.message }),
+        onSuccess: (agent) => ({ ok: true as const, agent }),
+      }),
+    ),
   )
-  if (created === undefined) {
-    fail(stage, 'cannot start a child agent')
+  if (!opened.ok) {
+    fail(stage, opened.reason)
     return
   }
+  const created = opened.agent
   const before = created.session.events().length
   const queued = await Effect.runPromise(
     created.followup({ text: task, source: 'user' }).pipe(Effect.orElseSucceed(() => false)),
