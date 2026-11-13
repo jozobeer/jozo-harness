@@ -46,6 +46,39 @@ describe('the host clock', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('delivers a one-shot at schedule once', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-clock-'))
+    const store = makeScheduleStore(join(root, 'schedules.json'), { now: () => NOW })
+    const at = NOW - 1_000
+    store.write({
+      kind: 'created',
+      schedule: {
+        id: 'once',
+        sessionId: 's1',
+        rule: { kind: 'at', at },
+        prompt: 'ping',
+        createdAt: NOW - 60_000,
+      },
+    })
+    let deliveries = 0
+    const clock = {
+      store,
+      deliver: () =>
+        Effect.sync(() => {
+          deliveries += 1
+          return true
+        }),
+      now: () => NOW,
+    }
+
+    await Effect.runPromise(fireDueSchedules(clock, NOW))
+    await Effect.runPromise(fireDueSchedules(clock, NOW))
+
+    expect(deliveries).toBe(1)
+    expect(store.due(NOW)).toEqual([])
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('delivers a schedule another session wrote, not the page the reader sees', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-clock-'))
     const store = makeScheduleStore(join(root, 'schedules.json'), { now: () => NOW })

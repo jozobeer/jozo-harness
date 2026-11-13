@@ -370,6 +370,15 @@ const recurringDue = (
 }
 
 /**
+ * One absolute instant. A firing that has reached it has spent the one-shot;
+ * moving the instant later than that firing leaves a new one ahead.
+ */
+const atDue = (at: number, from: number, lastFired: number | undefined): number | undefined => {
+  if (lastFired !== undefined && at <= lastFired) return undefined
+  return at > from ? at : undefined
+}
+
+/**
  * The instant a rule comes around next. A rule that never comes around, or a
  * one-time rule whose instant has already gone, has no answer.
  */
@@ -380,7 +389,7 @@ export const nextDue = (
 ): number | undefined => {
   const base = baseOf(from, lastFired)
   if (rule.kind === 'every') return base + Math.max(rule.seconds, 1) * 1000
-  if (rule.kind === 'at') return rule.at > from ? rule.at : undefined
+  if (rule.kind === 'at') return atDue(rule.at, from, lastFired)
   if (rule.kind === 'after') {
     return lastFired === undefined ? from + Math.max(rule.seconds, 1) * 1000 : undefined
   }

@@ -210,6 +210,11 @@ describe('one-time rules', () => {
 
     expect(nextDue({ kind: 'at', at }, at - 1000, undefined)).toBe(at)
     expect(nextDue({ kind: 'at', at }, at, undefined)).toBeUndefined()
+    // A delivery at or after the instant has spent the one-shot. Moving the
+    // instant later than that delivery leaves a new one ahead.
+    expect(nextDue({ kind: 'at', at }, at - 1000, at)).toBeUndefined()
+    expect(nextDue({ kind: 'at', at }, at - 1000, at + 5)).toBeUndefined()
+    expect(nextDue({ kind: 'at', at: at + 60_000 }, at - 1000, at)).toBe(at + 60_000)
   })
 
   test('after counts from the time the schedule was written', () => {
