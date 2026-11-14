@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from 'vitest'
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Effect } from 'effect'
@@ -273,4 +273,107 @@ describe('the session log lock', () => {
       (JSON.parse(await readFile(path + LOCK_SUFFIX, 'utf8')) as { token: string }).token,
     ).toBe('successor')
   })
+
+  test('a grave whose writer is still alive is put back and blocks a new lock', async () => {
+    const { root } = isolated()
+    await mkdir(root, { recursive: true })
+    const path = join(root, 'live-grave.log')
+    const grave = path + LOCK_SUFFIX + '.grave.leftover'
+    await writeFile(
+      grave,
+      JSON.stringify({ pid: process.pid, start: Date.now(), token: 'still-here' }),
+    )
+
+    const error = await Effect.runPromise(Effect.flip(acquireLock(path, 'live-grave')))
+
+    expect(error.message).toContain('being written by another process')
+    expect(
+      (JSON.parse(await readFile(path + LOCK_SUFFIX, 'utf8')) as { token: string }).token,
+    ).toBe('still-here')
+    expect(await readFile(grave, 'utf8').catch(() => '')).toBe('')
+  })
+
+  test('a grave whose writer is gone is discarded and the log can be locked', async () => {
+    const { root } = isolated()
+    await mkdir(root, { recursive: true })
+    const path = join(root, 'dead-grave.log')
+    const grave = path + LOCK_SUFFIX + '.grave.dead'
+    await writeFile(grave, JSON.stringify({ pid: deadPid(), start: 1, token: 'dead-writer' }))
+
+    const taken = await Effect.runPromise(acquireLock(path, 'dead-grave'))
+
+    expect((JSON.parse(await readFile(path + LOCK_SUFFIX, 'utf8')) as { pid: number }).pid).toBe(
+      process.pid,
+    )
+    expect(await readFile(grave, 'utf8').catch(() => '')).toBe('')
+    await Effect.runPromise(taken.release)
+  })
+
+  test('two processes cannot both take over one stale lock', async () => {
+    const { root } = isolated()
+    await mkdir(root, { recursive: true })
+    const racer = join(import.meta.dirname, 'lock-racer.ts')
+    const start = (
+      logPath: string,
+      marker: string,
+    ): {
+      readonly outcome: Promise<string>
+      readonly release: () => void
+      readonly done: Promise<void>
+    } => {
+      const child = spawn(process.execPath, [racer, logPath, marker], {
+        stdio: ['pipe', 'pipe', 'inherit'],
+        env: { ...process.env, JZH_LOCK_RACE_DELAY_MS: '4' },
+      })
+      child.stdin?.on('error', () => undefined)
+      let out = ''
+      const outcome = new Promise<string>((resolve, reject) => {
+        child.stdout?.on('data', (chunk: Buffer) => {
+          out += String(chunk)
+          const line = out.split('\n')[0]
+          if (out.includes('\n') && line !== undefined) resolve(line)
+        })
+        child.once('error', reject)
+        child.once('exit', (code) => {
+          if (!out.includes('\n')) reject(new Error('racer exited ' + String(code)))
+        })
+      })
+      const done = new Promise<void>((resolve) => child.once('exit', () => resolve()))
+      return {
+        outcome,
+        release: () => {
+          try {
+            child.stdin?.end('go')
+          } catch {
+            // The loser has already exited; its stdin is closed.
+          }
+        },
+        done,
+      }
+    }
+
+    // The delay makes the stale snapshot and the publish overlap. Unlinking the
+    // name in that gap lets both processes win; one pair is enough to see it,
+    // and a few pairs keep a single quiet schedule from hiding it.
+    for (let round = 0; round < 8; round += 1) {
+      const logPath = join(root, 'stale-' + String(round) + '.log')
+      const marker = logPath + '.winners'
+      await hold(logPath + LOCK_SUFFIX, deadPid())
+      const left = start(logPath, marker)
+      const right = start(logPath, marker)
+      const outcomes = await Promise.all([left.outcome, right.outcome])
+      const holder = JSON.parse(await readFile(logPath + LOCK_SUFFIX, 'utf8')) as { pid: number }
+      const winners = (await readFile(marker, 'utf8')).trim().split('\n')
+      const graves = (await readdir(root)).filter((name) => name.includes('.grave.'))
+      expect(outcomes.filter((line) => line === 'won')).toHaveLength(1)
+      expect(winners).toEqual([String(holder.pid)])
+      expect(graves).toEqual([])
+      left.release()
+      right.release()
+      await Promise.all([left.done, right.done])
+
+      const taken = await Effect.runPromise(acquireLock(logPath, 'after-stale-race'))
+      await Effect.runPromise(taken.release)
+    }
+  }, 30_000)
 })
