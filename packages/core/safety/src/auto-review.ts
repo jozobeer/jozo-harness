@@ -100,13 +100,13 @@ export const autoReviewPrompt = (request: AutoReviewRequest): string =>
 const DENIED_ANSWER = /^DENY\s*:?\s*([\s\S]*)$/i
 
 /**
- * Reads the reviewer's line. Only an explicit ALLOW allows: an answer this does
- * not understand is a denial, so a chatty or truncated model cannot widen what
- * runs.
+ * Reads the reviewer's line. Only an answer that is exactly ALLOW allows: a
+ * prefix, a second line, or anything else is a denial, so a chatty or truncated
+ * model cannot widen what runs.
  */
 export const parseAutoReviewAnswer = (answer: string): AutoReviewDecision => {
   const line = answer.trim()
-  if (line.toUpperCase().startsWith('ALLOW')) return { kind: 'allow' }
+  if (/^allow$/i.test(line)) return { kind: 'allow' }
   const denied = DENIED_ANSWER.exec(line)
   if (denied !== null) {
     const reason = (denied[1] ?? '').trim()
