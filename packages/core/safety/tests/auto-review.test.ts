@@ -71,6 +71,21 @@ describe('parseAutoReviewAnswer', () => {
     expect(parseAutoReviewAnswer('  allow  ')).toEqual({ kind: 'allow' })
   })
 
+  test('denies an ALLOW prefix, a second line, and ALLOWED', () => {
+    expect(parseAutoReviewAnswer('ALLOW this deletes the repository')).toEqual({
+      kind: 'deny',
+      reason: 'the reviewer did not answer ALLOW or DENY',
+    })
+    expect(parseAutoReviewAnswer('ALLOW\nDENY: it deletes the repository')).toEqual({
+      kind: 'deny',
+      reason: 'the reviewer did not answer ALLOW or DENY',
+    })
+    expect(parseAutoReviewAnswer('ALLOWED')).toEqual({
+      kind: 'deny',
+      reason: 'the reviewer did not answer ALLOW or DENY',
+    })
+  })
+
   test('keeps the reason of a DENY answer', () => {
     expect(parseAutoReviewAnswer('DENY: it deletes the repository')).toEqual({
       kind: 'deny',
