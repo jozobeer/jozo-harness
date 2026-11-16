@@ -1,7 +1,17 @@
 import { describe, expect, test } from 'vitest'
 import { Effect } from 'effect'
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  utimes,
+  writeFile,
+} from 'node:fs/promises'
+import { dirname, join, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { makeImageSpillWriter, makeSpillWriter, pruneSpills } from '../src/index.ts'
 /** Writes a file, making the directories above it, because the file may not be there yet. */
@@ -26,6 +36,16 @@ describe('makeSpillWriter', () => {
     await rm(store, { recursive: true, force: true })
   })
 
+  test('a provider call id keeps its underscores in the file name', async () => {
+    const store = await root()
+    const write = makeSpillWriter({ root: store, sessionId: 'session-1' })
+
+    const path = await Effect.runPromise(write('call_abc123', 'text'))
+
+    expect(path).toBe(join(store, 'session-1', 'call_abc123.txt'))
+    await rm(store, { recursive: true, force: true })
+  })
+
   test('the session directory is readable only by its owner', async () => {
     const store = await root()
     const write = makeSpillWriter({ root: store, sessionId: 'session-1' })
@@ -35,6 +55,82 @@ describe('makeSpillWriter', () => {
     const info = await stat(join(store, 'session-1'))
     expect(info.mode & 0o777).toBe(0o700)
     await rm(store, { recursive: true, force: true })
+  })
+
+  test('a call id that climbs out of the session directory still writes inside it', async () => {
+    const store = await root()
+    const outside = await mkdtemp(join(tmpdir(), 'jozo-harness-outside-'))
+    const write = makeSpillWriter({ root: store, sessionId: 'session-1' })
+    const callId = '../../../../' + outside + '/pwned'
+
+    const path = await Effect.runPromise(write(callId, 'secret'))
+
+    expect(path.startsWith(join(store, 'session-1') + sep)).toBe(true)
+    expect(await readFile(path, 'utf8')).toBe('secret')
+    expect(await readdir(outside)).toEqual([])
+    await rm(store, { recursive: true, force: true })
+    await rm(outside, { recursive: true, force: true })
+  })
+
+  test('a session id that climbs out of the store still writes inside it', async () => {
+    const store = await root()
+    const outside = await mkdtemp(join(tmpdir(), 'jozo-harness-outside-'))
+    const write = makeSpillWriter({
+      root: store,
+      sessionId: '../../../../' + outside + '/pwned',
+    })
+
+    const path = await Effect.runPromise(write('call-1', 'secret'))
+
+    expect(path.startsWith(store + sep)).toBe(true)
+    expect(await readFile(path, 'utf8')).toBe('secret')
+    expect(await readdir(outside)).toEqual([])
+    await rm(store, { recursive: true, force: true })
+    await rm(outside, { recursive: true, force: true })
+  })
+
+  test('a session directory that is a symlink is not written through', async () => {
+    const store = await root()
+    const outside = await mkdtemp(join(tmpdir(), 'jozo-harness-outside-'))
+    await symlink(outside, join(store, 'session-1'))
+    const write = makeSpillWriter({ root: store, sessionId: 'session-1' })
+
+    await expect(Effect.runPromise(write('call-1', 'secret'))).rejects.toThrow()
+
+    expect(await readdir(outside)).toEqual([])
+    await rm(store, { recursive: true, force: true })
+    await rm(outside, { recursive: true, force: true })
+  })
+
+  test('a spill root that is a symlink is not written through', async () => {
+    const store = await root()
+    const outside = await mkdtemp(join(tmpdir(), 'jozo-harness-outside-'))
+    const linked = join(store, 'linked-root')
+    await symlink(outside, linked)
+    const write = makeSpillWriter({ root: linked, sessionId: 'session-1' })
+
+    await expect(Effect.runPromise(write('call-1', 'secret'))).rejects.toThrow()
+
+    expect(await readdir(outside)).toEqual([])
+    await rm(store, { recursive: true, force: true })
+    await rm(outside, { recursive: true, force: true })
+  })
+
+  test('a spilled file that is a symlink is not followed', async () => {
+    const store = await root()
+    const outside = await mkdtemp(join(tmpdir(), 'jozo-harness-outside-'))
+    const target = join(outside, 'notes.txt')
+    const session = join(store, 'session-1')
+    await writeFileDeep(target, 'original')
+    await mkdir(session, { recursive: true })
+    await symlink(target, join(session, 'call-1.txt'))
+    const write = makeSpillWriter({ root: store, sessionId: 'session-1' })
+
+    await expect(Effect.runPromise(write('call-1', 'secret'))).rejects.toThrow()
+
+    expect(await readFile(target, 'utf8')).toBe('original')
+    await rm(store, { recursive: true, force: true })
+    await rm(outside, { recursive: true, force: true })
   })
 
   test('opening a store for a new session clears the sessions that went stale', async () => {
@@ -66,6 +162,22 @@ describe('makeImageSpillWriter', () => {
     expect(path).toBe(join(store, 'session-1', 'call-1.png'))
     expect(await readFile(path)).toEqual(bytes)
     await rm(store, { recursive: true, force: true })
+  })
+
+  test('an image call id that climbs out of the session directory still writes inside it', async () => {
+    const store = await root()
+    const outside = await mkdtemp(join(tmpdir(), 'jozo-harness-outside-'))
+    const write = makeImageSpillWriter({ root: store, sessionId: 'session-1' })
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47])
+    const callId = '../../../../' + outside + '/pwned'
+
+    const path = await Effect.runPromise(write(callId, bytes.toString('base64'), 'image/png'))
+
+    expect(path.startsWith(join(store, 'session-1') + sep)).toBe(true)
+    expect(await readFile(path)).toEqual(bytes)
+    expect(await readdir(outside)).toEqual([])
+    await rm(store, { recursive: true, force: true })
+    await rm(outside, { recursive: true, force: true })
   })
 
   test('keeps a media type it does not know as bytes with a neutral extension', async () => {

@@ -1,4 +1,6 @@
-import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { constants } from 'node:fs'
+import { lstat, mkdir, open, readdir, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Effect } from 'effect'
 import type { SpillImageWriter, SpillWriter } from './spill.ts'
@@ -19,6 +21,45 @@ const pathExists = (path: string): Promise<boolean> =>
     () => true,
     () => false,
   )
+
+/**
+ * A tool-call id is chosen by the model and a session id is joined under the
+ * spill root. `path.join` honors `..`, so anything that is not one plain
+ * segment is folded into a hash and cannot leave the directory.
+ */
+const PLAIN_SEGMENT = /^[A-Za-z0-9._-]+$/u
+
+const segmentName = (value: string, fallback: string): string =>
+  value !== '.' && value !== '..' && PLAIN_SEGMENT.test(value)
+    ? value
+    : fallback + '-' + createHash('sha256').update(value).digest('hex').slice(0, 16)
+
+/** A missing path is created below; a link is the case the caller must refuse. */
+const isSymlink = (path: string): Promise<boolean> =>
+  lstat(path).then(
+    (info) => info.isSymbolicLink(),
+    () => false,
+  )
+
+const assertNotSymlink = async (path: string): Promise<void> => {
+  if (await isSymlink(path)) throw new Error('refusing to spill through a symlink')
+}
+
+/**
+ * `O_NOFOLLOW` fails the open when the final component is a symlink, so a
+ * planted link cannot truncate the file it points at. The harness writes
+ * spilled output itself, outside the sandbox.
+ */
+const NO_FOLLOW = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW
+
+const writeNoFollow = async (path: string, data: string | Uint8Array): Promise<void> => {
+  const handle = await open(path, NO_FOLLOW)
+  try {
+    await handle.writeFile(data)
+  } finally {
+    await handle.close()
+  }
+}
 
 /**
  * Removes the session directories under `root` whose newest entry is older than
@@ -73,8 +114,25 @@ const openSession = async (options: SpillStoreOptions, directory: string): Promi
   )
 }
 
-const sessionDirectory = (options: SpillStoreOptions): string =>
-  join(options.root, options.sessionId)
+const directoryOf = (options: SpillStoreOptions): string =>
+  join(options.root, segmentName(options.sessionId, 'session'))
+
+const fileOf = (directory: string, callId: string, extension: string): string =>
+  join(directory, segmentName(callId, 'spill') + '.' + extension)
+
+const place = async (
+  options: SpillStoreOptions,
+  directory: string,
+  path: string,
+  data: string | Uint8Array,
+): Promise<string> => {
+  await assertNotSymlink(options.root)
+  await assertNotSymlink(directory)
+  await openSession(options, directory)
+  await assertNotSymlink(directory)
+  await writeNoFollow(path, data)
+  return path
+}
 
 /**
  * One writer that puts a spilled text under the session that owns it, in a
@@ -82,14 +140,9 @@ const sessionDirectory = (options: SpillStoreOptions): string =>
  * clears the sessions that went stale, so the area cleans itself up.
  */
 export const makeSpillWriter = (options: SpillStoreOptions): SpillWriter => {
-  const directory = sessionDirectory(options)
+  const directory = directoryOf(options)
   return (callId, text) =>
-    Effect.promise(async () => {
-      const path = join(directory, callId + '.txt')
-      await openSession(options, directory)
-      await writeFile(path, text)
-      return path
-    })
+    Effect.promise(() => place(options, directory, fileOf(directory, callId, 'txt'), text))
 }
 
 /**
@@ -97,13 +150,14 @@ export const makeSpillWriter = (options: SpillStoreOptions): SpillWriter => {
  * real image. The file keeps the extension that tells read_image its media type.
  */
 export const makeImageSpillWriter = (options: SpillStoreOptions): SpillImageWriter => {
-  const directory = sessionDirectory(options)
+  const directory = directoryOf(options)
   return (callId, data, mediaType) =>
-    Effect.promise(async () => {
-      const extension = IMAGE_EXTENSIONS[mediaType] ?? 'bin'
-      const path = join(directory, callId + '.' + extension)
-      await openSession(options, directory)
-      await writeFile(path, Buffer.from(data, 'base64'))
-      return path
-    })
+    Effect.promise(() =>
+      place(
+        options,
+        directory,
+        fileOf(directory, callId, IMAGE_EXTENSIONS[mediaType] ?? 'bin'),
+        Buffer.from(data, 'base64'),
+      ),
+    )
 }
