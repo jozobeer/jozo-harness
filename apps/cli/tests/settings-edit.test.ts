@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { Effect } from 'effect'
+import { parse } from 'yaml'
 import { applyEdit, type SettingsEdit } from '../src/settings-edit.ts'
 
 const applied = (text: string, edit: SettingsEdit) => Effect.runPromise(applyEdit(text, edit))
@@ -213,5 +214,75 @@ describe('settings edits', () => {
     const error = await refused(ROWS, { kind: 'remove-row', id: 'mcp' })
 
     expect(error.code).toBe('no-such-row')
+  })
+
+  test('replaces a nested config block and keeps the keys after it', async () => {
+    const text = [
+      'plugins:',
+      '  - id: delegate',
+      "    name: '@jozo-harness/delegate'",
+      '    config:',
+      '      tools:',
+      '        - name: codex',
+      '          argv: [codex, exec, --full-auto]',
+      '      note: keep',
+      '  - id: other',
+      "    name: '@jozo-harness/safety'",
+      '',
+    ].join('\n')
+
+    const edited = await applied(text, {
+      kind: 'set-row',
+      id: 'delegate',
+      name: '@jozo-harness/delegate',
+      key: 'tools',
+      value: '[{name: codex, argv: [codex, exec]}]',
+    })
+
+    expect(edited.text).toBe(
+      [
+        'plugins:',
+        '  - id: delegate',
+        "    name: '@jozo-harness/delegate'",
+        '    config:',
+        '      tools: [{name: codex, argv: [codex, exec]}]',
+        '      note: keep',
+        '  - id: other',
+        "    name: '@jozo-harness/safety'",
+        '',
+      ].join('\n'),
+    )
+    expect(parse(edited.text)).toMatchObject({
+      plugins: [
+        { config: { tools: [{ name: 'codex', argv: ['codex', 'exec'] }], note: 'keep' } },
+        { id: 'other' },
+      ],
+    })
+  })
+
+  test('replaces a config list written at the same indent as its key', async () => {
+    const text = [
+      'plugins:',
+      '  - id: delegate',
+      "    name: '@jozo-harness/delegate'",
+      '    config:',
+      '      tools:',
+      '      - name: codex',
+      '        argv: [codex]',
+      '      note: keep',
+      '',
+    ].join('\n')
+
+    const edited = await applied(text, {
+      kind: 'set-row',
+      id: 'delegate',
+      name: '@jozo-harness/delegate',
+      key: 'tools',
+      value: '[{name: codex, argv: [codex, exec]}]',
+    })
+
+    expect(parse(edited.text)).toMatchObject({
+      plugins: [{ config: { tools: [{ name: 'codex', argv: ['codex', 'exec'] }], note: 'keep' } }],
+    })
   })
 })

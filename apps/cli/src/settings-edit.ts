@@ -234,6 +234,51 @@ const configKeyAt = (
   return -1
 }
 
+const indentOf = (line: string): number => {
+  let index = 0
+  while (index < line.length && line[index] === ' ') index++
+  return index
+}
+
+/** A key with nothing after the colon holds its value on the following lines. */
+const bareKey = (line: string): boolean => {
+  const after = line.slice(line.indexOf(':') + 1).trim()
+  return after === '' || after.startsWith('#')
+}
+
+const sequenceItem = (line: string, indent: number): boolean => {
+  const rest = line.slice(indent)
+  return rest === '-' || rest.startsWith('- ')
+}
+
+/** A nested line, or a `-` item of a bare key written at the key's own indent. */
+const nestedValueLine = (line: string, indent: number, block: boolean): boolean => {
+  const indented = indentOf(line)
+  if (indented > indent) return true
+  return block && indented === indent && sequenceItem(line, indent)
+}
+
+/** Whether this line still belongs to the key being replaced. */
+const continuesValue = (line: string | undefined, indent: number, block: boolean): boolean => {
+  if (line === undefined) return false
+  if (line.trim() === '') return block
+  return nestedValueLine(line, indent, block)
+}
+
+/**
+ * The first line that is no longer part of a config key's value.
+ * Replacing the key with one line has to drop that value, or the old list stays
+ * underneath and the settings file no longer parses.
+ */
+const valueEnd = (lines: ReadonlyArray<string>, keyAt: number, limit: number): number => {
+  const keyLine = lines[keyAt] ?? ''
+  const indent = indentOf(keyLine)
+  const block = bareKey(keyLine)
+  let end = keyAt + 1
+  while (end < limit && continuesValue(lines[end], indent, block)) end++
+  return end
+}
+
 const setConfigKey = (
   lines: ReadonlyArray<string>,
   row: Row,
@@ -246,9 +291,11 @@ const setConfigKey = (
     return insertAfter(lines, row.end - 1, [row.indent + '  config:', written])
   }
   const at = configKeyAt(lines, row, configAt, key)
-  return at === -1
-    ? insertAfter(lines, lastHeld(lines, configAt, configEnd(lines, row, configAt)), [written])
-    : replaceAt(lines, at, written)
+  if (at === -1) {
+    return insertAfter(lines, lastHeld(lines, configAt, configEnd(lines, row, configAt)), [written])
+  }
+  const end = valueEnd(lines, at, row.end)
+  return [...lines.slice(0, at), written, ...lines.slice(end)]
 }
 
 /** The config sub-block: the lines deeper than the config line itself. */

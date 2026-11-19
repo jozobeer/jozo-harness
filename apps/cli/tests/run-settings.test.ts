@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { PluginRow } from '@jozo-harness/kernel'
 import { Effect } from 'effect'
 import { describe, expect, test } from 'vitest'
-import type { JozoHarnessConfig } from '../src/config-file.ts'
+import { parseConfigText, type JozoHarnessConfig } from '../src/config-file.ts'
 import {
   editRunSettings,
   readEditableSettings,
@@ -201,6 +201,55 @@ describe('the editable settings', () => {
 
     expect(next).not.toContain('search: exa')
     expect(next).not.toContain('apiKeyRef')
+  })
+
+  test('rewrites a block of delegate tools and leaves the rest of the file readable', async () => {
+    const text = [
+      'model: stub/model',
+      'plugins:',
+      '  - id: delegate',
+      "    name: '@jozo-harness/delegate'",
+      '    config:',
+      '      tools:',
+      '        - name: codex',
+      '          argv: [codex, exec, --full-auto]',
+      '  - id: tier0',
+      "    name: '@jozo-harness/tools-tier0'",
+      '    config:',
+      '      timeoutMs: 30000',
+      '',
+    ].join('\n')
+    const delegate = {
+      id: 'delegate',
+      name: '@jozo-harness/delegate',
+      config: { tools: [{ name: 'codex', argv: ['codex', 'exec', '--full-auto'] }] },
+    }
+    const tier0 = { id: 'tier0', name: '@jozo-harness/tools-tier0', config: { timeoutMs: 30_000 } }
+
+    const next = await Effect.runPromise(
+      editRunSettings(
+        text,
+        inputsOf([delegate, tier0, ...baseRows.slice(1)], {
+          model: 'stub/model',
+          plugins: [delegate, tier0],
+        }),
+        {
+          search: '',
+          apiKeyRef: '',
+          bashTimeoutMs: 30_000,
+          maxParallelToolCalls: 10,
+          subagentDepth: 1,
+          delegateTools: [{ name: 'codex', argv: ['codex', 'exec'] }],
+        },
+      ),
+    )
+
+    const parsed = await Effect.runPromise(parseConfigText(next))
+    expect(parsed.model).toBe('stub/model')
+    expect(parsed.plugins?.find((row) => row.id === 'delegate')?.config).toEqual({
+      tools: [{ name: 'codex', argv: ['codex', 'exec'] }],
+    })
+    expect(parsed.plugins?.find((row) => row.id === 'tier0')?.config).toEqual({ timeoutMs: 30_000 })
   })
 
   test('removes the delegate row when no tools are left', async () => {
