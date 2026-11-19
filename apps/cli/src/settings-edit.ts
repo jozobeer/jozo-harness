@@ -251,6 +251,20 @@ const sequenceItem = (line: string, indent: number): boolean => {
   return rest === '-' || rest.startsWith('- ')
 }
 
+/** A nested line, or a `-` item of a bare key written at the key's own indent. */
+const nestedValueLine = (line: string, indent: number, block: boolean): boolean => {
+  const indented = indentOf(line)
+  if (indented > indent) return true
+  return block && indented === indent && sequenceItem(line, indent)
+}
+
+/** Whether this line still belongs to the key being replaced. */
+const continuesValue = (line: string | undefined, indent: number, block: boolean): boolean => {
+  if (line === undefined) return false
+  if (line.trim() === '') return block
+  return nestedValueLine(line, indent, block)
+}
+
 /**
  * The first line that is no longer part of a config key's value.
  * Replacing the key with one line has to drop that value, or the old list stays
@@ -261,21 +275,7 @@ const valueEnd = (lines: ReadonlyArray<string>, keyAt: number, limit: number): n
   const indent = indentOf(keyLine)
   const block = bareKey(keyLine)
   let end = keyAt + 1
-  while (end < limit) {
-    const line = lines[end]
-    if (line === undefined) break
-    if (line.trim() === '') {
-      if (!block) break
-      end++
-      continue
-    }
-    const indented = indentOf(line)
-    if (indented > indent || (block && indented === indent && sequenceItem(line, indent))) {
-      end++
-      continue
-    }
-    break
-  }
+  while (end < limit && continuesValue(lines[end], indent, block)) end++
   return end
 }
 
