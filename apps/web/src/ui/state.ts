@@ -387,7 +387,7 @@ export const withRunSchedules = (
 
 export const withRun = (state: WebState, run: RunStateView): WebState => ({ ...state, run })
 
-/** The branch the workspace stands on, as the server read it when the session opened. */
+/** The branch the workspace stands on, from the last time the page asked git. */
 export const withBranch = (state: WebState, branch: string): WebState => ({
   ...state,
   info: { ...state.info, branch },
@@ -496,17 +496,36 @@ const commandsStale = (event: UiSessionEvent): boolean =>
   event.type === 'turn/end' ||
   (event.type === 'user/message' && fieldOf(event.data, 'source') === 'skill-catalog')
 
+/**
+ * Drops workspace views a working-directory move left behind. Their paths are
+ * relative to the directory the page was in, so they name a different tree now.
+ * Freshness is read from the state before the event was folded: folding advances
+ * the seq, and a replay of a move the page already applied must keep what it read since.
+ */
+const dropMovedWorkspace = (before: WebState, after: WebState, event: UiEvent): WebState => {
+  if (event.kind !== 'session') return after
+  if (event.event.type !== 'session/cwd/changed') return after
+  if (event.event.seq <= before.conversation.lastSeq) return after
+  return { ...after, tree: undefined, preview: undefined, files: undefined }
+}
+
 export const applyUiEvent = (state: WebState, event: UiEvent): WebState => {
   // The transport may replay the boundary event: only a seq the page has not seen counts.
   const fresh = event.kind === 'session' && event.event.seq > state.conversation.lastSeq
-  return {
-    ...state,
-    commands:
-      event.kind === 'session' && fresh && commandsStale(event.event) ? undefined : state.commands,
-    info: event.kind === 'session' ? infoAfter(state.info, event.event) : state.info,
-    turns: fresh ? turnsAfter(state.turns, event.event) : state.turns,
-    trace: fresh ? traceAfter(state.trace, event.event) : state.trace,
-    log: fresh ? logAfter(state.log, event.event) : state.log,
-    conversation: applyEvent(state.conversation, event),
-  }
+  return dropMovedWorkspace(
+    state,
+    {
+      ...state,
+      commands:
+        event.kind === 'session' && fresh && commandsStale(event.event)
+          ? undefined
+          : state.commands,
+      info: event.kind === 'session' ? infoAfter(state.info, event.event) : state.info,
+      turns: fresh ? turnsAfter(state.turns, event.event) : state.turns,
+      trace: fresh ? traceAfter(state.trace, event.event) : state.trace,
+      log: fresh ? logAfter(state.log, event.event) : state.log,
+      conversation: applyEvent(state.conversation, event),
+    },
+    event,
+  )
 }

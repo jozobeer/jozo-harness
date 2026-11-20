@@ -1,4 +1,4 @@
-import { Match, Show, Switch } from 'solid-js'
+import { Match, Show, Switch, createEffect, on } from 'solid-js'
 import type { WorkspacePreview } from '../../src/shared/rpc.ts'
 import { renderMarkdown } from '../../src/ui/markdown.ts'
 import { useTranslate } from '../i18n.ts'
@@ -24,6 +24,16 @@ export const FilePreview = (props: { store: SessionStore; path: string }) => {
   const view = () => preview()?.view
   const problem = () => preview()?.problem ?? ''
   const reading = () => preview() !== undefined && view() === undefined && problem() === ''
+
+  // The path is relative to the working directory, so a move reads that name again
+  // there. The click that opened the file already asked; only a later move does.
+  createEffect(
+    on(
+      () => props.store.state().info.cwd,
+      () => props.store.previewPath(props.path),
+      { defer: true },
+    ),
+  )
 
   return (
     <div class="preview">

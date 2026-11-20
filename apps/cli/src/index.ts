@@ -27,7 +27,6 @@ import {
   cwdOf,
   rootOf,
   lastSkillCatalog,
-  titleOf,
   type Session,
   type SessionEvent,
   type SessionId,
@@ -105,6 +104,7 @@ import { editRunSettings, readEditableSettings, type EditableInputs } from './ru
 import { runContextOf } from './run-state.ts'
 import { jobDetailOf, jobRecorderOf, jobsOf, stopJobOf } from './jobs.ts'
 import { messageSubagentOf, stopSubagentOf, subagentsOf } from './subagents.ts'
+import { pageSummary } from './page-summary.ts'
 import { sessionRootOf } from './session-list.ts'
 import { credentialSource, type SettingsSurface } from './settings.ts'
 import { configPaths } from './config.ts'
@@ -1828,7 +1828,7 @@ const sessionFactoryOf = (
         )
       }
       return {
-        summary: summaryOf(agent),
+        summary: pageSummary(agent.session),
         host: ui,
         composition: () => compositionInEffect(agent, built.runtime.tools),
         setComposition: (tools: ReadonlyArray<string>) =>
@@ -2121,7 +2121,7 @@ const openSessionOf = (
   const { agent, ui, jobs, efforts, agents, budget, permission } = runtime
   if (ui === undefined) return undefined
   return {
-    summary: summaryOf(agent),
+    summary: pageSummary(agent.session),
     host: ui,
     composition: () => compositionInEffect(agent, runtime.tools),
     setComposition: (tools: ReadonlyArray<string>) =>
@@ -2326,17 +2326,6 @@ const runStateOf = (
       lastFiredAt: schedule.lastFiredAt ?? 0,
       paused: schedule.paused === true,
     })),
-  }
-}
-
-const summaryOf = (agent: Agent): SessionSummary => {
-  const events = agent.session.events()
-  return {
-    id: agent.session.id,
-    cwd: agent.session.header.cwd,
-    createdAt: agent.session.header.createdAt,
-    updatedAt: events[events.length - 1]?.time ?? agent.session.header.createdAt,
-    title: titleOf(events),
   }
 }
 

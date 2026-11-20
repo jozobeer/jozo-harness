@@ -1501,4 +1501,28 @@ describe('the page store', () => {
       ),
     )
   }, 15_000)
+
+  test('a moved working directory asks for the branch of the directory it is in now', async () => {
+    stubTheBrowser()
+    const host = makeHost('a')
+    let reads = 0
+    Object.defineProperty(host.summary, 'cwd', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        reads += 1
+        return '/work/moved'
+      },
+    })
+    await Effect.runPromise(
+      withStore(host, (store) =>
+        Effect.gen(function* () {
+          const before = reads
+          host.said(event(1, 'session/cwd/changed', { cwd: '/work/moved' }))
+          yield* until(() => store.state().info.cwd === '/work/moved', 'followed the directory')
+          yield* until(() => reads > before, 'read the branch of the new directory')
+        }),
+      ),
+    )
+  }, 15_000)
 })
