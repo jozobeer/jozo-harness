@@ -389,7 +389,7 @@ const handlersOf = (
     workspaceFile: ({ sessionId, path }) =>
       Effect.gen(function* () {
         // The same workspace the tree reads: the blank page asks the run's own
-        // folder, and a session names the folder it was opened in.
+        // folder, and a session names the working directory it is in now.
         const cwd =
           sessionId === ''
             ? (yield* settings.read()).cwd

@@ -19,10 +19,11 @@ export const FileTree = (props: { store: SessionStore }) => {
   const [typed, setTyped] = createSignal('')
 
   // The tree opens at the workspace root. The tab may be opened again after files
-  // changed on disk, so every folder it already shows is read again with it.
+  // changed on disk, so every folder it already shows is read again with it. A
+  // working-directory move is a new root: the rows already drawn named the old one.
   createEffect(
     on(
-      () => props.store.state().sessionId,
+      () => props.store.state().sessionId + '\0' + props.store.state().info.cwd,
       () => {
         props.store.openFolder('')
         props.store.refreshTree()

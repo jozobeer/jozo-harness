@@ -70,6 +70,55 @@ describe('the browser state', () => {
     expect(state.info.cwd).toBe('/work/b')
   })
 
+  test('a moved working directory drops the tree and preview that named the old one', () => {
+    const tree = {
+      folders: [{ path: '', entries: [], truncated: false }],
+      open: [''],
+      problem: '',
+    }
+    const preview = { path: 'README.md', view: undefined, problem: '' }
+    const files = { sessionId: 'a', query: 'read', paths: ['README.md'] }
+    const shown = {
+      ...withSession(initialState, a),
+      tree,
+      preview,
+      files,
+      info: { cwd: '/work/one', model: '', turns: 1, branch: 'main' },
+    }
+    const change = session('session/cwd/changed', { cwd: '/work/two' })
+    const moved = applyUiEvent(shown, change)
+
+    expect(moved.info.cwd).toBe('/work/two')
+    // The branch stays until the store reads the new directory. Clearing it here
+    // would throw away a read that already asked for that directory.
+    expect(moved.info.branch).toBe('main')
+    expect(moved.tree).toBeUndefined()
+    expect(moved.preview).toBeUndefined()
+    expect(moved.files).toBeUndefined()
+
+    // A replay of the same move is not a new one: the tree the page read since stays.
+    const restored = { ...moved, tree, preview, files }
+    const replayed = applyUiEvent(restored, change)
+    expect(replayed.tree).toBe(tree)
+    expect(replayed.preview).toBe(preview)
+    expect(replayed.files).toBe(files)
+  })
+
+  test('the session header does not drop a tree the page already has', () => {
+    const tree = {
+      folders: [{ path: '', entries: [], truncated: false }],
+      open: [''],
+      problem: '',
+    }
+    const shown = { ...withSession(initialState, a), tree }
+    const next = applyUiEvent(
+      shown,
+      session('session/header', { formatVersion: 1, createdAt: 0, cwd: '/work/a' }),
+    )
+    expect(next.info.cwd).toBe('/work/a')
+    expect(next.tree).toBe(tree)
+  })
+
   test('an event body that is not the shape it claims leaves the header alone', () => {
     const state = fold([
       session('request/header', 'not a header'),

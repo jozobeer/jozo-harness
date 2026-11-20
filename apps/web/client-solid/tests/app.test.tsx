@@ -5436,6 +5436,19 @@ describe('the workspace file tree', () => {
     expect(field.value).toBe('')
   })
 
+  test('a moved working directory reads the tree again', () => {
+    const { store, calls, setState } = makeStore({
+      pane: { kind: 'files' },
+      tree: treeOf(),
+      info: { cwd: '/work', model: '', turns: 0 },
+    })
+    render(() => <ContextPane store={store} />)
+
+    setState((now) => ({ ...now, info: { ...now.info, cwd: '/work/sub' } }))
+    expect(calls).toContainEqual({ kind: 'openFolder', path: '' })
+    expect(calls.filter((call) => call.kind === 'refreshTree').length).toBeGreaterThan(1)
+  })
+
   test('the tree reads what changed when the reader asks it to', () => {
     const { store, calls } = makeStore({ pane: { kind: 'files' }, tree: treeOf() })
     const { container } = render(() => <ContextPane store={store} />)
@@ -5569,6 +5582,25 @@ describe('the workspace file preview', () => {
     expect(container.querySelector('.preview-problem')?.textContent).toBe(
       'this host cannot convert pptx to PDF',
     )
+  })
+
+  test('a moved working directory reads the open preview again', () => {
+    const view: WorkspacePreview = {
+      path: 'README.md',
+      kind: 'markdown',
+      mediaType: 'text/markdown',
+      size: 4,
+      text: '# Hi',
+      truncated: false,
+    }
+    const { store, calls, setState } = makeStore({
+      ...showing(view),
+      info: { cwd: '/work', model: '', turns: 0 },
+    })
+    render(() => <ContextPane store={store} />)
+
+    setState((now) => ({ ...now, info: { ...now.info, cwd: '/work/sub' } }))
+    expect(calls).toContainEqual({ kind: 'previewPath', path: 'README.md' })
   })
 
   test('a preview not asked for says how to pick one, and a refused read says why', () => {

@@ -749,6 +749,25 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
     )
 
     /**
+     * A working-directory move changes which branch the strip should name. Only
+     * the newest ask is read: the page wants the branch of the directory it is
+     * in now, not one per move that got it there.
+     */
+    const branchAsks = Effect.runSync(Queue.sliding<string>(1))
+    yield* Effect.forkScoped(
+      Stream.runForEach(Stream.fromQueue(branchAsks), (sessionId) =>
+        client.branch({ sessionId }).pipe(
+          Effect.tap((branch) =>
+            Effect.sync(() =>
+              update((now) => (now.sessionId === sessionId ? withBranch(now, branch ?? '') : now)),
+            ),
+          ),
+          Effect.catchCause(() => Effect.void),
+        ),
+      ),
+    )
+
+    /**
      * The word from other devices: a session one of them opens, renames, or
      * deletes makes this page read the store again. Without it the list stayed
      * as old as this page's own load.
@@ -815,6 +834,9 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
               // Handed over rather than awaited: the feed has to keep draining.
               if (event.kind === 'session' && needsRefresh(event.event)) {
                 yield* Queue.offer(refreshes, undefined)
+              }
+              if (event.kind === 'session' && event.event.type === 'session/cwd/changed') {
+                yield* Queue.offer(branchAsks, id)
               }
             }),
           ),
@@ -1021,13 +1043,16 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
         )
       })
 
-    /** The paths an @word names; a late answer never lands as another session's. */
+    /** The paths an @word names; a late answer never lands as another session's or directory's. */
     const answerFiles = (asked: { readonly sessionId: string; readonly query: string }) =>
       Effect.gen(function* () {
+        const cwd = state().info.cwd
         const paths = yield* client.files({ sessionId: asked.sessionId, query: asked.query })
         yield* Effect.sync(() =>
           update((now) =>
-            withFiles(now, { sessionId: asked.sessionId, query: asked.query, paths }),
+            now.sessionId === asked.sessionId && now.info.cwd === cwd
+              ? withFiles(now, { sessionId: asked.sessionId, query: asked.query, paths })
+              : now,
           ),
         )
       })
@@ -1331,24 +1356,35 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
      * that can no longer be read leaves the tree, so a folder or file removed on
      * disk takes its row with it.
      */
-    const readTreeFolder = (path: string) =>
-      client.workspaceDirectory({ sessionId: state().sessionId, path }).pipe(
+    const readTreeFolder = (path: string) => {
+      const sessionId = state().sessionId
+      const cwd = state().info.cwd
+      // A listing asked for one directory must not land after the page has moved:
+      // the names in it are relative, and they would be drawn under the new root.
+      const stillThere = (now: WebState): boolean =>
+        now.sessionId === sessionId && now.info.cwd === cwd
+      return client.workspaceDirectory({ sessionId, path }).pipe(
         Effect.tap((view) =>
           Effect.sync(() =>
             update((now) =>
-              withTreeFolder(now, {
-                path: view.path,
-                entries: view.entries,
-                truncated: view.truncated,
-              }),
+              stillThere(now)
+                ? withTreeFolder(now, {
+                    path: view.path,
+                    entries: view.entries,
+                    truncated: view.truncated,
+                  })
+                : now,
             ),
           ),
         ),
         Effect.asVoid,
         Effect.catchCause((cause) =>
-          Effect.sync(() => update((now) => withTreeProblem(now, path, causeText(cause)))),
+          Effect.sync(() =>
+            update((now) => (stillThere(now) ? withTreeProblem(now, path, causeText(cause)) : now)),
+          ),
         ),
       )
+    }
 
     yield* Effect.forkScoped(
       Stream.runForEach(Stream.fromQueue(treeAsks), (asked) =>
@@ -1362,20 +1398,28 @@ export const createSessionStore = (options: SessionStoreOptions = {}): SessionSt
      * One file the reader picked. The session and path travel with the ask, so an
      * answer that arrives after a move lands nowhere rather than on another file.
      */
-    const readPreview = (asked: PreviewAsk) =>
-      client.workspaceFile({ sessionId: asked.sessionId, path: asked.path }).pipe(
+    const readPreview = (asked: PreviewAsk) => {
+      const cwd = state().info.cwd
+      return client.workspaceFile({ sessionId: asked.sessionId, path: asked.path }).pipe(
         Effect.tap((view: WorkspacePreview) =>
           Effect.sync(() =>
-            update((now) => withPreviewView(now, asked.sessionId, asked.path, view)),
+            update((now) =>
+              now.info.cwd === cwd ? withPreviewView(now, asked.sessionId, asked.path, view) : now,
+            ),
           ),
         ),
         Effect.catchCause((cause) =>
           Effect.sync(() =>
-            update((now) => withPreviewProblem(now, asked.sessionId, asked.path, causeText(cause))),
+            update((now) =>
+              now.info.cwd === cwd
+                ? withPreviewProblem(now, asked.sessionId, asked.path, causeText(cause))
+                : now,
+            ),
           ),
         ),
         Effect.asVoid,
       )
+    }
 
     yield* Effect.forkScoped(Stream.runForEach(Stream.fromQueue(previewAsks), readPreview))
 

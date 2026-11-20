@@ -2252,6 +2252,50 @@ describe('the web transport', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('a file listing follows the working directory an open session moved to', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-cwd-'))
+    const first = await mkdtemp(join(tmpdir(), 'jozo-harness-web-cwd-a-'))
+    const second = await mkdtemp(join(tmpdir(), 'jozo-harness-web-cwd-b-'))
+    await writeFile(join(first, 'only-first.txt'), 'a')
+    await writeFile(join(second, 'only-second.txt'), 'b')
+    const web = makeWeb('a', first)
+    let cwd = first
+    Object.defineProperty(web.initial.summary, 'cwd', {
+      configurable: true,
+      enumerable: true,
+      get: () => cwd,
+    })
+    const settings = makeSettings()
+
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* start(root, web, settings)
+          const wsUrl = started.wsUrl
+          const useClient = Effect.gen(function* () {
+            const client = yield* RpcClient.make(UiRpcs)
+            const listed = yield* client.workspaceDirectory({ sessionId: 'a', path: '' })
+            cwd = second
+            const moved = yield* client.workspaceDirectory({ sessionId: 'a', path: '' })
+            const found = yield* client.files({ sessionId: 'a', query: 'only-' })
+            return { listed, moved, found }
+          }).pipe(clientLayers(wsUrl))
+          const result = yield* withoutServices(useClient)
+          yield* Deferred.succeed(started.stop, undefined)
+          return result
+        }),
+      ),
+    )
+
+    expect(observed.listed.entries.map((entry) => entry.name)).toEqual(['only-first.txt'])
+    expect(observed.moved.entries.map((entry) => entry.name)).toEqual(['only-second.txt'])
+    expect(observed.found).toContain('only-second.txt')
+    expect(observed.found).not.toContain('only-first.txt')
+    await rm(root, { recursive: true, force: true })
+    await rm(first, { recursive: true, force: true })
+    await rm(second, { recursive: true, force: true })
+  })
+
   test('a page reads the branch its session workspace stands on', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jozo-harness-web-branch-'))
     await writeFileDeep(join(root, 'index.html'), '<h1>jozo-harness</h1>')
