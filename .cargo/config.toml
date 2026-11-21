@@ -1,0 +1,6 @@
+# Supply-chain cooldown for crates, the cargo side of pnpm-workspace.yaml's
+# minimumReleaseAge: a crate version published less than this long ago is not
+# resolved, so a compromised release has time to be yanked before it can reach
+# Cargo.lock.
+[registry]
+global-min-publish-age = "3 days"
