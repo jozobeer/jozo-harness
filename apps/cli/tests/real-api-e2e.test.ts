@@ -7,6 +7,7 @@ import { llmOpenAiPlugin } from '@jozo-harness/llm-openai'
 import { askPlugin, safetyPlugin } from '@jozo-harness/safety'
 import { sessionPlugin } from '@jozo-harness/session'
 import { sessionJsonlPlugin } from '@jozo-harness/session-jsonl'
+import { sessionTelemetryPlugin } from '@jozo-harness/session-telemetry-otlp'
 import { systemPromptPlugin } from '@jozo-harness/system-prompt'
 import { toolsPlugin } from '@jozo-harness/tools'
 import { tier0Plugin } from '@jozo-harness/tools-tier0'
@@ -46,6 +47,9 @@ describe('the real provider', () => {
           plugins: [
             kernelPlugin,
             sessionJsonlPlugin,
+            // The base profile names the telemetry row, so a run without this
+            // plugin refuses every profile row at startup.
+            sessionTelemetryPlugin,
             sessionPlugin,
             toolsPlugin,
             systemPromptPlugin,
