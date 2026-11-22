@@ -70,6 +70,7 @@ import {
 import {
   Tier0Tools,
   childEnvironment,
+  fileReaderOf,
   logManagedEnv,
   makeShellSessions,
   managedEnvOf,
@@ -566,6 +567,7 @@ const installTier1 = (
       sandbox,
       timeLimitMsOf(rows),
       live,
+      rows,
     )) {
       yield* tools.register(tool)
     }
@@ -631,8 +633,12 @@ const tier1ToolList = (
   timeLimitMs: number | undefined,
   /** The values a call reads now: the delegation depth and the search provider. */
   live: LiveRunSettings,
+  /** The profile's rows: an ssh host row decides where read_image reads. */
+  rows: ReadonlyArray<PluginRow>,
 ) => {
-  const list = [...tier1Tools(ask, skills, runCode, timeLimitMs)]
+  // read_image reads from the machine the run works on: an ssh host's seam when
+  // the profile names one, this machine's disk otherwise.
+  const list = [...tier1Tools(ask, skills, runCode, timeLimitMs, fileReaderOf(rows))]
   list.push(makePluginTool(pluginHost))
   // A session opened while search is on keeps the tool, and reads the provider the
   // run holds when the call is made, so changing the provider does not need a reload.

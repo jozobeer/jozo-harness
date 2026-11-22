@@ -6,7 +6,7 @@ import type { AskShape } from '@jozo-harness/safety'
 import type { ToolDefinition } from '@jozo-harness/tools'
 import { askUserToolFor } from './ask.ts'
 import { webFetchTool } from './fetch.ts'
-import { readImageTool } from './image.ts'
+import { makeReadImageTool, readImageTool, type ImageReader } from './image.ts'
 import { makeRunCodeTool, type RunCodeHost } from './run-code.ts'
 import { makeSkillTool } from './skill.ts'
 
@@ -19,12 +19,14 @@ export const tier1Tools = (
   runCode?: RunCodeHost,
   /** Default wait for a batch of questions; absent waits until answered. */
   timeLimitMs?: number,
+  /** How read_image gets its bytes; absent reads this machine's disk. */
+  imageReader?: ImageReader,
 ): ReadonlyArray<ToolDefinition<any, any>> => [
   todoWriteTool,
 
   askUserToolFor(ask, timeLimitMs),
   webFetchTool,
-  readImageTool,
+  imageReader === undefined ? readImageTool : makeReadImageTool(imageReader),
   ...(skillRoots.length === 0 ? [] : [makeSkillTool(skillRoots)]),
   ...(runCode === undefined ? [] : [makeRunCodeTool(runCode)]),
 ]

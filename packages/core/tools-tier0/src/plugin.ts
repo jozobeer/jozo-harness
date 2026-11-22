@@ -158,6 +158,23 @@ export const tier0Plugin: Plugin<
 }
 
 /**
+ * How a tool that reads a file on its own gets the bytes: the host's seam when
+ * the profile names one, this machine's disk otherwise. read_image uses it so a
+ * run over ssh shows an image from the host rather than from here.
+ */
+export const fileReaderOf = (
+  rows: ReadonlyArray<{ readonly name: string; readonly config?: unknown }>,
+): ((path: string) => Effect.Effect<Uint8Array, unknown>) => {
+  const row = rows.find((each) => each.name === '@jozo-harness/tools-tier0')
+  const parsed = Schema.decodeUnknownOption(tier0ConfigSchema)(row?.config ?? {})
+  const options = Option.isSome(parsed) ? hostOptionsOf(parsed.value) : undefined
+  if (options === undefined) return (path) => nodeFileSystem.readBytes(path)
+  // A host whose bwrap cannot hold a command fails the tier0 row at load, so by
+  // the time a tool reads here the row already proved it can answer.
+  return (path) => sshFileSystem({ ...options, confines: true }).readBytes(path)
+}
+
+/**
  * The workspace a run works in when the profile names a host: the host's root,
  * not this machine's directory. A run still starts in its own cwd when no host
  * is named, which is every profile that does not carry an `ssh` row.

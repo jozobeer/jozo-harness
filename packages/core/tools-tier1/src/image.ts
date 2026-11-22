@@ -2,6 +2,12 @@ import { readFile } from 'node:fs/promises'
 import { Schema, Effect } from 'effect'
 import { ToolError, type ToolDefinition } from '@jozo-harness/tools'
 
+/**
+ * How the tool gets a file's bytes. The default reads this machine's disk; a run
+ * over ssh passes a reader for the host, so the image shown is the one there.
+ */
+export type ImageReader = (path: string) => Effect.Effect<Uint8Array, unknown>
+
 const Parameters = Schema.Struct({
   path: Schema.String.annotate({
     description:
@@ -33,8 +39,18 @@ export const mediaTypeOf = (path: string): string | undefined => {
   return dot < 0 ? undefined : MEDIA[path.slice(dot + 1).toLowerCase()]
 }
 
-/** Reads one image file and hands it to the model as an image block. */
-export const readImageTool: ToolDefinition<ReadImageArgs, ReadImageValue> = {
+/** The disk reader: the CLI without a host, a browser page, and a test. */
+export const diskImageReader: ImageReader = (path) =>
+  Effect.tryPromise({ try: () => readFile(path), catch: (error) => error })
+
+/**
+ * Reads one image file and hands it to the model as an image block. The bytes
+ * come through `read`, so a run over ssh shows an image from that host rather
+ * than from this machine.
+ */
+export const makeReadImageTool = (
+  read: ImageReader = diskImageReader,
+): ToolDefinition<ReadImageArgs, ReadImageValue> => ({
   name: 'read_image',
   readOnly: true,
   isConcurrencySafe: () => true,
@@ -73,10 +89,9 @@ export const readImageTool: ToolDefinition<ReadImageArgs, ReadImageValue> = {
         )
       }
       const path = args.path.startsWith('/') ? args.path : context.cwd + '/' + args.path
-      const bytes = yield* Effect.tryPromise({
-        try: () => readFile(path),
-        catch: () => new ToolError({ code: 'execution', message: 'cannot read ' + path }),
-      })
+      const bytes = yield* read(path).pipe(
+        Effect.mapError(() => new ToolError({ code: 'execution', message: 'cannot read ' + path })),
+      )
       return {
         path,
         mediaType,
@@ -84,4 +99,7 @@ export const readImageTool: ToolDefinition<ReadImageArgs, ReadImageValue> = {
         data: Buffer.from(bytes).toString('base64'),
       }
     }),
-}
+})
+
+/** The tool for a caller that reads this machine's disk. */
+export const readImageTool: ToolDefinition<ReadImageArgs, ReadImageValue> = makeReadImageTool()

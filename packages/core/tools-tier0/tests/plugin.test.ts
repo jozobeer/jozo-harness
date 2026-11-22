@@ -3,7 +3,8 @@ import { safetyPlugin } from '@jozo-harness/safety'
 import { systemPromptPlugin } from '@jozo-harness/system-prompt'
 import { Context, Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
-import { Tier0Tools, tier0Plugin } from '../src/index.ts'
+import { join } from 'node:path'
+import { Tier0Tools, fileReaderOf, tier0Plugin } from '../src/index.ts'
 
 /** The rows a profile writes: the kernel, the prompt, the sandbox, and the tools. */
 const layersOf = (tier0: Readonly<Record<string, unknown>>) => [
@@ -51,5 +52,29 @@ describe('tier0Plugin', () => {
     await expect(
       build({ ssh: { reach: ['true'], root: '/tmp', mode: 'writable-by-anyone' } }),
     ).rejects.toThrow()
+  })
+})
+
+describe('the file reader a tool of its own gets', () => {
+  test('a profile without a host reads this disk', async () => {
+    const read = fileReaderOf([{ name: '@jozo-harness/tools-tier0', config: {} }])
+    const bytes = await Effect.runPromise(read(join(process.cwd(), 'package.json')))
+
+    expect(new TextDecoder().decode(bytes)).toContain('@jozo-harness/root')
+  })
+
+  test('a profile with a host reads the host, not this disk', async () => {
+    // The reach is a program that is not there, so a read has to fail: reaching
+    // the local disk instead would answer with this machine's bytes.
+    const read = fileReaderOf([
+      {
+        name: '@jozo-harness/tools-tier0',
+        config: { ssh: { reach: ['jzh-no-such-host'], root: '/srv/work' } },
+      },
+    ])
+
+    const result = await Effect.runPromise(Effect.result(read('/srv/work/notes.txt')))
+
+    expect(result._tag).toBe('Failure')
   })
 })
