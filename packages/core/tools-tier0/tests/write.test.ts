@@ -204,6 +204,27 @@ describe('write tool', () => {
     await rm(dir, { recursive: true, force: true })
   })
 
+  test('two reads of one file in a parallel step still leave it writable', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-write-'))
+    await writeFileDeep(join(dir, 'notes.txt'), 'the original\n')
+    const call = makeSession(dir)
+
+    // The two reads land on one observed-file map in whatever order they finish;
+    // both saw the same bytes, so the newer observation is still the file on disk.
+    await Effect.runPromise(
+      Effect.all([call('read', { path: 'notes.txt' }), call('read', { path: 'notes.txt' })], {
+        concurrency: 2,
+      }),
+    )
+    const result = await Effect.runPromise(
+      call('write', { path: 'notes.txt', content: 'replaced\n' }),
+    )
+
+    expect(result?.isError).toBe(false)
+    expect(await readFile(join(dir, 'notes.txt'), 'utf8')).toBe('replaced\n')
+    await rm(dir, { recursive: true, force: true })
+  })
+
   test('writes CRLF as LF', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-write-'))
     const call = makeSession(dir)

@@ -37,6 +37,7 @@ export const mediaTypeOf = (path: string): string | undefined => {
 export const readImageTool: ToolDefinition<ReadImageArgs, ReadImageValue> = {
   name: 'read_image',
   readOnly: true,
+  isConcurrencySafe: () => true,
   description:
     'Reads a png, jpeg, webp, or gif file and shows it to the model when the current route carries images; otherwise it fails and says why. Use it instead of read for images: read returns bytes as text.',
   parameters: Parameters,

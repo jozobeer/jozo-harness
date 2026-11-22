@@ -98,4 +98,8 @@ describe('read_image tool', () => {
     expect(JSON.stringify(result?.content)).toContain('not a supported image')
     await rm(dir, { recursive: true, force: true })
   })
+
+  test('may share a step with another read, since it only reads a file', () => {
+    expect(readImageTool.isConcurrencySafe?.({ path: 'a.png' })).toBe(true)
+  })
 })

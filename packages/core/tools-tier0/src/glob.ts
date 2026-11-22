@@ -83,6 +83,7 @@ export const makeGlobTool = (
 ): ToolDefinition<GlobArgs, GlobValue> => ({
   name: 'glob',
   readOnly: true,
+  isConcurrencySafe: () => true,
   presentCall: (args) => ({ summary: 'glob ' + args.pattern }),
   description:
     'Lists workspace files matching a glob pattern, in modification-time order (oldest first). Use it to find files by name; use grep to search inside them. Dot-entries such as .github are walked; only node_modules and .git are never walked. ripgrep respects nested .gitignore files; without rg, the fallback reads only the workspace-root rules and says so. A list too long to show is stored whole; read that file with offset and limit.',
