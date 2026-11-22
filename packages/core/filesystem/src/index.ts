@@ -71,10 +71,11 @@ export interface FileSystemShape {
    */
   observe(path: string): Effect.Effect<Observation | undefined>
   /**
-   * Synchronous because a path is confined before any file is opened, and some
-   * of the tools that confine a path never touch the asynchronous seam at all.
+   * Whether the path is there, and whether it is a link, without following it.
+   * Asynchronous so a file seam over a network can answer it; the confinement
+   * runs it before it opens anything.
    */
-  lstat(path: string): FileStat | undefined
+  lstat(path: string): Effect.Effect<FileStat | undefined>
 }
 
 /** The file seam a tool runs against. `@jozo-harness/filesystem/node` or `memory` provides it. */
@@ -87,3 +88,5 @@ export const withFileSystem = <A, E>(
   fileSystem: FileSystemShape,
   body: Effect.Effect<A, E, FileSystem>,
 ): Effect.Effect<A, E> => body.pipe(Effect.provideService(FileSystem, fileSystem))
+
+export * from './ssh.ts'

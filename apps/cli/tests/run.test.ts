@@ -81,6 +81,50 @@ describe('runJozoHarness', () => {
     await rm(dir, { recursive: true, force: true })
   })
 
+  test('a task file becomes the task, so a prompt past the argv cap still runs', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jozo-harness-run-'))
+    const taskPath = join(dir, 'task.md')
+    // 200 KB is past the 128 KB Linux allows in one argument; the run must not
+    // care, because the prompt arrives on a file rather than in argv.
+    await writeFile(taskPath, 'describe this workspace\n'.repeat(8000))
+    const err: Array<string> = []
+    const code = await Effect.runPromise(
+      runJozoHarness(
+        ['--model', 'test/model', '--patch', await patchWithRoot(dir), '--task-file', taskPath],
+        {
+          stdout: () => undefined,
+          stderr: (text) => err.push(text),
+          cwd: '/work',
+          isTty: true,
+          readStdin: async () => '',
+        },
+      ),
+    )
+
+    // The run reaches the model (which this profile does not have), so it fails
+    // after the task was read rather than refusing the task itself.
+    expect(err.join('')).not.toContain('task-file')
+    expect(code).not.toBe(2)
+    await rm(dir, { recursive: true, force: true })
+  }, 120_000)
+
+  test('a task file that is not there says so and runs nothing', async () => {
+    const err: Array<string> = []
+    const code = await Effect.runPromise(
+      runJozoHarness(['--task-file', '/nowhere/task.md'], {
+        stdout: () => undefined,
+        stderr: (text) => err.push(text),
+        cwd: '/work',
+        isTty: true,
+        readStdin: async () => '',
+      }),
+    )
+
+    expect(code).toBe(1)
+    expect(err.join('')).toContain('cannot read --task-file /nowhere/task.md')
+    expect(err.join('')).toContain('nothing to do')
+  })
+
   test('accepts an interrupt effect on the task path', async () => {
     const code = await Effect.runPromise(
       runJozoHarness(['--help'], {

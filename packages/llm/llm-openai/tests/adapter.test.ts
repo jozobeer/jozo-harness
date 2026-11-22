@@ -320,6 +320,27 @@ describe('openAiAdapter', () => {
     expect(error.code).toBe('TRANSPORT')
   })
 
+  test('a refused connection names the address in the TRANSPORT message', async () => {
+    const refused = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:11434'), {
+      code: 'ECONNREFUSED',
+    })
+    const failing = openAiAdapter({
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      apiKey: () => 'key',
+      capabilities: {
+        toolChoice: false,
+        reasoningEffort: null,
+        images: 'none',
+        promptCacheControl: false,
+      },
+      transport: () => Promise.reject(new TypeError('fetch failed', { cause: refused })),
+    })
+    const error = await Effect.runPromise(Effect.flip(Stream.runCollect(failing.stream(request))))
+    expect(error.message).toBe(
+      'provider request failed: TypeError: fetch failed (connect ECONNREFUSED 127.0.0.1:11434)',
+    )
+  })
+
   test('refuses an image block when the route declares it carries none', async () => {
     let fetched = 0
     const streaming = openAiAdapter({

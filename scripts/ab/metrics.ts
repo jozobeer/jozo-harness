@@ -1,8 +1,9 @@
 /**
  * What the A/B counts: tool calls, failed edits, re-reads of a file already
- * read, turns, and compactions. Both harnesses keep an append-only JSONL log and
- * spell the call the same way; the result's failure flag and the name of a
- * written summary differ, which is what the two shapes below say.
+ * read, turns, model round trips and the output they wrote, and compactions.
+ * Both harnesses keep an append-only JSONL log and spell the call the same way;
+ * the result's failure flag and the name of a written summary differ, which is
+ * what the two shapes below say.
  */
 
 export interface AbMetrics {
@@ -12,6 +13,10 @@ export interface AbMetrics {
   /** Read calls for a path this same session had already read. */
   readonly reReads: number
   readonly turns: number
+  /** Model round trips: one settled `assistant/message` per request. */
+  readonly steps: number
+  /** Output tokens the provider reported, summed over the settled messages. */
+  readonly outputTokens: number
   /** Summaries written when the context crossed the compaction line. */
   readonly compactions: number
   readonly tools: Readonly<Record<string, number>>
@@ -26,6 +31,8 @@ export const METRIC_NAMES = [
   'failedEdits',
   'reReads',
   'turns',
+  'steps',
+  'outputTokens',
   'compactions',
 ] as const satisfies ReadonlyArray<keyof AbMetrics>
 
@@ -49,6 +56,11 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
     : undefined
 
 const stringOf = (value: unknown): string => (typeof value === 'string' ? value : '')
+
+const numberOf = (record: Record<string, unknown> | undefined, key: string): number => {
+  const value = record?.[key]
+  return typeof value === 'number' ? value : 0
+}
 
 const argumentsOf = (raw: unknown): Record<string, unknown> | undefined => {
   if (typeof raw !== 'string') return asRecord(raw)
@@ -90,6 +102,8 @@ const count = (events: ReadonlyArray<AbEvent>, shape: LogShape): AbMetrics => {
   let failedEdits = 0
   let reReads = 0
   let turns = 0
+  let steps = 0
+  let outputTokens = 0
   let compactions = 0
 
   for (const event of events) {
@@ -97,6 +111,13 @@ const count = (events: ReadonlyArray<AbEvent>, shape: LogShape): AbMetrics => {
     if (data === undefined) continue
     if (event.type === 'turn/start') turns += 1
     if (event.type === shape.summaryType) compactions += 1
+    // Both logs settle one assistant/message per model request and put the
+    // provider's usage on it, so the round trips and their output are read the
+    // same way by both harnesses; a request that failed left no message.
+    if (event.type === 'assistant/message') {
+      steps += 1
+      outputTokens += numberOf(asRecord(data['usage']), 'outputTokens')
+    }
     if (event.type === 'tool/call') {
       const call = callOf(data)
       toolCalls += 1
@@ -118,6 +139,8 @@ const count = (events: ReadonlyArray<AbEvent>, shape: LogShape): AbMetrics => {
     failedEdits,
     reReads,
     turns,
+    steps,
+    outputTokens,
     compactions,
     tools: Object.fromEntries(tools),
   }

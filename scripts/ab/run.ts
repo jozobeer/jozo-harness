@@ -113,6 +113,10 @@ const jsonl = (text: string): ReadonlyArray<AbEvent> =>
 /** The dsh log is zstd, one frame per append; zstdText reads every frame. */
 const zstdJsonl = (path: string): ReadonlyArray<AbEvent> => jsonl(zstdText(readFileSync(path)))
 
+/** jozo-harness writes `session.v1.jsonl.zst` since #451; an older store left the plain name. */
+const jozoHarnessJsonl = (path: string): ReadonlyArray<AbEvent> =>
+  path.endsWith('.zst') ? zstdJsonl(path) : jsonl(readFileSync(path, 'utf8'))
+
 /** A log that cannot be counted spoils its own run, not the runs still to come. */
 const countedOf = (count: () => AbMetrics): AbMetrics | Error => {
   try {
@@ -133,6 +137,10 @@ const noteOf = (
   return code === 0 ? undefined : lastLine(output)
 }
 
+/** Whether a spawn failed because one argument did not fit the platform's cap. */
+const argumentTooLong = (error: Error | undefined): boolean =>
+  error !== undefined && (error as NodeJS.ErrnoException).code === 'E2BIG'
+
 const spawn = (
   argv: ReadonlyArray<string>,
   cwd: string,
@@ -140,6 +148,10 @@ const spawn = (
   timeout: number,
 ): { code: number | undefined; output: string } => {
   const [command, ...rest] = argv
+  const envLimit =
+    'the task never started: one argument is ' +
+    String(rest[rest.length - 1]?.length ?? 0) +
+    ' characters, past the 128 KB cap Linux puts on one argv string'
   const run = spawnSync(command ?? '', rest, {
     cwd,
     env,
@@ -147,6 +159,11 @@ const spawn = (
     timeout,
     killSignal: 'SIGKILL',
   })
+  // Linux caps a single argv string at 128 KB (MAX_ARG_STRLEN) and macOS does
+  // not, so a task whose prompt is one huge argument runs on one platform and
+  // not the other. The note says why the cell is empty and which platform would
+  // run it, instead of leaving a blank note.
+  if (argumentTooLong(run.error)) return { code: undefined, output: envLimit }
   return {
     code: run.status ?? undefined,
     output: (run.stdout?.toString() ?? '') + (run.stderr?.toString() ?? ''),
@@ -180,6 +197,11 @@ const runJozoHarness = async (
 ): Promise<Omit<Cell, 'repeat'>> => {
   const patch = join(workspace, '.ab-patch.yml')
   await writeFile(patch, jozoHarnessPatch(sessions))
+  // A prompt past the platform's per-argument cap (128 KB on Linux) cannot ride
+  // in argv, so it goes through a file the run reads.
+  const promptAsFile = task.promptAsFile === true
+  const taskPath = join(workspace, '.ab-task.md')
+  if (promptAsFile) await writeFile(taskPath, task.prompt)
   const started = Date.now()
   const { code, output } = spawn(
     [
@@ -189,14 +211,18 @@ const runJozoHarness = async (
       patch,
       '--model',
       ROUTE,
-      task.prompt,
+      ...(promptAsFile ? ['--task-file', taskPath] : [task.prompt]),
     ],
     workspace,
     process.env as Record<string, string>,
     task.timeoutMs ?? TIMEOUT_MS,
   )
-  const log = await newestFile(sessions, (name) => name === 'session.v1.jsonl', started)
-  const events = log === undefined ? undefined : jsonl(await readFile(log, 'utf8'))
+  const log = await newestFile(
+    sessions,
+    (name) => name === 'session.v1.jsonl' || name === 'session.v1.jsonl.zst',
+    started,
+  )
+  const events = log === undefined ? undefined : jozoHarnessJsonl(log)
   const counted = events === undefined ? undefined : countedOf(() => jozoHarnessMetrics(events))
   return {
     harness: 'jozo-harness',

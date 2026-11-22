@@ -70,9 +70,11 @@ import {
 import {
   Tier0Tools,
   childEnvironment,
+  fileReaderOf,
   logManagedEnv,
   makeShellSessions,
   managedEnvOf,
+  workspaceOf,
   type Tier0ToolBuilder,
   type WorktreeHost,
 } from '@jozo-harness/tools-tier0'
@@ -565,6 +567,7 @@ const installTier1 = (
       sandbox,
       timeLimitMsOf(rows),
       live,
+      rows,
     )) {
       yield* tools.register(tool)
     }
@@ -630,8 +633,12 @@ const tier1ToolList = (
   timeLimitMs: number | undefined,
   /** The values a call reads now: the delegation depth and the search provider. */
   live: LiveRunSettings,
+  /** The profile's rows: an ssh host row decides where read_image reads. */
+  rows: ReadonlyArray<PluginRow>,
 ) => {
-  const list = [...tier1Tools(ask, skills, runCode, timeLimitMs)]
+  // read_image reads from the machine the run works on: an ssh host's seam when
+  // the profile names one, this machine's disk otherwise.
+  const list = [...tier1Tools(ask, skills, runCode, timeLimitMs, fileReaderOf(rows))]
   list.push(makePluginTool(pluginHost))
   // A session opened while search is on keeps the tool, and reads the provider the
   // run holds when the call is made, so changing the provider does not need a reload.
@@ -2893,6 +2900,20 @@ const dumpText = (
   renderEffective(options.surface, dumpCredential(rows, options, reference))
 
 /**
+ * The options a run starts from. A profile that names an ssh host works in that
+ * host's root, so the session's cwd, its instructions, and every tool path are
+ * the host's, not this machine's; a profile without a host keeps the directory
+ * it was started in.
+ */
+const workspaceOptionsOf = (
+  options: CommandOptions,
+  rows: ReadonlyArray<PluginRow>,
+): CommandOptions => {
+  const hostRoot = workspaceOf(rows)
+  return hostRoot === undefined ? options : { ...options, cwd: hostRoot }
+}
+
+/**
  * Runs one `jzh` command over a profile: build the layer, start the agent,
  * wait for the turn, and return the process exit code (0 completed, 1 error).
  */
@@ -2933,7 +2954,9 @@ export function runCommand(options: CommandOptions): Effect.Effect<number> {
     }
     const layer = yield* loadProfile({ plugins: options.plugins, layers: [rows] })
     const spillTokens = spillTokensOf(rows)
-    return yield* Effect.scoped(runSession(options, rows, route, effort, spillTokens, layer, work))
+    return yield* Effect.scoped(
+      runSession(workspaceOptionsOf(options, rows), rows, route, effort, spillTokens, layer, work),
+    )
   }).pipe(
     Effect.catchCause((cause) =>
       Effect.sync(() => {

@@ -30,6 +30,8 @@ export const longPrompt: AbTask = {
       'the filler it carried before done.md was written.',
     flat: 'A tie in compactions with done.md on disk means both crossed the same line and kept the instruction, so the task cannot say which of the two lost less on the way through.',
   },
+  // 315 KB in one argv is past MAX_ARG_STRLEN on Linux; the run reads the file.
+  promptAsFile: true,
   timeoutMs: 600_000,
   done: async (workspace) => {
     const text = await readFile(workspace + '/done.md', 'utf8').catch(() => '')

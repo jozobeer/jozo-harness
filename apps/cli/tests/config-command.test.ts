@@ -404,6 +404,31 @@ describe('jzh config add and remove', () => {
     })
   })
 
+  test('writes an empty string to a row key, which turns the local daemon route off', async () => {
+    await withHome(async (env, path) => {
+      const sink = collector()
+
+      const code = await runConfig(['set', 'plugins.llm.localBaseUrl', ''], sink.io, env)
+
+      expect(code).toBe(0)
+      const settings = await Effect.runPromise(loadConfigFile(path))
+      expect(settings.plugins).toEqual([
+        { id: 'llm', name: '@jozo-harness/llm-openai', config: { localBaseUrl: '' } },
+      ])
+    })
+  })
+
+  test('answers a row key with no value at all with the usage', async () => {
+    await withHome(async (env) => {
+      const sink = collector()
+
+      const code = await runConfig(['set', 'plugins.llm.localBaseUrl'], sink.io, env)
+
+      expect(code).toBe(2)
+      expect(sink.errs.join('')).toContain('jzh config set K V')
+    })
+  })
+
   test('adds a plugin row and then a key under it', async () => {
     await withHome(async (env, path) => {
       const sink = collector()

@@ -61,6 +61,7 @@ export const tier0Tools = (
     sessions,
     managed,
     defaultTimeoutMs ?? (() => undefined),
+    fileSystem,
   ),
   ...(worktree === undefined ? [] : [makeWorktreeTool(sandbox, approval, worktree)]),
 ]

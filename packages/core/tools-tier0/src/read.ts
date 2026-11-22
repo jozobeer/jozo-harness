@@ -177,6 +177,9 @@ export const makeReadTool = (
 ): ToolDefinition<ReadArgs, ReadValue> => ({
   name: 'read',
   readOnly: true,
+  // Two reads in one step share only the observed-file map, and the newer
+  // observation is the one a later write compares against.
+  isConcurrencySafe: () => true,
   presentCall: (args) => ({ summary: 'read ' + rangeOf(args) }),
   description:
     'Reads a UTF-8 text file and returns its lines with 1-based line numbers. Use it instead of cat, head, or tail. When the footer says more lines follow, call read again with offset; a file whose output was spilled is read the same way.',

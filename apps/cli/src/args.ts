@@ -6,6 +6,12 @@ export interface ParsedArgs {
   readonly profileFlag: string | undefined
   readonly patches: ReadonlyArray<string>
   readonly task: string | undefined
+  /**
+   * `--task-file <path>`: read the one-shot task from a file. A prompt past the
+   * platform's per-argument cap (128 KB on Linux) cannot ride in argv, and a
+   * measurement of a long session needs one.
+   */
+  readonly taskFile: string | undefined
   /** `jzh models`: list what the provider offers instead of running. */
   readonly models: boolean
   /** `jzh web`: serve the browser UI instead of running a turn. */
@@ -62,6 +68,7 @@ const FLAGS: ReadonlyMap<string, FlagSpec> = new Map<string, FlagSpec>([
   ['--port', { kind: 'value' }],
   ['--public-url', { kind: 'value' }],
   ['--allow-preset-change', { kind: 'boolean' }],
+  ['--task-file', { kind: 'value' }],
   ['--subagents', { kind: 'boolean' }],
   ['--all', { kind: 'boolean' }],
 ])
@@ -220,6 +227,7 @@ export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
     publicUrl: publicOriginOf(first(values, '--public-url'), selected.web, errors),
     resume: first(values, '--resume'),
     allowPresetChange: values.has('--allow-preset-change'),
+    taskFile: first(values, '--task-file'),
     model: first(values, '--model') ?? '',
     modelFlag: first(values, '--model'),
     effort: first(values, '--effort') ?? '',

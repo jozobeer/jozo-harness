@@ -12,7 +12,7 @@ import { describe, expect, test } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { readImageTool } from '../src/index.ts'
+import { makeReadImageTool, readImageTool } from '../src/index.ts'
 /** Writes a file, making the directories above it, because the file may not be there yet. */
 const writeFileDeep = async (path: string, text: string | Uint8Array): Promise<void> => {
   await mkdir(dirname(path), { recursive: true })
@@ -97,5 +97,34 @@ describe('read_image tool', () => {
     expect(result?.isError).toBe(true)
     expect(JSON.stringify(result?.content)).toContain('not a supported image')
     await rm(dir, { recursive: true, force: true })
+  })
+
+  test('may share a step with another read, since it only reads a file', () => {
+    expect(readImageTool.isConcurrencySafe?.({ path: 'a.png' })).toBe(true)
+  })
+
+  test('reads through the reader it was given, so a host supplies its own bytes', async () => {
+    const bytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
+    const asked: Array<string> = []
+    const tool = makeReadImageTool((path) => {
+      asked.push(path)
+      return Effect.succeed(bytes)
+    })
+
+    const result = await Effect.runPromise(call(tool, { path: 'photos/tiny.png' }, '/work'))
+
+    // The path asked for is the workspace's, and nothing on this disk was read.
+    expect(asked).toEqual(['/work/photos/tiny.png'])
+    expect(result?.isError).toBe(false)
+    expect(result?.value).toMatchObject({ bytes: 8, mediaType: 'image/png' })
+  })
+
+  test('a reader that cannot produce the bytes is an error that names the path', async () => {
+    const tool = makeReadImageTool(() => Effect.fail(new Error('no host')))
+
+    const result = await Effect.runPromise(call(tool, { path: 'tiny.png' }, '/work'))
+
+    expect(result?.isError).toBe(true)
+    expect(JSON.stringify(result?.content)).toContain('cannot read /work/tiny.png')
   })
 })

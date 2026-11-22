@@ -5,9 +5,10 @@ import type { SandboxMode } from '@jozo-harness/safety'
 import { ToolError } from '@jozo-harness/tools'
 
 /**
- * The one synchronous question a confinement asks: is this component a link?
- * It is passed in rather than read from the file seam, because a path is confined
- * before any file is opened and some confined tools never touch that seam.
+ * The one question a confinement asks about a path's parts: is this component a
+ * link? It is passed in rather than read from the file seam, because some
+ * confined tools never touch that seam, and it is asynchronous because a seam
+ * over a network answers it in a round trip.
  */
 export type LinkLookup = Pick<FileSystemShape, 'lstat'>
 
@@ -43,16 +44,17 @@ export const resolveInside = (
       new ToolError({ code: 'denied', message: 'path escapes the workspace: ' + path }),
     )
   }
-  const linked = linkIn(links, root, inside)
-  if (linked !== undefined) {
-    return Effect.fail(
-      new ToolError({
-        code: 'denied',
-        message: path + ' goes through a link: ' + linked + '; write the path it points to instead',
-      }),
-    )
-  }
-  return Effect.succeed(target)
+  return Effect.flatMap(linkIn(links, root, inside), (linked) =>
+    linked === undefined
+      ? Effect.succeed(target)
+      : Effect.fail(
+          new ToolError({
+            code: 'denied',
+            message:
+              path + ' goes through a link: ' + linked + '; write the path it points to instead',
+          }),
+        ),
+  )
 }
 
 /**
@@ -79,13 +81,22 @@ export const resolveSearchStart = (
 }
 
 /** The first component below the root that is a link, if any. Parts that are not there yet are new work. */
-const linkIn = (links: LinkLookup, root: string, inside: string): string | undefined => {
-  let walk = root
-  for (const part of inside.split(sep)) {
-    walk = join(walk, part)
-    const info = links.lstat(walk)
-    if (info === undefined) return undefined
-    if (info.isSymbolicLink) return walk
+const linkIn = (
+  links: LinkLookup,
+  root: string,
+  inside: string,
+): Effect.Effect<string | undefined> => {
+  const parts = inside.split(sep)
+  // One component per round trip: a seam over a network must not walk the whole
+  // path when the first component already answers.
+  const walk = (index: number, path: string): Effect.Effect<string | undefined> => {
+    const part = parts[index]
+    if (part === undefined) return Effect.succeed(undefined)
+    const next = join(path, part)
+    return Effect.flatMap(links.lstat(next), (info) => {
+      if (info === undefined) return Effect.succeed(undefined)
+      return info.isSymbolicLink ? Effect.succeed(next) : walk(index + 1, next)
+    })
   }
-  return undefined
+  return walk(0, root)
 }

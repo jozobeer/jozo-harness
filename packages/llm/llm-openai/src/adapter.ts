@@ -1,6 +1,7 @@
 import {
   LlmFailure,
   fetchTransport,
+  transportFailureText,
   type ContentBlock,
   type LlmAdapter,
   type LlmCapabilities,
@@ -213,7 +214,7 @@ export function openAiAdapter(options: OpenAiAdapterOptions): LlmAdapter {
                   })
                 : new LlmFailure({
                     code: 'TRANSPORT',
-                    message: `provider request failed: ${String(cause)}`,
+                    message: `provider request failed: ${transportFailureText(cause)}`,
                   })
               guard.disarm()
               return failure

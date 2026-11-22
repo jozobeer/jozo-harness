@@ -101,7 +101,7 @@ YAML では plugin 名を引用する（`name: '@jozo-harness/safety'`）。`@` 
 | `@jozo-harness/mcp` | `command`（必須）、`prefix` |
 | `@jozo-harness/delegate` | `tools`（必須）— 委譲してよい外部 CLI の配列。各要素は `name`（tool の `command` に渡す名前）と `argv`（起動する argv。タスクは最後の引数として足す） |
 | `@jozo-harness/workspace-dependencies` | `dir`（必須）— この配布が同梱するランタイムの payload ディレクトリ（絶対パス、または `~` で始める）。`dir/runtime.json` が payload からの相対パスで `python`（必須）、`node`、`pnpm` を並べる |
-| `@jozo-harness/tools-tier0` | `env` — `JZH_` で始まる名前だけを持つ map。bash、背景ジョブ、run_code の子がこの値を環境に持ち、モデルが `env` 引数で同じ名前を渡してもこの値が勝つ。名前は `JZH_` のあとに大文字・数字・`_` だけを置け、`=` や空白を含む名前は起動時に拒否する。値は設定のリテラルだけで、`secrets.env` や `.env` は読まない。秘密は `jzh auth` の経路に置く |
+| `@jozo-harness/tools-tier0` | `ssh` — `reach`（`ssh` と宛先のフラグ。例 `["ssh", "-p", "2222", "box"]`）、`root`（そのホストのワークスペース。相対パスはここを基準にする）、`mode`（`read-only` / `workspace-write` / `danger-full-access`、既定は `workspace-write`）。置くと、read / write / edit / glob / grep / bash はそのホストのファイルとプロセスを対象にし、セッションの cwd と AGENTS.md の探索もホストの `root` になる。コマンドはホストの bwrap で包み、書き込みは `root` と `/tmp` の外へ出ない。ホストに bwrap が無い、または bwrap が名前空間を作れない場合、行は起動時に失敗する（`workspace-write` を守れないまま走らせないため）。`env` — `JZH_` で始まる名前だけを持つ map。bash、背景ジョブ、run_code の子がこの値を環境に持ち、モデルが `env` 引数で同じ名前を渡してもこの値が勝つ。名前は `JZH_` のあとに大文字・数字・`_` だけを置け、`=` や空白を含む名前は起動時に拒否する。値は設定のリテラルだけで、`secrets.env` や `.env` は読まない。秘密は `jzh auth` の経路に置く |
 | `@jozo-harness/tools-tier1` | `timeLimitMs` — `ask_user` が複数の質問を待つ既定の時間（ミリ秒、1 以上）。省略すると回答があるまで待つ。呼び出しの `time_limit_ms` が優先する |
 | `@jozo-harness/hooks-json` | `path` — 読む hooks.json の場所（既定 `hooks.json`）。相対パスは各 tool 呼び出しの cwd から解決する、`timeoutMs` — フックが `timeout` を書かないときの 1 コマンドの上限（ミリ秒、既定 600000） |
 
@@ -220,6 +220,7 @@ plugins:
 | `--config <file.yml>` | 設定ファイルのパス |
 | `--resume <sessionId>` | 過去のセッションを開く |
 | `--allow-preset-change` | tool の減少や profile の変更があっても再開する（C6） |
+| `--task-file <path>` | 1 turn のタスクを argv ではなくファイルから読む。Linux は 1 引数を 128 KB で切るので、それを超えるプロンプト（長いセッションの再計測など）はこのフラグで渡す。ファイルが読めないときはタスクを空のまま走らせず、終了コード 1 で止まる |
 | `--port <N>` | `jzh web` のポート。設定ファイルの `port` より優先する。0 は空きポート |
 | `--public-url <https origin>` | `jzh web` を proxy 越しに公開する origin。許可する Host / Origin と起動メッセージの URL を決める。`jzh web` 以外ではエラー |
 | `--json` | セッションイベントを JSON 行で出す |

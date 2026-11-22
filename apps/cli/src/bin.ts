@@ -63,6 +63,7 @@ jzh sessions --search <text>    find sessions by what they say
 jzh sessions --all              list the sessions nobody said anything in too
 jzh --allow-preset-change         continue a session that lost a tool or changed profile
 jzh --subagents                  let the model run and steer child agents
+jzh --task-file <path>           read the one-shot task from a file instead of argv
 jzh --json "task"
 jzh --tui                       terminal UI even through a pipe
 `
@@ -298,6 +299,28 @@ const printModels = (inputs: CommandInputs, io: MainIo): Effect.Effect<number> =
     }),
   )
 
+/**
+ * The one-shot task, with `--task-file` read when it names one. The file is read
+ * before anything else runs, so a path that is not there fails the command
+ * instead of starting a session with no task.
+ */
+const taskOf = (parsed: ParsedArgs, io: MainIo): Effect.Effect<ParsedArgs, never> => {
+  const path = parsed.taskFile
+  if (path === undefined) return Effect.succeed(parsed)
+  return Effect.tryPromise({
+    try: () => readFile(path, 'utf8'),
+    catch: () => new Error('cannot read --task-file ' + path),
+  }).pipe(
+    Effect.map((task) => ({ ...parsed, task })),
+    Effect.catch((error: Error) =>
+      Effect.sync(() => {
+        io.stderr('jzh: ' + error.message + '\n')
+        return { ...parsed, task: '' }
+      }),
+    ),
+  )
+}
+
 /** The `jzh` entry point: parse argv, load the bundled base profile, run. */
 export function main(argv: ReadonlyArray<string>, io: MainIo): Effect.Effect<number> {
   const parsed = parseArgs(argv)
@@ -310,12 +333,19 @@ export function main(argv: ReadonlyArray<string>, io: MainIo): Effect.Effect<num
     return Effect.succeed(2)
   }
   return Effect.gen(function* () {
-    const inputs = yield* loadInputs(parsed, io)
+    const chosen = yield* taskOf(parsed, io)
+    // A task file that could not be read leaves no task, so the run refuses
+    // rather than starting a session with an empty prompt.
+    if (parsed.taskFile !== undefined && (chosen.task ?? '') === '') {
+      io.stderr('jzh: nothing to do: --task-file could not be read\n')
+      return 1
+    }
+    const inputs = yield* loadInputs(chosen, io)
     if (parsed.models) return yield* printModels(inputs, io)
     if (parsed.sessions) {
       return yield* printSessions(inputs, io, parsed.sessionId, parsed.search, parsed.all)
     }
-    return yield* runCommand(commandOptions(parsed, io, inputs))
+    return yield* runCommand(commandOptions(chosen, io, inputs))
   }).pipe(
     Effect.catchCause((cause) =>
       Effect.sync(() => {

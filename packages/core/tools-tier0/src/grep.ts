@@ -189,6 +189,7 @@ export const makeGrepTool = (
 ): ToolDefinition<GrepArgs, GrepValue> => ({
   name: 'grep',
   readOnly: true,
+  isConcurrencySafe: () => true,
   presentCall: (args) => ({ summary: 'grep ' + args.pattern }),
   description:
     'Searches workspace files for a regular expression and returns file, line, and text for each match. Use it instead of shelling out to grep or rg. Dot-entries such as .github are searched; only node_modules, .git, and binary files are skipped. ripgrep respects nested .gitignore files; without rg, the fallback reads only the workspace-root rules and says so. A result too long to show is stored whole; read that file with offset and limit.',

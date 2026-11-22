@@ -221,6 +221,8 @@ const pluginNamed = (name: string): Plugin<any, any, any> | undefined =>
 type ParsedYaml = { readonly ok: true; readonly value: unknown } | { readonly ok: false }
 
 const parseYaml = (raw: string): ParsedYaml => {
+  // YAML reads an empty document as null, but an empty shell argument means the empty string.
+  if (raw === '') return { ok: true, value: '' }
   try {
     return { ok: true, value: parse(raw) }
   } catch {
@@ -419,9 +421,11 @@ const setValue = async (
   io: ConfigIo,
   paths: ConfigPaths,
 ): Promise<number> => {
-  const [key = '', value = ''] = argv
-  if (key === '' || value === '') return usage(io)
+  const [key = '', value] = argv
+  if (key === '' || value === undefined) return usage(io)
+  // A row key may be set to '', which is how a row opts out of something (localBaseUrl).
   if (key.startsWith('plugins.')) return await setRowValue(key, value, io, paths)
+  if (value === '') return usage(io)
   if (LIST_VALUE_KEYS.includes(key)) return await setListValue(key, value, io, paths)
   return await setScalarValue(key, value, io, paths)
 }
