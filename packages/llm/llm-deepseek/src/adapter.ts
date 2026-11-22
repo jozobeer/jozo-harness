@@ -1,6 +1,7 @@
 import {
   LlmFailure,
   fetchTransport,
+  transportFailureText,
   type ContentBlock,
   type LlmAdapter,
   type LlmCapabilities,
@@ -216,7 +217,7 @@ export function deepSeekMessagesAdapter(options: DeepSeekMessagesOptions): LlmAd
             catch: (cause) =>
               new LlmFailure({
                 code: 'TRANSPORT',
-                message: `provider request failed: ${String(cause)}`,
+                message: `provider request failed: ${transportFailureText(cause)}`,
               }),
           })
           if (!response.ok) {
