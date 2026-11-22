@@ -220,6 +220,7 @@ plugins:
 | `--config <file.yml>` | 設定ファイルのパス |
 | `--resume <sessionId>` | 過去のセッションを開く |
 | `--allow-preset-change` | tool の減少や profile の変更があっても再開する（C6） |
+| `--task-file <path>` | 1 turn のタスクを argv ではなくファイルから読む。Linux は 1 引数を 128 KB で切るので、それを超えるプロンプト（長いセッションの再計測など）はこのフラグで渡す。ファイルが読めないときはタスクを空のまま走らせず、終了コード 1 で止まる |
 | `--port <N>` | `jzh web` のポート。設定ファイルの `port` より優先する。0 は空きポート |
 | `--public-url <https origin>` | `jzh web` を proxy 越しに公開する origin。許可する Host / Origin と起動メッセージの URL を決める。`jzh web` 以外ではエラー |
 | `--json` | セッションイベントを JSON 行で出す |
