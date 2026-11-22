@@ -1,0 +1,14 @@
+name: macos-probe
+on:
+  push:
+    branches: [ci/macos-probe]
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15, macos-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - run: uname -a
