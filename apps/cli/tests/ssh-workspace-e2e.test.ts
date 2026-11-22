@@ -28,6 +28,8 @@ interface Loopback {
   readonly key: string
   readonly root: string
   readonly home: string
+  /** Where the run's session log goes; the e2e reads tool results back from it. */
+  readonly logs: string
   read(path: string): Promise<string>
   stop(): Promise<void>
 }
@@ -45,12 +47,14 @@ const startLoopback = async (): Promise<Loopback | undefined> => {
   const config = join(base, 'sshd_config')
   const root = join(base, 'work')
   const home = join(base, 'home')
+  const logs = join(base, 'logs')
   await run(['ssh-keygen', '-q', '-t', 'ed25519', '-f', hostKey, '-N', ''])
   await run(['ssh-keygen', '-q', '-t', 'ed25519', '-f', userKey, '-N', ''])
   await writeFile(authorized, await readFile(userKey + '.pub', 'utf8'))
   await chmod(authorized, 0o600)
   await mkdir(root, { recursive: true })
   await mkdir(home, { recursive: true })
+  await mkdir(logs, { recursive: true })
   // A port the kernel picks, so two runs of this file cannot collide.
   const port = 22000 + Math.floor(Math.random() * 2000)
   await writeFile(
@@ -100,6 +104,7 @@ const startLoopback = async (): Promise<Loopback | undefined> => {
     key: userKey,
     root,
     home,
+    logs,
     read: (path: string) => readFile(path, 'utf8'),
     stop: async () => {
       const pid = await readFile(join(base, 'sshd.pid'), 'utf8').catch(() => '')
@@ -197,7 +202,13 @@ const scriptedLlm = (turns: ReadonlyArray<ReadonlyArray<StreamChunk>>): Plugin<{
   }
 }
 
-const profile = (root: string, reach: ReadonlyArray<string>): string =>
+const profile = (
+  root: string,
+  reach: ReadonlyArray<string>,
+  logs: string,
+  /** The permission preset: workspace-write is what wraps a remote command in bwrap. */
+  preset = 'full',
+): string =>
   [
     'name: test',
     'plugins:',
@@ -208,7 +219,7 @@ const profile = (root: string, reach: ReadonlyArray<string>): string =>
     '  - id: session-jsonl',
     "    name: '@jozo-harness/session-jsonl'",
     '    config:',
-    '      root: ' + root,
+    '      root: ' + logs,
     '  - id: tools',
     "    name: '@jozo-harness/tools'",
     '  - id: system-prompt',
@@ -216,7 +227,7 @@ const profile = (root: string, reach: ReadonlyArray<string>): string =>
     '  - id: safety',
     "    name: '@jozo-harness/safety'",
     '    config:',
-    '      preset: full',
+    '      preset: ' + preset,
     '  - id: ask',
     "    name: '@jozo-harness/ask'",
     '  - id: tier0',
@@ -239,10 +250,13 @@ const drive = (
   loopback: Loopback,
   turns: ReadonlyArray<ReadonlyArray<StreamChunk>>,
   task: string,
+  logRoot = loopback.logs,
+  /** The permission preset the profile runs under. */
+  preset = 'full',
 ): Promise<number> =>
   Effect.runPromise(
     runCommand({
-      profiles: [profile(loopback.root, reachOf(loopback))],
+      profiles: [profile(loopback.root, reachOf(loopback), logRoot, preset)],
       plugins: [
         kernelPlugin,
         sessionJsonlPlugin,
@@ -264,6 +278,17 @@ const drive = (
       stderr: () => undefined,
     }),
   )
+
+/** Every tool result's text from the session the run wrote, for a refusal to be read in. */
+const toolResultsOf = async (root: string): Promise<ReadonlyArray<string>> => {
+  const sessions = await Effect.runPromise(jsonlSessions({ root }).list())
+  const opened = await Effect.runPromise(jsonlSessions({ root }).open(sessions[0]?.id ?? ''))
+  return opened.events.flatMap((event) =>
+    event.type === 'tool/result'
+      ? event.data.content.flatMap((block) => (block.type === 'text' ? [block.text] : []))
+      : [],
+  )
+}
 
 describe('a workspace on an ssh host', () => {
   test('bash and write reach the remote workspace, and a write outside it is refused', async () => {
@@ -289,6 +314,40 @@ describe('a workspace on an ssh host', () => {
       await expect(readFile(join(loopback.home, 'written.txt'), 'utf8')).rejects.toThrow()
     } finally {
       await loopback.stop()
+    }
+  }, 120_000)
+
+  test('a command that writes outside the workspace is refused by the host kernel', async () => {
+    const loopback = await startLoopback()
+    if (loopback === undefined) return
+    try {
+      // workspace-write lets a command write to its workspace and to /tmp, which
+      // is where this e2e's root lives. /var/tmp is outside both, so the host's
+      // bwrap is what refuses this, not the file tools.
+      const escaped = join('/var/tmp', 'jozo-harness-ssh-escaped-' + String(process.pid) + '.txt')
+      await rm(escaped, { force: true })
+      const sessions = await mkdtemp(join(tmpdir(), 'jozo-harness-ssh-logs-'))
+      const code = await drive(
+        loopback,
+        // The command itself fails, which is when the sandbox reads a denial: a
+        // command that swallows the refusal and exits zero is not a denial.
+        [bashTurn('echo nope > ' + escaped), textTurn('done')],
+        'write outside with a command',
+        sessions,
+        'workspace-write',
+      )
+
+      expect(code).toBe(0)
+      await expect(readFile(escaped, 'utf8')).rejects.toThrow()
+      // The host's own kernel said why, and the sandbox read it as a denial
+      // rather than as a command that happened to exit non-zero.
+      const results = (await toolResultsOf(sessions)).join('\n').toLowerCase()
+      expect(results).toContain('[exit code: 1]')
+      expect(results).toContain('read-only file system')
+      expect(results).toContain('sandbox: file access denied')
+    } finally {
+      await loopback.stop()
+      await rm('/var/tmp/jozo-harness-ssh-escaped-' + String(process.pid) + '.txt', { force: true })
     }
   }, 120_000)
 
@@ -319,7 +378,7 @@ describe('a workspace on an ssh host', () => {
     const reach = ['ssh', '-F', '/dev/null', '-p', '1', '-o', 'BatchMode=yes', 'nobody@127.0.0.1']
     const code = await Effect.runPromise(
       runCommand({
-        profiles: [profile(workspace, reach)],
+        profiles: [profile(workspace, reach, logs)],
         plugins: [
           kernelPlugin,
           sessionJsonlPlugin,
