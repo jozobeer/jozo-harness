@@ -25,7 +25,7 @@ import {
   type ShellSession,
   type ShellSessions,
 } from './shells.ts'
-import { resolveInside } from './workspace.ts'
+import { resolveInside, type LinkLookup } from './workspace.ts'
 import { exitSummaryOf } from './present.ts'
 import { childEnvironment, logManagedEnv, type ManagedEnv } from './managed-env.ts'
 
@@ -431,6 +431,12 @@ export const makeBashTool = (
    * run can change its own default and the next call reads the new one.
    */
   defaultTimeoutMs: () => number | undefined = () => undefined,
+  /**
+   * How the call reads the workspace: a named `cwd` is confined against it. The
+   * disk by default; a run over ssh passes the host's seam, so the directory is
+   * resolved where the command will actually run.
+   */
+  links: LinkLookup = nodeFileSystem,
 ): ToolDefinition<BashArgs, BashValue> => {
   const canEscalate = escalates(sandbox, approval)
   return {
@@ -480,9 +486,7 @@ export const makeBashTool = (
           )
         }
         const cwd =
-          args.cwd === undefined
-            ? context.cwd
-            : yield* resolveInside(nodeFileSystem, context.cwd, args.cwd)
+          args.cwd === undefined ? context.cwd : yield* resolveInside(links, context.cwd, args.cwd)
         const refused = reusedSessionRefusal(
           sessions,
           args.session,

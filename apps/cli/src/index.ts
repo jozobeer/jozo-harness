@@ -73,6 +73,7 @@ import {
   logManagedEnv,
   makeShellSessions,
   managedEnvOf,
+  workspaceOf,
   type Tier0ToolBuilder,
   type WorktreeHost,
 } from '@jozo-harness/tools-tier0'
@@ -2933,7 +2934,14 @@ export function runCommand(options: CommandOptions): Effect.Effect<number> {
     }
     const layer = yield* loadProfile({ plugins: options.plugins, layers: [rows] })
     const spillTokens = spillTokensOf(rows)
-    return yield* Effect.scoped(runSession(options, rows, route, effort, spillTokens, layer, work))
+    // A profile that names an ssh host works in that host's root: the session's
+    // cwd, its instructions, and every tool path are the host's, not this
+    // machine's. A profile without a host keeps the directory it was started in.
+    const hostRoot = workspaceOf(rows)
+    const sessionOptions = hostRoot === undefined ? options : { ...options, cwd: hostRoot }
+    return yield* Effect.scoped(
+      runSession(sessionOptions, rows, route, effort, spillTokens, layer, work),
+    )
   }).pipe(
     Effect.catchCause((cause) =>
       Effect.sync(() => {
