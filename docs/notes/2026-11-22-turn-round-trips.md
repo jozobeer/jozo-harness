@@ -14,7 +14,9 @@
 ## 直した計測の不具合
 
 1. **jozo-harness のセルは #451 以降すべて未計数だった。** セッションの保存が `session.v1.jsonl.zst` になってからも `run.ts` は `session.v1.jsonl` を探していたので、`newestFile` が何も見つけず、jozo-harness 側の全セルが `counted 0` で「no session log」になっていた。両方の名前を探し、`.zst` なら zstd のフレームを解いて読むようにした。
-2. **`long-prompt` は Linux で 1 度も走れない。** 315 KB の 1 プロンプトを 1 個の argv として渡しており、Linux は 1 引数 128 KB（`MAX_ARG_STRLEN`）で `E2BIG` にする。macOS にはこの上限が無いので、この task は platform によって走ったり走らなかったりする。`spawn` が `E2BIG` を拾い、表の note にその理由と文字数を出すようにした。task の文面自体は変えていない（窓を越えさせる目的は変えたくない）。
+2. **`long-prompt` は Linux で 1 度も走れない。** 315 KB の 1 プロンプトを 1 個の argv として渡しており、Linux は 1 引数 128 KB（`MAX_ARG_STRLEN`）で `E2BIG` にする。macOS にはこの上限が無いので、この task は platform によって走ったり走らなかったりする。
+   - `spawn` が `E2BIG` を拾い、表の note にその理由と文字数を出すようにした。
+   - そのうえで口を用意した。`jzh --task-file <path>` が 1 turn のタスクをファイルから読む。`long-prompt` は `promptAsFile: true` を立て、A/B が task をファイルに書いてこのフラグで渡す。task の文面そのものは変えていない（窓を越えさせる目的は変えたくない）。
 
 ## 測ったこと
 
@@ -29,9 +31,11 @@
 | read-report | yes | 5 | 4 | 606 | 0 | 0 |
 | find-disagreement | yes | 16 | 15 | 6,701 | 0 | 0 |
 | recover-ambiguous-edit | yes | 8 | 8 | 1,222 | 1 | 0 |
-| long-prompt | no | - | - | - | - | - |
+| long-prompt | yes | 4 | 3 | 778 | 0 | 0 |
 
-（`fix-rules` は 2 回目で steps 33 / toolCalls 32 / outputTokens 26,445 / re-reads 1。同じ task でも走ごとに倍近く振れるので、1 走の差は読まない。）
+（`fix-rules` は 2 回目で steps 33 / toolCalls 32 / outputTokens 26,445 / re-reads 1。3 回目は steps 36 / toolCalls 51 / outputTokens 27,754。同じ task でも走ごとに振れるので、1 走の差は読まない。）
+
+`--task-file` を入れた後の 8 task 一巡では、`long-prompt` を含む 8 本すべてが `done: yes` で終わった（`JZH_AB_TIMEOUT_MS=900000`、1 走ずつ）。`long-prompt` は steps 4 / toolCalls 3 / outputTokens 778 / compactions 0。**compaction は 0 で、この task は窓を越えていない**（A/B の patch は窓 20,000。line-filling のつもりだったが、この走では越えなかった）。
 
 step の中身を `fix-rules` のログで見ると、読み取りだけの複数 call の step はこの走には無かった（並列にしても減る往復は無い）。`fix-rules` の初回の走では 12 個の `read` が 1 step にまとまっていた。issue の指摘どおり、**並列化は往復を減らさない**。減るのは tool 時間だけで、その tool 時間は turn 全体の 4% 程度である。
 
@@ -45,7 +49,7 @@ step の中身を `fix-rules` のログで見ると、読み取りだけの複�
 | step | 190 | 120 以下 | 未計測 |
 | 出力トークン | 478,820 | 250,000 以下 | 未計測 |
 
-上の 8 task は 1 turn・33 step 以内で終わる短いもので、issue が対象にした長いセッションではない。`long-prompt` が Linux で走らないことは直したが、それでも 1 turn の短い task である。**目標に対する判定は、まだできていない。**
+上の 8 task は 1 turn・36 step 以内で終わる短いもので、issue が対象にした長いセッションではない。`long-prompt` が Linux で走らないことは直し、この環境でも 8 本すべてが完走するようになったが、それでも 1 turn の短い task である。**目標に対する判定は、まだできていない。** 次に要るのは「同じ依頼」の固定で、issue の「明確にすべきポイント」のままだ。
 
 ## 確かめたこと
 
