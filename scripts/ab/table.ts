@@ -24,6 +24,8 @@ const cellLine = (cell: Cell): string => {
     metrics === undefined ? '-' : String(metrics.failedEdits),
     metrics === undefined ? '-' : String(metrics.reReads),
     metrics === undefined ? '-' : String(metrics.turns),
+    metrics === undefined ? '-' : String(metrics.steps),
+    metrics === undefined ? '-' : String(metrics.outputTokens),
     metrics === undefined ? '-' : String(metrics.compactions),
     cell.code === undefined ? '-' : String(cell.code),
     cell.note ?? '',
@@ -54,9 +56,11 @@ const summaryLine = (group: ReadonlyArray<Cell>): string => {
     String(numbers.length),
     String(group.filter((cell) => cell.done).length),
     span(numbers.map((metrics) => metrics.toolCalls)),
-    span(numbers.map((metrics) => metrics.turns)),
     span(numbers.map((metrics) => metrics.failedEdits)),
     span(numbers.map((metrics) => metrics.reReads)),
+    span(numbers.map((metrics) => metrics.turns)),
+    span(numbers.map((metrics) => metrics.steps)),
+    span(numbers.map((metrics) => metrics.outputTokens)),
     span(numbers.map((metrics) => metrics.compactions)),
   ]
   return '| ' + columns.join(' | ') + ' |'
@@ -68,12 +72,12 @@ export const tableOf = (
   groups: ReadonlyArray<ReadonlyArray<Cell>>,
 ): string =>
   [
-    '| harness | task | run | done | tool calls | failed edits | re-reads | turns | compactions | exit | note |',
-    '|---|---|---|---|---|---|---|---|---|---|---|',
+    '| harness | task | run | done | tool calls | failed edits | re-reads | turns | steps | output tokens | compactions | exit | note |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|',
     ...cells.map(cellLine),
     '',
-    '| harness | task | runs | counted | done | tool calls | turns | failed edits | re-reads | compactions |',
-    '|---|---|---|---|---|---|---|---|---|---|',
+    '| harness | task | runs | counted | done | tool calls | failed edits | re-reads | turns | steps | output tokens | compactions |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|',
     ...groups.map(summaryLine),
     '',
   ].join('\n')
