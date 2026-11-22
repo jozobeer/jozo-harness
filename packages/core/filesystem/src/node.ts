@@ -129,8 +129,10 @@ export const nodeFileSystem: FileSystemShape = {
         digest: createHash('sha256').update(bytes).digest('hex'),
       } satisfies Observation
     }),
-  lstat: (path) => {
-    const info = lstatSync(path, { throwIfNoEntry: false })
-    return info === undefined ? undefined : statOf(info)
-  },
+  // The seam is asynchronous for the remote case; the disk answers in one tick.
+  lstat: (path) =>
+    Effect.sync(() => {
+      const info = lstatSync(path, { throwIfNoEntry: false })
+      return info === undefined ? undefined : statOf(info)
+    }),
 }

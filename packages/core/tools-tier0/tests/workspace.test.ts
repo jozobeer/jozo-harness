@@ -115,4 +115,33 @@ describe('the one place a path becomes a path a tool may use', () => {
       expect(existsSync(path)).toBe(false)
     })
   })
+
+  test('a lookup over a network is asked one component at a time and stops at the link', async () => {
+    const asked: Array<string> = []
+    const directory = {
+      size: 0,
+      mtimeMs: 0,
+      mode: 0o755,
+      isFile: false,
+      isDirectory: true,
+      isSymbolicLink: false,
+    }
+    // `lstat` over ssh is a round trip per component; the walk must not ask about
+    // the rest of the path once a component answered.
+    const remote = {
+      lstat: (path: string) => {
+        asked.push(path)
+        return Effect.succeed(
+          path === join('/work', 'src', 'out') ? { ...directory, isSymbolicLink: true } : directory,
+        )
+      },
+    }
+
+    const result = await Effect.runPromise(
+      Effect.result(resolveInside(remote, '/work', 'src/out/deep/file.txt')),
+    )
+
+    expect(failure(result)).toContain('goes through a link')
+    expect(asked).toEqual([join('/work', 'src'), join('/work', 'src', 'out')])
+  })
 })

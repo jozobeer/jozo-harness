@@ -164,6 +164,6 @@ export const makeMemoryFileSystem = (
         digest: digestOf(file.content),
       } satisfies Observation)
     },
-    lstat: (path) => statOf(normalized(path)),
+    lstat: (path) => Effect.sync(() => statOf(normalized(path))),
   }
 }
