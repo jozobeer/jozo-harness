@@ -88,3 +88,5 @@ export const withFileSystem = <A, E>(
   fileSystem: FileSystemShape,
   body: Effect.Effect<A, E, FileSystem>,
 ): Effect.Effect<A, E> => body.pipe(Effect.provideService(FileSystem, fileSystem))
+
+export * from './ssh.ts'
