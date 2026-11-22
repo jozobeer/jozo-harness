@@ -2900,6 +2900,20 @@ const dumpText = (
   renderEffective(options.surface, dumpCredential(rows, options, reference))
 
 /**
+ * The options a run starts from. A profile that names an ssh host works in that
+ * host's root, so the session's cwd, its instructions, and every tool path are
+ * the host's, not this machine's; a profile without a host keeps the directory
+ * it was started in.
+ */
+const workspaceOptionsOf = (
+  options: CommandOptions,
+  rows: ReadonlyArray<PluginRow>,
+): CommandOptions => {
+  const hostRoot = workspaceOf(rows)
+  return hostRoot === undefined ? options : { ...options, cwd: hostRoot }
+}
+
+/**
  * Runs one `jzh` command over a profile: build the layer, start the agent,
  * wait for the turn, and return the process exit code (0 completed, 1 error).
  */
@@ -2940,13 +2954,8 @@ export function runCommand(options: CommandOptions): Effect.Effect<number> {
     }
     const layer = yield* loadProfile({ plugins: options.plugins, layers: [rows] })
     const spillTokens = spillTokensOf(rows)
-    // A profile that names an ssh host works in that host's root: the session's
-    // cwd, its instructions, and every tool path are the host's, not this
-    // machine's. A profile without a host keeps the directory it was started in.
-    const hostRoot = workspaceOf(rows)
-    const sessionOptions = hostRoot === undefined ? options : { ...options, cwd: hostRoot }
     return yield* Effect.scoped(
-      runSession(sessionOptions, rows, route, effort, spillTokens, layer, work),
+      runSession(workspaceOptionsOf(options, rows), rows, route, effort, spillTokens, layer, work),
     )
   }).pipe(
     Effect.catchCause((cause) =>
