@@ -27,6 +27,12 @@ export interface AbTask {
   readonly name: string
   /** What the task asks for, verbatim, to both harnesses. */
   readonly prompt: string
+  /**
+   * True when the prompt is too large for one argument (Linux caps it at 128 KB),
+   * so jozo-harness reads it from a file instead. dsh has no such flag and is
+   * reported as unable to run the task where it cannot.
+   */
+  readonly promptAsFile?: boolean
   /** Files the workspace starts with, keyed by a path relative to it. */
   readonly files: Readonly<Record<string, string>>
   /** How long one run may take; the run script's default when absent. */

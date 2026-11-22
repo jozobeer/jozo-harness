@@ -197,6 +197,11 @@ const runJozoHarness = async (
 ): Promise<Omit<Cell, 'repeat'>> => {
   const patch = join(workspace, '.ab-patch.yml')
   await writeFile(patch, jozoHarnessPatch(sessions))
+  // A prompt past the platform's per-argument cap (128 KB on Linux) cannot ride
+  // in argv, so it goes through a file the run reads.
+  const promptAsFile = task.promptAsFile === true
+  const taskPath = join(workspace, '.ab-task.md')
+  if (promptAsFile) await writeFile(taskPath, task.prompt)
   const started = Date.now()
   const { code, output } = spawn(
     [
@@ -206,7 +211,7 @@ const runJozoHarness = async (
       patch,
       '--model',
       ROUTE,
-      task.prompt,
+      ...(promptAsFile ? ['--task-file', taskPath] : [task.prompt]),
     ],
     workspace,
     process.env as Record<string, string>,
